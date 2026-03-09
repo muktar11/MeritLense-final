@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: meritlense_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_DB=meritlense_db     
+      - POSTGRES_USER=merit_user 
+      - POSTGRES_PASSWORD=meritlense_password
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U merit_user -d meritlense_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build: .
+    container_name: meritlense_web
+    command: >
+      sh -c "
+        echo 'Waiting for database...' &&
+        sleep 10 &&
+        echo 'Running migrations...' &&
+        python manage.py migrate &&
+        echo 'Creating superuser...' &&
+        python /app/create_superuser.py &&
+        echo 'Starting server...' &&
+        python manage.py runserver 0.0.0.0:8000
+      "
+    volumes:
+      - .:/app
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    ports:
+      - "8020:8000"
+    environment:
+      - DJANGO_SETTINGS_MODULE=meritlense.settings
+      - DJANGO_SUPERUSER_EMAIL=admin@meritlense.com
+      - DJANGO_SUPERUSER_PASSWORD=Admin@123
+      - DJANGO_SUPERUSER_FIRST_NAME=Super
+      - DJANGO_SUPERUSER_LAST_NAME=Admin
+      - DB_NAME=meritlense_db
+      - DB_USER=merit_user
+      - DB_PASSWORD=meritlense_password
+      - DB_HOST=db
+      - DB_PORT=5432
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  static_volume:
+  media_volume:

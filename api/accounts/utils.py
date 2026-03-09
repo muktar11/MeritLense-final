@@ -1,0 +1,206 @@
+from django.utils import timezone
+import secrets
+from django.core.mail import send_mail
+from django.conf import settings
+from api.core.constants import Roles
+
+
+def send_verification_email(user, request=None):
+    code = user.email_verification_code
+    
+    if user.role == Roles.B2C:
+        subject = "Verify Your Individual Employer Account"
+        message = f"""
+        Hello {user.first_name},
+        
+        Thank you for registering as an Individual Employer.
+        
+        Your verification code is: {code}
+        
+        Please enter this 5-digit code in the app to verify your email address.
+        
+        This code will expire in 24 hours.
+        
+        Best regards,
+        Meritlense Team
+        """
+    elif user.role == Roles.B2B:
+        subject = "Verify Your Company Account"
+        company_name = "Your Company"
+        if hasattr(user, 'company_profile'):
+            company_name = user.company_profile.company_name
+        
+        message = f"""
+        Hello {user.first_name},
+        
+        Thank you for registering {company_name} as a Company Employer.
+        
+        Your verification code is: {code}
+        
+        Please enter this 5-digit code in the app to verify your email address.
+        
+        This code will expire in 24 hours.
+        
+        Best regards,
+        Meritlense Team
+        """
+    else:
+        subject = "Verify Your Account"
+        message = f"""
+        Hello {user.first_name},
+        
+        Your verification code is: {code}
+        
+        Please enter this 5-digit code to verify your email address.
+        
+        Best regards,
+        Meritlense Team
+        """
+    
+    send_mail(
+        subject,
+        message,
+        settings.DEFAULT_FROM_EMAIL,
+        [user.email],
+        fail_silently=False,
+    )
+    
+def generate_password_reset_token(user):
+    token = secrets.token_urlsafe(32)
+    user.password_reset_token = token
+    user.password_reset_token_created_at = timezone.now()
+    user.save(update_fields=['password_reset_token', 'password_reset_token_created_at'])
+    return token
+
+
+def send_password_reset_email(user, request):
+    token = generate_password_reset_token(user)
+    locale = 'en'
+    if hasattr(user, 'preferred_language'):
+        locale = user.preferred_language.lower()
+    reset_url = f"{settings.FRONTEND_URL}/{locale}/auth/reset-password?token={token}"
+    
+    if user.role == Roles.B2C:
+        subject = "Reset Your Individual Employer Password"
+        message = f"""
+        Hello {user.first_name},
+        
+        We received a request to reset your password for your Individual Employer account.
+        
+        Please click the link below to reset your password:
+        {reset_url}
+        
+        This link will expire in 24 hours.
+        
+        If you didn't request this, please ignore this email or contact support.
+        
+        Best regards,
+        Meritlense Team
+        """
+    elif user.role == Roles.B2B:
+        company_name = "Your Company"
+        if hasattr(user, 'company_profile'):
+            company_name = user.company_profile.company_name
+            
+        subject = "Reset Your Company Account Password"
+        message = f"""
+        Hello {user.first_name},
+        
+        We received a request to reset your password for {company_name}'s account.
+        
+        Please click the link below to reset your password:
+        {reset_url}
+        
+        This link will expire in 24 hours.
+        
+        If you didn't request this, please ignore this email or contact support.
+        
+        Best regards,
+        Meritlense Team
+        """
+    else:
+        subject = "Reset Your Password"
+        message = f"""
+        Hello {user.first_name},
+        
+        We received a request to reset your password.
+        
+        Please click the link below to reset your password:
+        {reset_url}
+        
+        This link will expire in 24 hours.
+        
+        If you didn't request this, please ignore this email or contact support.
+        
+        Best regards,
+        Meritlense Team
+        """
+    
+    send_mail(
+        subject,
+        message,
+        settings.DEFAULT_FROM_EMAIL,
+        [user.email],
+        fail_silently=False,
+    )
+
+def send_team_invitation_email(invitation, request):
+    
+    locale = request.GET.get('locale', 'en') if request else 'ar'
+    
+    accept_url = f"{settings.FRONTEND_URL}/{locale}/auth/accept-invitation?token={invitation.token}"
+    
+    company_name = invitation.company.name
+    
+    inviter_name = invitation.invited_by.get_full_name()
+    
+    expiration_date = invitation.expires_at.strftime("%B %d, %Y")
+    
+    permission_descriptions = {
+        'view_candidates': 'View Candidates',
+        'evaluate_candidates': 'Evaluate Candidates',
+        'create_evaluations': 'Create Evaluations',
+        'view_reports': 'View Reports',
+    }
+    
+    permissions_text = ""
+    for perm in invitation.permissions:
+        desc = permission_descriptions.get(perm, perm.replace('_', ' ').title())
+        permissions_text += f"  • {desc}\n"
+    
+    if not permissions_text:
+        permissions_text = "  • View Candidates (default)"
+    
+    subject = f"Invitation to join {company_name} on Meritlense"
+    
+    message = f"""
+Hello {invitation.first_name},
+
+You have been invited to join {company_name} on Meritlense by {inviter_name}.
+
+Invitation Details:
+- Company: {company_name}
+- Role: {invitation.job_title}
+
+Your Access Permissions:
+{permissions_text}
+
+To accept this invitation and set up your account, please click the link below:
+{accept_url}
+
+This invitation link will expire on {expiration_date}.
+
+If you did not expect this invitation, please ignore this email or contact support.
+
+Best regards,
+Meritlense Team
+"""
+    
+    send_mail(
+        subject,
+        message,
+        settings.DEFAULT_FROM_EMAIL,
+        [invitation.email],
+        fail_silently=False,
+    )
+        

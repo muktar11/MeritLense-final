@@ -26,22 +26,5 @@ api_v1_patterns = [
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-
     path('api/v1/', include(api_v1_patterns)),
-    
-    path('api/auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('api/auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    
-    path('api/auth/', include('api.accounts.urls')),
-    path('api/candidates/', include('api.candidates.urls')),
-    path('api/evaluations/', include('api.evaluations.urls')),
-    path('api/scores/', include('api.scores.urls')),
-    path('api/payments/', include('api.payments.urls')),
-    path('api/dashboard/', include('api.dashboard.urls')),
-    path('api/audit/', include('api.audit.urls')),
-
-
-
-    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
 ]

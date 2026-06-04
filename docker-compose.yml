@@ -54,6 +54,7 @@ services:
       - AZURE_QUEUE_CONNECTION_STRING=
       - AZURE_STORAGE_CONNECTION_STRING=
       - AZURE_STORAGE_CONTAINER_NAME=meritlense-media
+      - AZURE_DEFAULT_QUEUE_NAME=meritlense-jobs
     depends_on:
       db:
         condition: service_healthy

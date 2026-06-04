@@ -25,18 +25,28 @@ Windows PowerShell:
 
 ```powershell
 python -m venv .venv
+
+or
+
+python3 -m venv .venv
 ```
 
 If `python` is not found, try:
 
 ```powershell
 py -3.12 -m venv .venv
+
 ```
 
 ### 2. Activate Virtual Environment
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
+
+
+or 
+
+source .venv/bin/activate
 ```
 
 If PowerShell blocks activation, run:
@@ -64,7 +74,11 @@ cp .env.example .env
 On Windows PowerShell:
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item .env.example .env. 
+
+or 
+
+cp .env.example .env
 ```
 
 Update `.env` with the real remote database values:

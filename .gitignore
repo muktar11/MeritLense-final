@@ -1,7 +1,6 @@
 media/
-**/migrations/*
-!**/migrations/
-!**/migrations/__init__.py
+**/migrations/__pycache__/
+**/migrations/*.pyc
 *.log
 *.pot
 *.pyc

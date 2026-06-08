@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     image: postgres:16-alpine
@@ -40,6 +38,10 @@ services:
       - "8020:8000"
     environment:
       - DJANGO_SETTINGS_MODULE=meritlense.settings
+      - DJANGO_SECRET_KEY=django-insecure-local-docker-change-me
+      - DEBUG=True
+      - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
       - DJANGO_SUPERUSER_EMAIL=admin@meritlense.com
       - DJANGO_SUPERUSER_PASSWORD=Admin@123
       - DJANGO_SUPERUSER_FIRST_NAME=Super
@@ -49,6 +51,10 @@ services:
       - DB_PASSWORD=meritlense_password
       - DB_HOST=db
       - DB_PORT=5432
+      - AZURE_QUEUE_CONNECTION_STRING=
+      - AZURE_STORAGE_CONNECTION_STRING=
+      - AZURE_STORAGE_CONTAINER_NAME=meritlense-media
+      - AZURE_DEFAULT_QUEUE_NAME=meritlense-jobs
     depends_on:
       db:
         condition: service_healthy

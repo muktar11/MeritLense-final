@@ -95,7 +95,7 @@ class CanVerifyDocuments(BasePermission):
             return True
         
         if request.user.role == Roles.ADMIN:
-            return request.user.has_perm('can_verify_documents')
+            return request.user.has_admin_permission('can_verify_documents')
         
         return False
 
@@ -109,7 +109,7 @@ class CanManageUsers(BasePermission):
             return True
         
         if request.user.role == Roles.ADMIN:
-            return request.user.has_perm('can_manage_users')
+            return request.user.has_admin_permission('can_manage_users')
         
         return False
 

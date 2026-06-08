@@ -25,8 +25,7 @@ class CanManageCandidate(BasePermission):
             return True
         
         if user.role == Roles.B2B_TEAM_MEMBER:
-            if obj.created_by == user or user in obj.shared_with.all():
-                return True
+            return obj.created_by == user
         
         return False
 

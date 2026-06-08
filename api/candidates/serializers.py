@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Candidate
+from api.core.constants import Roles
 
 class CandidateSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
@@ -71,6 +72,39 @@ class CandidateCreateSerializer(serializers.ModelSerializer):
             'job_role', 'core_skills', 'preferred_language',
             'passport_document', 'profile_photo'
         ]
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not user:
+            return attrs
+
+        email = attrs.get('email')
+        passport_id = attrs.get('passport_id')
+        company = None
+
+        if hasattr(user, 'company_profile'):
+            company = user.company_profile.company
+        elif user.role == Roles.B2B_TEAM_MEMBER and hasattr(user, 'team_member_profile'):
+            company = user.team_member_profile.company
+
+        queryset = Candidate.objects.all()
+        if company:
+            queryset = queryset.filter(company=company)
+        else:
+            queryset = queryset.filter(created_by=user)
+
+        if email and queryset.filter(email=email).exists():
+            raise serializers.ValidationError({
+                'email': "A candidate with this email already exists in your scope."
+            })
+
+        if passport_id and queryset.filter(passport_id=passport_id).exists():
+            raise serializers.ValidationError({
+                'passport_id': "A candidate with this passport ID already exists in your scope."
+            })
+
+        return attrs
     
     def validate_core_skills(self, value):
         if value:
@@ -89,10 +123,12 @@ class CandidateCreateSerializer(serializers.ModelSerializer):
         
         if hasattr(user, 'company_profile'):
             validated_data['company'] = user.company_profile.company
+        elif user.role == Roles.B2B_TEAM_MEMBER and hasattr(user, 'team_member_profile'):
+            validated_data['company'] = user.team_member_profile.company
         
         candidate = super().create(validated_data)
         
-        if user.role == 'B2B_TEAM_MEMBER':
+        if user.role == Roles.B2B_TEAM_MEMBER:
             candidate.shared_with.add(user)
         
         return candidate
@@ -117,6 +153,35 @@ class CandidateUpdateSerializer(serializers.ModelSerializer):
             'job_role', 'core_skills', 'preferred_language',
             'status', 'passport_document', 'profile_photo'
         ]
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        instance = getattr(self, 'instance', None)
+        if not user or not instance:
+            return attrs
+
+        email = attrs.get('email', instance.email)
+        passport_id = attrs.get('passport_id', instance.passport_id)
+        company = instance.company
+
+        queryset = Candidate.objects.exclude(pk=instance.pk)
+        if company:
+            queryset = queryset.filter(company=company)
+        else:
+            queryset = queryset.filter(created_by=instance.created_by)
+
+        if queryset.filter(email=email).exists():
+            raise serializers.ValidationError({
+                'email': "A candidate with this email already exists in your scope."
+            })
+
+        if queryset.filter(passport_id=passport_id).exists():
+            raise serializers.ValidationError({
+                'passport_id': "A candidate with this passport ID already exists in your scope."
+            })
+
+        return attrs
     
     def validate_core_skills(self, value):
         if value:
@@ -133,7 +198,7 @@ class CandidateShareSerializer(serializers.Serializer):
     )
     
     def validate_user_ids(self, value):
-        from api.accounts.models import User, TeamMemberProfile        
+        from api.accounts.models import TeamMemberProfile
         request = self.context.get('request')
         if not request:
             raise serializers.ValidationError("Request context required")
@@ -143,10 +208,8 @@ class CandidateShareSerializer(serializers.Serializer):
         company = None
         if hasattr(request.user, 'company_profile'):
             company = request.user.company_profile.company
-            print(f"Company from admin: {company.id if company else None} - {company.name if company else None}")
         elif candidate and candidate.company:
             company = candidate.company
-            print(f"Company from candidate: {company.id if company else None} - {company.name if company else None}")
         
         if not company:
             raise serializers.ValidationError("Could not determine company for sharing")
@@ -154,41 +217,27 @@ class CandidateShareSerializer(serializers.Serializer):
         team_profiles = TeamMemberProfile.objects.filter(
             company=company
         ).select_related('user')
-        
-        print(f"Found {team_profiles.count()} team profiles")
-        
-        team_user_ids = []
+        valid_profile_map = {}
         for profile in team_profiles:
-            team_user_ids.append(profile.user.id)
-            print(f"Team member: profile_id={profile.id}, user_id={profile.user.id}, email={profile.user.email}")
-        
-        if company.admin_user and company.admin_user.id not in team_user_ids:
-            team_user_ids.append(company.admin_user.id)
-            print(f"Added company admin: user_id={company.admin_user.id}")
-        
-        print(f"Valid team user IDs: {team_user_ids}")
-        print(f"Requested user IDs: {value}")
-        
-        valid_users = []
+            valid_profile_map[profile.id] = profile
+            valid_profile_map[profile.user.id] = profile
+
+        valid_profiles = []
         invalid_ids = []
         
-        for user_id in value:
-            if user_id in team_user_ids:
-                try:
-                    user = User.objects.get(id=user_id)
-                    valid_users.append(user)
-                    print(f"Valid user: {user_id} - {user.email}")
-                except User.DoesNotExist:
-                    invalid_ids.append(user_id)
-                    print(f"User not found: {user_id}")
+        for identifier in value:
+            profile = valid_profile_map.get(identifier)
+            if profile:
+                valid_profiles.append(profile)
             else:
-                invalid_ids.append(user_id)
-                print(f"Invalid user (not in team): {user_id}")
+                invalid_ids.append(identifier)
         
         if invalid_ids:
             raise serializers.ValidationError(
                 f"User IDs {invalid_ids} are not team members of your company"
             )
         
-        self.context['users'] = valid_users
+        deduped_profiles = list({profile.id: profile for profile in valid_profiles}.values())
+        self.context['team_profiles'] = deduped_profiles
+        self.context['users'] = [profile.user for profile in deduped_profiles]
         return value

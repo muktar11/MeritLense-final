@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import Company, TeamInvitation, TeamMemberProfile, User, IndividualEmployerProfile, CompanyEmployerProfile, AdminProfile
 from api.core.constants import AdminPermissions, CompanyTeamPermissions, Roles
@@ -9,6 +10,9 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     
     def validate(self, attrs):
         data = super().validate(attrs)
+
+        if not self.user.is_verified:
+            raise AuthenticationFailed("Email verification is required before login.")
         
         data['role'] = self.user.role
         data['is_superuser'] = self.user.is_superuser
@@ -71,6 +75,11 @@ class B2CRegistrationSerializer(UserRegistrationSerializer):
         self.fields['job_role'].choices = JobRoles.CHOICES
         self.fields['nationality'].choices = Nationalities.CHOICES
         self.fields['preferred_language'].choices = Languages.CHOICES
+
+    def validate_passport_id(self, value):
+        if IndividualEmployerProfile.objects.filter(passport_id=value).exists():
+            raise serializers.ValidationError("Passport ID already exists.")
+        return value
     
     def create(self, validated_data):
         profile_data = {
@@ -112,6 +121,13 @@ class B2BRegistrationSerializer(UserRegistrationSerializer):
         from api.core.constants import CompanySize, Languages
         self.fields['company_size'].choices = CompanySize.CHOICES
         self.fields['preferred_language'].choices = Languages.CHOICES
+
+    def validate_company_registration_number(self, value):
+        if CompanyEmployerProfile.objects.filter(company_registration_number=value).exists():
+            raise serializers.ValidationError("Company registration number already exists.")
+        if Company.objects.filter(registration_number=value).exists():
+            raise serializers.ValidationError("Company registration number already exists.")
+        return value
     
     def create(self, validated_data):
         profile_data = {

@@ -1,9 +1,10 @@
 from rest_framework import serializers
 from .models import AuditLog
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
+from api.core.serializers import PublicIdModelSerializer
 
 
-class AuditLogSerializer(serializers.ModelSerializer):
+class AuditLogSerializer(PublicIdModelSerializer):
     action_display = serializers.CharField(source='get_action_display', read_only=True)
     category_display = serializers.CharField(source='get_category_display', read_only=True)
     severity_display = serializers.CharField(source='get_severity_display', read_only=True)
@@ -73,8 +74,8 @@ class AuditLogCreateSerializer(serializers.Serializer):
 
 
 class AuditLogFilterSerializer(serializers.Serializer):
-    user_id = serializers.IntegerField(required=False)
-    company_id = serializers.IntegerField(required=False)
+    user_id = serializers.CharField(required=False)
+    company_id = serializers.CharField(required=False)
     category = serializers.CharField(required=False)
     action = serializers.CharField(required=False)
     severity = serializers.CharField(required=False)

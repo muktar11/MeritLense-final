@@ -24,13 +24,17 @@ from .serializers import (
 from .permissions import CanManageEvaluation, CanViewEvaluation
 from api.core.constants import Roles, EvaluationStatus
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
+from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier
 
 
-class EvaluationViewSet(viewsets.ModelViewSet):
+class EvaluationViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = EvaluationSerializer
     
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Evaluation.objects.none()
+
         user = self.request.user
         queryset = Evaluation.objects.all()
         
@@ -44,7 +48,7 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         
         candidate_id = self.request.query_params.get('candidate_id')
         if candidate_id:
-            queryset = queryset.filter(candidate_id=candidate_id)
+            queryset = filter_by_identifier(queryset, "candidate", candidate_id)
         
         from_date = self.request.query_params.get('from_date')
         if from_date:
@@ -218,7 +222,7 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         return response
     
     @action(detail=True, methods=['post'])
-    def complete(self, request, pk=None):
+    def complete(self, request, id=None):
         evaluation = self.get_object()
         
         if evaluation.status not in [EvaluationStatus.SCHEDULED, EvaluationStatus.RESCHEDULED]:
@@ -272,7 +276,7 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     @action(detail=True, methods=['post'])
-    def reschedule(self, request, pk=None):
+    def reschedule(self, request, id=None):
         evaluation = self.get_object()
         
         if evaluation.status not in [EvaluationStatus.SCHEDULED, EvaluationStatus.RESCHEDULED]:
@@ -317,7 +321,7 @@ class EvaluationViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     @action(detail=True, methods=['post'])
-    def cancel(self, request, pk=None):
+    def cancel(self, request, id=None):
         evaluation = self.get_object()
         
         if evaluation.status in [EvaluationStatus.COMPLETED, EvaluationStatus.CANCELLED]:
@@ -423,7 +427,7 @@ class EvaluationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        queryset = self.get_queryset().filter(candidate_id=candidate_id)
+        queryset = filter_by_identifier(self.get_queryset(), "candidate", candidate_id)
         
         AuditLogService.log(
             user=request.user,

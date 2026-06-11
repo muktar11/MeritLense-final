@@ -1,8 +1,10 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q
+from drf_spectacular.utils import OpenApiExample, extend_schema, extend_schema_view
 
 from api.audit.services import AuditLogService
 from .models import Candidate
@@ -18,11 +20,53 @@ from api.core.constants import AuditLogCategory, AuditLogAction
 from api.accounts.models import User
 
 
+@extend_schema_view(
+    create=extend_schema(
+        summary="Create a candidate",
+        description="Create a candidate with a required passport/ID document upload.",
+        request={'multipart/form-data': CandidateCreateSerializer},
+        responses={201: CandidateSerializer},
+        examples=[
+            OpenApiExample(
+                "Candidate create example",
+                summary="Candidate with document upload",
+                description="Use multipart/form-data in Swagger and attach a real file for passport_document.",
+                value={
+                    "first_name": "Jane",
+                    "last_name": "Doe",
+                    "email": "jane.doe@example.com",
+                    "passport_id": "PASS-1001",
+                    "job_role": "NA",
+                    "core_skills": "communication, patience",
+                    "preferred_language": "EN",
+                    "passport_document": "(binary file)",
+                    "profile_photo": "(binary file, optional)",
+                },
+                request_only=True,
+            ),
+        ],
+    ),
+    update=extend_schema(
+        request={'multipart/form-data': CandidateUpdateSerializer},
+        responses={200: CandidateSerializer},
+    ),
+    partial_update=extend_schema(
+        request={'multipart/form-data': CandidateUpdateSerializer},
+        responses={200: CandidateSerializer},
+    ),
+)
 class CandidateViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = CandidateSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    lookup_field = "public_id"
+    lookup_url_kwarg = "id"
+    lookup_value_regex = "[0-9a-fA-F-]{36}"
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Candidate.objects.none()
+
         user = self.request.user
         
         if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
@@ -65,7 +109,20 @@ class CandidateViewSet(viewsets.ModelViewSet):
             return CandidateCreateSerializer
         elif self.action in ['update', 'partial_update']:
             return CandidateUpdateSerializer
+        elif self.action in ['share', 'unshare']:
+            return CandidateShareSerializer
         return CandidateSerializer
+
+    def _can_manage_sharing(self, user, candidate):
+        if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
+            return True
+        if candidate.created_by == user:
+            return True
+        if hasattr(user, 'managed_company') and candidate.company == user.managed_company:
+            return True
+        if hasattr(user, 'company_profile') and candidate.company == user.company_profile.company:
+            return True
+        return False
     
     def perform_create(self, serializer):
         candidate = serializer.save()
@@ -144,59 +201,40 @@ class CandidateViewSet(viewsets.ModelViewSet):
         instance.delete()
     
     @action(detail=True, methods=['post'])
-    def share(self, request, pk=None):
+    def share(self, request, id=None):
         candidate = self.get_object()
         
         user = request.user
-        if not (user.role in [Roles.ADMIN, Roles.SUPERADMIN] or 
-                candidate.created_by == user or
-                (hasattr(user, 'managed_company') and candidate.company == user.managed_company) or
-                (hasattr(user, 'company_profile') and candidate.company == user.company_profile.company)):
+        if not self._can_manage_sharing(user, candidate):
             return Response(
                 {'error': 'You do not have permission to share this candidate.'},
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        team_member_profile_ids = request.data.get('user_ids', [])
-        if not team_member_profile_ids:
-            return Response(
-                {'error': 'Please provide team member profile IDs to share.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        raw_user_ids = request.data.get('user_ids', [])
+        if isinstance(raw_user_ids, (int, str)):
+            raw_user_ids = [raw_user_ids]
+        serializer = self.get_serializer(
+            data={'user_ids': raw_user_ids},
+            context={'request': request, 'candidate': candidate}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.validated_data['user_ids']
         
-        if isinstance(team_member_profile_ids, (int, str)):
-            team_member_profile_ids = [team_member_profile_ids]
-        
-        from api.accounts.models import TeamMemberProfile
-        
-        company = None
-        if hasattr(request.user, 'company_profile'):
-            company = request.user.company_profile.company
-        elif candidate.company:
-            company = candidate.company
-        
+        company = candidate.company
         if not company:
             return Response(
                 {'error': 'Could not determine company'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        valid_team_profiles = TeamMemberProfile.objects.filter(
-            id__in=team_member_profile_ids,
-            company=company
-        ).select_related('user')
+        valid_team_profiles = serializer.context.get('team_profiles', [])
         
         users_to_share = [profile.user for profile in valid_team_profiles]
-        
-        invalid_ids = [
-            pid for pid in team_member_profile_ids 
-            if pid not in [profile.id for profile in valid_team_profiles]
-        ]
-        
+
         if not users_to_share:
             return Response({
-                'error': 'No valid team members found to share with',
-                'invalid_ids': invalid_ids
+                'error': 'No valid team members found to share with'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         candidate.shared_with.add(*users_to_share)
@@ -232,67 +270,45 @@ class CandidateViewSet(viewsets.ModelViewSet):
                 } for profile in valid_team_profiles
             ]
         }
-        
-        if invalid_ids:
-            response_data['warning'] = f'{len(invalid_ids)} team member profile IDs were invalid: {invalid_ids}'
-        
+
         return Response(response_data)
 
 
     @action(detail=True, methods=['post'])
-    def unshare(self, request, pk=None):
+    def unshare(self, request, id=None):
         candidate = self.get_object()
         
         user = request.user
-        if not (user.role in [Roles.ADMIN, Roles.SUPERADMIN] or 
-                candidate.created_by == user or
-                (hasattr(user, 'managed_company') and candidate.company == user.managed_company) or
-                (hasattr(user, 'company_profile') and candidate.company == user.company_profile.company)):
+        if not self._can_manage_sharing(user, candidate):
             return Response(
                 {'error': 'You do not have permission to modify sharing for this candidate.'},
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        team_member_profile_ids = request.data.get('user_ids', [])
-        if not team_member_profile_ids:
-            return Response(
-                {'error': 'Please provide team member profile IDs to unshare.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        raw_user_ids = request.data.get('user_ids', [])
+        if isinstance(raw_user_ids, (int, str)):
+            raw_user_ids = [raw_user_ids]
+        serializer = self.get_serializer(
+            data={'user_ids': raw_user_ids},
+            context={'request': request, 'candidate': candidate}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.validated_data['user_ids']
         
-        if isinstance(team_member_profile_ids, (int, str)):
-            team_member_profile_ids = [team_member_profile_ids]
-        
-        from api.accounts.models import TeamMemberProfile
-        
-        company = None
-        if hasattr(request.user, 'company_profile'):
-            company = request.user.company_profile.company
-        elif candidate.company:
-            company = candidate.company
-        
+        company = candidate.company
         if not company:
             return Response(
                 {'error': 'Could not determine company'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        valid_team_profiles = TeamMemberProfile.objects.filter(
-            id__in=team_member_profile_ids,
-            company=company
-        ).select_related('user')
+        valid_team_profiles = serializer.context.get('team_profiles', [])
         
         users_to_remove = [profile.user for profile in valid_team_profiles]
-        
-        invalid_ids = [
-            pid for pid in team_member_profile_ids 
-            if pid not in [profile.id for profile in valid_team_profiles]
-        ]
-        
+
         if not users_to_remove:
             return Response({
-                'error': 'No valid team members found to unshare',
-                'invalid_ids': invalid_ids
+                'error': 'No valid team members found to unshare'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         candidate.shared_with.remove(*users_to_remove)
@@ -328,10 +344,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
                 } for profile in valid_team_profiles
             ]
         }
-        
-        if invalid_ids:
-            response_data['warning'] = f'{len(invalid_ids)} team member profile IDs were invalid: {invalid_ids}'
-        
+
         return Response(response_data)
     
     @action(detail=False, methods=['get'])

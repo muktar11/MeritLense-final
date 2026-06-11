@@ -20,6 +20,7 @@ from .serializers import (
 from .permissions import CanManageScores, CanViewScores
 from api.core.constants import Roles, JOB_ROLE_SCORE_AREAS, ScoreArea
 from api.core.constants import AuditLogCategory, AuditLogSeverity
+from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier
 
 
 class ScoreCategoryViewSet(viewsets.ModelViewSet):
@@ -102,21 +103,24 @@ class ScoreCategoryViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 
-class ScoreSetViewSet(viewsets.ModelViewSet):
+class ScoreSetViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = ScoreSetSerializer
     
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return ScoreSet.objects.none()
+
         user = self.request.user
         queryset = ScoreSet.objects.all()
         
         candidate_id = self.request.query_params.get('candidate_id')
         if candidate_id:
-            queryset = queryset.filter(candidate_id=candidate_id)
+            queryset = filter_by_identifier(queryset, "candidate", candidate_id)
         
         evaluation_id = self.request.query_params.get('evaluation_id')
         if evaluation_id:
-            queryset = queryset.filter(evaluation_id=evaluation_id)
+            queryset = filter_by_identifier(queryset, "evaluation", evaluation_id)
         
         if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
             return queryset
@@ -255,7 +259,7 @@ class ScoreSetViewSet(viewsets.ModelViewSet):
         return response
     
     @action(detail=True, methods=['get'])
-    def scores(self, request, pk=None):
+    def scores(self, request, id=None):
         score_set = self.get_object()
         scores = CandidateScore.objects.filter(
             candidate=score_set.candidate,
@@ -279,7 +283,7 @@ class ScoreSetViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
     
     @action(detail=True, methods=['post'])
-    def recalculate(self, request, pk=None):
+    def recalculate(self, request, id=None):
         score_set = self.get_object()
         old_average = score_set.average_score
         average = score_set.calculate_average()
@@ -305,21 +309,24 @@ class ScoreSetViewSet(viewsets.ModelViewSet):
         })
 
 
-class CandidateScoreViewSet(viewsets.ModelViewSet):
+class CandidateScoreViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = CandidateScoreSerializer
     
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return CandidateScore.objects.none()
+
         user = self.request.user
         queryset = CandidateScore.objects.all()
         
         candidate_id = self.request.query_params.get('candidate_id')
         if candidate_id:
-            queryset = queryset.filter(candidate_id=candidate_id)
+            queryset = filter_by_identifier(queryset, "candidate", candidate_id)
         
         evaluation_id = self.request.query_params.get('evaluation_id')
         if evaluation_id:
-            queryset = queryset.filter(evaluation_id=evaluation_id)
+            queryset = filter_by_identifier(queryset, "evaluation", evaluation_id)
         
         area = self.request.query_params.get('area')
         if area:

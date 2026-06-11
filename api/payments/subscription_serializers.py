@@ -1,15 +1,17 @@
 from rest_framework import serializers
 from django.utils import timezone
+from api.core.serializers import PublicIdModelSerializer
+from api.core.public_ids import get_by_identifier
 from .models import Subscription, Price
 
 
-class PriceForSubscriptionSerializer(serializers.ModelSerializer):
+class PriceForSubscriptionSerializer(PublicIdModelSerializer):
     class Meta:
         model = Price
         fields = ['id', 'name', 'unit_amount', 'currency', 'interval', 'feature_limits']
         
 
-class SubscriptionSerializer(serializers.ModelSerializer):
+class SubscriptionSerializer(PublicIdModelSerializer):
     plan_details = PriceForSubscriptionSerializer(source='stripe_price', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     user_email = serializers.EmailField(source='user.email', read_only=True)
@@ -49,7 +51,7 @@ class SubscriptionSerializer(serializers.ModelSerializer):
             return max(0, delta.days)
         return 0
     
-class SubscriptionListSerializer(serializers.ModelSerializer):
+class SubscriptionListSerializer(PublicIdModelSerializer):
     plan_name = serializers.CharField(source='stripe_price.name', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     amount = serializers.DecimalField(source='stripe_price.unit_amount', max_digits=10, decimal_places=2, read_only=True)
@@ -63,12 +65,12 @@ class SubscriptionListSerializer(serializers.ModelSerializer):
             'cancel_at_period_end', 'quantity', 'created_at'
         ]
 class ChangePlanSerializer(serializers.Serializer):
-    price_id = serializers.IntegerField()
+    price_id = serializers.CharField()
     prorate = serializers.BooleanField(default=True)
     
     def validate_price_id(self, value):
         try:
-            price = Price.objects.get(id=value, is_active=True)
+            price = get_by_identifier(Price.objects.filter(is_active=True), value)
             self.context['price'] = price
             return value
         except Price.DoesNotExist:
@@ -93,7 +95,7 @@ class UpdateQuantitySerializer(serializers.Serializer):
         return value
 
 class SubscriptionInvoiceSerializer(serializers.Serializer):
-    price_id = serializers.IntegerField(required=False)
+    price_id = serializers.CharField(required=False)
     quantity = serializers.IntegerField(min_value=1, required=False)
 
 class CancelSubscriptionSerializer(serializers.Serializer):

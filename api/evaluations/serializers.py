@@ -2,10 +2,11 @@ from rest_framework import serializers
 from django.utils import timezone
 from .models import Evaluation
 from api.core.constants import CertificateStatus
+from api.core.serializers import PublicIdModelSerializer
 from api.candidates.serializers import CandidateSerializer
 
 
-class EvaluationSerializer(serializers.ModelSerializer):
+class EvaluationSerializer(PublicIdModelSerializer):
     candidate_details = CandidateSerializer(source='candidate', read_only=True)
     evaluation_type_display = serializers.CharField(source='get_evaluation_type_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
@@ -117,7 +118,7 @@ class EvaluationCancelSerializer(serializers.Serializer):
     reason = serializers.CharField(required=False, allow_blank=True)
 
 
-class EvaluationListSerializer(serializers.ModelSerializer):
+class EvaluationListSerializer(PublicIdModelSerializer):
     candidate_name = serializers.SerializerMethodField()
     evaluation_type_display = serializers.CharField(source='get_evaluation_type_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)

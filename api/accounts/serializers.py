@@ -1,7 +1,9 @@
 from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import Company, TeamInvitation, TeamMemberProfile, User, IndividualEmployerProfile, CompanyEmployerProfile, AdminProfile
 from api.core.constants import AdminPermissions, CompanyTeamPermissions, Roles
+from api.core.serializers import PublicIdModelSerializer
 import random
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -9,6 +11,9 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     
     def validate(self, attrs):
         data = super().validate(attrs)
+
+        if not self.user.is_verified:
+            raise AuthenticationFailed("Email verification is required before login.")
         
         data['role'] = self.user.role
         data['is_superuser'] = self.user.is_superuser
@@ -71,6 +76,11 @@ class B2CRegistrationSerializer(UserRegistrationSerializer):
         self.fields['job_role'].choices = JobRoles.CHOICES
         self.fields['nationality'].choices = Nationalities.CHOICES
         self.fields['preferred_language'].choices = Languages.CHOICES
+
+    def validate_passport_id(self, value):
+        if IndividualEmployerProfile.objects.filter(passport_id=value).exists():
+            raise serializers.ValidationError("Passport ID already exists.")
+        return value
     
     def create(self, validated_data):
         profile_data = {
@@ -112,6 +122,13 @@ class B2BRegistrationSerializer(UserRegistrationSerializer):
         from api.core.constants import CompanySize, Languages
         self.fields['company_size'].choices = CompanySize.CHOICES
         self.fields['preferred_language'].choices = Languages.CHOICES
+
+    def validate_company_registration_number(self, value):
+        if CompanyEmployerProfile.objects.filter(company_registration_number=value).exists():
+            raise serializers.ValidationError("Company registration number already exists.")
+        if Company.objects.filter(registration_number=value).exists():
+            raise serializers.ValidationError("Company registration number already exists.")
+        return value
     
     def create(self, validated_data):
         profile_data = {
@@ -189,7 +206,7 @@ class ChangePasswordSerializer(serializers.Serializer):
         
         return data
 
-class IndividualProfileSerializer(serializers.ModelSerializer):
+class IndividualProfileSerializer(PublicIdModelSerializer):
     email = serializers.EmailField(source='user.email', read_only=True)
     first_name = serializers.CharField(source='user.first_name')
     last_name = serializers.CharField(source='user.last_name')
@@ -222,7 +239,7 @@ class IndividualProfileSerializer(serializers.ModelSerializer):
         
         return super().update(instance, validated_data)
 
-class CompanyProfileSerializer(serializers.ModelSerializer):
+class CompanyProfileSerializer(PublicIdModelSerializer):
     email = serializers.EmailField(source='user.email', read_only=True)
     first_name = serializers.CharField(source='user.first_name')
     last_name = serializers.CharField(source='user.last_name')
@@ -258,7 +275,7 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
-class AdminProfileSerializer(serializers.ModelSerializer):
+class AdminProfileSerializer(PublicIdModelSerializer):
     email = serializers.EmailField(source='user.email', read_only=True)
     first_name = serializers.CharField(source='user.first_name')
     last_name = serializers.CharField(source='user.last_name')
@@ -290,7 +307,7 @@ class AdminProfileSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
     
-class TeamMemberProfileSerializer(serializers.ModelSerializer):
+class TeamMemberProfileSerializer(PublicIdModelSerializer):
     email = serializers.EmailField(source='user.email', read_only=True)
     first_name = serializers.CharField(source='user.first_name', read_only=True)
     last_name = serializers.CharField(source='user.last_name', read_only=True)
@@ -348,7 +365,7 @@ class ProfileSerializer(serializers.Serializer):
                 return TeamMemberProfileSerializer(profile).data
             else:
                 return {
-                    'id': user.id,
+                    'id': str(user.public_id),
                     'email': user.email,
                     'first_name': user.first_name,
                     'last_name': user.last_name,
@@ -359,7 +376,7 @@ class ProfileSerializer(serializers.Serializer):
                 }
         
         return {
-            'id': user.id,
+            'id': str(user.public_id),
             'email': user.email,
             'first_name': user.first_name,
             'last_name': user.last_name,
@@ -367,7 +384,7 @@ class ProfileSerializer(serializers.Serializer):
             'is_verified': user.is_verified
         }
 
-class AdminUserSerializer(serializers.ModelSerializer):
+class AdminUserSerializer(PublicIdModelSerializer):
     full_name = serializers.SerializerMethodField()
     profile_type = serializers.SerializerMethodField()
     
@@ -486,7 +503,7 @@ class CreateAdminSerializer(serializers.Serializer):
             
             return user
 
-class EmployerListSerializer(serializers.ModelSerializer):
+class EmployerListSerializer(PublicIdModelSerializer):
     full_name = serializers.SerializerMethodField()
     profile_details = serializers.SerializerMethodField()
     documents_status = serializers.SerializerMethodField()
@@ -573,7 +590,7 @@ class DocumentVerificationSerializer(serializers.Serializer):
             )
         return data
 
-class CompanySerializer(serializers.ModelSerializer):
+class CompanySerializer(PublicIdModelSerializer):
     admin_name = serializers.SerializerMethodField()
     team_member_count = serializers.SerializerMethodField()
     admin_user_email = serializers.EmailField(source='admin_user.email', read_only=True)
@@ -599,7 +616,7 @@ class CompanySerializer(serializers.ModelSerializer):
         return User.objects.filter(company=obj, role=Roles.B2B_TEAM_MEMBER).count()
 
 
-class TeamMemberProfileSerializer(serializers.ModelSerializer):
+class TeamMemberProfileSerializer(PublicIdModelSerializer):
     email = serializers.EmailField(source='user.email', read_only=True)
     first_name = serializers.CharField(source='user.first_name', read_only=True)
     last_name = serializers.CharField(source='user.last_name', read_only=True)
@@ -646,7 +663,7 @@ class InviteTeamMemberSerializer(serializers.Serializer):
         return value
 
 
-class TeamInvitationSerializer(serializers.ModelSerializer):
+class TeamInvitationSerializer(PublicIdModelSerializer):
     company_name = serializers.CharField(source='company.name', read_only=True)
     invited_by_name = serializers.SerializerMethodField()
     

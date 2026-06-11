@@ -2,11 +2,13 @@ from rest_framework import serializers
 from django.db import transaction
 from .models import CandidateScore, ScoreSet, ScoreCategory
 from api.core.constants import JOB_ROLE_SCORE_AREAS
+from api.core.serializers import PublicIdModelSerializer
+from api.core.public_ids import get_by_identifier
 from api.candidates.serializers import CandidateSerializer
 from api.evaluations.serializers import EvaluationSerializer
 
 
-class ScoreCategorySerializer(serializers.ModelSerializer):
+class ScoreCategorySerializer(PublicIdModelSerializer):
     applicable_roles_list = serializers.SerializerMethodField()
     
     class Meta:
@@ -19,7 +21,7 @@ class ScoreCategorySerializer(serializers.ModelSerializer):
         return obj.get_applicable_roles_list()
 
 
-class CandidateScoreSerializer(serializers.ModelSerializer):
+class CandidateScoreSerializer(PublicIdModelSerializer):
     area_display = serializers.CharField(source='get_area_display', read_only=True)
     candidate_name = serializers.CharField(source='candidate.get_full_name', read_only=True)
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
@@ -35,7 +37,7 @@ class CandidateScoreSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_by', 'company', 'created_at', 'updated_at']
 
 
-class ScoreSetSerializer(serializers.ModelSerializer):
+class ScoreSetSerializer(PublicIdModelSerializer):
     candidate_details = CandidateSerializer(source='candidate', read_only=True)
     evaluation_details = EvaluationSerializer(source='evaluation', read_only=True)
     scores = serializers.SerializerMethodField()
@@ -64,8 +66,8 @@ class ScoreSetSerializer(serializers.ModelSerializer):
 
 
 class CreateScoreSetSerializer(serializers.Serializer):
-    candidate_id = serializers.IntegerField()
-    evaluation_id = serializers.IntegerField(required=False, allow_null=True)
+    candidate_id = serializers.CharField()
+    evaluation_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     scores = serializers.DictField(
         child=serializers.DecimalField(max_digits=5, decimal_places=2),
         help_text="Dictionary of area -> score"
@@ -77,7 +79,7 @@ class CreateScoreSetSerializer(serializers.Serializer):
         request = self.context.get('request')
         
         try:
-            candidate = Candidate.objects.get(id=value)
+            candidate = get_by_identifier(Candidate.objects.all(), value)
         except Candidate.DoesNotExist:
             raise serializers.ValidationError("Candidate not found")
         
@@ -93,7 +95,7 @@ class CreateScoreSetSerializer(serializers.Serializer):
         
         if value:
             try:
-                evaluation = Evaluation.objects.get(id=value)
+                evaluation = get_by_identifier(Evaluation.objects.all(), value)
             except Evaluation.DoesNotExist:
                 raise serializers.ValidationError("Evaluation not found")
             

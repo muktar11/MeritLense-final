@@ -1,11 +1,13 @@
 from rest_framework import serializers
+from api.core.serializers import PublicIdModelSerializer
+from api.core.public_ids import get_by_identifier
 from .models import (
     Price, Customer, PaymentMethod, 
     Subscription, Payment, Invoice
 )
 
 
-class PriceSerializer(serializers.ModelSerializer):
+class PriceSerializer(PublicIdModelSerializer):
     formatted_price = serializers.SerializerMethodField()
     target_user_type_display = serializers.SerializerMethodField()
     
@@ -26,7 +28,7 @@ class PriceSerializer(serializers.ModelSerializer):
     def get_target_user_type_display(self, obj):
         return dict(obj._meta.get_field('target_user_type').choices).get(obj.target_user_type, '')
 
-class CustomerSerializer(serializers.ModelSerializer):
+class CustomerSerializer(PublicIdModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)
     user_name = serializers.SerializerMethodField()
     
@@ -43,7 +45,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         return obj.user.get_full_name()
 
 
-class PaymentMethodSerializer(serializers.ModelSerializer):
+class PaymentMethodSerializer(PublicIdModelSerializer):
     display_name = serializers.SerializerMethodField()
     
     class Meta:
@@ -60,7 +62,7 @@ class PaymentMethodSerializer(serializers.ModelSerializer):
         return str(obj)
 
 
-class SubscriptionSerializer(serializers.ModelSerializer):
+class SubscriptionSerializer(PublicIdModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)
     user_name = serializers.SerializerMethodField()
     price_details = PriceSerializer(source='stripe_price', read_only=True)
@@ -85,7 +87,7 @@ class SubscriptionSerializer(serializers.ModelSerializer):
         active_statuses = ['active', 'trialing', 'ACTIVE', 'TRIALING']
         return obj.status and obj.status.lower() in ['active', 'trialing']
 
-class PaymentSerializer(serializers.ModelSerializer):
+class PaymentSerializer(PublicIdModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)
     payment_method_display = serializers.SerializerMethodField()
     
@@ -106,7 +108,7 @@ class PaymentSerializer(serializers.ModelSerializer):
             return str(obj.stripe_payment_method)
         return obj.payment_method_type
 
-class InvoiceSerializer(serializers.ModelSerializer):
+class InvoiceSerializer(PublicIdModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)
     
     class Meta:
@@ -123,7 +125,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
 
 class CreatePaymentIntentSerializer(serializers.Serializer):
-    price_id = serializers.IntegerField(required=False)
+    price_id = serializers.CharField(required=False)
     amount = serializers.DecimalField(
         max_digits=10, 
         decimal_places=2,
@@ -151,14 +153,14 @@ class AttachPaymentMethodSerializer(serializers.Serializer):
 
 
 class CreateSubscriptionSerializer(serializers.Serializer):
-    price_id = serializers.IntegerField()
+    price_id = serializers.CharField()
     payment_method_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     trial_period_days = serializers.IntegerField(default=0, min_value=0)
     quantity = serializers.IntegerField(default=1, min_value=1)
     
     def validate_price_id(self, value):
         try:
-            price = Price.objects.get(id=value, is_active=True)
+            price = get_by_identifier(Price.objects.filter(is_active=True), value)
             self.context['price'] = price
             return value
         except Price.DoesNotExist:
@@ -194,7 +196,7 @@ class CreateSubscriptionSerializer(serializers.Serializer):
         return data
 
 class UpdateSubscriptionSerializer(serializers.Serializer):
-    price_id = serializers.IntegerField(required=False)
+    price_id = serializers.CharField(required=False)
     quantity = serializers.IntegerField(min_value=1, required=False)
     cancel_at_period_end = serializers.BooleanField(required=False)
 

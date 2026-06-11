@@ -1,8 +1,41 @@
 from django.utils import timezone
 import secrets
+import logging
 from django.core.mail import send_mail
 from django.conf import settings
 from api.core.constants import Roles
+
+logger = logging.getLogger(__name__)
+
+
+def safe_send_mail(subject, message, recipients):
+    from_email = settings.DEFAULT_FROM_EMAIL or "no-reply@localhost"
+
+    if not settings.EMAIL_HOST:
+        logger.warning(
+            "Email skipped because EMAIL_HOST is not configured. subject=%s recipients=%s",
+            subject,
+            recipients,
+        )
+        return 0
+
+    try:
+        return send_mail(
+            subject,
+            message,
+            from_email,
+            recipients,
+            fail_silently=False,
+        )
+    except Exception:
+        if settings.DEBUG:
+            logger.exception(
+                "Email sending failed in DEBUG mode. subject=%s recipients=%s",
+                subject,
+                recipients,
+            )
+            return 0
+        raise
 
 
 def send_verification_email(user, request=None):
@@ -57,13 +90,7 @@ def send_verification_email(user, request=None):
         Meritlense Team
         """
     
-    send_mail(
-        subject,
-        message,
-        settings.DEFAULT_FROM_EMAIL,
-        [user.email],
-        fail_silently=False,
-    )
+    safe_send_mail(subject, message, [user.email])
     
 def generate_password_reset_token(user):
     token = secrets.token_urlsafe(32)
@@ -136,13 +163,7 @@ def send_password_reset_email(user, request):
         Meritlense Team
         """
     
-    send_mail(
-        subject,
-        message,
-        settings.DEFAULT_FROM_EMAIL,
-        [user.email],
-        fail_silently=False,
-    )
+    safe_send_mail(subject, message, [user.email])
 
 def send_team_invitation_email(invitation, request):
     
@@ -196,11 +217,5 @@ Best regards,
 Meritlense Team
 """
     
-    send_mail(
-        subject,
-        message,
-        settings.DEFAULT_FROM_EMAIL,
-        [invitation.email],
-        fail_silently=False,
-    )
+    safe_send_mail(subject, message, [invitation.email])
         

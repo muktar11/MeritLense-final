@@ -1,16 +1,20 @@
 from datetime import timedelta
 import secrets
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
+from drf_spectacular.utils import OpenApiExample, OpenApiResponse, PolymorphicProxySerializer, extend_schema, inline_serializer
+from rest_framework import serializers
 from api.audit.services import AuditLogService
-from api.core.constants import AuditLogAction, AuditLogCategory, AuditLogSeverity, CompanyTeamPermissions, DocumentStatus, Roles
+from api.core.constants import AdminPermissions, AuditLogAction, AuditLogCategory, AuditLogSeverity, CompanyTeamPermissions, DocumentStatus, Roles
 from api.core.permisssions import CanVerifyDocuments, IsAdminOrSuperAdmin, IsB2BTeamMember, IsB2BUser, IsEmployer, IsOwnerOrAdmin, IsSuperAdmin
 from .models import Company, TeamInvitation, TeamMemberProfile, User, IndividualEmployerProfile, CompanyEmployerProfile, AdminProfile
 from .serializers import (
@@ -45,42 +49,279 @@ class StandardResultsSetPagination(PageNumberPagination):
     page_size = 20
     page_size_query_param = 'page_size'
     max_page_size = 100
+
+
+message_response_serializer = inline_serializer(
+    name="MessageResponse",
+    fields={
+        "message": serializers.CharField(),
+    },
+)
+
+error_response_serializer = inline_serializer(
+    name="ErrorResponse",
+    fields={
+        "error": serializers.CharField(required=False),
+        "detail": serializers.CharField(required=False),
+    },
+)
+
+validate_reset_token_request_serializer = inline_serializer(
+    name="ValidateResetTokenRequest",
+    fields={
+        "token": serializers.CharField(),
+    },
+)
+
+profile_document_upload_request_serializer = inline_serializer(
+    name="ProfileDocumentUploadRequest",
+    fields={
+        "document_type": serializers.ChoiceField(
+            choices=["id", "resume", "additional", "registration", "license", "tax"]
+        ),
+        "document": serializers.FileField(),
+    },
+)
+
+profile_update_request_serializer = PolymorphicProxySerializer(
+    component_name="ProfileUpdateRequest",
+    serializers=[
+        inline_serializer(
+            name="B2CProfileUpdateRequest",
+            fields={
+                "first_name": serializers.CharField(required=False),
+                "last_name": serializers.CharField(required=False),
+                "passport_id": serializers.CharField(required=False),
+                "phone_number": serializers.CharField(required=False),
+                "date_of_birth": serializers.DateField(required=False),
+                "address": serializers.CharField(required=False),
+                "job_role": serializers.CharField(required=False),
+                "nationality": serializers.CharField(required=False),
+                "preferred_language": serializers.CharField(required=False),
+            },
+        ),
+        inline_serializer(
+            name="B2BProfileUpdateRequest",
+            fields={
+                "first_name": serializers.CharField(required=False),
+                "last_name": serializers.CharField(required=False),
+                "company_name": serializers.CharField(required=False),
+                "company_registration_number": serializers.CharField(required=False),
+                "company_size": serializers.CharField(required=False),
+                "industry": serializers.CharField(required=False),
+                "phone_number": serializers.CharField(required=False),
+                "country": serializers.CharField(required=False),
+                "city": serializers.CharField(required=False),
+                "address": serializers.CharField(required=False),
+                "website": serializers.URLField(required=False),
+                "preferred_language": serializers.CharField(required=False),
+            },
+        ),
+        inline_serializer(
+            name="AdminProfileUpdateRequest",
+            fields={
+                "first_name": serializers.CharField(required=False),
+                "last_name": serializers.CharField(required=False),
+                "department": serializers.CharField(required=False),
+                "phone_number": serializers.CharField(required=False),
+            },
+        ),
+        inline_serializer(
+            name="TeamMemberSelfProfileUpdateRequest",
+            fields={
+                "job_title": serializers.CharField(required=False),
+                "department": serializers.CharField(required=False),
+                "phone_number": serializers.CharField(required=False),
+            },
+        ),
+    ],
+    resource_type_field_name=None,
+)
+
+company_update_request_serializer = inline_serializer(
+    name="CompanyUpdateRequest",
+    fields={
+        "name": serializers.CharField(required=False),
+        "company_size": serializers.CharField(required=False),
+        "industry": serializers.CharField(required=False),
+        "phone_number": serializers.CharField(required=False),
+        "country": serializers.CharField(required=False),
+        "city": serializers.CharField(required=False),
+        "address": serializers.CharField(required=False),
+        "website": serializers.URLField(required=False),
+    },
+)
+
+admin_stats_response_serializer = inline_serializer(
+    name="AdminStatsResponse",
+    fields={
+        "total_users": serializers.IntegerField(),
+        "total_b2c": serializers.IntegerField(),
+        "total_b2b": serializers.IntegerField(),
+        "pending_email_verification": serializers.IntegerField(),
+        "pending_document_verification": serializers.IntegerField(),
+        "recent_registrations": serializers.IntegerField(),
+    },
+)
+
+paginated_admin_users_response_serializer = inline_serializer(
+    name="PaginatedAdminUsersResponse",
+    fields={
+        "count": serializers.IntegerField(),
+        "next": serializers.CharField(required=False, allow_null=True),
+        "previous": serializers.CharField(required=False, allow_null=True),
+        "results": AdminUserSerializer(many=True),
+    },
+)
+
+paginated_employers_response_serializer = inline_serializer(
+    name="PaginatedEmployersResponse",
+    fields={
+        "count": serializers.IntegerField(),
+        "next": serializers.CharField(required=False, allow_null=True),
+        "previous": serializers.CharField(required=False, allow_null=True),
+        "results": EmployerListSerializer(many=True),
+    },
+)
+
+pending_verification_response_serializer = inline_serializer(
+    name="PendingVerificationResponse",
+    fields={
+        "count": serializers.IntegerField(),
+        "results": serializers.ListField(child=serializers.JSONField()),
+    },
+)
+
+admin_dashboard_stats_response_serializer = inline_serializer(
+    name="AdminDashboardStatsResponse",
+    fields={
+        "user_stats": serializers.JSONField(),
+        "verification_stats": serializers.JSONField(),
+        "recent_users": serializers.ListField(child=serializers.JSONField()),
+    },
+)
+
+my_company_info_response_serializer = inline_serializer(
+    name="MyCompanyInfoResponse",
+    fields={
+        "id": serializers.IntegerField(),
+        "name": serializers.CharField(),
+        "registration_number": serializers.CharField(),
+        "company_size": serializers.CharField(),
+        "industry": serializers.CharField(allow_blank=True),
+        "country": serializers.CharField(),
+        "city": serializers.CharField(),
+        "address": serializers.CharField(allow_blank=True),
+        "phone_number": serializers.CharField(),
+        "website": serializers.CharField(allow_blank=True),
+        "is_verified": serializers.BooleanField(),
+        "subscription": serializers.JSONField(required=False, allow_null=True),
+    },
+)
+
+team_member_permissions_response_serializer = inline_serializer(
+    name="TeamMemberPermissionsResponseItem",
+    fields={
+        "key": serializers.CharField(),
+        "label": serializers.CharField(),
+    },
+)
+
+team_member_permissions_list_response_serializer = inline_serializer(
+    name="TeamMemberPermissionsListResponse",
+    fields={
+        "results": serializers.ListField(child=serializers.JSONField()),
+    },
+)
+
+
 class B2CRegistrationView(APIView):
     permission_classes = [AllowAny]
-    
+    parser_classes = [MultiPartParser, FormParser]
+
+    @extend_schema(
+        summary="Register a B2C account",
+        description="Create an individual employer account with the required personal information and uploaded documents.",
+        request=B2CRegistrationSerializer,
+        responses={
+            201: inline_serializer(
+                name="B2CRegistrationSuccessResponse",
+                fields={
+                    "message": serializers.CharField(),
+                    "email": serializers.EmailField(),
+                },
+            ),
+            400: inline_serializer(
+                name="RegistrationErrorResponse",
+                fields={
+                    "detail": serializers.CharField(required=False),
+                },
+            ),
+        },
+        examples=[
+            OpenApiExample(
+                "B2C registration example",
+                summary="Individual account",
+                description="Use multipart/form-data in Swagger and attach real files for the document fields.",
+                value={
+                    "email": "new-b2c@example.com",
+                    "first_name": "Sara",
+                    "last_name": "Ahmed",
+                    "password": "Password123!",
+                    "confirm_password": "Password123!",
+                    "passport_id": "REG-1001",
+                    "job_role": "SE",
+                    "nationality": "US",
+                    "preferred_language": "EN",
+                    "phone_number": "+251911223344",
+                    "date_of_birth": "1993-04-05",
+                    "address": "Addis Ababa",
+                    "id_document": "(binary file)",
+                    "resume_document": "(binary file)",
+                },
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         serializer = B2CRegistrationSerializer(data=request.data, context={'request': request})
         
         if serializer.is_valid():
-            user = serializer.save()
-            
-            profile_data = serializer.context.get('profile_data', {})
-            
-            profile = IndividualEmployerProfile.objects.create(
-                user=user,
-                passport_id=profile_data.get('passport_id'),
-                job_role=profile_data.get('job_role'),
-                nationality=profile_data.get('nationality'),
-                preferred_language=profile_data.get('preferred_language'),
-                phone_number=profile_data.get('phone_number'),
-                date_of_birth=profile_data.get('date_of_birth'),
-                address=profile_data.get('address'),
-                id_document=profile_data.get('id_document'),
-                resume_document=profile_data.get('resume_document')
-            )
-            
-            send_verification_email(user, request)
-            
-            AuditLogService.log(
-                user=user,
-                action=AuditLogAction.USER_CREATED,
-                category=AuditLogCategory.USER,
-                description=f"New B2C user registered: {user.email}",
-                resource=user,
-                data={'registration_type': 'B2C'},
-                request=request
-            )
-            
+            try:
+                with transaction.atomic():
+                    user = serializer.save()
+                    profile_data = serializer.context.get('profile_data', {})
+
+                    IndividualEmployerProfile.objects.create(
+                        user=user,
+                        passport_id=profile_data.get('passport_id'),
+                        job_role=profile_data.get('job_role'),
+                        nationality=profile_data.get('nationality'),
+                        preferred_language=profile_data.get('preferred_language'),
+                        phone_number=profile_data.get('phone_number'),
+                        date_of_birth=profile_data.get('date_of_birth'),
+                        address=profile_data.get('address'),
+                        id_document=profile_data.get('id_document'),
+                        resume_document=profile_data.get('resume_document')
+                    )
+
+                    send_verification_email(user, request)
+
+                    AuditLogService.log(
+                        user=user,
+                        action=AuditLogAction.USER_CREATED,
+                        category=AuditLogCategory.USER,
+                        description=f"New B2C user registered: {user.email}",
+                        resource=user,
+                        data={'registration_type': 'B2C'},
+                        request=request
+                    )
+            except IntegrityError:
+                return Response(
+                    {'detail': 'Registration failed because one of the submitted unique values already exists.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             return Response({
                 'message': 'Registration successful. Please check your email for the 5-digit verification code.',
                 'email': user.email
@@ -91,73 +332,128 @@ class B2CRegistrationView(APIView):
 
 class B2BRegistrationView(APIView):
     permission_classes = [AllowAny]
-    
+    parser_classes = [MultiPartParser, FormParser]
+
+    @extend_schema(
+        summary="Register a B2B account",
+        description="Create a company employer account with company details and uploaded compliance documents.",
+        request=B2BRegistrationSerializer,
+        responses={
+            201: inline_serializer(
+                name="B2BRegistrationSuccessResponse",
+                fields={
+                    "message": serializers.CharField(),
+                    "email": serializers.EmailField(),
+                },
+            ),
+            400: inline_serializer(
+                name="RegistrationValidationErrorResponse",
+                fields={
+                    "detail": serializers.CharField(required=False),
+                },
+            ),
+        },
+        examples=[
+            OpenApiExample(
+                "B2B registration example",
+                summary="Company account",
+                description="Use multipart/form-data in Swagger and attach real files for the document fields.",
+                value={
+                    "email": "company-admin@example.com",
+                    "first_name": "John",
+                    "last_name": "Smith",
+                    "password": "Password123!",
+                    "confirm_password": "Password123!",
+                    "company_name": "ABC Solutions Ltd",
+                    "company_registration_number": "BIZ-2024-001",
+                    "company_size": "1-10",
+                    "country": "Ethiopia",
+                    "city": "Addis Ababa",
+                    "preferred_language": "EN",
+                    "phone_number": "+251922334455",
+                    "website": "https://abcsolutions.example.com",
+                    "industry": "Technology",
+                    "address": "Bole, Addis Ababa",
+                    "registration_certificate": "(binary file)",
+                    "resachetified_license": "(binary file)",
+                    "tax_id_document": "(binary file)",
+                },
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         serializer = B2BRegistrationSerializer(data=request.data, context={'request': request})
         
         if serializer.is_valid():
-            user = serializer.save()
-            
-            profile_data = serializer.context.get('profile_data', {})
-            
-            profile = CompanyEmployerProfile.objects.create(
-                user=user,
-                company_name=profile_data.get('company_name'),
-                company_registration_number=profile_data.get('company_registration_number'),
-                company_size=profile_data.get('company_size'),
-                country=profile_data.get('country'),
-                city=profile_data.get('city'),
-                preferred_language=profile_data.get('preferred_language'),
-                phone_number=profile_data.get('phone_number'),
-                website=profile_data.get('website'),
-                industry=profile_data.get('industry'),
-                address=profile_data.get('address'),
-                registration_certificate=profile_data.get('registration_certificate'),
-                resachetified_license=profile_data.get('resachetified_license'),
-                tax_id_document=profile_data.get('tax_id_document')
-            )
-            
-            company = Company.objects.create(
-                name=profile.company_name,
-                registration_number=profile.company_registration_number,
-                company_size=profile.company_size,
-                industry=profile.industry,
-                phone_number=profile.phone_number,
-                country=profile.country,
-                city=profile.city,
-                address=profile.address,
-                website=profile.website,
-                admin_user=user,
-                registration_certificate=profile.registration_certificate,
-                tax_id_document=profile.tax_id_document,
-                is_verified=False
-            )
-            
-            profile.company = company
-            profile.save()
-            
-            send_verification_email(user, request)
-            
-            AuditLogService.log(
-                user=user,
-                action=AuditLogAction.COMPANY_CREATED,
-                category=AuditLogCategory.COMPANY,
-                description=f"New company registered: {company.name}",
-                resource=company,
-                data={'company_name': company.name, 'registration_number': company.registration_number},
-                request=request
-            )
-            
-            AuditLogService.log(
-                user=user,
-                action=AuditLogAction.USER_CREATED,
-                category=AuditLogCategory.USER,
-                description=f"New B2B user registered: {user.email}",
-                resource=user,
-                data={'registration_type': 'B2B', 'company': company.name},
-                request=request
-            )
-            
+            try:
+                with transaction.atomic():
+                    user = serializer.save()
+                    profile_data = serializer.context.get('profile_data', {})
+
+                    profile = CompanyEmployerProfile.objects.create(
+                        user=user,
+                        company_name=profile_data.get('company_name'),
+                        company_registration_number=profile_data.get('company_registration_number'),
+                        company_size=profile_data.get('company_size'),
+                        country=profile_data.get('country'),
+                        city=profile_data.get('city'),
+                        preferred_language=profile_data.get('preferred_language'),
+                        phone_number=profile_data.get('phone_number'),
+                        website=profile_data.get('website'),
+                        industry=profile_data.get('industry'),
+                        address=profile_data.get('address'),
+                        registration_certificate=profile_data.get('registration_certificate'),
+                        resachetified_license=profile_data.get('resachetified_license'),
+                        tax_id_document=profile_data.get('tax_id_document')
+                    )
+
+                    company = Company.objects.create(
+                        name=profile.company_name,
+                        registration_number=profile.company_registration_number,
+                        company_size=profile.company_size,
+                        industry=profile.industry,
+                        phone_number=profile.phone_number,
+                        country=profile.country,
+                        city=profile.city,
+                        address=profile.address,
+                        website=profile.website,
+                        admin_user=user,
+                        registration_certificate=profile.registration_certificate,
+                        tax_id_document=profile.tax_id_document,
+                        is_verified=False
+                    )
+
+                    profile.company = company
+                    profile.save()
+
+                    send_verification_email(user, request)
+
+                    AuditLogService.log(
+                        user=user,
+                        action=AuditLogAction.COMPANY_CREATED,
+                        category=AuditLogCategory.COMPANY,
+                        description=f"New company registered: {company.name}",
+                        resource=company,
+                        data={'company_name': company.name, 'registration_number': company.registration_number},
+                        request=request
+                    )
+
+                    AuditLogService.log(
+                        user=user,
+                        action=AuditLogAction.USER_CREATED,
+                        category=AuditLogCategory.USER,
+                        description=f"New B2B user registered: {user.email}",
+                        resource=user,
+                        data={'registration_type': 'B2B', 'company': company.name},
+                        request=request
+                    )
+            except IntegrityError:
+                return Response(
+                    {'detail': 'Registration failed because one of the submitted unique values already exists.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             return Response({
                 'message': 'Registration successful. Please check your email for the 5-digit verification code.',
                 'email': user.email
@@ -168,7 +464,28 @@ class B2BRegistrationView(APIView):
 
 class EmailVerificationView(APIView):
     permission_classes = [AllowAny]
-    
+
+    @extend_schema(
+        summary="Verify email",
+        request=EmailVerificationSerializer,
+        responses={
+            200: inline_serializer(
+                name="EmailVerificationSuccessResponse",
+                fields={
+                    "message": serializers.CharField(),
+                    "role": serializers.CharField(),
+                },
+            ),
+            400: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Verify email example",
+                value={"email": "new-b2c@example.com", "code": "12345"},
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         serializer = EmailVerificationSerializer(data=request.data)
         
@@ -222,7 +539,19 @@ class EmailVerificationView(APIView):
 
 class ResendVerificationView(APIView):
     permission_classes = [AllowAny]
-    
+
+    @extend_schema(
+        summary="Resend verification code",
+        request=ResendVerificationSerializer,
+        responses={200: message_response_serializer, 400: error_response_serializer},
+        examples=[
+            OpenApiExample(
+                "Resend verification example",
+                value={"email": "new-b2c@example.com"},
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         serializer = ResendVerificationSerializer(data=request.data)
         
@@ -251,7 +580,19 @@ class ResendVerificationView(APIView):
 
 class ForgotPasswordView(APIView):
     permission_classes = [AllowAny]
-    
+
+    @extend_schema(
+        summary="Request password reset",
+        request=ForgotPasswordSerializer,
+        responses={200: message_response_serializer, 400: error_response_serializer},
+        examples=[
+            OpenApiExample(
+                "Forgot password example",
+                value={"email": "verified@example.com"},
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         serializer = ForgotPasswordSerializer(data=request.data, context={'request': request})
         
@@ -280,7 +621,23 @@ class ForgotPasswordView(APIView):
 
 class ResetPasswordView(APIView):
     permission_classes = [AllowAny]
-    
+
+    @extend_schema(
+        summary="Reset password",
+        request=ResetPasswordSerializer,
+        responses={200: message_response_serializer, 400: error_response_serializer},
+        examples=[
+            OpenApiExample(
+                "Reset password example",
+                value={
+                    "token": "reset-token-from-email",
+                    "password": "NewPassword123!",
+                    "confirm_password": "NewPassword123!",
+                },
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         serializer = ResetPasswordSerializer(data=request.data)
         
@@ -330,7 +687,23 @@ class ResetPasswordView(APIView):
 
 class ChangePasswordView(APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    @extend_schema(
+        summary="Change password",
+        request=ChangePasswordSerializer,
+        responses={200: message_response_serializer, 400: error_response_serializer},
+        examples=[
+            OpenApiExample(
+                "Change password example",
+                value={
+                    "current_password": "Password123!",
+                    "new_password": "NewestPassword123!",
+                    "confirm_new_password": "NewestPassword123!",
+                },
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         serializer = ChangePasswordSerializer(
             data=request.data,
@@ -363,7 +736,34 @@ class ChangePasswordView(APIView):
 
 class ValidateResetTokenView(APIView):
     permission_classes = [AllowAny]
-    
+
+    @extend_schema(
+        summary="Validate password reset token",
+        request=validate_reset_token_request_serializer,
+        responses={
+            200: inline_serializer(
+                name="ValidateResetTokenSuccessResponse",
+                fields={
+                    "valid": serializers.BooleanField(),
+                    "message": serializers.CharField(),
+                },
+            ),
+            400: inline_serializer(
+                name="ValidateResetTokenErrorResponse",
+                fields={
+                    "valid": serializers.BooleanField(),
+                    "error": serializers.CharField(),
+                },
+            ),
+        },
+        examples=[
+            OpenApiExample(
+                "Validate reset token example",
+                value={"token": "reset-token-from-email"},
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         token = request.data.get('token')
         
@@ -397,11 +797,45 @@ class ValidateResetTokenView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 class ProfileDetailView(APIView):
     permission_classes = [IsAuthenticated, IsOwnerOrAdmin]
-    
+
+    @extend_schema(
+        summary="Get my profile",
+        responses={200: OpenApiResponse(description="Current authenticated user profile.")},
+    )
     def get(self, request):
         serializer = ProfileSerializer(request.user)
         return Response(serializer.data)
-    
+
+    @extend_schema(
+        summary="Update my profile",
+        request=profile_update_request_serializer,
+        responses={
+            200: OpenApiResponse(description="Updated profile for the current user."),
+            400: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "B2C profile patch example",
+                value={
+                    "first_name": "Sara",
+                    "last_name": "Ahmed",
+                    "phone_number": "+251911223344",
+                    "address": "Addis Ababa",
+                },
+                request_only=True,
+            ),
+            OpenApiExample(
+                "B2B profile patch example",
+                value={
+                    "company_name": "ABC Solutions Ltd",
+                    "phone_number": "+251922334455",
+                    "city": "Addis Ababa",
+                    "website": "https://abcsolutions.example.com",
+                },
+                request_only=True,
+            ),
+        ],
+    )
     def patch(self, request):
         user = request.user
         
@@ -446,7 +880,31 @@ class ProfileDetailView(APIView):
 
 class ProfileDocumentUploadView(APIView):
     permission_classes = [IsAuthenticated, IsEmployer]
-    
+
+    parser_classes = [MultiPartParser, FormParser]
+
+    @extend_schema(
+        summary="Upload a profile document",
+        request=profile_document_upload_request_serializer,
+        responses={
+            200: inline_serializer(
+                name="ProfileDocumentUploadResponse",
+                fields={
+                    "message": serializers.CharField(),
+                    "profile": serializers.JSONField(),
+                },
+            ),
+            400: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Profile document upload example",
+                description="Use multipart/form-data and attach a real file in the document field.",
+                value={"document_type": "id", "document": "(binary file)"},
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         user = request.user
         document_type = request.data.get('document_type')
@@ -495,7 +953,12 @@ class ProfileDocumentUploadView(APIView):
                 category=AuditLogCategory.USER,
                 description=f"Profile updated for user: {user.email}",
                 resource=user,
-                data={'changes': request.data},
+                data={
+                    'changes': {
+                        'document_type': document_type,
+                        'document_name': getattr(document_file, 'name', None),
+                    }
+                },
                 request=request
             )
         return Response({
@@ -506,7 +969,11 @@ class ProfileDocumentUploadView(APIView):
 
 class AdminStatsView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
-    
+
+    @extend_schema(
+        summary="Get admin statistics",
+        responses={200: admin_stats_response_serializer},
+    )
     def get(self, request):
         total_users = User.objects.count()
         total_b2c = User.objects.filter(role=Roles.B2C).count()
@@ -534,7 +1001,11 @@ class AdminStatsView(APIView):
 class AdminUserListView(APIView):
     permission_classes = [IsAuthenticated, IsSuperAdmin]
     pagination_class = StandardResultsSetPagination
-    
+
+    @extend_schema(
+        summary="List admin users",
+        responses={200: paginated_admin_users_response_serializer},
+    )
     def get(self, request):
         admins = User.objects.filter(role__in=[Roles.SUPERADMIN, Roles.ADMIN])
         
@@ -563,7 +1034,37 @@ class AdminUserListView(APIView):
 
 class CreateAdminView(APIView):
     permission_classes = [IsAuthenticated, IsSuperAdmin]
-    
+
+    @extend_schema(
+        summary="Create or promote an admin user",
+        request=CreateAdminSerializer,
+        responses={
+            201: inline_serializer(
+                name="CreateAdminResponse",
+                fields={
+                    "message": serializers.CharField(),
+                    "admin": serializers.JSONField(),
+                },
+            ),
+            400: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Create admin example",
+                value={
+                    "email": "admin@example.com",
+                    "first_name": "System",
+                    "last_name": "Admin",
+                    "password": "Password123!",
+                    "confirm_password": "Password123!",
+                    "permissions": ["can_manage_users", "can_verify_documents"],
+                    "department": "Operations",
+                    "phone_number": "+251900000001",
+                },
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         serializer = CreateAdminSerializer(data=request.data)
         
@@ -596,6 +1097,10 @@ class AdminUserDetailView(APIView):
         except User.DoesNotExist:
             return None
     
+    @extend_schema(
+        summary="Get an admin user",
+        responses={200: AdminUserSerializer, 404: error_response_serializer},
+    )
     def get(self, request, user_id):
         user = self.get_object(user_id)
         if not user:
@@ -603,7 +1108,30 @@ class AdminUserDetailView(APIView):
         
         serializer = AdminUserSerializer(user)
         return Response(serializer.data)
-    
+
+    @extend_schema(
+        summary="Update an admin user",
+        request=inline_serializer(
+            name="AdminUserPatchRequest",
+            fields={
+                "first_name": serializers.CharField(required=False),
+                "last_name": serializers.CharField(required=False),
+                "is_active": serializers.BooleanField(required=False),
+                "admin_permissions": serializers.ListField(
+                    child=serializers.ChoiceField(choices=AdminPermissions.CHOICES),
+                    required=False,
+                ),
+            },
+        ),
+        responses={200: AdminUserSerializer, 400: error_response_serializer, 404: error_response_serializer},
+        examples=[
+            OpenApiExample(
+                "Admin update example",
+                value={"first_name": "Updated", "is_active": True},
+                request_only=True,
+            ),
+        ],
+    )
     def patch(self, request, user_id):
         user = self.get_object(user_id)
         if not user:
@@ -629,6 +1157,11 @@ class AdminUserDetailView(APIView):
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
+    @extend_schema(
+        summary="Delete an admin user",
+        request=None,
+        responses={200: message_response_serializer, 400: error_response_serializer, 404: error_response_serializer},
+    )
     def delete(self, request, user_id):
         user = self.get_object(user_id)
         if not user:
@@ -652,7 +1185,11 @@ class AdminUserDetailView(APIView):
 class EmployerListView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
     pagination_class = StandardResultsSetPagination
-    
+
+    @extend_schema(
+        summary="List employers",
+        responses={200: paginated_employers_response_serializer},
+    )
     def get(self, request):
         employers = User.objects.filter(role__in=[Roles.B2B, Roles.B2C, Roles.B2B_TEAM_MEMBER])
         
@@ -707,6 +1244,10 @@ class EmployerDetailView(APIView):
         except User.DoesNotExist:
             return None
     
+    @extend_schema(
+        summary="Get an employer",
+        responses={200: EmployerListSerializer, 404: error_response_serializer},
+    )
     def get(self, request, user_id):
         user = self.get_object(user_id)
         if not user:
@@ -714,7 +1255,33 @@ class EmployerDetailView(APIView):
         
         serializer = EmployerListSerializer(user)
         return Response(serializer.data)
-    
+
+    @extend_schema(
+        summary="Update employer status",
+        request=UserStatusUpdateSerializer,
+        responses={
+            200: inline_serializer(
+                name="EmployerStatusUpdateResponse",
+                fields={
+                    "message": serializers.CharField(),
+                    "user": serializers.JSONField(),
+                },
+            ),
+            400: error_response_serializer,
+            404: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Employer status update example",
+                value={
+                    "is_active": True,
+                    "is_verified": False,
+                    "rejection_reason": "Missing required documents",
+                },
+                request_only=True,
+            ),
+        ],
+    )
     def patch(self, request, user_id):
         user = self.get_object(user_id)
         if not user:
@@ -753,7 +1320,11 @@ class EmployerDetailView(APIView):
 
 class PendingVerificationListView(APIView):
     permission_classes = [IsAuthenticated, CanVerifyDocuments]
-    
+
+    @extend_schema(
+        summary="List pending employer verifications",
+        responses={200: pending_verification_response_serializer},
+    )
     def get(self, request):
         pending_users = User.objects.filter(
             documents_verification_status=DocumentStatus.PENDING,
@@ -788,7 +1359,43 @@ class PendingVerificationListView(APIView):
 
 class VerifyDocumentsView(APIView):
     permission_classes = [IsAuthenticated, CanVerifyDocuments]
-    
+
+    @extend_schema(
+        summary="Verify employer documents",
+        request=DocumentVerificationSerializer,
+        responses={
+            200: inline_serializer(
+                name="VerifyDocumentsResponse",
+                fields={
+                    "message": serializers.CharField(),
+                    "user": serializers.JSONField(),
+                },
+            ),
+            400: error_response_serializer,
+            404: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Approve documents example",
+                value={
+                    "user_id": 1,
+                    "status": "APPROVED",
+                    "verification_notes": "All submitted documents are valid.",
+                },
+                request_only=True,
+            ),
+            OpenApiExample(
+                "Reject documents example",
+                value={
+                    "user_id": 1,
+                    "status": "REJECTED",
+                    "rejection_reason": "Registration certificate is unreadable.",
+                    "verification_notes": "Please re-upload a clear copy.",
+                },
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         serializer = DocumentVerificationSerializer(data=request.data)
         
@@ -870,7 +1477,40 @@ class VerifyDocumentsView(APIView):
 
 class RejectDocumentsView(APIView):
     permission_classes = [IsAuthenticated, CanVerifyDocuments]
-    
+
+    @extend_schema(
+        summary="Reject employer documents",
+        request=inline_serializer(
+            name="RejectDocumentsRequest",
+            fields={
+                "user_id": serializers.IntegerField(),
+                "rejection_reason": serializers.CharField(),
+                "verification_notes": serializers.CharField(required=False, allow_blank=True),
+            },
+        ),
+        responses={
+            200: inline_serializer(
+                name="RejectDocumentsResponse",
+                fields={
+                    "message": serializers.CharField(),
+                    "user": serializers.JSONField(),
+                },
+            ),
+            400: error_response_serializer,
+            404: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Reject documents direct example",
+                value={
+                    "user_id": 1,
+                    "rejection_reason": "Tax ID document is missing.",
+                    "verification_notes": "Upload the missing file and resubmit.",
+                },
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         user_id = request.data.get('user_id')
         rejection_reason = request.data.get('rejection_reason', '')
@@ -926,7 +1566,11 @@ class RejectDocumentsView(APIView):
         }, status=status.HTTP_200_OK)
 class AdminDashboardStatsView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
-    
+
+    @extend_schema(
+        summary="Get admin dashboard statistics",
+        responses={200: admin_dashboard_stats_response_serializer},
+    )
     def get(self, request):
         total_users = User.objects.count()
         total_admins = User.objects.filter(role__in=[Roles.SUPERADMIN, Roles.ADMIN]).count()
@@ -967,7 +1611,11 @@ class AdminDashboardStatsView(APIView):
 
 class CompanyProfileView(APIView):
     permission_classes = [IsAuthenticated, IsB2BUser]
-    
+
+    @extend_schema(
+        summary="Get company profile",
+        responses={200: CompanySerializer, 400: error_response_serializer, 404: error_response_serializer},
+    )
     def get(self, request):
         try:
             if hasattr(request.user, 'managed_company'):
@@ -990,7 +1638,24 @@ class CompanyProfileView(APIView):
                 {'error': str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
-    
+
+    @extend_schema(
+        summary="Update company profile",
+        request=company_update_request_serializer,
+        responses={200: CompanySerializer, 400: error_response_serializer, 404: error_response_serializer},
+        examples=[
+            OpenApiExample(
+                "Company profile patch example",
+                value={
+                    "name": "ABC Solutions Ltd",
+                    "industry": "Technology",
+                    "phone_number": "+251922334455",
+                    "city": "Addis Ababa",
+                },
+                request_only=True,
+            ),
+        ],
+    )
     def patch(self, request):
         try:
             if hasattr(request.user, 'managed_company'):
@@ -1038,7 +1703,11 @@ class CompanyProfileView(APIView):
 
 class MyCompanyInfoView(APIView):
     permission_classes = [IsAuthenticated, IsB2BTeamMember]
-    
+
+    @extend_schema(
+        summary="Get my company info",
+        responses={200: my_company_info_response_serializer, 404: error_response_serializer},
+    )
     def get(self, request):
         try:
             profile = request.user.team_member_profile
@@ -1076,7 +1745,11 @@ class MyCompanyInfoView(APIView):
             )
 class TeamMemberListView(APIView):
     permission_classes = [IsAuthenticated, IsB2BUser]
-    
+
+    @extend_schema(
+        summary="List team members",
+        responses={200: TeamMemberProfileSerializer(many=True), 400: error_response_serializer, 404: error_response_serializer},
+    )
     def get(self, request):
         try:
             if not hasattr(request.user, 'company_profile'):
@@ -1102,7 +1775,37 @@ class TeamMemberListView(APIView):
 
 class InviteTeamMemberView(APIView):
     permission_classes = [IsAuthenticated, IsB2BUser]
-    
+
+    @extend_schema(
+        summary="Invite a team member",
+        request=InviteTeamMemberSerializer,
+        responses={
+            201: inline_serializer(
+                name="InviteTeamMemberResponse",
+                fields={
+                    "message": serializers.CharField(),
+                    "invitation": serializers.JSONField(),
+                },
+            ),
+            400: error_response_serializer,
+            404: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Invite team member example",
+                value={
+                    "email": "recruiter@example.com",
+                    "first_name": "Liya",
+                    "last_name": "Bekele",
+                    "job_title": "Recruiter",
+                    "department": "Talent",
+                    "phone_number": "+251911000000",
+                    "permissions": ["view_candidates", "create_evaluations"],
+                },
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         serializer = InviteTeamMemberSerializer(data=request.data)
         
@@ -1169,7 +1872,11 @@ class InviteTeamMemberView(APIView):
 
 class PendingInvitationsView(APIView):
     permission_classes = [IsAuthenticated, IsB2BUser]
-    
+
+    @extend_schema(
+        summary="List pending invitations",
+        responses={200: TeamInvitationSerializer(many=True), 400: error_response_serializer, 404: error_response_serializer},
+    )
     def get(self, request):
         try:
             if not hasattr(request.user, 'company_profile'):
@@ -1196,7 +1903,12 @@ class PendingInvitationsView(APIView):
 
 class CancelInvitationView(APIView):
     permission_classes = [IsAuthenticated, IsB2BUser]
-    
+
+    @extend_schema(
+        summary="Cancel a pending invitation",
+        request=None,
+        responses={200: message_response_serializer, 400: error_response_serializer, 404: error_response_serializer},
+    )
     def post(self, request, invitation_id):
         try:
             if not hasattr(request.user, 'company_profile'):
@@ -1240,7 +1952,32 @@ class CancelInvitationView(APIView):
 
 class AcceptInvitationView(APIView):
     permission_classes = []
-    
+
+    @extend_schema(
+        summary="Accept a team invitation",
+        request=AcceptInvitationSerializer,
+        responses={
+            201: inline_serializer(
+                name="AcceptInvitationResponse",
+                fields={
+                    "message": serializers.CharField(),
+                    "email": serializers.EmailField(),
+                },
+            ),
+            400: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Accept invitation example",
+                value={
+                    "token": "invitation-token",
+                    "password": "Password123!",
+                    "confirm_password": "Password123!",
+                },
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         serializer = AcceptInvitationSerializer(data=request.data)
         
@@ -1331,6 +2068,10 @@ class TeamMemberDetailView(APIView):
         except TeamMemberProfile.DoesNotExist:
             return None
     
+    @extend_schema(
+        summary="Get a team member",
+        responses={200: TeamMemberProfileSerializer, 404: error_response_serializer},
+    )
     def get(self, request, member_id):
         member = self.get_object(member_id, request.user)
         if not member:
@@ -1341,7 +2082,24 @@ class TeamMemberDetailView(APIView):
         
         serializer = TeamMemberProfileSerializer(member)
         return Response(serializer.data)
-    
+
+    @extend_schema(
+        summary="Update a team member",
+        request=TeamMemberUpdateSerializer,
+        responses={200: TeamMemberProfileSerializer, 400: error_response_serializer, 404: error_response_serializer},
+        examples=[
+            OpenApiExample(
+                "Team member update example",
+                value={
+                    "job_title": "Senior Recruiter",
+                    "department": "Talent",
+                    "phone_number": "+251911000001",
+                    "permissions": ["view_candidates", "evaluate_candidates"],
+                },
+                request_only=True,
+            ),
+        ],
+    )
     def patch(self, request, member_id):
         member = self.get_object(member_id, request.user)
         if not member:
@@ -1366,6 +2124,11 @@ class TeamMemberDetailView(APIView):
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
+    @extend_schema(
+        summary="Remove a team member",
+        request=None,
+        responses={200: message_response_serializer, 404: error_response_serializer},
+    )
     def delete(self, request, member_id):
         member = self.get_object(member_id, request.user)
         if not member:
@@ -1393,10 +2156,14 @@ class TeamMemberDetailView(APIView):
 
 class TeamMemberPermissionsView(APIView):
     permission_classes = [IsAuthenticated, IsB2BUser]
-    
+
+    @extend_schema(
+        summary="List available team permissions",
+        responses={200: team_member_permissions_list_response_serializer},
+    )
     def get(self, request):
         permissions = [
             {'key': p[0], 'label': p[1]}
             for p in CompanyTeamPermissions.CHOICES
         ]
-        return Response(permissions)
+        return Response({'results': permissions})

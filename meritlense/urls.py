@@ -10,9 +10,9 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
 api_v1_patterns = [
-    path('health/', health_check, name='api-v1-health'),
-    path('auth/login/', CustomTokenObtainPairView.as_view(), name='api-v1-token-obtain-pair'),
-    path('auth/refresh/', TokenRefreshView.as_view(), name='api-v1-token-refresh'),
+    path('health', health_check, name='api-v1-health'),
+    path('auth/login', CustomTokenObtainPairView.as_view(), name='api-v1-token-obtain-pair'),
+    path('auth/refresh', TokenRefreshView.as_view(), name='api-v1-token-refresh'),
     path('auth/', include('api.accounts.urls')),
     path('candidates/', include('api.candidates.urls')),
     path('evaluations/', include('api.evaluations.urls')),
@@ -20,8 +20,8 @@ api_v1_patterns = [
     path('payments/', include('api.payments.urls')),
     path('dashboard/', include('api.dashboard.urls')),
     path('audit/', include('api.audit.urls')),
-    path('schema/', SpectacularAPIView.as_view(), name='api-v1-schema'),
-    path('docs/', SpectacularSwaggerView.as_view(url_name='api-v1-schema'), name='api-v1-swagger-ui'),
+    path('schema', SpectacularAPIView.as_view(), name='api-v1-schema'),
+    path('docs', SpectacularSwaggerView.as_view(url_name='api-v1-schema'), name='api-v1-swagger-ui'),
 ]
 
 urlpatterns = [

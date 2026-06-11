@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from api.candidates.models import Candidate
+from api.core.serializers import PublicIdModelSerializer
 from api.evaluations.models import Evaluation
 
 class DashboardStatsSerializer(serializers.Serializer):
@@ -11,7 +12,7 @@ class DashboardStatsSerializer(serializers.Serializer):
     team_members_count = serializers.IntegerField(required=False)
 
 
-class RecentCandidateSerializer(serializers.ModelSerializer):
+class RecentCandidateSerializer(PublicIdModelSerializer):
     full_name = serializers.SerializerMethodField()
     evaluation_count = serializers.IntegerField(read_only=True)
     last_evaluation_date = serializers.DateTimeField(read_only=True)
@@ -28,7 +29,7 @@ class RecentCandidateSerializer(serializers.ModelSerializer):
         return obj.get_full_name()
 
 
-class RecentEvaluationSerializer(serializers.ModelSerializer):
+class RecentEvaluationSerializer(PublicIdModelSerializer):
     candidate_name = serializers.SerializerMethodField()
     evaluation_type_display = serializers.CharField(source='get_evaluation_type_display')
     status_display = serializers.CharField(source='get_status_display')

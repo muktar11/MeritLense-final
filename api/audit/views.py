@@ -8,12 +8,14 @@ from django.utils import timezone
 from datetime import timedelta
 
 from api.core.permisssions import IsAdminOrSuperAdmin
+from api.accounts.models import Company, User
+from api.core.public_ids import PublicIdLookupMixin, get_by_identifier
 from .models import AuditLog
 from .serializers import AuditLogSerializer, AuditLogFilterSerializer
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 
 
-class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+class AuditLogViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
     serializer_class = AuditLogSerializer
     
@@ -25,10 +27,16 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
             data = filters.validated_data
             
             if data.get('user_id'):
-                queryset = queryset.filter(user_id=data['user_id'])
+                try:
+                    queryset = queryset.filter(user=get_by_identifier(User.objects.all(), data['user_id']))
+                except User.DoesNotExist:
+                    return queryset.none()
             
             if data.get('company_id'):
-                queryset = queryset.filter(company_id=data['company_id'])
+                try:
+                    queryset = queryset.filter(company=get_by_identifier(Company.objects.all(), data['company_id']))
+                except Company.DoesNotExist:
+                    return queryset.none()
             
             if data.get('category'):
                 queryset = queryset.filter(category=data['category'])

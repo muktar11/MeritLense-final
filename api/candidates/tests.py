@@ -3,6 +3,7 @@ import tempfile
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
+from drf_spectacular.generators import SchemaGenerator
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -102,7 +103,7 @@ class CandidatesWeek2Tests(APITestCase):
 
     def authenticate(self, user, password="Password123!"):
         response = self.client.post(
-            "/api/v1/auth/login/",
+            "/api/v1/auth/login",
             {"email": user.email, "password": password},
             format="json",
         )
@@ -124,7 +125,7 @@ class CandidatesWeek2Tests(APITestCase):
         defaults.update(overrides)
         self.authenticate(user)
         response = self.client.post(
-            "/api/v1/candidates/candidates/",
+            "/api/v1/candidates/candidates",
             defaults,
             format="multipart",
         )
@@ -143,7 +144,7 @@ class CandidatesWeek2Tests(APITestCase):
 
         self.authenticate(company_admin)
         create_response = self.client.post(
-            "/api/v1/candidates/candidates/",
+            "/api/v1/candidates/candidates",
             {
                 "first_name": "Jane",
                 "last_name": "Doe",
@@ -161,7 +162,7 @@ class CandidatesWeek2Tests(APITestCase):
         self.client.credentials()
         self.authenticate(teammate)
         duplicate_response = self.client.post(
-            "/api/v1/candidates/candidates/",
+            "/api/v1/candidates/candidates",
             {
                 "first_name": "John",
                 "last_name": "Smith",
@@ -180,7 +181,7 @@ class CandidatesWeek2Tests(APITestCase):
         self.client.credentials()
         self.authenticate(other_admin)
         other_company_response = self.client.post(
-            "/api/v1/candidates/candidates/",
+            "/api/v1/candidates/candidates",
             {
                 "first_name": "Other",
                 "last_name": "Company",
@@ -202,12 +203,12 @@ class CandidatesWeek2Tests(APITestCase):
         other_candidate = self.create_candidate(other_user, email="other-candidate@example.com", passport_id="OWNER-2")
 
         self.authenticate(owner)
-        list_response = self.client.get("/api/v1/candidates/candidates/")
+        list_response = self.client.get("/api/v1/candidates/candidates")
         self.assertEqual(list_response.status_code, status.HTTP_200_OK, list_response.data)
         self.assertEqual(len(list_response.data), 1)
-        self.assertEqual(list_response.data[0]["id"], owner_candidate.id)
+        self.assertEqual(list_response.data[0]["id"], str(owner_candidate.public_id))
 
-        forbidden_detail = self.client.get(f"/api/v1/candidates/candidates/{other_candidate.id}/")
+        forbidden_detail = self.client.get(f"/api/v1/candidates/candidates/{other_candidate.id}")
         self.assertEqual(forbidden_detail.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_share_and_unshare_control_team_member_access_and_edit_rights(self):
@@ -223,7 +224,7 @@ class CandidatesWeek2Tests(APITestCase):
 
         self.authenticate(company_admin)
         share_response = self.client.post(
-            f"/api/v1/candidates/candidates/{candidate.id}/share/",
+            f"/api/v1/candidates/candidates/{candidate.id}/share",
             {"user_ids": [teammate_profile.id]},
             format="json",
         )
@@ -231,11 +232,11 @@ class CandidatesWeek2Tests(APITestCase):
 
         self.client.credentials()
         self.authenticate(teammate)
-        retrieve_response = self.client.get(f"/api/v1/candidates/candidates/{candidate.id}/")
+        retrieve_response = self.client.get(f"/api/v1/candidates/candidates/{candidate.id}")
         self.assertEqual(retrieve_response.status_code, status.HTTP_200_OK, retrieve_response.data)
 
         update_response = self.client.patch(
-            f"/api/v1/candidates/candidates/{candidate.id}/",
+            f"/api/v1/candidates/candidates/{candidate.id}",
             {"first_name": "Blocked"},
             format="json",
         )
@@ -244,7 +245,7 @@ class CandidatesWeek2Tests(APITestCase):
         self.client.credentials()
         self.authenticate(company_admin)
         unshare_response = self.client.post(
-            f"/api/v1/candidates/candidates/{candidate.id}/unshare/",
+            f"/api/v1/candidates/candidates/{candidate.id}/unshare",
             {"user_ids": [teammate_profile.id]},
             format="json",
         )
@@ -252,7 +253,7 @@ class CandidatesWeek2Tests(APITestCase):
 
         self.client.credentials()
         self.authenticate(teammate)
-        missing_after_unshare = self.client.get(f"/api/v1/candidates/candidates/{candidate.id}/")
+        missing_after_unshare = self.client.get(f"/api/v1/candidates/candidates/{candidate.id}")
         self.assertEqual(missing_after_unshare.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_share_rejects_team_members_from_other_companies(self):
@@ -271,7 +272,7 @@ class CandidatesWeek2Tests(APITestCase):
 
         self.authenticate(company_admin)
         share_response = self.client.post(
-            f"/api/v1/candidates/candidates/{candidate.id}/share/",
+            f"/api/v1/candidates/candidates/{candidate.id}/share",
             {"user_ids": [outside_profile.id]},
             format="json",
         )
@@ -286,7 +287,7 @@ class CandidatesWeek2Tests(APITestCase):
 
         self.authenticate(teammate)
         create_response = self.client.post(
-            "/api/v1/candidates/candidates/",
+            "/api/v1/candidates/candidates",
             {
                 "first_name": "Owned",
                 "last_name": "ByTeamMember",
@@ -305,3 +306,11 @@ class CandidatesWeek2Tests(APITestCase):
         self.assertEqual(candidate.company, company)
         self.assertEqual(candidate.created_by, teammate)
         self.assertIn(teammate, candidate.shared_with.all())
+
+    def test_candidate_create_schema_uses_multipart_form_data(self):
+        schema = SchemaGenerator().get_schema(request=None, public=True)
+        operation = schema["paths"]["/api/v1/candidates/candidates"]["post"]
+        content = operation["requestBody"]["content"]
+
+        self.assertIn("multipart/form-data", content)
+        self.assertNotIn("application/json", content)

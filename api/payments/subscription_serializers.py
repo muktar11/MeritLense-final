@@ -1,15 +1,16 @@
 from rest_framework import serializers
 from django.utils import timezone
+from api.core.serializers import PublicIdModelSerializer
 from .models import Subscription, Price
 
 
-class PriceForSubscriptionSerializer(serializers.ModelSerializer):
+class PriceForSubscriptionSerializer(PublicIdModelSerializer):
     class Meta:
         model = Price
         fields = ['id', 'name', 'unit_amount', 'currency', 'interval', 'feature_limits']
         
 
-class SubscriptionSerializer(serializers.ModelSerializer):
+class SubscriptionSerializer(PublicIdModelSerializer):
     plan_details = PriceForSubscriptionSerializer(source='stripe_price', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     user_email = serializers.EmailField(source='user.email', read_only=True)
@@ -49,7 +50,7 @@ class SubscriptionSerializer(serializers.ModelSerializer):
             return max(0, delta.days)
         return 0
     
-class SubscriptionListSerializer(serializers.ModelSerializer):
+class SubscriptionListSerializer(PublicIdModelSerializer):
     plan_name = serializers.CharField(source='stripe_price.name', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     amount = serializers.DecimalField(source='stripe_price.unit_amount', max_digits=10, decimal_places=2, read_only=True)

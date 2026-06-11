@@ -51,7 +51,7 @@ class AccountsWeek2Tests(APITestCase):
 
     def authenticate(self, email, password):
         login_response = self.client.post(
-            "/api/v1/auth/login/",
+            "/api/v1/auth/login",
             {"email": email, "password": password},
             format="json",
         )
@@ -80,7 +80,7 @@ class AccountsWeek2Tests(APITestCase):
         }
 
         response = self.client.post(
-            "/api/v1/auth/register/b2c/",
+            "/api/v1/auth/register/b2c",
             registration_payload,
             format="multipart",
         )
@@ -95,7 +95,7 @@ class AccountsWeek2Tests(APITestCase):
         )
 
         login_before_verification = self.client.post(
-            "/api/v1/auth/login/",
+            "/api/v1/auth/login",
             {"email": user.email, "password": registration_payload["password"]},
             format="json",
         )
@@ -103,14 +103,14 @@ class AccountsWeek2Tests(APITestCase):
         self.assertIn("verification", str(login_before_verification.data).lower())
 
         verify_response = self.client.post(
-            "/api/v1/auth/verify-email/",
+            "/api/v1/auth/verify-email",
             {"email": user.email, "code": user.email_verification_code},
             format="json",
         )
         self.assertEqual(verify_response.status_code, status.HTTP_200_OK, verify_response.data)
 
         login_response = self.client.post(
-            "/api/v1/auth/login/",
+            "/api/v1/auth/login",
             {"email": user.email, "password": registration_payload["password"]},
             format="json",
         )
@@ -121,7 +121,7 @@ class AccountsWeek2Tests(APITestCase):
         self.assertIn("refresh", login_response.data)
 
         refresh_response = self.client.post(
-            "/api/v1/auth/refresh/",
+            "/api/v1/auth/refresh",
             {"refresh": login_response.data["refresh"]},
             format="json",
         )
@@ -244,7 +244,7 @@ class AccountsWeek2Tests(APITestCase):
         user = self.create_verified_b2c_user()
 
         forgot_response = self.client.post(
-            "/api/v1/auth/forgot-password/",
+            "/api/v1/auth/forgot-password",
             {"email": user.email},
             format="json",
         )
@@ -254,7 +254,7 @@ class AccountsWeek2Tests(APITestCase):
         self.assertTrue(user.password_reset_token)
 
         validate_response = self.client.post(
-            "/api/v1/auth/validate-reset-token/",
+            "/api/v1/auth/validate-reset-token",
             {"token": user.password_reset_token},
             format="json",
         )
@@ -262,7 +262,7 @@ class AccountsWeek2Tests(APITestCase):
         self.assertTrue(validate_response.data["valid"])
 
         reset_response = self.client.post(
-            "/api/v1/auth/reset-password/",
+            "/api/v1/auth/reset-password",
             {
                 "token": user.password_reset_token,
                 "password": "NewPassword123!",
@@ -273,14 +273,14 @@ class AccountsWeek2Tests(APITestCase):
         self.assertEqual(reset_response.status_code, status.HTTP_200_OK, reset_response.data)
 
         invalidated_response = self.client.post(
-            "/api/v1/auth/validate-reset-token/",
+            "/api/v1/auth/validate-reset-token",
             {"token": user.password_reset_token},
             format="json",
         )
         self.assertEqual(invalidated_response.status_code, status.HTTP_400_BAD_REQUEST)
 
         login_after_reset = self.client.post(
-            "/api/v1/auth/login/",
+            "/api/v1/auth/login",
             {"email": user.email, "password": "NewPassword123!"},
             format="json",
         )
@@ -290,7 +290,7 @@ class AccountsWeek2Tests(APITestCase):
             HTTP_AUTHORIZATION=f"Bearer {login_after_reset.data['access']}"
         )
         change_response = self.client.post(
-            "/api/v1/auth/change-password/",
+            "/api/v1/auth/change-password",
             {
                 "current_password": "NewPassword123!",
                 "new_password": "NewestPassword123!",
@@ -301,7 +301,7 @@ class AccountsWeek2Tests(APITestCase):
         self.assertEqual(change_response.status_code, status.HTTP_200_OK, change_response.data)
 
         relogin_response = self.client.post(
-            "/api/v1/auth/login/",
+            "/api/v1/auth/login",
             {"email": user.email, "password": "NewestPassword123!"},
             format="json",
         )
@@ -311,12 +311,12 @@ class AccountsWeek2Tests(APITestCase):
         user = self.create_verified_b2c_user(email="profile@example.com")
         self.authenticate(user.email, "Password123!")
 
-        get_response = self.client.get("/api/v1/auth/me/")
+        get_response = self.client.get("/api/v1/auth/me")
         self.assertEqual(get_response.status_code, status.HTTP_200_OK, get_response.data)
         self.assertEqual(get_response.data["email"], user.email)
 
         patch_response = self.client.patch(
-            "/api/v1/auth/me/",
+            "/api/v1/auth/me",
             {
                 "first_name": "Updated",
                 "last_name": "Name",
@@ -352,7 +352,7 @@ class AccountsWeek2Tests(APITestCase):
         limited_login = self.authenticate(admin_without_permission.email, "Password123!")
         self.assertEqual(limited_login.data["role"], Roles.ADMIN)
 
-        denied_response = self.client.get("/api/v1/auth/admin/employers/pending-verification/")
+        denied_response = self.client.get("/api/v1/auth/admin/employers/pending-verification")
         self.assertEqual(denied_response.status_code, status.HTTP_403_FORBIDDEN)
 
         self.client.credentials()
@@ -369,5 +369,5 @@ class AccountsWeek2Tests(APITestCase):
         )
         self.authenticate(admin_with_permission.email, "Password123!")
 
-        allowed_response = self.client.get("/api/v1/auth/admin/employers/pending-verification/")
+        allowed_response = self.client.get("/api/v1/auth/admin/employers/pending-verification")
         self.assertEqual(allowed_response.status_code, status.HTTP_200_OK, allowed_response.data)

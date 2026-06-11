@@ -1,8 +1,10 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q
+from drf_spectacular.utils import OpenApiExample, extend_schema, extend_schema_view
 
 from api.audit.services import AuditLogService
 from .models import Candidate
@@ -18,11 +20,50 @@ from api.core.constants import AuditLogCategory, AuditLogAction
 from api.accounts.models import User
 
 
+@extend_schema_view(
+    create=extend_schema(
+        summary="Create a candidate",
+        description="Create a candidate with a required passport/ID document upload.",
+        request={'multipart/form-data': CandidateCreateSerializer},
+        responses={201: CandidateSerializer},
+        examples=[
+            OpenApiExample(
+                "Candidate create example",
+                summary="Candidate with document upload",
+                description="Use multipart/form-data in Swagger and attach a real file for passport_document.",
+                value={
+                    "first_name": "Jane",
+                    "last_name": "Doe",
+                    "email": "jane.doe@example.com",
+                    "passport_id": "PASS-1001",
+                    "job_role": "NA",
+                    "core_skills": "communication, patience",
+                    "preferred_language": "EN",
+                    "passport_document": "(binary file)",
+                    "profile_photo": "(binary file, optional)",
+                },
+                request_only=True,
+            ),
+        ],
+    ),
+    update=extend_schema(
+        request={'multipart/form-data': CandidateUpdateSerializer},
+        responses={200: CandidateSerializer},
+    ),
+    partial_update=extend_schema(
+        request={'multipart/form-data': CandidateUpdateSerializer},
+        responses={200: CandidateSerializer},
+    ),
+)
 class CandidateViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = CandidateSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Candidate.objects.none()
+
         user = self.request.user
         
         if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:

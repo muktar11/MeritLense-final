@@ -2,11 +2,12 @@ from rest_framework import serializers
 from django.db import transaction
 from .models import CandidateScore, ScoreSet, ScoreCategory
 from api.core.constants import JOB_ROLE_SCORE_AREAS
+from api.core.serializers import PublicIdModelSerializer
 from api.candidates.serializers import CandidateSerializer
 from api.evaluations.serializers import EvaluationSerializer
 
 
-class ScoreCategorySerializer(serializers.ModelSerializer):
+class ScoreCategorySerializer(PublicIdModelSerializer):
     applicable_roles_list = serializers.SerializerMethodField()
     
     class Meta:
@@ -19,7 +20,7 @@ class ScoreCategorySerializer(serializers.ModelSerializer):
         return obj.get_applicable_roles_list()
 
 
-class CandidateScoreSerializer(serializers.ModelSerializer):
+class CandidateScoreSerializer(PublicIdModelSerializer):
     area_display = serializers.CharField(source='get_area_display', read_only=True)
     candidate_name = serializers.CharField(source='candidate.get_full_name', read_only=True)
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
@@ -35,7 +36,7 @@ class CandidateScoreSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_by', 'company', 'created_at', 'updated_at']
 
 
-class ScoreSetSerializer(serializers.ModelSerializer):
+class ScoreSetSerializer(PublicIdModelSerializer):
     candidate_details = CandidateSerializer(source='candidate', read_only=True)
     evaluation_details = EvaluationSerializer(source='evaluation', read_only=True)
     scores = serializers.SerializerMethodField()

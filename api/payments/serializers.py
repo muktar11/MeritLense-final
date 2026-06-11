@@ -1,11 +1,12 @@
 from rest_framework import serializers
+from api.core.serializers import PublicIdModelSerializer
 from .models import (
     Price, Customer, PaymentMethod, 
     Subscription, Payment, Invoice
 )
 
 
-class PriceSerializer(serializers.ModelSerializer):
+class PriceSerializer(PublicIdModelSerializer):
     formatted_price = serializers.SerializerMethodField()
     target_user_type_display = serializers.SerializerMethodField()
     
@@ -26,7 +27,7 @@ class PriceSerializer(serializers.ModelSerializer):
     def get_target_user_type_display(self, obj):
         return dict(obj._meta.get_field('target_user_type').choices).get(obj.target_user_type, '')
 
-class CustomerSerializer(serializers.ModelSerializer):
+class CustomerSerializer(PublicIdModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)
     user_name = serializers.SerializerMethodField()
     
@@ -43,7 +44,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         return obj.user.get_full_name()
 
 
-class PaymentMethodSerializer(serializers.ModelSerializer):
+class PaymentMethodSerializer(PublicIdModelSerializer):
     display_name = serializers.SerializerMethodField()
     
     class Meta:
@@ -60,7 +61,7 @@ class PaymentMethodSerializer(serializers.ModelSerializer):
         return str(obj)
 
 
-class SubscriptionSerializer(serializers.ModelSerializer):
+class SubscriptionSerializer(PublicIdModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)
     user_name = serializers.SerializerMethodField()
     price_details = PriceSerializer(source='stripe_price', read_only=True)
@@ -85,7 +86,7 @@ class SubscriptionSerializer(serializers.ModelSerializer):
         active_statuses = ['active', 'trialing', 'ACTIVE', 'TRIALING']
         return obj.status and obj.status.lower() in ['active', 'trialing']
 
-class PaymentSerializer(serializers.ModelSerializer):
+class PaymentSerializer(PublicIdModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)
     payment_method_display = serializers.SerializerMethodField()
     
@@ -106,7 +107,7 @@ class PaymentSerializer(serializers.ModelSerializer):
             return str(obj.stripe_payment_method)
         return obj.payment_method_type
 
-class InvoiceSerializer(serializers.ModelSerializer):
+class InvoiceSerializer(PublicIdModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)
     
     class Meta:

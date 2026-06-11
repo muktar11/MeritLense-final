@@ -1,8 +1,9 @@
 from rest_framework import serializers
 from .models import Candidate
 from api.core.constants import Roles
+from api.core.serializers import PublicIdModelSerializer
 
-class CandidateSerializer(serializers.ModelSerializer):
+class CandidateSerializer(PublicIdModelSerializer):
     full_name = serializers.SerializerMethodField()
     skills_list = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()

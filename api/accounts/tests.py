@@ -240,6 +240,162 @@ class AccountsWeek2Tests(APITestCase):
         self.assertIn("company_registration_number", response.data)
         self.assertFalse(User.objects.filter(email="new-b2b-duplicate@example.com").exists())
 
+    def test_b2b_registration_resend_verification_and_login_flow(self):
+        registration_payload = {
+            "email": "company-admin@example.com",
+            "first_name": "Company",
+            "last_name": "Admin",
+            "password": "Password123!",
+            "confirm_password": "Password123!",
+            "company_name": "Acme Staffing",
+            "company_registration_number": "ACME-REG-100",
+            "company_size": "1-10",
+            "country": "Ethiopia",
+            "city": "Addis Ababa",
+            "preferred_language": Languages.ENGLISH,
+            "phone_number": "+251911223344",
+            "website": "https://acme.example.com",
+            "industry": "Recruitment",
+            "address": "Bole",
+            "registration_certificate": make_file("acme-cert.pdf"),
+            "resachetified_license": make_file("acme-license.pdf"),
+            "tax_id_document": make_file("acme-tax.pdf"),
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/register/b2b",
+            registration_payload,
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+
+        user = User.objects.get(email=registration_payload["email"])
+        profile = CompanyEmployerProfile.objects.get(user=user)
+        company = Company.objects.get(admin_user=user)
+        self.assertEqual(user.role, Roles.B2B)
+        self.assertFalse(user.is_verified)
+        self.assertEqual(profile.company, company)
+        self.assertEqual(company.registration_number, registration_payload["company_registration_number"])
+
+        original_code = user.email_verification_code
+        resend_response = self.client.post(
+            "/api/v1/auth/resend-verification",
+            {"email": user.email},
+            format="json",
+        )
+        self.assertEqual(resend_response.status_code, status.HTTP_200_OK, resend_response.data)
+
+        user.refresh_from_db()
+        self.assertTrue(user.email_verification_code)
+        self.assertNotEqual(user.email_verification_code, original_code)
+
+        verify_response = self.client.post(
+            "/api/v1/auth/verify-email",
+            {"email": user.email, "code": user.email_verification_code},
+            format="json",
+        )
+        self.assertEqual(verify_response.status_code, status.HTTP_200_OK, verify_response.data)
+
+        login_response = self.client.post(
+            "/api/v1/auth/login",
+            {"email": user.email, "password": registration_payload["password"]},
+            format="json",
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK, login_response.data)
+        self.assertEqual(login_response.data["role"], Roles.B2B)
+        self.assertTrue(login_response.data["is_verified"])
+        self.assertIn("access", login_response.data)
+        self.assertIn("refresh", login_response.data)
+
+    def test_resend_verification_unknown_email_returns_generic_success_message(self):
+        response = self.client.post(
+            "/api/v1/auth/resend-verification",
+            {"email": "missing@example.com"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertIn("message", response.data)
+
+    def test_b2b_profile_me_patch_and_document_upload_work_after_login(self):
+        user = User.objects.create_user(
+            email="b2b-profile@example.com",
+            password="Password123!",
+            first_name="B2B",
+            last_name="Owner",
+            role=Roles.B2B,
+            is_verified=True,
+        )
+        company = Company.objects.create(
+            name="Profile Co",
+            registration_number="PROFILE-CO-1",
+            company_size="1-10",
+            industry="Technology",
+            phone_number="+15550001111",
+            country="Ethiopia",
+            city="Addis Ababa",
+            address="Kazanchis",
+            website="https://profile.example.com",
+            admin_user=user,
+            registration_certificate=make_file("profile-company-cert.pdf"),
+            is_verified=False,
+        )
+        CompanyEmployerProfile.objects.create(
+            user=user,
+            company_name=company.name,
+            company_registration_number=company.registration_number,
+            company_size=company.company_size,
+            industry=company.industry,
+            phone_number=company.phone_number,
+            country=company.country,
+            city=company.city,
+            address=company.address,
+            website=company.website,
+            preferred_language=Languages.ENGLISH,
+            registration_certificate=make_file("profile-employer-cert.pdf"),
+            resachetified_license=make_file("profile-license.pdf"),
+            company=company,
+        )
+
+        self.authenticate(user.email, "Password123!")
+
+        get_response = self.client.get("/api/v1/auth/me")
+        self.assertEqual(get_response.status_code, status.HTTP_200_OK, get_response.data)
+        self.assertEqual(get_response.data["email"], user.email)
+
+        patch_response = self.client.patch(
+            "/api/v1/auth/me",
+            {
+                "company_name": "Profile Co Updated",
+                "phone_number": "+15550002222",
+                "city": "Hawassa",
+                "website": "https://updated.example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(patch_response.status_code, status.HTTP_200_OK, patch_response.data)
+        self.assertEqual(patch_response.data["company_name"], "Profile Co Updated")
+        self.assertEqual(patch_response.data["city"], "Hawassa")
+
+        user.refresh_from_db()
+        user.company_profile.refresh_from_db()
+        self.assertEqual(user.company_profile.company_name, "Profile Co Updated")
+        self.assertEqual(user.company_profile.phone_number, "+15550002222")
+        self.assertEqual(user.company_profile.city, "Hawassa")
+
+        upload_response = self.client.post(
+            "/api/v1/auth/documents/upload",
+            {
+                "document_type": "tax",
+                "document": make_file("updated-tax.pdf"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(upload_response.status_code, status.HTTP_200_OK, upload_response.data)
+        self.assertEqual(upload_response.data["message"], "tax uploaded successfully")
+
+        user.company_profile.refresh_from_db()
+        self.assertTrue(bool(user.company_profile.tax_id_document))
+
     def test_password_reset_validate_reset_and_change_password_flow(self):
         user = self.create_verified_b2c_user()
 

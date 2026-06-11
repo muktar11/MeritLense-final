@@ -3,6 +3,7 @@ from django.db import transaction
 from .models import CandidateScore, ScoreSet, ScoreCategory
 from api.core.constants import JOB_ROLE_SCORE_AREAS
 from api.core.serializers import PublicIdModelSerializer
+from api.core.public_ids import get_by_identifier
 from api.candidates.serializers import CandidateSerializer
 from api.evaluations.serializers import EvaluationSerializer
 
@@ -65,8 +66,8 @@ class ScoreSetSerializer(PublicIdModelSerializer):
 
 
 class CreateScoreSetSerializer(serializers.Serializer):
-    candidate_id = serializers.IntegerField()
-    evaluation_id = serializers.IntegerField(required=False, allow_null=True)
+    candidate_id = serializers.CharField()
+    evaluation_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     scores = serializers.DictField(
         child=serializers.DecimalField(max_digits=5, decimal_places=2),
         help_text="Dictionary of area -> score"
@@ -78,7 +79,7 @@ class CreateScoreSetSerializer(serializers.Serializer):
         request = self.context.get('request')
         
         try:
-            candidate = Candidate.objects.get(id=value)
+            candidate = get_by_identifier(Candidate.objects.all(), value)
         except Candidate.DoesNotExist:
             raise serializers.ValidationError("Candidate not found")
         
@@ -94,7 +95,7 @@ class CreateScoreSetSerializer(serializers.Serializer):
         
         if value:
             try:
-                evaluation = Evaluation.objects.get(id=value)
+                evaluation = get_by_identifier(Evaluation.objects.all(), value)
             except Evaluation.DoesNotExist:
                 raise serializers.ValidationError("Evaluation not found")
             

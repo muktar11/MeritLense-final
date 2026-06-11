@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from api.core.serializers import PublicIdModelSerializer
+from api.core.public_ids import get_by_identifier
 from .models import (
     Price, Customer, PaymentMethod, 
     Subscription, Payment, Invoice
@@ -124,7 +125,7 @@ class InvoiceSerializer(PublicIdModelSerializer):
 
 
 class CreatePaymentIntentSerializer(serializers.Serializer):
-    price_id = serializers.IntegerField(required=False)
+    price_id = serializers.CharField(required=False)
     amount = serializers.DecimalField(
         max_digits=10, 
         decimal_places=2,
@@ -152,14 +153,14 @@ class AttachPaymentMethodSerializer(serializers.Serializer):
 
 
 class CreateSubscriptionSerializer(serializers.Serializer):
-    price_id = serializers.IntegerField()
+    price_id = serializers.CharField()
     payment_method_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     trial_period_days = serializers.IntegerField(default=0, min_value=0)
     quantity = serializers.IntegerField(default=1, min_value=1)
     
     def validate_price_id(self, value):
         try:
-            price = Price.objects.get(id=value, is_active=True)
+            price = get_by_identifier(Price.objects.filter(is_active=True), value)
             self.context['price'] = price
             return value
         except Price.DoesNotExist:
@@ -195,7 +196,7 @@ class CreateSubscriptionSerializer(serializers.Serializer):
         return data
 
 class UpdateSubscriptionSerializer(serializers.Serializer):
-    price_id = serializers.IntegerField(required=False)
+    price_id = serializers.CharField(required=False)
     quantity = serializers.IntegerField(min_value=1, required=False)
     cancel_at_period_end = serializers.BooleanField(required=False)
 

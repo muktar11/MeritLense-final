@@ -15,6 +15,7 @@ from api.payments.subscription_serializers import CancelSubscriptionSerializer, 
 from meritlense import settings
 from api.audit.services import AuditLogService
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
+from api.core.public_ids import PublicIdLookupMixin, get_by_identifier
 
 from .models import Price, Customer, PaymentMethod, Subscription, Payment, Invoice
 from .serializers import (
@@ -25,11 +26,14 @@ from .serializers import (
 from .services import StripeService
 
 
-class PriceViewSet(viewsets.ReadOnlyModelViewSet):
+class PriceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = PriceSerializer
     
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Price.objects.none()
+
         queryset = Price.objects.filter(is_active=True)
         user = self.request.user
         
@@ -43,11 +47,11 @@ class PriceViewSet(viewsets.ReadOnlyModelViewSet):
             )
         
         if user.role in ['B2B', 'B2B_TEAM_MEMBER'] and hasattr(user, 'company_profile'):
-            company = user.company_profile.company
-            queryset = [
-                price for price in queryset 
+            allowed_ids = [
+                price.id for price in queryset
                 if price.is_available_for_user(user)
             ]
+            queryset = queryset.filter(id__in=allowed_ids)
         
         return queryset
     
@@ -184,6 +188,8 @@ class CustomerViewSet(viewsets.GenericViewSet):
     serializer_class = CustomerSerializer
     
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Customer.objects.none()
         return Customer.objects.filter(user=self.request.user)
     
     @action(detail=False, methods=['get'])
@@ -212,11 +218,14 @@ class CustomerViewSet(viewsets.GenericViewSet):
         )
 
 
-class PaymentMethodViewSet(viewsets.GenericViewSet):
+class PaymentMethodViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = PaymentMethodSerializer
+    queryset = PaymentMethod.objects.none()
     
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return PaymentMethod.objects.none()
         return PaymentMethod.objects.filter(
             customer__user=self.request.user,
             is_active=True
@@ -299,98 +308,81 @@ class PaymentMethodViewSet(viewsets.GenericViewSet):
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-    def destroy(self, request, pk=None):
-        try:
-            payment_method = PaymentMethod.objects.get(
-                id=pk,
-                customer__user=request.user
-            )
-            
-            method_info = {
-                'id': payment_method.id,
-                'stripe_payment_method_id': payment_method.stripe_payment_method_id,
-                'card_brand': payment_method.card_brand,
-                'card_last4': payment_method.card_last4,
-                'was_default': payment_method.is_default
-            }
-            
-            service = StripeService()
-            success = service.detach_payment_method(
-                payment_method.stripe_payment_method_id
-            )
-            
-            if success:
-                AuditLogService.log(
-                    user=request.user,
-                    action='DETACH_PAYMENT_METHOD',
-                    category=AuditLogCategory.BILLING,
-                    description=f"Payment method detached: {payment_method.card_brand} ending in {payment_method.card_last4}",
-                    data=method_info,
-                    request=request,
-                    severity=AuditLogSeverity.WARNING
-                )
-                
-                return Response(status=status.HTTP_204_NO_CONTENT)
-            
-            return Response(
-                {'error': 'Could not detach payment method'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except PaymentMethod.DoesNotExist:
-            return Response(
-                {'error': 'Payment method not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-    
-    @action(detail=True, methods=['post'])
-    def set_default(self, request, pk=None):
-        try:
-            payment_method = PaymentMethod.objects.get(
-                id=pk,
-                customer__user=request.user
-            )
-            
-            service = StripeService()
-            customer = service.get_or_create_customer(request.user)
-            
-            stripe.Customer.modify(
-                customer.stripe_customer_id,
-                invoice_settings={
-                    'default_payment_method': payment_method.stripe_payment_method_id
-                }
-            )
-            
-            PaymentMethod.objects.filter(customer=customer).update(is_default=False)
-            payment_method.is_default = True
-            payment_method.save()
-            
-            customer.default_payment_method_id = payment_method.stripe_payment_method_id
-            customer.save()
-            
+    def destroy(self, request, id=None):
+        payment_method = self.get_object()
+        
+        method_info = {
+            'id': str(payment_method.public_id),
+            'stripe_payment_method_id': payment_method.stripe_payment_method_id,
+            'card_brand': payment_method.card_brand,
+            'card_last4': payment_method.card_last4,
+            'was_default': payment_method.is_default
+        }
+        
+        service = StripeService()
+        success = service.detach_payment_method(
+            payment_method.stripe_payment_method_id
+        )
+        
+        if success:
             AuditLogService.log(
                 user=request.user,
-                action='SET_DEFAULT_PAYMENT_METHOD',
+                action='DETACH_PAYMENT_METHOD',
                 category=AuditLogCategory.BILLING,
-                description=f"Default payment method changed to: {payment_method.card_brand} ending in {payment_method.card_last4}",
-                resource=payment_method,
-                data={
-                    'payment_method_id': payment_method.id,
-                    'card_brand': payment_method.card_brand,
-                    'card_last4': payment_method.card_last4
-                },
-                request=request
+                description=f"Payment method detached: {payment_method.card_brand} ending in {payment_method.card_last4}",
+                data=method_info,
+                request=request,
+                severity=AuditLogSeverity.WARNING
             )
             
-            return Response({'message': 'Default payment method updated'})
-        except PaymentMethod.DoesNotExist:
-            return Response(
-                {'error': 'Payment method not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        
+        return Response(
+            {'error': 'Could not detach payment method'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    @action(detail=True, methods=['post'])
+    def set_default(self, request, id=None):
+        payment_method = self.get_object()
+        
+        service = StripeService()
+        customer = service.get_or_create_customer(request.user)
+        
+        stripe.Customer.modify(
+            customer.stripe_customer_id,
+            invoice_settings={
+                'default_payment_method': payment_method.stripe_payment_method_id
+            }
+        )
+        
+        PaymentMethod.objects.filter(customer=customer).update(is_default=False)
+        payment_method.is_default = True
+        payment_method.save()
+        
+        customer.default_payment_method_id = payment_method.stripe_payment_method_id
+        customer.save()
+        
+        AuditLogService.log(
+            user=request.user,
+            action='SET_DEFAULT_PAYMENT_METHOD',
+            category=AuditLogCategory.BILLING,
+            description=f"Default payment method changed to: {payment_method.card_brand} ending in {payment_method.card_last4}",
+            resource=payment_method,
+            data={
+                'payment_method_id': str(payment_method.public_id),
+                'card_brand': payment_method.card_brand,
+                'card_last4': payment_method.card_last4
+            },
+            request=request
+        )
+        
+        return Response({'message': 'Default payment method updated'})
 
 
-class SubscriptionViewSet(viewsets.GenericViewSet):
+class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
+    queryset = Subscription.objects.none()
     
     def get_serializer_class(self):
         if self.action == 'list':
@@ -398,6 +390,9 @@ class SubscriptionViewSet(viewsets.GenericViewSet):
         return SubscriptionSerializer
     
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Subscription.objects.none()
+
         user = self.request.user
         
         if user.role in [Roles.SUPERADMIN, Roles.ADMIN]:
@@ -441,31 +436,24 @@ class SubscriptionViewSet(viewsets.GenericViewSet):
         
         return Response(serializer.data)
     
-    def retrieve(self, request, pk=None):
-        try:
-            subscription = self.get_queryset().get(id=pk)
-            self.check_object_permissions(request, subscription)
-            serializer = self.get_serializer(subscription)
-            
-            AuditLogService.log(
-                user=request.user,
-                action='VIEW_SUBSCRIPTION_DETAILS',
-                category=AuditLogCategory.SUBSCRIPTION,
-                description=f"Subscription details viewed: {subscription.stripe_subscription_id}",
-                resource=subscription,
-                data={
-                    'plan': subscription.stripe_price.name if subscription.stripe_price else None,
-                    'status': subscription.status
-                },
-                request=request
-            )
-            
-            return Response(serializer.data)
-        except Subscription.DoesNotExist:
-            return Response(
-                {'error': 'Subscription not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+    def retrieve(self, request, id=None):
+        subscription = self.get_object()
+        serializer = self.get_serializer(subscription)
+        
+        AuditLogService.log(
+            user=request.user,
+            action='VIEW_SUBSCRIPTION_DETAILS',
+            category=AuditLogCategory.SUBSCRIPTION,
+            description=f"Subscription details viewed: {subscription.stripe_subscription_id}",
+            resource=subscription,
+            data={
+                'plan': subscription.stripe_price.name if subscription.stripe_price else None,
+                'status': subscription.status
+            },
+            request=request
+        )
+        
+        return Response(serializer.data)
     
     def create(self, request):
         logger.info(f"Creating subscription for user {request.user.id}")
@@ -542,228 +530,108 @@ class SubscriptionViewSet(viewsets.GenericViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     @action(detail=True, methods=['post'])
-    def change_plan(self, request, pk=None):
-        try:
-            subscription = self.get_queryset().get(id=pk)
-            self.check_object_permissions(request, subscription)
+    def change_plan(self, request, id=None):
+        subscription = self.get_object()
+        old_plan = subscription.stripe_price.name if subscription.stripe_price else 'Unknown'
+        
+        serializer = ChangePlanSerializer(
+            data=request.data, 
+            context={'request': request}
+        )
+        
+        if serializer.is_valid():
+            price_id = serializer.validated_data['price_id']
+            prorate = serializer.validated_data['prorate']
             
-            old_plan = subscription.stripe_price.name if subscription.stripe_price else 'Unknown'
-            
-            serializer = ChangePlanSerializer(
-                data=request.data, 
-                context={'request': request}
-            )
-            
-            if serializer.is_valid():
-                price_id = serializer.validated_data['price_id']
-                prorate = serializer.validated_data['prorate']
+            try:
+                new_price = get_by_identifier(Price.objects.filter(is_active=True), price_id)
                 
-                try:
-                    new_price = Price.objects.get(id=price_id)
-                    
-                    stripe.api_key = settings.STRIPE_SECRET_KEY
-                    
-                    items = [{
-                        'id': subscription.stripe_price.stripe_price_id,
-                        'price': new_price.stripe_price_id,
-                    }]
-                    
-                    stripe_sub = stripe.Subscription.modify(
-                        subscription.stripe_subscription_id,
-                        items=items,
-                        proration_behavior='create_prorations' if prorate else 'none'
-                    )
-                    
-                    subscription.stripe_price = new_price
-                    subscription.save()
-                    
-                    subscription.refresh_from_db()
-                    
-                    AuditLogService.log(
-                        user=request.user,
-                        action='SUBSCRIPTION_PLAN_CHANGED',
-                        category=AuditLogCategory.SUBSCRIPTION,
-                        description=f"Subscription plan changed from {old_plan} to {new_price.name}",
-                        resource=subscription,
-                        data={
-                            'old_plan': old_plan,
-                            'new_plan': new_price.name,
-                            'prorate': prorate
-                        },
-                        request=request
-                    )
-                    
-                    return Response(SubscriptionSerializer(subscription).data)
-                    
-                except stripe.error.StripeError as e:
-                    return Response(
-                        {'error': str(e)},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                except Price.DoesNotExist:
-                    return Response(
-                        {'error': 'New price not found'},
-                        status=status.HTTP_404_NOT_FOUND
-                    )
-            
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            
-        except Subscription.DoesNotExist:
-            return Response(
-                {'error': 'Subscription not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-    
-    @action(detail=True, methods=['post'])
-    def update_quantity(self, request, pk=None):
-        try:
-            subscription = self.get_queryset().get(id=pk)
-            self.check_object_permissions(request, subscription)
-            
-            old_quantity = subscription.quantity
-            
-            serializer = UpdateQuantitySerializer(data=request.data)
-            
-            if serializer.is_valid():
-                new_quantity = serializer.validated_data['quantity']
+                stripe.api_key = settings.STRIPE_SECRET_KEY
                 
-                try:
-                    stripe.api_key = settings.STRIPE_SECRET_KEY
-                    
-                    stripe_sub = stripe.Subscription.modify(
-                        subscription.stripe_subscription_id,
-                        items=[{
-                            'id': subscription.stripe_price.stripe_price_id,
-                            'quantity': new_quantity
-                        }]
-                    )
-                    
-                    subscription.quantity = new_quantity
-                    subscription.save()
-                    
-                    AuditLogService.log(
-                        user=request.user,
-                        action='SUBSCRIPTION_QUANTITY_UPDATED',
-                        category=AuditLogCategory.SUBSCRIPTION,
-                        description=f"Subscription quantity updated from {old_quantity} to {new_quantity}",
-                        resource=subscription,
-                        data={
-                            'old_quantity': old_quantity,
-                            'new_quantity': new_quantity
-                        },
-                        request=request
-                    )
-                    
-                    return Response({
-                        'message': 'Quantity updated successfully',
-                        'quantity': new_quantity
-                    })
-                    
-                except stripe.error.StripeError as e:
-                    return Response(
-                        {'error': str(e)},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            
-        except Subscription.DoesNotExist:
-            return Response(
-                {'error': 'Subscription not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-    
-    @action(detail=True, methods=['post'])
-    def cancel(self, request, pk=None):
-        try:
-            subscription = self.get_queryset().get(id=pk)
-            self.check_object_permissions(request, subscription)
-            
-            serializer = CancelSubscriptionSerializer(data=request.data)
-            
-            if serializer.is_valid():
-                at_period_end = serializer.validated_data['at_period_end']
-                reason = serializer.validated_data.get('cancellation_reason', '')
+                items = [{
+                    'id': subscription.stripe_price.stripe_price_id,
+                    'price': new_price.stripe_price_id,
+                }]
                 
-                if reason:
-                    subscription.metadata['cancellation_reason'] = reason
-                    subscription.save()
+                stripe.Subscription.modify(
+                    subscription.stripe_subscription_id,
+                    items=items,
+                    proration_behavior='create_prorations' if prorate else 'none'
+                )
                 
-                success = subscription.cancel(at_period_end)
+                subscription.stripe_price = new_price
+                subscription.save()
+                subscription.refresh_from_db()
                 
-                if success:
-                    subscription.refresh_from_db()
-                    
-                    AuditLogService.log(
-                        user=request.user,
-                        action=AuditLogAction.SUBSCRIPTION_CANCELLED,
-                        category=AuditLogCategory.SUBSCRIPTION,
-                        description=f"Subscription cancelled for {subscription.user.email}",
-                        resource=subscription,
-                        data={
-                            'at_period_end': at_period_end,
-                            'reason': reason
-                        },
-                        request=request,
-                        severity=AuditLogSeverity.WARNING
-                    )
-                    
-                    return Response({
-                        'message': 'Subscription cancelled successfully',
-                        'subscription': SubscriptionSerializer(subscription).data
-                    })
-                else:
-                    return Response(
-                        {'error': 'Failed to cancel subscription'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            
-        except Subscription.DoesNotExist:
-            return Response(
-                {'error': 'Subscription not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-    
-    @action(detail=True, methods=['post'])
-    def reactivate(self, request, pk=None):
-        try:
-            subscription = self.get_queryset().get(id=pk)
-            self.check_object_permissions(request, subscription)
-            
-            if subscription.status != SubscriptionStatus.CANCELED:
+                AuditLogService.log(
+                    user=request.user,
+                    action='SUBSCRIPTION_PLAN_CHANGED',
+                    category=AuditLogCategory.SUBSCRIPTION,
+                    description=f"Subscription plan changed from {old_plan} to {new_price.name}",
+                    resource=subscription,
+                    data={
+                        'old_plan': old_plan,
+                        'new_plan': new_price.name,
+                        'prorate': prorate
+                    },
+                    request=request
+                )
+                
+                return Response(SubscriptionSerializer(subscription).data)
+                
+            except stripe.error.StripeError as e:
                 return Response(
-                    {'error': 'Only cancelled subscriptions can be reactivated'},
+                    {'error': str(e)},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+            except Price.DoesNotExist:
+                return Response(
+                    {'error': 'New price not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['post'])
+    def update_quantity(self, request, id=None):
+        subscription = self.get_object()
+        old_quantity = subscription.quantity
+        
+        serializer = UpdateQuantitySerializer(data=request.data)
+        
+        if serializer.is_valid():
+            new_quantity = serializer.validated_data['quantity']
             
             try:
                 stripe.api_key = settings.STRIPE_SECRET_KEY
                 
-                stripe_sub = stripe.Subscription.modify(
+                stripe.Subscription.modify(
                     subscription.stripe_subscription_id,
-                    cancel_at_period_end=False
+                    items=[{
+                        'id': subscription.stripe_price.stripe_price_id,
+                        'quantity': new_quantity
+                    }]
                 )
                 
-                old_status = subscription.status
-                subscription.cancel_at_period_end = False
-                subscription.status = SubscriptionStatus.ACTIVE
+                subscription.quantity = new_quantity
                 subscription.save()
                 
                 AuditLogService.log(
                     user=request.user,
-                    action='SUBSCRIPTION_REACTIVATED',
+                    action='SUBSCRIPTION_QUANTITY_UPDATED',
                     category=AuditLogCategory.SUBSCRIPTION,
-                    description=f"Subscription reactivated for {subscription.user.email}",
+                    description=f"Subscription quantity updated from {old_quantity} to {new_quantity}",
                     resource=subscription,
-                    data={'old_status': old_status, 'new_status': subscription.status},
+                    data={
+                        'old_quantity': old_quantity,
+                        'new_quantity': new_quantity
+                    },
                     request=request
                 )
                 
                 return Response({
-                    'message': 'Subscription reactivated successfully',
-                    'subscription': SubscriptionSerializer(subscription).data
+                    'message': 'Quantity updated successfully',
+                    'quantity': new_quantity
                 })
                 
             except stripe.error.StripeError as e:
@@ -771,22 +639,103 @@ class SubscriptionViewSet(viewsets.GenericViewSet):
                     {'error': str(e)},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, id=None):
+        subscription = self.get_object()
+        serializer = CancelSubscriptionSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            at_period_end = serializer.validated_data['at_period_end']
+            reason = serializer.validated_data.get('cancellation_reason', '')
             
-        except Subscription.DoesNotExist:
+            if reason:
+                subscription.metadata['cancellation_reason'] = reason
+                subscription.save()
+            
+            success = subscription.cancel(at_period_end)
+            
+            if success:
+                subscription.refresh_from_db()
+                
+                AuditLogService.log(
+                    user=request.user,
+                    action=AuditLogAction.SUBSCRIPTION_CANCELLED,
+                    category=AuditLogCategory.SUBSCRIPTION,
+                    description=f"Subscription cancelled for {subscription.user.email}",
+                    resource=subscription,
+                    data={
+                        'at_period_end': at_period_end,
+                        'reason': reason
+                    },
+                    request=request,
+                    severity=AuditLogSeverity.WARNING
+                )
+                
+                return Response({
+                    'message': 'Subscription cancelled successfully',
+                    'subscription': SubscriptionSerializer(subscription).data
+                })
             return Response(
-                {'error': 'Subscription not found'},
-                status=status.HTTP_404_NOT_FOUND
+                {'error': 'Failed to cancel subscription'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['post'])
+    def reactivate(self, request, id=None):
+        subscription = self.get_object()
+        
+        if subscription.status != SubscriptionStatus.CANCELED:
+            return Response(
+                {'error': 'Only cancelled subscriptions can be reactivated'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            stripe.api_key = settings.STRIPE_SECRET_KEY
+            
+            stripe.Subscription.modify(
+                subscription.stripe_subscription_id,
+                cancel_at_period_end=False
+            )
+            
+            old_status = subscription.status
+            subscription.cancel_at_period_end = False
+            subscription.status = SubscriptionStatus.ACTIVE
+            subscription.save()
+            
+            AuditLogService.log(
+                user=request.user,
+                action='SUBSCRIPTION_REACTIVATED',
+                category=AuditLogCategory.SUBSCRIPTION,
+                description=f"Subscription reactivated for {subscription.user.email}",
+                resource=subscription,
+                data={'old_status': old_status, 'new_status': subscription.status},
+                request=request
+            )
+            
+            return Response({
+                'message': 'Subscription reactivated successfully',
+                'subscription': SubscriptionSerializer(subscription).data
+            })
+            
+        except stripe.error.StripeError as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
             )
     
     @action(detail=True, methods=['get'])
-    def upcoming_invoice(self, request, pk=None):
+    def upcoming_invoice(self, request, id=None):
+        subscription = self.get_object()
+        price_id = request.query_params.get('price_id')
+        quantity = request.query_params.get('quantity')
+        
         try:
-            subscription = self.get_queryset().get(id=pk)
-            self.check_object_permissions(request, subscription)
-            
-            price_id = request.query_params.get('price_id')
-            quantity = request.query_params.get('quantity')
-            
             stripe.api_key = settings.STRIPE_SECRET_KEY
             
             items = [{
@@ -798,7 +747,7 @@ class SubscriptionViewSet(viewsets.GenericViewSet):
             preview_changes = {}
             if price_id:
                 try:
-                    new_price = Price.objects.get(id=price_id)
+                    new_price = get_by_identifier(Price.objects.filter(is_active=True), price_id)
                     items[0]['price'] = new_price.stripe_price_id
                     preview_changes['price'] = {'old': subscription.stripe_price.name, 'new': new_price.name}
                 except Price.DoesNotExist:
@@ -844,12 +793,6 @@ class SubscriptionViewSet(viewsets.GenericViewSet):
                     for line in invoice.lines.data
                 ]
             })
-            
-        except Subscription.DoesNotExist:
-            return Response(
-                {'error': 'Subscription not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
         except stripe.error.StripeError as e:
             return Response(
                 {'error': str(e)},
@@ -857,34 +800,26 @@ class SubscriptionViewSet(viewsets.GenericViewSet):
             )
     
     @action(detail=True, methods=['get'])
-    def usage(self, request, pk=None):
-        try:
-            subscription = self.get_queryset().get(id=pk)
-            self.check_object_permissions(request, subscription)
-            
-            usage_data = {
-                'current_usage': subscription.current_usage,
-                'usage_percentages': subscription.get_usage_percentage(),
-                'limits': subscription.get_feature_limits()
-            }
-            
-            AuditLogService.log(
-                user=request.user,
-                action='VIEW_SUBSCRIPTION_USAGE',
-                category=AuditLogCategory.SUBSCRIPTION,
-                description="Subscription usage viewed",
-                resource=subscription,
-                data={'usage_data': subscription.current_usage},
-                request=request
-            )
-            
-            return Response(usage_data)
-            
-        except Subscription.DoesNotExist:
-            return Response(
-                {'error': 'Subscription not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+    def usage(self, request, id=None):
+        subscription = self.get_object()
+        
+        usage_data = {
+            'current_usage': subscription.current_usage,
+            'usage_percentages': subscription.get_usage_percentage(),
+            'limits': subscription.get_feature_limits()
+        }
+        
+        AuditLogService.log(
+            user=request.user,
+            action='VIEW_SUBSCRIPTION_USAGE',
+            category=AuditLogCategory.SUBSCRIPTION,
+            description="Subscription usage viewed",
+            resource=subscription,
+            data={'usage_data': subscription.current_usage},
+            request=request
+        )
+        
+        return Response(usage_data)
     
     @action(detail=False, methods=['get'])
     def active(self, request):
@@ -929,11 +864,13 @@ class SubscriptionViewSet(viewsets.GenericViewSet):
         return Response(serializer.data)
 
 
-class AdminSubscriptionViewSet(viewsets.ReadOnlyModelViewSet):
+class AdminSubscriptionViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
     serializer_class = SubscriptionSerializer
     
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Subscription.objects.none()
         return Subscription.objects.all()
     
     def list(self, request, *args, **kwargs):
@@ -1035,11 +972,13 @@ class AdminSubscriptionViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(stats_data)
 
 
-class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
+class PaymentViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = PaymentSerializer
     
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Payment.objects.none()
         return Payment.objects.filter(user=self.request.user)
     
     def list(self, request, *args, **kwargs):
@@ -1112,11 +1051,14 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class InvoiceViewSet(viewsets.ReadOnlyModelViewSet):
+class InvoiceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = InvoiceSerializer
     
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Invoice.objects.none()
+
         user = self.request.user
         
         if user.role in [Roles.SUPERADMIN, Roles.ADMIN]:
@@ -1265,10 +1207,10 @@ def debug_subscription_data(request):
     data = []
     for sub in subscriptions:
         data.append({
-            'id': sub.id,
+            'id': str(sub.public_id),
             'stripe_price_id': sub.stripe_price_id,
             'stripe_price': {
-                'id': sub.stripe_price.id if sub.stripe_price else None,
+                'id': str(sub.stripe_price.public_id) if sub.stripe_price else None,
                 'name': sub.stripe_price.name if sub.stripe_price else None,
                 'unit_amount': str(sub.stripe_price.unit_amount) if sub.stripe_price else None,
                 'currency': sub.stripe_price.currency if sub.stripe_price else None,
@@ -1297,7 +1239,10 @@ def retry_subscription_payment(request):
     subscription_id = request.data.get('subscription_id')
     
     try:
-        subscription = Subscription.objects.get(id=subscription_id, user=request.user)
+        subscription = get_by_identifier(
+            Subscription.objects.filter(user=request.user),
+            subscription_id,
+        )
         
         stripe.api_key = settings.STRIPE_SECRET_KEY
         stripe_sub = stripe.Subscription.retrieve(
@@ -1355,7 +1300,7 @@ def debug_subscription_payment(request):
         payment_intent = invoice.payment_intent if invoice and hasattr(invoice, 'payment_intent') else None
         
         results.append({
-            'subscription_id': sub.id,
+            'subscription_id': str(sub.public_id),
             'stripe_status': stripe_sub.status,
             'invoice_status': invoice.status if invoice else None,
             'payment_intent_status': payment_intent.status if payment_intent else None,
@@ -1384,7 +1329,10 @@ def sync_subscription_status(request):
         return Response({'error': 'subscription_id required'}, status=400)
     
     try:
-        subscription = Subscription.objects.get(id=subscription_id, user=request.user)
+        subscription = get_by_identifier(
+            Subscription.objects.filter(user=request.user),
+            subscription_id,
+        )
         
         stripe.api_key = settings.STRIPE_SECRET_KEY
         stripe_sub = stripe.Subscription.retrieve(
@@ -1448,7 +1396,7 @@ def check_all_subscriptions(request):
             stripe_sub = stripe.Subscription.retrieve(sub.stripe_subscription_id)
             
             results.append({
-                'id': sub.id,
+                'id': str(sub.public_id),
                 'db_status': sub.status,
                 'stripe_status': stripe_sub.status,
                 'stripe_id': sub.stripe_subscription_id,
@@ -1456,7 +1404,7 @@ def check_all_subscriptions(request):
             })
         except Exception as e:
             results.append({
-                'id': sub.id,
+                'id': str(sub.public_id),
                 'db_status': sub.status,
                 'error': str(e)
             })
@@ -1494,12 +1442,12 @@ def sync_all_subscriptions(request):
                 sub.save()
                 synced_count += 1
                 synced_details.append({
-                    'id': sub.id,
+                    'id': str(sub.public_id),
                     'old_status': old_status,
                     'new_status': stripe_sub.status
                 })
         except Exception as e:
-            print(f"Error syncing subscription {sub.id}: {e}")
+            print(f"Error syncing subscription {sub.public_id}: {e}")
     
     AuditLogService.log(
         user=request.user,

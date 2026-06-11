@@ -50,3 +50,110 @@ The test settings use SQLite and local-memory email so the suite can run without
   - `B2B`: company candidates
   - `B2B_TEAM_MEMBER`: candidates created by the member or explicitly shared with the member
   - `ADMIN` and `SUPERADMIN`: all candidates
+
+## API Usage Examples
+
+### Register a B2C user
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/register/b2c \
+  -F "email=new-b2c@example.com" \
+  -F "first_name=Sara" \
+  -F "last_name=Ahmed" \
+  -F "password=Password123!" \
+  -F "confirm_password=Password123!" \
+  -F "passport_id=REG-1001" \
+  -F "job_role=SE" \
+  -F "nationality=US" \
+  -F "preferred_language=EN" \
+  -F "phone_number=+251911223344" \
+  -F "date_of_birth=1993-04-05" \
+  -F "address=Addis Ababa" \
+  -F "id_document=@/path/to/id.pdf" \
+  -F "resume_document=@/path/to/resume.pdf"
+```
+
+### Register a B2B user
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/register/b2b \
+  -F "email=company-admin@example.com" \
+  -F "first_name=John" \
+  -F "last_name=Smith" \
+  -F "password=Password123!" \
+  -F "confirm_password=Password123!" \
+  -F "company_name=ABC Solutions Ltd" \
+  -F "company_registration_number=BIZ-2024-001" \
+  -F "company_size=1-10" \
+  -F "country=Ethiopia" \
+  -F "city=Addis Ababa" \
+  -F "preferred_language=EN" \
+  -F "phone_number=+251922334455" \
+  -F "website=https://abcsolutions.example.com" \
+  -F "industry=Technology" \
+  -F "address=Bole, Addis Ababa" \
+  -F "registration_certificate=@/path/to/certificate.pdf" \
+  -F "resachetified_license=@/path/to/license.pdf" \
+  -F "tax_id_document=@/path/to/tax.pdf"
+```
+
+### Verify email and log in
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/verify-email \
+  -H "Content-Type: application/json" \
+  -d '{"email":"company-admin@example.com","code":"12345"}'
+
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"company-admin@example.com","password":"Password123!"}'
+```
+
+### Fetch and update profile
+
+```bash
+curl -X GET http://localhost:8000/api/v1/auth/me \
+  -H "Authorization: Bearer <access_token>"
+
+curl -X PATCH http://localhost:8000/api/v1/auth/me \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"first_name":"Updated","last_name":"Name","phone_number":"+251911000000"}'
+```
+
+### Upload a profile document
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/documents/upload \
+  -H "Authorization: Bearer <access_token>" \
+  -F "document_type=tax" \
+  -F "document=@/path/to/tax.pdf"
+```
+
+### Create and share a candidate
+
+```bash
+curl -X POST http://localhost:8000/api/v1/candidates/candidates \
+  -H "Authorization: Bearer <access_token>" \
+  -F "first_name=Jane" \
+  -F "last_name=Doe" \
+  -F "email=jane.doe@example.com" \
+  -F "passport_id=PASS-1001" \
+  -F "job_role=NA" \
+  -F "core_skills=communication,patience" \
+  -F "preferred_language=EN" \
+  -F "passport_document=@/path/to/passport.pdf"
+
+curl -X POST http://localhost:8000/api/v1/candidates/candidates/<candidate_public_id>/share \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"user_ids":[12]}'
+```
+
+## Recommended Sign-Off Command
+
+Run the Week 2 backend checks with:
+
+```bash
+DJANGO_SETTINGS_MODULE=meritlense.settings.test ./.venv/bin/python manage.py test api.accounts api.candidates api.core.tests_public_ids
+```

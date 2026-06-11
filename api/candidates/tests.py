@@ -208,7 +208,9 @@ class CandidatesWeek2Tests(APITestCase):
         self.assertEqual(len(list_response.data), 1)
         self.assertEqual(list_response.data[0]["id"], str(owner_candidate.public_id))
 
-        forbidden_detail = self.client.get(f"/api/v1/candidates/candidates/{other_candidate.id}")
+        forbidden_detail = self.client.get(
+            f"/api/v1/candidates/candidates/{other_candidate.public_id}"
+        )
         self.assertEqual(forbidden_detail.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_share_and_unshare_control_team_member_access_and_edit_rights(self):
@@ -224,7 +226,7 @@ class CandidatesWeek2Tests(APITestCase):
 
         self.authenticate(company_admin)
         share_response = self.client.post(
-            f"/api/v1/candidates/candidates/{candidate.id}/share",
+            f"/api/v1/candidates/candidates/{candidate.public_id}/share",
             {"user_ids": [teammate_profile.id]},
             format="json",
         )
@@ -232,11 +234,13 @@ class CandidatesWeek2Tests(APITestCase):
 
         self.client.credentials()
         self.authenticate(teammate)
-        retrieve_response = self.client.get(f"/api/v1/candidates/candidates/{candidate.id}")
+        retrieve_response = self.client.get(
+            f"/api/v1/candidates/candidates/{candidate.public_id}"
+        )
         self.assertEqual(retrieve_response.status_code, status.HTTP_200_OK, retrieve_response.data)
 
         update_response = self.client.patch(
-            f"/api/v1/candidates/candidates/{candidate.id}",
+            f"/api/v1/candidates/candidates/{candidate.public_id}",
             {"first_name": "Blocked"},
             format="json",
         )
@@ -245,7 +249,7 @@ class CandidatesWeek2Tests(APITestCase):
         self.client.credentials()
         self.authenticate(company_admin)
         unshare_response = self.client.post(
-            f"/api/v1/candidates/candidates/{candidate.id}/unshare",
+            f"/api/v1/candidates/candidates/{candidate.public_id}/unshare",
             {"user_ids": [teammate_profile.id]},
             format="json",
         )
@@ -253,7 +257,9 @@ class CandidatesWeek2Tests(APITestCase):
 
         self.client.credentials()
         self.authenticate(teammate)
-        missing_after_unshare = self.client.get(f"/api/v1/candidates/candidates/{candidate.id}")
+        missing_after_unshare = self.client.get(
+            f"/api/v1/candidates/candidates/{candidate.public_id}"
+        )
         self.assertEqual(missing_after_unshare.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_share_rejects_team_members_from_other_companies(self):
@@ -272,7 +278,7 @@ class CandidatesWeek2Tests(APITestCase):
 
         self.authenticate(company_admin)
         share_response = self.client.post(
-            f"/api/v1/candidates/candidates/{candidate.id}/share",
+            f"/api/v1/candidates/candidates/{candidate.public_id}/share",
             {"user_ids": [outside_profile.id]},
             format="json",
         )
@@ -314,3 +320,11 @@ class CandidatesWeek2Tests(APITestCase):
 
         self.assertIn("multipart/form-data", content)
         self.assertNotIn("application/json", content)
+
+    def test_candidate_detail_schema_uses_uuid_path_parameter(self):
+        schema = SchemaGenerator().get_schema(request=None, public=True)
+        operation = schema["paths"]["/api/v1/candidates/candidates/{id}"]["get"]
+        parameter = next(param for param in operation["parameters"] if param["name"] == "id")
+
+        self.assertEqual(parameter["schema"]["type"], "string")
+        self.assertEqual(parameter["schema"]["pattern"], "^[0-9a-fA-F-]{36}$")

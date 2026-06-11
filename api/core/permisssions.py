@@ -124,5 +124,5 @@ class IsCompanyAdmin(BasePermission):
     
     def has_object_permission(self, request, view, obj):
         if hasattr(obj, 'company') and hasattr(request.user, 'company_profile'):
-            return obj.company == request.user.company_profile
+            return obj.company == request.user.company_profile.company
         return False

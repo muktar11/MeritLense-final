@@ -74,8 +74,8 @@ class AuditLogCreateSerializer(serializers.Serializer):
 
 
 class AuditLogFilterSerializer(serializers.Serializer):
-    user_id = serializers.IntegerField(required=False)
-    company_id = serializers.IntegerField(required=False)
+    user_id = serializers.CharField(required=False)
+    company_id = serializers.CharField(required=False)
     category = serializers.CharField(required=False)
     action = serializers.CharField(required=False)
     severity = serializers.CharField(required=False)

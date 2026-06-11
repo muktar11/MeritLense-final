@@ -59,6 +59,9 @@ class CandidateViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = CandidateSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+    lookup_field = "public_id"
+    lookup_url_kwarg = "id"
+    lookup_value_regex = "[0-9a-fA-F-]{36}"
     
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
@@ -198,7 +201,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
         instance.delete()
     
     @action(detail=True, methods=['post'])
-    def share(self, request, pk=None):
+    def share(self, request, id=None):
         candidate = self.get_object()
         
         user = request.user
@@ -272,7 +275,7 @@ class CandidateViewSet(viewsets.ModelViewSet):
 
 
     @action(detail=True, methods=['post'])
-    def unshare(self, request, pk=None):
+    def unshare(self, request, id=None):
         candidate = self.get_object()
         
         user = request.user

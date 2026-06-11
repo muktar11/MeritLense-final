@@ -953,7 +953,12 @@ class ProfileDocumentUploadView(APIView):
                 category=AuditLogCategory.USER,
                 description=f"Profile updated for user: {user.email}",
                 resource=user,
-                data={'changes': request.data},
+                data={
+                    'changes': {
+                        'document_type': document_type,
+                        'document_name': getattr(document_file, 'name', None),
+                    }
+                },
                 request=request
             )
         return Response({

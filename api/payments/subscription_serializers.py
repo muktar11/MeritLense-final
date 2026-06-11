@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.utils import timezone
 from api.core.serializers import PublicIdModelSerializer
+from api.core.public_ids import get_by_identifier
 from .models import Subscription, Price
 
 
@@ -64,12 +65,12 @@ class SubscriptionListSerializer(PublicIdModelSerializer):
             'cancel_at_period_end', 'quantity', 'created_at'
         ]
 class ChangePlanSerializer(serializers.Serializer):
-    price_id = serializers.IntegerField()
+    price_id = serializers.CharField()
     prorate = serializers.BooleanField(default=True)
     
     def validate_price_id(self, value):
         try:
-            price = Price.objects.get(id=value, is_active=True)
+            price = get_by_identifier(Price.objects.filter(is_active=True), value)
             self.context['price'] = price
             return value
         except Price.DoesNotExist:
@@ -94,7 +95,7 @@ class UpdateQuantitySerializer(serializers.Serializer):
         return value
 
 class SubscriptionInvoiceSerializer(serializers.Serializer):
-    price_id = serializers.IntegerField(required=False)
+    price_id = serializers.CharField(required=False)
     quantity = serializers.IntegerField(min_value=1, required=False)
 
 class CancelSubscriptionSerializer(serializers.Serializer):

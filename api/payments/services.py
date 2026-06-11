@@ -3,6 +3,7 @@ import stripe
 from django.conf import settings
 from django.utils import timezone
 from decimal import Decimal
+from api.core.public_ids import get_by_identifier
 from .models import (
     Price, Customer, PaymentMethod, 
     Subscription, Payment, Invoice
@@ -156,7 +157,7 @@ class StripeService:
         
         if price_id:
             try:
-                price = Price.objects.get(id=price_id)
+                price = get_by_identifier(Price.objects.all(), price_id)
                 amount = price.unit_amount
             except Price.DoesNotExist:
                 return None
@@ -215,7 +216,7 @@ class StripeService:
                 return None
             
             try:
-                price = Price.objects.get(id=price_id, is_active=True)
+                price = get_by_identifier(Price.objects.filter(is_active=True), price_id)
             except Price.DoesNotExist:
                 logger.error(f"Price {price_id} not found or inactive")
                 return None
@@ -319,7 +320,7 @@ class StripeService:
     def update_subscription(self, subscription_id, price_id=None, quantity=None,
                            cancel_at_period_end=None):
         try:
-            subscription = Subscription.objects.get(id=subscription_id)
+            subscription = get_by_identifier(Subscription.objects.all(), subscription_id)
             stripe_subscription_id = subscription.stripe_subscription_id
             
             update_params = {}
@@ -327,7 +328,7 @@ class StripeService:
             if price_id or quantity:
                 items = []
                 if price_id:
-                    new_price = Price.objects.get(id=price_id)
+                    new_price = get_by_identifier(Price.objects.all(), price_id)
                     items.append({
                         'id': subscription.stripe_price.stripe_price_id,
                         'price': new_price.stripe_price_id
@@ -367,7 +368,7 @@ class StripeService:
     
     def cancel_subscription(self, subscription_id, at_period_end=True):
         try:
-            subscription = Subscription.objects.get(id=subscription_id)
+            subscription = get_by_identifier(Subscription.objects.all(), subscription_id)
             result = subscription.cancel(at_period_end)
             return result
         except Subscription.DoesNotExist:

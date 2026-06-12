@@ -14,6 +14,7 @@ api_v1_patterns = [
     path('auth/login', CustomTokenObtainPairView.as_view(), name='api-v1-token-obtain-pair'),
     path('auth/refresh', TokenRefreshView.as_view(), name='api-v1-token-refresh'),
     path('auth/', include('api.accounts.urls')),
+    path('interviews/', include('api.interviews.urls')),
     path('candidates/', include('api.candidates.urls')),
     path('evaluations/', include('api.evaluations.urls')),
     path('scores/', include('api.scores.urls')),

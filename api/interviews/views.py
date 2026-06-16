@@ -8,6 +8,7 @@ from rest_framework.response import Response
 
 from api.core.public_ids import PUBLIC_ID_OR_PK_REGEX, build_object_identifier_filter
 from api.interviews.models import InterviewConfiguration
+from api.questions.models import QuestionTemplate
 from api.sessions.models import InterviewSession
 from api.sessions.services import InterviewSessionService
 
@@ -15,6 +16,7 @@ from .serializers import (
     InterviewConfigurationSerializer,
     InterviewSessionCreateSerializer,
     InterviewSessionSerializer,
+    QuestionTemplateSerializer,
     SessionQuestionSerializer,
     SessionResponseSubmitSerializer,
     SessionStartSerializer,
@@ -22,10 +24,35 @@ from .serializers import (
 )
 
 
-class InterviewConfigurationViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = InterviewConfiguration.objects.filter(is_active=True)
+class CanManageInterviewSetupMixin:
+    setup_roles = {"ADMIN", "SUPERADMIN", "B2B", "B2C"}
+
+    def get_permissions(self):
+        return [IsAuthenticated()]
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if self.action in {"create", "update", "partial_update", "destroy"}:
+            if request.user.role not in self.setup_roles:
+                raise PermissionDenied("You do not have permission to manage interview setup")
+
+
+class InterviewConfigurationViewSet(CanManageInterviewSetupMixin, viewsets.ModelViewSet):
     serializer_class = InterviewConfigurationSerializer
-    permission_classes = [IsAuthenticated]
+    lookup_field = "public_id"
+    lookup_url_kwarg = "id"
+    lookup_value_regex = PUBLIC_ID_OR_PK_REGEX
+
+    def get_queryset(self):
+        queryset = InterviewConfiguration.objects.all()
+        if self.action == "list":
+            return queryset.filter(is_active=True)
+        return queryset
+
+
+class QuestionTemplateViewSet(CanManageInterviewSetupMixin, viewsets.ModelViewSet):
+    queryset = QuestionTemplate.objects.all()
+    serializer_class = QuestionTemplateSerializer
     lookup_field = "public_id"
     lookup_url_kwarg = "id"
     lookup_value_regex = PUBLIC_ID_OR_PK_REGEX

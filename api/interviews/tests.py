@@ -64,6 +64,98 @@ class InterviewSessionApiTests(APITestCase):
                 language="EN",
             )
 
+    def test_can_crud_interview_configuration(self):
+        response = self.client.post(
+            "/api/v1/interviews/configs/",
+            {
+                "role_name": "Driver",
+                "language": "EN",
+                "duration_minutes": 25,
+                "total_questions": 2,
+                "allow_retries": True,
+                "max_retries": 1,
+                "enable_translation": False,
+                "enable_task_module": False,
+                "enable_integrity_checks": False,
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        config_id = response.data["id"]
+
+        patch_response = self.client.patch(
+            f"/api/v1/interviews/configs/{config_id}/",
+            {"duration_minutes": 35},
+            format="json",
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(patch_response.data["duration_minutes"], 35)
+
+        delete_response = self.client.delete(f"/api/v1/interviews/configs/{config_id}/")
+        self.assertEqual(delete_response.status_code, 204)
+
+    def test_can_crud_question_template(self):
+        response = self.client.post(
+            "/api/v1/interviews/question-templates/",
+            {
+                "role_name": "Nanny",
+                "domain": "Care",
+                "skill": "Patience",
+                "difficulty": "MEDIUM",
+                "question_text": "How would you calm a crying child?",
+                "expected_steps": ["stay calm", "reassure"],
+                "keywords": ["patience", "calm"],
+                "weight": "1.00",
+                "language": "EN",
+                "is_mandatory": True,
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        template_id = response.data["id"]
+
+        patch_response = self.client.patch(
+            f"/api/v1/interviews/question-templates/{template_id}/",
+            {"is_active": False},
+            format="json",
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertFalse(patch_response.data["is_active"])
+
+        delete_response = self.client.delete(f"/api/v1/interviews/question-templates/{template_id}/")
+        self.assertEqual(delete_response.status_code, 204)
+
+    def test_team_member_cannot_manage_interview_setup(self):
+        team_member = User.objects.create_user(
+            email="team@example.com",
+            password="testpass123",
+            first_name="Team",
+            last_name="Member",
+            role=Roles.B2B_TEAM_MEMBER,
+            is_verified=True,
+        )
+        self.client.force_authenticate(team_member)
+
+        response = self.client.post(
+            "/api/v1/interviews/configs/",
+            {
+                "role_name": "Driver",
+                "language": "EN",
+                "duration_minutes": 25,
+                "total_questions": 2,
+                "allow_retries": False,
+                "max_retries": 0,
+                "enable_translation": False,
+                "enable_task_module": False,
+                "enable_integrity_checks": False,
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403)
+
     def test_create_start_answer_and_complete_interview_session(self):
         create_response = self.client.post(
             "/api/v1/interviews/",
@@ -223,5 +315,5 @@ class InterviewSessionWebSocketTests(TransactionTestCase):
         pong_payload = json.loads(pong["text"])
         self.assertEqual(pong_payload["event"], "PONG")
 
-        await communicator.send_input({"type": "websocket.disconnect"})
+        await communicator.send_input({"type": "websocket.disconnect", "code": 1000})
         await communicator.wait(timeout=1)

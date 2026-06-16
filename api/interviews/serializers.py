@@ -4,6 +4,7 @@ from api.candidates.models import Candidate
 from api.core.public_ids import get_by_identifier
 from api.core.serializers import PublicIdModelSerializer
 from api.interviews.models import InterviewConfiguration
+from api.questions.models import QuestionTemplate
 from api.sessions.models import CandidateResponse, InterviewSession, SessionQuestion
 
 
@@ -26,6 +27,49 @@ class InterviewConfigurationSerializer(PublicIdModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate(self, attrs):
+        total_questions = attrs.get("total_questions", getattr(self.instance, "total_questions", 0))
+        max_retries = attrs.get("max_retries", getattr(self.instance, "max_retries", 0))
+        allow_retries = attrs.get("allow_retries", getattr(self.instance, "allow_retries", False))
+
+        if total_questions < 1:
+            raise serializers.ValidationError({"total_questions": "Total questions must be at least 1"})
+        if allow_retries and max_retries < 1:
+            raise serializers.ValidationError({"max_retries": "Max retries must be at least 1 when retries are enabled"})
+        return attrs
+
+
+class QuestionTemplateSerializer(PublicIdModelSerializer):
+    class Meta:
+        model = QuestionTemplate
+        fields = [
+            "id",
+            "role_name",
+            "domain",
+            "skill",
+            "difficulty",
+            "question_text",
+            "expected_steps",
+            "keywords",
+            "weight",
+            "language",
+            "is_mandatory",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_expected_steps(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Expected steps must be a list")
+        return value
+
+    def validate_keywords(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Keywords must be a list")
+        return value
 
 
 class SessionQuestionSerializer(PublicIdModelSerializer):

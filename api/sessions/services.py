@@ -17,6 +17,7 @@ from api.core.constants import (
 from api.questions.models import QuestionTemplate
 
 from .models import CandidateResponse, IntegrityLog, InterviewSession, SessionQuestion
+from .realtime import InterviewSessionSocketRegistry
 
 
 LANGUAGE_CODE_MAP = {

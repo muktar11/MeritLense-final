@@ -3,7 +3,7 @@ from rest_framework import serializers
 from api.candidates.models import Candidate
 from api.core.public_ids import get_by_identifier
 from api.core.serializers import PublicIdModelSerializer
-from api.interviews.models import InterviewConfiguration
+from api.interviews.models import InterviewConfiguration, InterviewRubric
 from api.questions.models import QuestionTemplate
 from api.sessions.models import CandidateResponse, InterviewSession, SessionQuestion
 
@@ -14,7 +14,9 @@ class InterviewConfigurationSerializer(PublicIdModelSerializer):
         fields = [
             "id",
             "role_name",
+            "role_code",
             "language",
+            "evaluation_tier",
             "duration_minutes",
             "total_questions",
             "allow_retries",
@@ -22,6 +24,8 @@ class InterviewConfigurationSerializer(PublicIdModelSerializer):
             "enable_translation",
             "enable_task_module",
             "enable_integrity_checks",
+            "rubric_version",
+            "question_set_version",
             "is_active",
             "created_at",
             "updated_at",
@@ -46,14 +50,23 @@ class QuestionTemplateSerializer(PublicIdModelSerializer):
         fields = [
             "id",
             "role_name",
+            "role_code",
             "domain",
+            "skill_tag",
+            "skill_id",
             "skill",
+            "sequence_number",
             "difficulty",
             "question_text",
+            "question_type",
             "expected_steps",
             "keywords",
             "weight",
             "language",
+            "scoring_type",
+            "evaluation_tier",
+            "rubric_version",
+            "question_set_version",
             "is_mandatory",
             "is_active",
             "created_at",
@@ -70,6 +83,30 @@ class QuestionTemplateSerializer(PublicIdModelSerializer):
         if not isinstance(value, list):
             raise serializers.ValidationError("Keywords must be a list")
         return value
+
+
+class InterviewRubricSerializer(PublicIdModelSerializer):
+    class Meta:
+        model = InterviewRubric
+        fields = [
+            "id",
+            "role_name",
+            "role_code",
+            "skill_tag",
+            "scoring_category",
+            "weight",
+            "max_score",
+            "scoring_type",
+            "domain",
+            "notes",
+            "rubric_version",
+            "question_set_version",
+            "evaluation_criteria",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
 
 
 class SessionQuestionSerializer(PublicIdModelSerializer):
@@ -126,6 +163,7 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
             "config_details",
             "status",
             "role_name",
+            "role_code",
             "ui_language",
             "candidate_language",
             "tts_language_code",
@@ -133,6 +171,9 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
             "translation_target",
             "current_question_index",
             "total_questions",
+            "evaluation_tier",
+            "rubric_version",
+            "question_set_version",
             "progress_percent",
             "started_at",
             "ended_at",

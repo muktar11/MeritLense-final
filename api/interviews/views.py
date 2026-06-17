@@ -7,7 +7,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from api.core.public_ids import PUBLIC_ID_OR_PK_REGEX, build_object_identifier_filter
-from api.interviews.models import InterviewConfiguration
+from api.interviews.models import InterviewConfiguration, InterviewRubric
 from api.questions.models import QuestionTemplate
 from api.sessions.models import InterviewSession
 from api.sessions.services import InterviewSessionService
@@ -16,6 +16,7 @@ from .serializers import (
     InterviewConfigurationSerializer,
     InterviewSessionCreateSerializer,
     InterviewSessionSerializer,
+    InterviewRubricSerializer,
     QuestionTemplateSerializer,
     SessionQuestionSerializer,
     SessionResponseSubmitSerializer,
@@ -48,6 +49,14 @@ class InterviewConfigurationViewSet(CanManageInterviewSetupMixin, viewsets.Model
         if self.action == "list":
             return queryset.filter(is_active=True)
         return queryset
+
+
+class InterviewRubricViewSet(CanManageInterviewSetupMixin, viewsets.ModelViewSet):
+    queryset = InterviewRubric.objects.all()
+    serializer_class = InterviewRubricSerializer
+    lookup_field = "public_id"
+    lookup_url_kwarg = "id"
+    lookup_value_regex = PUBLIC_ID_OR_PK_REGEX
 
 
 class QuestionTemplateViewSet(CanManageInterviewSetupMixin, viewsets.ModelViewSet):

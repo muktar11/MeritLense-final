@@ -9,8 +9,8 @@ from rest_framework.test import APIClient, APITestCase
 
 from api.accounts.models import User
 from api.candidates.models import Candidate
-from api.core.constants import QuestionDifficulty, Roles
-from api.interviews.models import InterviewConfiguration
+from api.core.constants import InterviewEvaluationTier, QuestionDifficulty, Roles
+from api.interviews.models import InterviewConfiguration, InterviewRubric
 from api.questions.models import QuestionTemplate
 from api.sessions.models import CandidateResponse, InterviewSession
 from meritlense.asgi import application
@@ -46,22 +46,34 @@ class InterviewSessionApiTests(APITestCase):
         )
         self.config = InterviewConfiguration.objects.create(
             role_name="Nanny",
+            role_code="nanny",
             language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
             duration_minutes=30,
             total_questions=3,
             allow_retries=True,
             max_retries=1,
+            rubric_version="v1",
+            question_set_version="v1",
         )
         for index in range(1, 4):
             QuestionTemplate.objects.create(
                 role_name="Nanny",
+                role_code="nanny",
                 domain="Child Care",
+                skill_tag=f"Skill {index}",
                 skill=f"Skill {index}",
+                sequence_number=index,
                 difficulty=QuestionDifficulty.MEDIUM,
                 question_text=f"Question text {index}",
+                question_type="TEXT",
                 expected_steps=["step1", "step2"],
                 keywords=["care", "safe"],
                 language="EN",
+                scoring_type="0/3/5",
+                evaluation_tier=InterviewEvaluationTier.FULL,
+                rubric_version="v1",
+                question_set_version="v1",
             )
 
     def test_can_crud_interview_configuration(self):
@@ -69,7 +81,9 @@ class InterviewSessionApiTests(APITestCase):
             "/api/v1/interviews/configs/",
             {
                 "role_name": "Driver",
+                "role_code": "driver",
                 "language": "EN",
+                "evaluation_tier": "FULL",
                 "duration_minutes": 25,
                 "total_questions": 2,
                 "allow_retries": True,
@@ -77,6 +91,8 @@ class InterviewSessionApiTests(APITestCase):
                 "enable_translation": False,
                 "enable_task_module": False,
                 "enable_integrity_checks": False,
+                "rubric_version": "v1",
+                "question_set_version": "v1",
                 "is_active": True,
             },
             format="json",
@@ -100,14 +116,22 @@ class InterviewSessionApiTests(APITestCase):
             "/api/v1/interviews/question-templates/",
             {
                 "role_name": "Nanny",
+                "role_code": "nanny",
                 "domain": "Care",
+                "skill_tag": "Patience",
                 "skill": "Patience",
+                "sequence_number": 10,
                 "difficulty": "MEDIUM",
                 "question_text": "How would you calm a crying child?",
+                "question_type": "SCENARIO",
                 "expected_steps": ["stay calm", "reassure"],
                 "keywords": ["patience", "calm"],
                 "weight": "1.00",
                 "language": "EN",
+                "scoring_type": "0/3/5",
+                "evaluation_tier": "FULL",
+                "rubric_version": "v1",
+                "question_set_version": "v1",
                 "is_mandatory": True,
                 "is_active": True,
             },
@@ -127,6 +151,38 @@ class InterviewSessionApiTests(APITestCase):
         delete_response = self.client.delete(f"/api/v1/interviews/question-templates/{template_id}/")
         self.assertEqual(delete_response.status_code, 204)
 
+    def test_can_crud_interview_rubric(self):
+        response = self.client.post(
+            "/api/v1/interviews/rubrics/",
+            {
+                "role_name": "Housekeeper",
+                "role_code": "domestic_worker",
+                "skill_tag": "Safety Awareness",
+                "scoring_category": "Knowledge & Safety",
+                "weight": "0.2700",
+                "max_score": 40,
+                "scoring_type": "0/3/5",
+                "domain": "Safety & Hygiene",
+                "notes": "Maps to knowledge_score",
+                "rubric_version": "v2.0",
+                "question_set_version": "v1.0",
+                "evaluation_criteria": [{"question_ref": "EN-Q1"}],
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        rubric_id = response.data["id"]
+        self.assertEqual(InterviewRubric.objects.count(), 1)
+
+        patch_response = self.client.patch(
+            f"/api/v1/interviews/rubrics/{rubric_id}/",
+            {"notes": "Updated"},
+            format="json",
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(patch_response.data["notes"], "Updated")
+
     def test_team_member_cannot_manage_interview_setup(self):
         team_member = User.objects.create_user(
             email="team@example.com",
@@ -142,7 +198,9 @@ class InterviewSessionApiTests(APITestCase):
             "/api/v1/interviews/configs/",
             {
                 "role_name": "Driver",
+                "role_code": "driver",
                 "language": "EN",
+                "evaluation_tier": "FULL",
                 "duration_minutes": 25,
                 "total_questions": 2,
                 "allow_retries": False,
@@ -150,6 +208,8 @@ class InterviewSessionApiTests(APITestCase):
                 "enable_translation": False,
                 "enable_task_module": False,
                 "enable_integrity_checks": False,
+                "rubric_version": "v1",
+                "question_set_version": "v1",
                 "is_active": True,
             },
             format="json",
@@ -257,33 +317,49 @@ class InterviewSessionWebSocketTests(TransactionTestCase):
         )
         self.config = InterviewConfiguration.objects.create(
             role_name="Nanny",
+            role_code="nanny",
             language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
             duration_minutes=30,
             total_questions=1,
             allow_retries=True,
             max_retries=1,
+            rubric_version="v1",
+            question_set_version="v1",
         )
         QuestionTemplate.objects.create(
             role_name="Nanny",
+            role_code="nanny",
             domain="Safety",
+            skill_tag="Awareness",
             skill="Awareness",
+            sequence_number=1,
             difficulty=QuestionDifficulty.EASY,
             question_text="What should you check first?",
+            question_type="TEXT",
             expected_steps=["check"],
             keywords=["safe"],
             language="EN",
+            scoring_type="0/3/5",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v1",
+            question_set_version="v1",
         )
         self.session = InterviewSession.objects.create(
             candidate=self.candidate,
             organization=self.candidate.company,
             config=self.config,
             role_name=self.config.role_name,
+            role_code=self.config.role_code,
             ui_language="EN",
             candidate_language="EN",
             tts_language_code="en-US",
             stt_language_code="en-US",
             translation_target="",
             total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v1",
+            question_set_version="v1",
             expires_at=InterviewSession.build_expiry(30),
             created_by=self.user,
         )

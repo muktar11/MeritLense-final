@@ -68,6 +68,28 @@ class CandidateResponseType:
     ]
 
 
+class InterviewEvaluationTier:
+    FULL = "FULL"
+    SCREENING = "SCREENING"
+
+    CHOICES = [
+        (FULL, "Full Evaluation"),
+        (SCREENING, "Screening"),
+    ]
+
+
+class InterviewQuestionType:
+    TEXT = "TEXT"
+    SCENARIO = "SCENARIO"
+    TASK = "TASK"
+
+    CHOICES = [
+        (TEXT, "Text"),
+        (SCENARIO, "Scenario"),
+        (TASK, "Task"),
+    ]
+
+
 class QuestionDifficulty:
     EASY = "EASY"
     MEDIUM = "MEDIUM"

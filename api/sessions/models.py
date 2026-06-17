@@ -40,6 +40,7 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
         default=InterviewSessionStatus.CREATED,
     )
     role_name = models.CharField(max_length=100)
+    role_code = models.CharField(max_length=100, blank=True)
     ui_language = models.CharField(max_length=20, default="EN")
     candidate_language = models.CharField(max_length=20, default="EN")
     tts_language_code = models.CharField(max_length=20, default="en-US")
@@ -47,6 +48,9 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
     translation_target = models.CharField(max_length=20, blank=True)
     current_question_index = models.PositiveIntegerField(default=0)
     total_questions = models.PositiveIntegerField(default=0)
+    evaluation_tier = models.CharField(max_length=20, default="FULL")
+    rubric_version = models.CharField(max_length=20, blank=True)
+    question_set_version = models.CharField(max_length=20, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     ended_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField()

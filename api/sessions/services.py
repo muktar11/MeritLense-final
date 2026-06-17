@@ -11,6 +11,7 @@ from api.core.constants import (
     AuditLogCategory,
     CandidateResponseType,
     IdentityVerificationStatus,
+    InterviewEvaluationTier,
     InterviewSessionStatus,
     SessionQuestionStatus,
 )
@@ -53,8 +54,12 @@ class QuestionGenerationService:
         target_count = session.config.total_questions
         queryset = QuestionTemplate.objects.filter(
             is_active=True,
-            role_name__iexact=session.role_name,
+            evaluation_tier=session.evaluation_tier or InterviewEvaluationTier.FULL,
         )
+        if session.role_code:
+            queryset = queryset.filter(role_code__iexact=session.role_code)
+        else:
+            queryset = queryset.filter(role_name__iexact=session.role_name)
         localized = list(queryset.filter(language=session.candidate_language))
         if len(localized) < target_count:
             localized = list(queryset)
@@ -70,7 +75,7 @@ class QuestionGenerationService:
                     question_template=template,
                     question_text=template.question_text,
                     domain=template.domain,
-                    skill=template.skill,
+                    skill=template.skill_tag or template.skill,
                     difficulty=template.difficulty,
                     question_order=order,
                     is_mandatory=template.is_mandatory,
@@ -110,12 +115,16 @@ class InterviewSessionService:
             organization=candidate.company,
             config=config,
             role_name=config.role_name or candidate.get_job_role_display(),
+            role_code=config.role_code,
             ui_language=config.language or language,
             candidate_language=language,
             tts_language_code=LANGUAGE_CODE_MAP.get(language, "en-US"),
             stt_language_code=LANGUAGE_CODE_MAP.get(language, "en-US"),
             translation_target=config.language if config.enable_translation else "",
             total_questions=config.total_questions,
+            evaluation_tier=config.evaluation_tier,
+            rubric_version=config.rubric_version,
+            question_set_version=config.question_set_version,
             expires_at=InterviewSession.build_expiry(config.duration_minutes),
             created_by=created_by,
         )

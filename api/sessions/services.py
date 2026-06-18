@@ -13,6 +13,7 @@ from api.core.constants import (
     IdentityVerificationStatus,
     InterviewEvaluationTier,
     InterviewSessionStatus,
+    QuestionLifecycleStatus,
     SessionQuestionStatus,
 )
 from api.questions.models import QuestionTemplate
@@ -52,9 +53,11 @@ class QuestionGenerationService:
             return list(session.questions.order_by("question_order"))
 
         target_count = session.config.total_questions
+        tier = session.evaluation_tier or InterviewEvaluationTier.FULL
         queryset = QuestionTemplate.objects.filter(
             is_active=True,
-            evaluation_tier=session.evaluation_tier or InterviewEvaluationTier.FULL,
+            question_status=QuestionLifecycleStatus.ACTIVE,
+            evaluation_tier__in=[tier, InterviewEvaluationTier.BOTH],
         )
         if session.role_code:
             queryset = queryset.filter(role_code__iexact=session.role_code)

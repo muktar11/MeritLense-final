@@ -71,14 +71,36 @@ class CandidateResponseType:
 class InterviewEvaluationTier:
     FULL = "FULL"
     SCREENING = "SCREENING"
+    BOTH = "BOTH"
 
     CHOICES = [
         (FULL, "Full Evaluation"),
         (SCREENING, "Screening"),
+        (BOTH, "Both"),
     ]
 
 
 class InterviewQuestionType:
+    SAFETY = "safety"
+    INTEGRITY = "integrity"
+    BEHAVIORAL = "behavioral"
+    COMMUNICATION = "communication"
+    SITUATIONAL = "situational"
+    SCENARIO = "scenario"
+    KNOWLEDGE = "knowledge"
+
+    CHOICES = [
+        (SAFETY, "Safety"),
+        (INTEGRITY, "Integrity"),
+        (BEHAVIORAL, "Behavioral"),
+        (COMMUNICATION, "Communication"),
+        (SITUATIONAL, "Situational"),
+        (SCENARIO, "Scenario"),
+        (KNOWLEDGE, "Knowledge"),
+    ]
+
+
+class InterviewQuestionFormat:
     TEXT = "TEXT"
     SCENARIO = "SCENARIO"
     TASK = "TASK"
@@ -87,6 +109,32 @@ class InterviewQuestionType:
         (TEXT, "Text"),
         (SCENARIO, "Scenario"),
         (TASK, "Task"),
+    ]
+
+
+class QuestionLifecycleStatus:
+    ACTIVE = "active"
+    DRAFT = "draft"
+    DEPRECATED = "deprecated"
+    ARCHIVED = "archived"
+
+    CHOICES = [
+        (ACTIVE, "Active"),
+        (DRAFT, "Draft"),
+        (DEPRECATED, "Deprecated"),
+        (ARCHIVED, "Archived"),
+    ]
+
+
+class ExpectedAnswerType:
+    SHORT = "short"
+    STRUCTURED = "structured"
+    MULTI_STEP = "multi_step"
+
+    CHOICES = [
+        (SHORT, "Short"),
+        (STRUCTURED, "Structured"),
+        (MULTI_STEP, "Multi Step"),
     ]
 
 

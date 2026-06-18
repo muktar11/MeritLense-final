@@ -9,7 +9,7 @@ from rest_framework.test import APIClient, APITestCase
 
 from api.accounts.models import User
 from api.candidates.models import Candidate
-from api.core.constants import InterviewEvaluationTier, QuestionDifficulty, Roles
+from api.core.constants import InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, Roles
 from api.interviews.models import InterviewConfiguration, InterviewRubric
 from api.questions.models import QuestionTemplate
 from api.sessions.models import CandidateResponse, InterviewSession
@@ -60,17 +60,24 @@ class InterviewSessionApiTests(APITestCase):
             QuestionTemplate.objects.create(
                 role_name="Nanny",
                 role_code="nanny",
+                question_code=f"NAN-{index:03d}",
+                question_version="1.0",
+                question_status=QuestionLifecycleStatus.ACTIVE,
                 domain="Child Care",
                 skill_tag=f"Skill {index}",
                 skill=f"Skill {index}",
                 sequence_number=index,
                 difficulty=QuestionDifficulty.MEDIUM,
                 question_text=f"Question text {index}",
-                question_type="TEXT",
+                question_type="knowledge",
+                question_format="TEXT",
                 expected_steps=["step1", "step2"],
                 keywords=["care", "safe"],
                 language="EN",
                 scoring_type="0/3/5",
+                difficulty_score=2,
+                estimated_time_seconds=30,
+                expected_answer_type="structured",
                 evaluation_tier=InterviewEvaluationTier.FULL,
                 rubric_version="v1",
                 question_set_version="v1",
@@ -117,22 +124,31 @@ class InterviewSessionApiTests(APITestCase):
             {
                 "role_name": "Nanny",
                 "role_code": "nanny",
+                "question_code": "NAN-010",
+                "question_version": "1.0",
+                "question_status": "active",
                 "domain": "Care",
                 "skill_tag": "Patience",
                 "skill": "Patience",
                 "sequence_number": 10,
                 "difficulty": "MEDIUM",
                 "question_text": "How would you calm a crying child?",
-                "question_type": "SCENARIO",
+                "question_type": "behavioral",
+                "question_format": "SCENARIO",
                 "expected_steps": ["stay calm", "reassure"],
                 "keywords": ["patience", "calm"],
                 "weight": "1.00",
                 "language": "EN",
                 "scoring_type": "0/3/5",
+                "difficulty_score": 2,
+                "estimated_time_seconds": 60,
+                "expected_answer_type": "structured",
                 "evaluation_tier": "FULL",
                 "rubric_version": "v1",
                 "question_set_version": "v1",
                 "is_mandatory": True,
+                "follow_up_allowed": False,
+                "critical_question": False,
                 "is_active": True,
             },
             format="json",
@@ -291,6 +307,56 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Cannot start expired session", str(response.data["detail"]))
 
+    def test_session_generation_accepts_both_tier_questions(self):
+        both_config = InterviewConfiguration.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            duration_minutes=20,
+            total_questions=1,
+            allow_retries=True,
+            max_retries=1,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+        )
+        QuestionTemplate.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            question_code="HK-PRO-999",
+            question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE,
+            domain="Professional Skills",
+            skill_tag="Psych & Professional",
+            skill="Psych & Professional",
+            sequence_number=1,
+            difficulty=QuestionDifficulty.EASY,
+            question_text="How do you greet your employer?",
+            question_type="communication",
+            question_format="TEXT",
+            language="EN",
+            scoring_type="0/2/3",
+            difficulty_score=1,
+            estimated_time_seconds=60,
+            expected_answer_type="short",
+            evaluation_tier=InterviewEvaluationTier.BOTH,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            is_active=True,
+        )
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(both_config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(create_response.data["total_questions"], 1)
+        self.assertEqual(create_response.data["questions"][0]["question_text"], "How do you greet your employer?")
+
 
 class InterviewSessionWebSocketTests(TransactionTestCase):
     reset_sequences = True
@@ -330,17 +396,24 @@ class InterviewSessionWebSocketTests(TransactionTestCase):
         QuestionTemplate.objects.create(
             role_name="Nanny",
             role_code="nanny",
+            question_code="NAN-WS-001",
+            question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE,
             domain="Safety",
             skill_tag="Awareness",
             skill="Awareness",
             sequence_number=1,
             difficulty=QuestionDifficulty.EASY,
             question_text="What should you check first?",
-            question_type="TEXT",
+            question_type="knowledge",
+            question_format="TEXT",
             expected_steps=["check"],
             keywords=["safe"],
             language="EN",
             scoring_type="0/3/5",
+            difficulty_score=1,
+            estimated_time_seconds=30,
+            expected_answer_type="short",
             evaluation_tier=InterviewEvaluationTier.FULL,
             rubric_version="v1",
             question_set_version="v1",

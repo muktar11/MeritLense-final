@@ -164,6 +164,18 @@ class IdentityVerificationStatus:
     ]
 
 
+class ReadinessStatus:
+    PENDING = "PENDING"
+    READY = "READY"
+    NOT_READY = "NOT_READY"
+
+    CHOICES = [
+        (PENDING, "Pending"),
+        (READY, "Ready"),
+        (NOT_READY, "Not Ready"),
+    ]
+
+
 class AdminPermissions:
     USER_MANAGEMENT = "can_manage_users"
     COMPANY_VERIFICATION = "can_verify_companies"

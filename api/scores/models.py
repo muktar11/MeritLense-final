@@ -181,6 +181,11 @@ class ScoreSet(TimeStampedModel):
         if self.evaluation and self.average_score:
             self.evaluation.score = self.average_score
             self.evaluation.save(update_fields=['score'])
+
+        if self.evaluation:
+            from api.evaluations.rule_engine import EvaluationRuleEngine
+
+            EvaluationRuleEngine.apply_readiness_rules(self.evaluation)
         
         return self.average_score
     

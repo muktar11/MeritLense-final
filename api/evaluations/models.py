@@ -2,7 +2,14 @@ from django.utils import timezone
 from django.db import models
 from django.core.validators import MinValueValidator
 from api.core.models import TimeStampedModel, SoftDeleteModel
-from api.core.constants import EvaluationType, EvaluationStatus, CertificateStatus, JobRoles, Languages
+from api.core.constants import (
+    CertificateStatus,
+    EvaluationStatus,
+    EvaluationType,
+    JobRoles,
+    Languages,
+    ReadinessStatus,
+)
 from api.candidates.models import Candidate
 from api.accounts.models import User
 
@@ -90,6 +97,24 @@ class Evaluation(TimeStampedModel, SoftDeleteModel):
         blank=True,
         help_text="Score achieved in the evaluation (if applicable)"
     )
+
+    readiness_status = models.CharField(
+        max_length=20,
+        choices=ReadinessStatus.CHOICES,
+        default=ReadinessStatus.PENDING,
+        help_text="Readiness decision after applying evaluation rules"
+    )
+
+    readiness_override_applied = models.BooleanField(
+        default=False,
+        help_text="Whether a rule-based readiness override has been applied"
+    )
+
+    readiness_override_reason = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Reason for readiness override, for example a failed critical question"
+    )
     
     feedback = models.TextField(
         null=True,
@@ -167,6 +192,7 @@ class Evaluation(TimeStampedModel, SoftDeleteModel):
             models.Index(fields=['created_by']),
             models.Index(fields=['company']),
             models.Index(fields=['evaluation_type']),
+            models.Index(fields=['readiness_status']),
         ]
         ordering = ['-scheduled_date']
     

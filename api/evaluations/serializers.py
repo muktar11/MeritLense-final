@@ -26,6 +26,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
             'certificate_issued_at', 'certificate_url',
             'last_evaluation_date',
             'score', 'feedback',
+            'readiness_status', 'readiness_override_applied', 'readiness_override_reason',
             'meeting_link', 'meeting_id', 'meeting_password',
             'location',
             'created_by', 'created_by_name',
@@ -37,6 +38,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
             'id', 'candidate_first_name', 'candidate_last_name', 'candidate_email',
             'candidate_passport_id', 'candidate_job_role', 'candidate_preferred_language',
             'created_by', 'company', 'completed_at', 'cancelled_at',
+            'readiness_status', 'readiness_override_applied', 'readiness_override_reason',
             'created_at', 'updated_at'
         ]
     
@@ -128,7 +130,7 @@ class EvaluationListSerializer(PublicIdModelSerializer):
         fields = [
             'id', 'candidate_name', 'evaluation_type', 'evaluation_type_display',
             'status', 'status_display', 'scheduled_date', 'duration_minutes',
-            'score', 'created_by', 'created_at'
+            'score', 'readiness_status', 'readiness_override_applied', 'created_by', 'created_at'
         ]
     
     def get_candidate_name(self, obj):

@@ -4,6 +4,7 @@ class Roles:
     B2B = "B2B"
     B2C = "B2C"
     B2B_TEAM_MEMBER = "B2B_TEAM_MEMBER"
+    CANDIDATE = "CANDIDATE"
 
     CHOICES = [
         (SUPERADMIN, "Super Admin"),
@@ -11,6 +12,107 @@ class Roles:
         (B2B, "B2B Company"),
         (B2C, "B2C Individual"),
         (B2B_TEAM_MEMBER, "B2B Team Member"),
+        (CANDIDATE, "Candidate"),
+    ]
+
+
+class InterviewSessionStatus:
+    CREATED = "CREATED"
+    VERIFICATION_PENDING = "VERIFICATION_PENDING"
+    READY = "READY"
+    IN_PROGRESS = "IN_PROGRESS"
+    PAUSED = "PAUSED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    EXPIRED = "EXPIRED"
+    CANCELLED = "CANCELLED"
+
+    CHOICES = [
+        (CREATED, "Created"),
+        (VERIFICATION_PENDING, "Verification Pending"),
+        (READY, "Ready"),
+        (IN_PROGRESS, "In Progress"),
+        (PAUSED, "Paused"),
+        (COMPLETED, "Completed"),
+        (FAILED, "Failed"),
+        (EXPIRED, "Expired"),
+        (CANCELLED, "Cancelled"),
+    ]
+
+
+class SessionQuestionStatus:
+    PENDING = "PENDING"
+    ASKED = "ASKED"
+    ANSWERED = "ANSWERED"
+    SKIPPED = "SKIPPED"
+    FAILED = "FAILED"
+
+    CHOICES = [
+        (PENDING, "Pending"),
+        (ASKED, "Asked"),
+        (ANSWERED, "Answered"),
+        (SKIPPED, "Skipped"),
+        (FAILED, "Failed"),
+    ]
+
+
+class CandidateResponseType:
+    TEXT = "TEXT"
+    VOICE = "VOICE"
+    TASK = "TASK"
+
+    CHOICES = [
+        (TEXT, "Text"),
+        (VOICE, "Voice"),
+        (TASK, "Task"),
+    ]
+
+
+class InterviewEvaluationTier:
+    FULL = "FULL"
+    SCREENING = "SCREENING"
+
+    CHOICES = [
+        (FULL, "Full Evaluation"),
+        (SCREENING, "Screening"),
+    ]
+
+
+class InterviewQuestionType:
+    TEXT = "TEXT"
+    SCENARIO = "SCENARIO"
+    TASK = "TASK"
+
+    CHOICES = [
+        (TEXT, "Text"),
+        (SCENARIO, "Scenario"),
+        (TASK, "Task"),
+    ]
+
+
+class QuestionDifficulty:
+    EASY = "EASY"
+    MEDIUM = "MEDIUM"
+    HARD = "HARD"
+
+    CHOICES = [
+        (EASY, "Easy"),
+        (MEDIUM, "Medium"),
+        (HARD, "Hard"),
+    ]
+
+
+class IdentityVerificationStatus:
+    NOT_STARTED = "NOT_STARTED"
+    PENDING = "PENDING"
+    VERIFIED = "VERIFIED"
+    FAILED = "FAILED"
+
+    CHOICES = [
+        (NOT_STARTED, "Not Started"),
+        (PENDING, "Pending"),
+        (VERIFIED, "Verified"),
+        (FAILED, "Failed"),
     ]
 
 
@@ -434,6 +536,9 @@ class InvoiceStatus:
 class AuditLogCategory:
     USER = "USER"
     CANDIDATE = "CANDIDATE"
+    SESSION = "SESSION"
+    QUESTION = "QUESTION"
+    INTEGRITY = "INTEGRITY"
     EVALUATION = "EVALUATION"
     SUBSCRIPTION = "SUBSCRIPTION"
     PAYMENT = "PAYMENT"
@@ -447,6 +552,9 @@ class AuditLogCategory:
     CHOICES = [
         (USER, "User Management"),
         (CANDIDATE, "Candidate Management"),
+        (SESSION, "Interview Session"),
+        (QUESTION, "Interview Question"),
+        (INTEGRITY, "Integrity Monitoring"),
         (EVALUATION, "Evaluation"),
         (SUBSCRIPTION, "Subscription"),
         (PAYMENT, "Payment"),
@@ -476,6 +584,19 @@ class AuditLogAction:
     VIEW_SHARED_CANDIDATES = "VIEW_SHARED_CANDIDATES"
     VIEW_CANDIDATE = "VIEW_CANDIDATE"
     VIEW_CANDIDATES_LIST = "VIEW_CANDIDATES_LIST"
+
+    SESSION_CREATED = "SESSION_CREATED"
+    SESSION_VERIFICATION_PENDING = "SESSION_VERIFICATION_PENDING"
+    SESSION_READY = "SESSION_READY"
+    SESSION_STARTED = "SESSION_STARTED"
+    SESSION_PAUSED = "SESSION_PAUSED"
+    SESSION_COMPLETED = "SESSION_COMPLETED"
+    SESSION_FAILED = "SESSION_FAILED"
+    SESSION_EXPIRED = "SESSION_EXPIRED"
+    SESSION_CANCELLED = "SESSION_CANCELLED"
+    QUESTION_SENT = "QUESTION_SENT"
+    QUESTION_VIEWED = "QUESTION_VIEWED"
+    ANSWER_SUBMITTED = "ANSWER_SUBMITTED"
 
     
     EVALUATION_CREATED = "EVALUATION_CREATED"
@@ -607,6 +728,19 @@ class AuditLogAction:
         (VIEW_SHARED_CANDIDATES, "Viewed Shared Candidates"),
         (VIEW_CANDIDATE, "Viewed Candidate Details"),
         (VIEW_CANDIDATES_LIST, "Viewed Candidates List"),
+
+        (SESSION_CREATED, "Session Created"),
+        (SESSION_VERIFICATION_PENDING, "Session Verification Pending"),
+        (SESSION_READY, "Session Ready"),
+        (SESSION_STARTED, "Session Started"),
+        (SESSION_PAUSED, "Session Paused"),
+        (SESSION_COMPLETED, "Session Completed"),
+        (SESSION_FAILED, "Session Failed"),
+        (SESSION_EXPIRED, "Session Expired"),
+        (SESSION_CANCELLED, "Session Cancelled"),
+        (QUESTION_SENT, "Question Sent"),
+        (QUESTION_VIEWED, "Question Viewed"),
+        (ANSWER_SUBMITTED, "Answer Submitted"),
         
         (EVALUATION_CREATED, "Evaluation Created"),
         (EVALUATION_UPDATED, "Evaluation Updated"),

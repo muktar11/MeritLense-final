@@ -124,7 +124,6 @@ python manage.py makemigrations
 
 ```powershell
 python manage.py runserver
-```
 
 The backend runs at:
 
@@ -166,6 +165,7 @@ Schema:
 
 All application API routes should use the `/api/v1/` prefix.
 
+```
 ## Optional Docker Setup
 
 Use Docker only if you want local PostgreSQL and a containerized backend.

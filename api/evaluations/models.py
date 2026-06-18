@@ -8,7 +8,15 @@ from api.accounts.models import User
 
 
 class Evaluation(TimeStampedModel, SoftDeleteModel):
-   
+    session = models.OneToOneField(
+        "interview_sessions.InterviewSession",
+        on_delete=models.SET_NULL,
+        related_name="linked_evaluation",
+        null=True,
+        blank=True,
+        help_text="The interview session that produced this evaluation",
+    )
+
     candidate = models.ForeignKey(
         Candidate,
         on_delete=models.CASCADE,
@@ -152,6 +160,7 @@ class Evaluation(TimeStampedModel, SoftDeleteModel):
         verbose_name = "Evaluation"
         verbose_name_plural = "Evaluations"
         indexes = [
+            models.Index(fields=['session']),
             models.Index(fields=['candidate']),
             models.Index(fields=['status']),
             models.Index(fields=['scheduled_date']),

@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "channels",
     "drf_spectacular",
     "django_filters",
     "corsheaders",
@@ -57,7 +58,9 @@ INSTALLED_APPS = [
     "api.core",
     "api.organizations",
     "api.interviews",
+    "api.sessions",
     "api.questions",
+    "api.notifications",
     "api.translation",
     "api.monitoring",
     "api.storage",
@@ -79,6 +82,7 @@ CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 
 ROOT_URLCONF = "meritlense.urls"
 WSGI_APPLICATION = "meritlense.wsgi.application"
+ASGI_APPLICATION = "meritlense.asgi.application"
 AUTH_USER_MODEL = "accounts.User"
 
 TEMPLATES = [
@@ -105,6 +109,25 @@ DATABASES = {
             "PASSWORD": os.getenv("DB_PASSWORD", "meritlense_password"),
             "HOST": os.getenv("DB_HOST", "localhost"),
             "PORT": os.getenv("DB_PORT", "5432"),
+        }
+    }
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+USE_REDIS_CHANNEL_LAYER = env_bool("USE_REDIS_CHANNEL_LAYER", False)
+
+if USE_REDIS_CHANNEL_LAYER:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [REDIS_URL],
+            },
+        }
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
         }
     }
 

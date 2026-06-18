@@ -35,9 +35,9 @@ class AuditLogService:
             company = user.managed_company
         
         ip_address = None
-        user_agent = None
-        request_method = None
-        request_path = None
+        user_agent = ''
+        request_method = ''
+        request_path = ''
         
         if request:
             x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')

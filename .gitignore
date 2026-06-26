@@ -106,9 +106,17 @@ Control.ca-bundle
 Control.system-ca-bundle 
 GitHub.sublime-settings 
 
-.vscode/* 
-!.vscode/settings.json 
-!.vscode/tasks.json 
-!.vscode/launch.json 
-!.vscode/extensions.json 
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
 .history
+
+# Frontend build artifacts
+MeritLense-ui/node_modules/
+MeritLense-ui/.next/
+MeritLense-ui/out/
+
+# Django collected static files
+staticfiles/

@@ -15,13 +15,14 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         if not self.user.is_verified:
             raise AuthenticationFailed("Email verification is required before login.")
         
+        data['user_id'] = str(self.user.public_id)
         data['role'] = self.user.role
         data['is_superuser'] = self.user.is_superuser
         data['is_staff'] = self.user.is_staff
         data['is_verified'] = self.user.is_verified
         data['documents_verified'] = self.user.documents_verified
         data['full_name'] = self.user.get_full_name()
-        
+
         return data
 
 
@@ -211,11 +212,12 @@ class IndividualProfileSerializer(PublicIdModelSerializer):
     first_name = serializers.CharField(source='user.first_name')
     last_name = serializers.CharField(source='user.last_name')
     full_name = serializers.SerializerMethodField()
-    
+    role = serializers.CharField(source='user.role', read_only=True)
+
     class Meta:
         model = IndividualEmployerProfile
         fields = [
-            'id', 'email', 'first_name', 'last_name', 'full_name',
+            'id', 'email', 'first_name', 'last_name', 'full_name', 'role',
             'passport_id', 'phone_number', 'date_of_birth', 'address',
             'job_role', 'nationality', 'preferred_language',
             'id_document', 'resume_document', 'additional_documents',
@@ -244,11 +246,12 @@ class CompanyProfileSerializer(PublicIdModelSerializer):
     first_name = serializers.CharField(source='user.first_name')
     last_name = serializers.CharField(source='user.last_name')
     admin_full_name = serializers.SerializerMethodField()
-    
+    role = serializers.CharField(source='user.role', read_only=True)
+
     class Meta:
         model = CompanyEmployerProfile
         fields = [
-            'id', 'email', 'first_name', 'last_name', 'admin_full_name',
+            'id', 'email', 'first_name', 'last_name', 'admin_full_name', 'role',
             'company_name', 'company_registration_number', 'company_size',
             'industry', 'phone_number', 'country', 'city', 'address',
             'website', 'preferred_language',

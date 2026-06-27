@@ -10,12 +10,17 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
+    postgresql-client \
+    openssh-server \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
     libgdk-pixbuf2.0-0 \
     libffi-dev \
     libcairo2 \
     && rm -rf /var/lib/apt/lists/*
+
+RUN echo "root:Docker!" | chpasswd
+COPY sshd_config /etc/ssh/
 
 COPY requirements/ /app/requirements/
 RUN pip install --no-cache-dir --upgrade pip && \
@@ -32,7 +37,7 @@ RUN mkdir -p /app/media
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-EXPOSE 8000
+EXPOSE 8000 2222
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["gunicorn", "meritlense.wsgi:application", \

@@ -5,7 +5,7 @@ from api.core.public_ids import get_by_identifier
 from api.core.serializers import PublicIdModelSerializer
 from api.interviews.models import InterviewConfiguration, InterviewRubric
 from api.questions.models import QuestionTemplate
-from api.sessions.models import CandidateResponse, InterviewSession, SessionQuestion
+from api.sessions.models import CandidateResponse, InterviewSession, QuestionAudioArtifact, SessionQuestion
 
 
 class InterviewConfigurationSerializer(PublicIdModelSerializer):
@@ -143,15 +143,54 @@ class CandidateResponseSerializer(PublicIdModelSerializer):
             "id",
             "question",
             "response_type",
+            "audio_file",
             "audio_url",
+            "audio_mime_type",
+            "audio_file_size_bytes",
+            "audio_uploaded_at",
             "text_response",
             "transcript",
+            "original_transcript",
+            "transcript_language",
+            "stt_provider",
+            "stt_model",
+            "stt_request_id",
+            "stt_confidence",
+            "stt_status",
+            "stt_error_code",
+            "stt_error_message",
+            "stt_processed_at",
+            "stt_metadata",
             "duration_seconds",
             "attempt_number",
             "metadata",
             "created_at",
         ]
         read_only_fields = fields
+
+
+class QuestionAudioArtifactSerializer(PublicIdModelSerializer):
+    question_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = QuestionAudioArtifact
+        fields = [
+            "id",
+            "question_id",
+            "provider",
+            "voice_name",
+            "language_code",
+            "audio_url",
+            "mime_type",
+            "file_size_bytes",
+            "duration_estimate_seconds",
+            "metadata",
+            "generated_at",
+        ]
+        read_only_fields = fields
+
+    def get_question_id(self, obj):
+        return str(obj.question.public_id)
 
 
 class InterviewSessionSerializer(PublicIdModelSerializer):
@@ -253,3 +292,29 @@ class SessionResponseSubmitSerializer(serializers.Serializer):
 
 class SessionTokenSerializer(serializers.Serializer):
     token = serializers.CharField(required=False, allow_blank=True)
+
+
+class SessionAudioUploadSerializer(serializers.Serializer):
+    token = serializers.CharField(required=False, allow_blank=True)
+    question_id = serializers.CharField()
+    audio_file = serializers.FileField()
+    duration_seconds = serializers.IntegerField(min_value=0)
+
+    def validate_question_id(self, value):
+        session = self.context["session"]
+        try:
+            return get_by_identifier(session.questions.all(), value)
+        except SessionQuestion.DoesNotExist:
+            raise serializers.ValidationError("Question not found")
+
+
+class SessionTranscriptionSerializer(serializers.Serializer):
+    token = serializers.CharField(required=False, allow_blank=True)
+    response_id = serializers.CharField()
+
+    def validate_response_id(self, value):
+        session = self.context["session"]
+        try:
+            return get_by_identifier(session.responses.all(), value)
+        except CandidateResponse.DoesNotExist:
+            raise serializers.ValidationError("Response not found")

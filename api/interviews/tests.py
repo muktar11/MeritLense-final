@@ -1,16 +1,21 @@
 import asyncio
 import json
+import shutil
+import tempfile
+from unittest.mock import patch
 
 from asgiref.testing import ApplicationCommunicator
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 
 from api.accounts.models import User
+from api.audit.models import AuditLog
 from api.candidates.models import Candidate
-from api.core.constants import InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, Roles
+from api.core.constants import AuditLogAction, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, Roles
 from api.interviews.models import InterviewConfiguration, InterviewRubric
+from api.interviews.voice_services import VoiceProviderError
 from api.questions.models import QuestionTemplate
 from api.sessions.models import CandidateResponse, InterviewSession
 from meritlense.asgi import application
@@ -21,6 +26,19 @@ def make_file(name="passport.pdf", content=b"passport"):
 
 
 class InterviewSessionApiTests(APITestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._media_dir = tempfile.mkdtemp(prefix="interview-tests-")
+        cls._override = override_settings(MEDIA_ROOT=cls._media_dir)
+        cls._override.enable()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._override.disable()
+        shutil.rmtree(cls._media_dir, ignore_errors=True)
+        super().tearDownClass()
+
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create_user(
@@ -288,6 +306,328 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(complete_response.status_code, 200)
         self.assertEqual(complete_response.data["status"], "COMPLETED")
 
+    def test_current_question_endpoint_returns_active_question(self):
+        session = self._create_and_start_session()
+
+        response = self.client.get(f"/api/v1/interviews/{session.public_id}/current-question/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["question_order"], 1)
+        self.assertEqual(response.data["status"], "ASKED")
+
+    def test_upload_response_audio_persists_voice_metadata_and_audits(self):
+        session = self._create_and_start_session()
+        question = session.questions.order_by("question_order").first()
+        question.status = "ASKED"
+        question.asked_at = timezone.now()
+        question.save(update_fields=["status", "asked_at", "updated_at"])
+
+        response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/upload-response-audio/",
+            {
+                "question_id": str(question.public_id),
+                "duration_seconds": 12,
+                "audio_file": SimpleUploadedFile("answer.webm", b"voice-bytes", content_type="audio/webm"),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        stored = CandidateResponse.objects.get(public_id=response.data["id"])
+        self.assertEqual(stored.response_type, "VOICE")
+        self.assertEqual(stored.audio_mime_type, "audio/webm")
+        self.assertEqual(stored.audio_file_size_bytes, len(b"voice-bytes"))
+        self.assertEqual(stored.stt_status, "PENDING")
+        self.assertTrue(stored.audio_file.name)
+        self.assertEqual(stored.question.status, "ANSWERED")
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.AUDIO_UPLOAD_COMPLETED).exists())
+
+    def test_upload_response_audio_supports_session_token_access(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+        token_client = APIClient()
+
+        response = token_client.post(
+            f"/api/v1/interviews/{session.public_id}/upload-response-audio/",
+            {
+                "question_id": str(question.public_id),
+                "duration_seconds": 10,
+                "audio_file": SimpleUploadedFile("answer.webm", b"voice-bytes", content_type="audio/webm"),
+                "token": session.access_token,
+            },
+            format="multipart",
+            HTTP_X_SESSION_TOKEN=session.access_token,
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        audit = AuditLog.objects.filter(action=AuditLogAction.AUDIO_UPLOAD_COMPLETED).latest("created_at")
+        self.assertEqual(audit.data["access_context"], "session_token")
+
+    def test_voice_endpoints_reject_invalid_session_token(self):
+        session = self._create_and_start_session()
+        token_client = APIClient()
+
+        response = token_client.get(
+            f"/api/v1/interviews/{session.public_id}/current-question/",
+            HTTP_X_SESSION_TOKEN="bad-token",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_upload_response_audio_rejects_invalid_type(self):
+        session = self._create_and_start_session()
+        question = session.questions.order_by("question_order").first()
+        question.status = "ASKED"
+        question.save(update_fields=["status", "updated_at"])
+
+        response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/upload-response-audio/",
+            {
+                "question_id": str(question.public_id),
+                "duration_seconds": 12,
+                "audio_file": SimpleUploadedFile("answer.txt", b"not-audio", content_type="text/plain"),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Unsupported audio type", str(response.data["detail"]))
+
+    @override_settings(INTERVIEW_AUDIO_MAX_FILE_SIZE_BYTES=4)
+    def test_upload_response_audio_rejects_oversized_file(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+
+        response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/upload-response-audio/",
+            {
+                "question_id": str(question.public_id),
+                "duration_seconds": 12,
+                "audio_file": SimpleUploadedFile("answer.webm", b"voice-bytes", content_type="audio/webm"),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Audio file is too large", str(response.data["detail"]))
+
+    def test_upload_response_audio_rejects_expired_session(self):
+        session = self._create_and_start_session()
+        session.expires_at = timezone.now() - timezone.timedelta(minutes=1)
+        session.status = "EXPIRED"
+        session.save(update_fields=["expires_at", "status", "updated_at"])
+        question = session.questions.order_by("question_order").first()
+        question.status = "ASKED"
+        question.save(update_fields=["status", "updated_at"])
+
+        response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/upload-response-audio/",
+            {
+                "question_id": str(question.public_id),
+                "duration_seconds": 12,
+                "audio_file": SimpleUploadedFile("answer.webm", b"voice-bytes", content_type="audio/webm"),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Cannot answer after session is closed", str(response.data["detail"]))
+
+    def test_upload_response_audio_rejects_duplicate_submission_for_answered_question(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+
+        first = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/upload-response-audio/",
+            {
+                "question_id": str(question.public_id),
+                "duration_seconds": 12,
+                "audio_file": SimpleUploadedFile("answer.webm", b"voice-bytes", content_type="audio/webm"),
+            },
+            format="multipart",
+        )
+        second = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/upload-response-audio/",
+            {
+                "question_id": str(question.public_id),
+                "duration_seconds": 12,
+                "audio_file": SimpleUploadedFile("answer-2.webm", b"voice-bytes-2", content_type="audio/webm"),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(first.status_code, 200, first.data)
+        self.assertEqual(second.status_code, 400)
+        self.assertIn("Question is not currently active", str(second.data["detail"]))
+
+    def test_transcribe_response_success_path(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+        upload_response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/upload-response-audio/",
+            {
+                "question_id": str(question.public_id),
+                "duration_seconds": 9,
+                "audio_file": SimpleUploadedFile("answer.webm", b"voice-bytes", content_type="audio/webm"),
+            },
+            format="multipart",
+        )
+        response_id = upload_response.data["id"]
+
+        class FakeSttService:
+            provider = "OPENAI"
+
+            def transcribe(self, **kwargs):
+                return {
+                    "provider": "OPENAI",
+                    "provider_model": "whisper-1",
+                    "request_id": "req_123",
+                    "detected_language": "en",
+                    "confidence": None,
+                    "processing_status": "COMPLETED",
+                    "transcript": "I would keep the child safe first.",
+                    "metadata": {"segments": []},
+                }
+
+        with patch("api.sessions.services.InterviewVoicePipelineService.stt_service_class", FakeSttService):
+            response = self.client.post(
+                f"/api/v1/interviews/{session.public_id}/transcribe-response/",
+                {"response_id": response_id},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        stored = CandidateResponse.objects.get(public_id=response_id)
+        self.assertEqual(stored.transcript, "I would keep the child safe first.")
+        self.assertEqual(stored.original_transcript, "I would keep the child safe first.")
+        self.assertEqual(stored.stt_status, "COMPLETED")
+        self.assertEqual(stored.stt_provider, "OPENAI")
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TRANSCRIPTION_COMPLETED).exists())
+
+    def test_transcribe_response_is_retry_safe_after_success(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+        upload_response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/upload-response-audio/",
+            {
+                "question_id": str(question.public_id),
+                "duration_seconds": 9,
+                "audio_file": SimpleUploadedFile("answer.webm", b"voice-bytes", content_type="audio/webm"),
+            },
+            format="multipart",
+        )
+        response_id = upload_response.data["id"]
+
+        class FakeSttService:
+            provider = "OPENAI"
+            calls = 0
+
+            def transcribe(self, **kwargs):
+                type(self).calls += 1
+                return {
+                    "provider": "OPENAI",
+                    "provider_model": "whisper-1",
+                    "request_id": "req_123",
+                    "detected_language": "en",
+                    "confidence": None,
+                    "processing_status": "COMPLETED",
+                    "transcript": "Stable transcript",
+                    "metadata": {"segments": []},
+                }
+
+        with patch("api.sessions.services.InterviewVoicePipelineService.stt_service_class", FakeSttService):
+            first = self.client.post(
+                f"/api/v1/interviews/{session.public_id}/transcribe-response/",
+                {"response_id": response_id},
+                format="json",
+            )
+            second = self.client.post(
+                f"/api/v1/interviews/{session.public_id}/transcribe-response/",
+                {"response_id": response_id},
+                format="json",
+            )
+
+        self.assertEqual(first.status_code, 200, first.data)
+        self.assertEqual(second.status_code, 200, second.data)
+        self.assertEqual(FakeSttService.calls, 1)
+
+    def test_transcribe_response_failure_path(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+        upload_response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/upload-response-audio/",
+            {
+                "question_id": str(question.public_id),
+                "duration_seconds": 9,
+                "audio_file": SimpleUploadedFile("answer.webm", b"voice-bytes", content_type="audio/webm"),
+            },
+            format="multipart",
+        )
+        response_id = upload_response.data["id"]
+
+        class FakeSttService:
+            provider = "OPENAI"
+
+            def transcribe(self, **kwargs):
+                raise VoiceProviderError("Speech-to-text provider timed out", code="stt_timeout")
+
+        with patch("api.sessions.services.InterviewVoicePipelineService.stt_service_class", FakeSttService):
+            response = self.client.post(
+                f"/api/v1/interviews/{session.public_id}/transcribe-response/",
+                {"response_id": response_id},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        stored = CandidateResponse.objects.get(public_id=response_id)
+        self.assertEqual(stored.stt_status, "FAILED")
+        self.assertEqual(stored.stt_error_code, "stt_timeout")
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TRANSCRIPTION_FAILED).exists())
+
+    def test_question_audio_generation_and_caching(self):
+        session = self._create_and_start_session()
+
+        class FakeTtsService:
+            def __init__(self):
+                self.provider = "GOOGLE"
+
+            def synthesize(self, **kwargs):
+                return {
+                    "provider": "GOOGLE",
+                    "voice_name": "en-US-Standard-C",
+                    "language_code": "en-US",
+                    "mime_type": "audio/mpeg",
+                    "audio_bytes": b"mp3-bytes",
+                    "duration_estimate_seconds": 4,
+                    "metadata": {"audio_encoding": "MP3"},
+                }
+
+        with patch("api.sessions.services.InterviewVoicePipelineService.tts_service_class", FakeTtsService):
+            first = self.client.post(f"/api/v1/interviews/{session.public_id}/question-audio/", {}, format="json")
+            second = self.client.post(f"/api/v1/interviews/{session.public_id}/question-audio/", {}, format="json")
+
+        self.assertEqual(first.status_code, 200, first.data)
+        self.assertEqual(second.status_code, 200, second.data)
+        self.assertEqual(first.data["id"], second.data["id"])
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.QUESTION_AUDIO_GENERATED).exists())
+
+    def test_question_audio_failure_returns_controlled_error(self):
+        session = self._create_and_start_session()
+
+        class FakeTtsService:
+            def __init__(self):
+                self.provider = "GOOGLE"
+
+            def synthesize(self, **kwargs):
+                raise VoiceProviderError("Text-to-speech provider timed out", code="tts_timeout")
+
+        with patch("api.sessions.services.InterviewVoicePipelineService.tts_service_class", FakeTtsService):
+            response = self.client.post(f"/api/v1/interviews/{session.public_id}/question-audio/", {}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Text-to-speech provider timed out", str(response.data["detail"]))
+        self.assertFalse(session.question_audio_artifacts.exists())
+
     def test_cannot_start_expired_session(self):
         session = InterviewSession.objects.create(
             candidate=self.candidate,
@@ -356,6 +696,48 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(create_response.status_code, 201)
         self.assertEqual(create_response.data["total_questions"], 1)
         self.assertEqual(create_response.data["questions"][0]["question_text"], "How do you greet your employer?")
+
+    def _create_and_start_session(self):
+        session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            role_code=self.config.role_code,
+            ui_language="EN",
+            candidate_language="EN",
+            tts_language_code="en-US",
+            stt_language_code="en-US",
+            translation_target="",
+            total_questions=3,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v1",
+            question_set_version="v1",
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+            status="IN_PROGRESS",
+            started_at=timezone.now(),
+        )
+        for index, template in enumerate(QuestionTemplate.objects.order_by("sequence_number")[:3], start=1):
+            session.questions.create(
+                question_template=template,
+                question_text=template.question_text,
+                domain=template.domain,
+                skill=template.skill,
+                difficulty=template.difficulty,
+                question_order=index,
+                is_mandatory=template.is_mandatory,
+            )
+        return session
+
+    def _mark_first_question_asked(self, session):
+        question = session.questions.order_by("question_order").first()
+        question.status = "ASKED"
+        question.asked_at = timezone.now()
+        question.save(update_fields=["status", "asked_at", "updated_at"])
+        session.current_question_index = question.question_order
+        session.save(update_fields=["current_question_index", "updated_at"])
+        return question
 
 
 class InterviewSessionWebSocketTests(TransactionTestCase):

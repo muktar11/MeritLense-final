@@ -10,17 +10,21 @@ from api.core.public_ids import PUBLIC_ID_OR_PK_REGEX, build_object_identifier_f
 from api.interviews.models import InterviewConfiguration, InterviewRubric
 from api.questions.models import QuestionTemplate
 from api.sessions.models import InterviewSession
-from api.sessions.services import InterviewSessionService
+from api.sessions.services import InterviewSessionService, InterviewVoicePipelineService
 
 from .serializers import (
+    CandidateResponseSerializer,
     InterviewConfigurationSerializer,
     InterviewSessionCreateSerializer,
     InterviewSessionSerializer,
     InterviewRubricSerializer,
+    QuestionAudioArtifactSerializer,
     QuestionTemplateSerializer,
+    SessionAudioUploadSerializer,
     SessionQuestionSerializer,
     SessionResponseSubmitSerializer,
     SessionStartSerializer,
+    SessionTranscriptionSerializer,
     SessionTokenSerializer,
 )
 
@@ -103,6 +107,10 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
     def get_serializer_class(self):
         if self.action == "create":
             return InterviewSessionCreateSerializer
+        if self.action == "upload_response_audio":
+            return SessionAudioUploadSerializer
+        if self.action == "transcribe_response":
+            return SessionTranscriptionSerializer
         if self.action == "submit_response":
             return SessionResponseSubmitSerializer
         if self.action == "start":
@@ -149,10 +157,15 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
     @extend_schema(request=None, responses={200: SessionQuestionSerializer})
     @action(detail=True, methods=["get"], url_path="next-question")
     def next_question(self, request, id=None):
+        return self.current_question(request, id=id)
+
+    @extend_schema(request=None, responses={200: SessionQuestionSerializer})
+    @action(detail=True, methods=["get"], url_path="current-question")
+    def current_question(self, request, id=None):
         session = self._get_session()
         self._ensure_access(session, request)
         try:
-            question, completed = InterviewSessionService.get_next_question(
+            question, completed = InterviewSessionService.get_or_activate_current_question(
                 session,
                 actor=request.user if request.user.is_authenticated else None,
             )
@@ -162,6 +175,59 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             return Response({"status": "COMPLETED"})
         serializer = SessionQuestionSerializer(question)
         return Response(serializer.data)
+
+    @extend_schema(request=SessionTokenSerializer, responses={200: QuestionAudioArtifactSerializer})
+    @action(detail=True, methods=["post"], url_path="question-audio")
+    def question_audio(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        try:
+            artifact = InterviewVoicePipelineService.get_or_generate_question_audio(
+                session=session,
+                actor=request.user if request.user.is_authenticated else None,
+            )
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        serializer = QuestionAudioArtifactSerializer(artifact)
+        return Response(serializer.data)
+
+    @extend_schema(request=SessionAudioUploadSerializer, responses={200: CandidateResponseSerializer})
+    @action(detail=True, methods=["post"], url_path="upload-response-audio")
+    def upload_response_audio(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        serializer = self.get_serializer(data=request.data, context={"session": session})
+        serializer.is_valid(raise_exception=True)
+        try:
+            response = InterviewVoicePipelineService.upload_response_audio(
+                session=session,
+                question=serializer.validated_data["question_id"],
+                uploaded_file=serializer.validated_data["audio_file"],
+                duration_seconds=serializer.validated_data["duration_seconds"],
+                actor=request.user if request.user.is_authenticated else None,
+            )
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        output = CandidateResponseSerializer(response, context={"request": request})
+        return Response(output.data)
+
+    @extend_schema(request=SessionTranscriptionSerializer, responses={200: CandidateResponseSerializer})
+    @action(detail=True, methods=["post"], url_path="transcribe-response")
+    def transcribe_response(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        serializer = self.get_serializer(data=request.data, context={"session": session})
+        serializer.is_valid(raise_exception=True)
+        try:
+            response = InterviewVoicePipelineService.transcribe_response(
+                session=session,
+                response=serializer.validated_data["response_id"],
+                actor=request.user if request.user.is_authenticated else None,
+            )
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        output = CandidateResponseSerializer(response, context={"request": request})
+        return Response(output.data)
 
     @extend_schema(request=SessionResponseSubmitSerializer, responses={200: dict})
     @action(detail=True, methods=["post"], url_path="submit-response")

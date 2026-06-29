@@ -1,16 +1,11 @@
 #!/bin/sh
+set -e
 
-echo "Waiting for PostgreSQL to be ready..."
+echo "Starting SSH service..."
+service ssh start
 
-while ! nc -z "$DB_HOST" "$DB_PORT"; do
-  sleep 1
-done
+echo "Running database migrations..."
+python manage.py migrate --noinput
 
-echo "PostgreSQL is up - continuing..."
-
-python manage.py makemigrations accounts audit candidates contracts core evaluations organizations payments reports subscriptions
-python manage.py migrate
-
-python manage.py shell < /app/create_superuser.py
-
-python manage.py runserver 0.0.0.0:8000
+echo "Starting application..."
+exec "$@"

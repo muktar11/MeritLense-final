@@ -1,5 +1,5 @@
 from collections import defaultdict
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
@@ -82,16 +82,20 @@ class Command(BaseCommand):
             if not row[0] or row[0] == "TOTAL":
                 continue
             weight_value = row[2]
-            if isinstance(weight_value, str) and weight_value.endswith("%"):
-                weight = Decimal(weight_value.rstrip("%")) / Decimal("100")
-            else:
-                weight = Decimal(str(weight_value))
+            try:
+                if isinstance(weight_value, str) and weight_value.endswith("%"):
+                    weight = Decimal(weight_value.rstrip("%")) / Decimal("100")
+                else:
+                    weight = Decimal(str(weight_value))
+                max_score = int(row[3])
+            except (InvalidOperation, TypeError, ValueError):
+                continue
             rows.append(
                 {
                     "skill_tag": row[0],
                     "scoring_category": row[1],
                     "weight": weight,
-                    "max_score": int(row[3]),
+                    "max_score": max_score,
                     "scoring_type": row[4],
                     "domain": row[5] or "",
                     "notes": row[6] or "",

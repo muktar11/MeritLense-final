@@ -1,6 +1,7 @@
 from datetime import timedelta
 from pathlib import Path
 import os
+import json
 
 from dotenv import load_dotenv
 
@@ -22,6 +23,16 @@ def env_list(name, default=None):
     if not value:
         return default or []
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def env_json(name, default=None):
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return default
 
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-dev-only-change-me")
@@ -190,6 +201,36 @@ AZURE_QUEUE_CONNECTION_STRING = os.getenv("AZURE_QUEUE_CONNECTION_STRING", "")
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
 AZURE_STORAGE_CONTAINER_NAME = os.getenv("AZURE_STORAGE_CONTAINER_NAME", "meritlense-media")
 AZURE_DEFAULT_QUEUE_NAME = os.getenv("AZURE_DEFAULT_QUEUE_NAME", "meritlense-jobs")
+
+INTERVIEW_AUDIO_ALLOWED_MIME_TYPES = env_list(
+    "INTERVIEW_AUDIO_ALLOWED_MIME_TYPES",
+    ["audio/webm", "audio/mp4", "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/ogg"],
+)
+INTERVIEW_AUDIO_MAX_FILE_SIZE_BYTES = int(os.getenv("INTERVIEW_AUDIO_MAX_FILE_SIZE_BYTES", str(10 * 1024 * 1024)))
+INTERVIEW_AUDIO_MAX_DURATION_SECONDS = int(os.getenv("INTERVIEW_AUDIO_MAX_DURATION_SECONDS", "600"))
+
+STT_PROVIDER = os.getenv("STT_PROVIDER", "OPENAI").upper()
+STT_API_URL = os.getenv("STT_API_URL", "https://api.openai.com/v1/audio/transcriptions")
+STT_API_KEY = os.getenv("STT_API_KEY", "")
+STT_MODEL = os.getenv("STT_MODEL", "whisper-1")
+STT_TIMEOUT_SECONDS = int(os.getenv("STT_TIMEOUT_SECONDS", "60"))
+
+TTS_PROVIDER = os.getenv("TTS_PROVIDER", "GOOGLE").upper()
+TTS_API_URL = os.getenv("TTS_API_URL", "https://texttospeech.googleapis.com/v1/text:synthesize")
+GOOGLE_TTS_API_KEY = os.getenv("GOOGLE_TTS_API_KEY", "")
+TTS_TIMEOUT_SECONDS = int(os.getenv("TTS_TIMEOUT_SECONDS", "30"))
+TTS_AUDIO_ENCODING = os.getenv("TTS_AUDIO_ENCODING", "MP3").upper()
+TTS_VOICE_MAP = env_json(
+    "TTS_VOICE_MAP",
+    {
+        "en-US": "en-US-Standard-C",
+        "es-ES": "es-ES-Standard-A",
+        "fr-FR": "fr-FR-Standard-A",
+        "ar-SA": "ar-XA-Standard-A",
+        "de-DE": "de-DE-Standard-A",
+        "zh-CN": "cmn-CN-Standard-A",
+    },
+)
 
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")

@@ -25,4 +25,8 @@ def health_check(request):
         "database": database,
         "azure_queue": "configured" if settings.AZURE_QUEUE_CONNECTION_STRING else "not_configured",
         "azure_storage": "configured" if settings.AZURE_STORAGE_CONNECTION_STRING else "not_configured",
+        "stt_provider": settings.STT_PROVIDER,
+        "stt_status": "configured" if settings.STT_API_KEY else "not_configured",
+        "tts_provider": settings.TTS_PROVIDER,
+        "tts_status": "configured" if settings.GOOGLE_TTS_API_KEY else "not_configured",
     })

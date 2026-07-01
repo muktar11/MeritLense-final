@@ -598,6 +598,7 @@ class AuditLogCategory:
     CANDIDATE = "CANDIDATE"
     SESSION = "SESSION"
     QUESTION = "QUESTION"
+    VOICE = "VOICE"
     INTEGRITY = "INTEGRITY"
     EVALUATION = "EVALUATION"
     SUBSCRIPTION = "SUBSCRIPTION"
@@ -614,6 +615,7 @@ class AuditLogCategory:
         (CANDIDATE, "Candidate Management"),
         (SESSION, "Interview Session"),
         (QUESTION, "Interview Question"),
+        (VOICE, "Voice Pipeline"),
         (INTEGRITY, "Integrity Monitoring"),
         (EVALUATION, "Evaluation"),
         (SUBSCRIPTION, "Subscription"),
@@ -657,6 +659,14 @@ class AuditLogAction:
     QUESTION_SENT = "QUESTION_SENT"
     QUESTION_VIEWED = "QUESTION_VIEWED"
     ANSWER_SUBMITTED = "ANSWER_SUBMITTED"
+    AUDIO_UPLOAD_STARTED = "AUDIO_UPLOAD_STARTED"
+    AUDIO_UPLOAD_COMPLETED = "AUDIO_UPLOAD_COMPLETED"
+    QUESTION_AUDIO_GENERATED = "QUESTION_AUDIO_GENERATED"
+    TRANSCRIPTION_REQUESTED = "TRANSCRIPTION_REQUESTED"
+    TRANSCRIPTION_COMPLETED = "TRANSCRIPTION_COMPLETED"
+    TRANSCRIPTION_FAILED = "TRANSCRIPTION_FAILED"
+    RESPONSE_ATTACHED = "RESPONSE_ATTACHED"
+    SESSION_MOVED_TO_NEXT_QUESTION = "SESSION_MOVED_TO_NEXT_QUESTION"
 
     
     EVALUATION_CREATED = "EVALUATION_CREATED"
@@ -801,6 +811,14 @@ class AuditLogAction:
         (QUESTION_SENT, "Question Sent"),
         (QUESTION_VIEWED, "Question Viewed"),
         (ANSWER_SUBMITTED, "Answer Submitted"),
+        (AUDIO_UPLOAD_STARTED, "Audio Upload Started"),
+        (AUDIO_UPLOAD_COMPLETED, "Audio Upload Completed"),
+        (QUESTION_AUDIO_GENERATED, "Question Audio Generated"),
+        (TRANSCRIPTION_REQUESTED, "Transcription Requested"),
+        (TRANSCRIPTION_COMPLETED, "Transcription Completed"),
+        (TRANSCRIPTION_FAILED, "Transcription Failed"),
+        (RESPONSE_ATTACHED, "Response Attached"),
+        (SESSION_MOVED_TO_NEXT_QUESTION, "Session Moved To Next Question"),
         
         (EVALUATION_CREATED, "Evaluation Created"),
         (EVALUATION_UPDATED, "Evaluation Updated"),

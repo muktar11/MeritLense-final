@@ -1,5 +1,6 @@
 import secrets
 from datetime import timedelta
+from pathlib import Path
 
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
@@ -14,6 +15,16 @@ from api.core.constants import (
     SessionQuestionStatus,
 )
 from api.core.models import SoftDeleteModel, TimeStampedModel
+
+
+def response_audio_upload_to(instance, filename):
+    extension = Path(filename).suffix or ".bin"
+    return f"interviews/sessions/{instance.session_id}/responses/{instance.public_id}{extension}"
+
+
+def question_audio_upload_to(instance, filename):
+    extension = Path(filename).suffix or ".bin"
+    return f"interviews/sessions/{instance.session_id}/questions/{instance.question_id}/tts/{instance.public_id}{extension}"
 
 
 class InterviewSession(TimeStampedModel, SoftDeleteModel):
@@ -229,9 +240,24 @@ class CandidateResponse(TimeStampedModel):
         choices=CandidateResponseType.CHOICES,
         default=CandidateResponseType.TEXT,
     )
+    audio_file = models.FileField(upload_to=response_audio_upload_to, blank=True)
     audio_url = models.URLField(blank=True)
+    audio_mime_type = models.CharField(max_length=100, blank=True)
+    audio_file_size_bytes = models.PositiveIntegerField(default=0)
+    audio_uploaded_at = models.DateTimeField(null=True, blank=True)
     text_response = models.TextField(blank=True)
     transcript = models.TextField(blank=True)
+    original_transcript = models.TextField(blank=True)
+    transcript_language = models.CharField(max_length=20, blank=True)
+    stt_provider = models.CharField(max_length=100, blank=True)
+    stt_model = models.CharField(max_length=100, blank=True)
+    stt_request_id = models.CharField(max_length=150, blank=True)
+    stt_confidence = models.DecimalField(max_digits=5, decimal_places=4, null=True, blank=True)
+    stt_status = models.CharField(max_length=20, default="PENDING")
+    stt_error_code = models.CharField(max_length=100, blank=True)
+    stt_error_message = models.TextField(blank=True)
+    stt_processed_at = models.DateTimeField(null=True, blank=True)
+    stt_metadata = models.JSONField(default=dict, blank=True)
     duration_seconds = models.PositiveIntegerField(default=0)
     attempt_number = models.PositiveIntegerField(default=1)
     metadata = models.JSONField(default=dict, blank=True)
@@ -247,6 +273,42 @@ class CandidateResponse(TimeStampedModel):
 
     def __str__(self):
         return f"{self.session_id} - Q{self.question_id} - {self.response_type}"
+
+
+class QuestionAudioArtifact(TimeStampedModel):
+    session = models.ForeignKey(
+        InterviewSession,
+        on_delete=models.CASCADE,
+        related_name="question_audio_artifacts",
+    )
+    question = models.ForeignKey(
+        SessionQuestion,
+        on_delete=models.CASCADE,
+        related_name="audio_artifacts",
+    )
+    provider = models.CharField(max_length=100)
+    voice_name = models.CharField(max_length=120)
+    language_code = models.CharField(max_length=20)
+    audio_file = models.FileField(upload_to=question_audio_upload_to)
+    audio_url = models.URLField(blank=True)
+    mime_type = models.CharField(max_length=100, blank=True)
+    file_size_bytes = models.PositiveIntegerField(default=0)
+    duration_estimate_seconds = models.PositiveIntegerField(default=0)
+    metadata = models.JSONField(default=dict, blank=True)
+    generated_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Question Audio Artifact"
+        verbose_name_plural = "Question Audio Artifacts"
+        unique_together = [("session", "question", "language_code", "voice_name")]
+        indexes = [
+            models.Index(fields=["session", "question"]),
+            models.Index(fields=["provider", "generated_at"]),
+        ]
+        ordering = ["question__question_order", "-generated_at"]
+
+    def __str__(self):
+        return f"{self.session_id} - Q{self.question_id} - {self.language_code}"
 
 
 class IntegrityLog(TimeStampedModel):

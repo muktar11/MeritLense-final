@@ -222,3 +222,167 @@ AZURE_STORAGE_CONTAINER_NAME=meritlense-media
 ```
 
 Use `api.storage.services.enqueue_background_job()` when a feature needs to submit a background job.
+
+## Week 4 Voice Pipeline
+
+The backend now supports the Week 4 interview voice loop:
+
+- `GET /api/v1/interviews/{id}/current-question/`
+- `POST /api/v1/interviews/{id}/question-audio/`
+- `POST /api/v1/interviews/{id}/upload-response-audio/`
+- `POST /api/v1/interviews/{id}/transcribe-response/`
+
+Voice pipeline behavior:
+
+- Question audio is generated through the configured TTS provider and cached per session question.
+- Candidate voice answers are stored as first-class response records with file metadata.
+- Transcription is handled through a provider abstraction and persists transcript plus provider trace metadata.
+- Critical voice events are written into the audit log for traceability.
+
+### Voice Environment Variables
+
+```text
+INTERVIEW_AUDIO_ALLOWED_MIME_TYPES=audio/webm,audio/mp4,audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/ogg
+INTERVIEW_AUDIO_MAX_FILE_SIZE_BYTES=10485760
+INTERVIEW_AUDIO_MAX_DURATION_SECONDS=600
+
+STT_PROVIDER=OPENAI
+STT_API_URL=https://api.openai.com/v1/audio/transcriptions
+STT_API_KEY=
+STT_MODEL=whisper-1
+STT_TIMEOUT_SECONDS=60
+
+TTS_PROVIDER=GOOGLE
+TTS_API_URL=https://texttospeech.googleapis.com/v1/text:synthesize
+GOOGLE_TTS_API_KEY=
+TTS_TIMEOUT_SECONDS=30
+TTS_AUDIO_ENCODING=MP3
+TTS_VOICE_MAP={"en-US":"en-US-Standard-C","es-ES":"es-ES-Standard-A"}
+```
+
+### Example Flow
+
+1. Start or resume a valid interview session.
+2. Call `GET /current-question/` to activate the next question in deterministic order.
+3. Call `POST /question-audio/` to get a cached or newly generated audio artifact for that question.
+4. Call `POST /upload-response-audio/` with multipart form data containing `question_id`, `audio_file`, and `duration_seconds`.
+5. Call `POST /transcribe-response/` with the returned `response_id` to persist the transcript and STT metadata.
+
+### Sample Requests
+
+Current question:
+
+```bash
+curl -X GET \
+  http://127.0.0.1:8000/api/v1/interviews/{session_id}/current-question/ \
+  -H "Authorization: Bearer <staff-jwt>"
+```
+
+Question audio:
+
+```bash
+curl -X POST \
+  http://127.0.0.1:8000/api/v1/interviews/{session_id}/question-audio/ \
+  -H "Authorization: Bearer <staff-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+Upload response audio:
+
+```bash
+curl -X POST \
+  http://127.0.0.1:8000/api/v1/interviews/{session_id}/upload-response-audio/ \
+  -H "X-Session-Token: <session-token>" \
+  -F "question_id=<question-public-id>" \
+  -F "duration_seconds=18" \
+  -F "audio_file=@answer.webm;type=audio/webm"
+```
+
+Transcribe response:
+
+```bash
+curl -X POST \
+  http://127.0.0.1:8000/api/v1/interviews/{session_id}/transcribe-response/ \
+  -H "Authorization: Bearer <staff-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"response_id":"<candidate-response-public-id>"}'
+```
+
+### Sample Responses
+
+Question audio response:
+
+```json
+{
+  "id": "artifact-public-id",
+  "question_id": "question-public-id",
+  "provider": "GOOGLE",
+  "voice_name": "en-US-Standard-C",
+  "language_code": "en-US",
+  "audio_url": "/media/interviews/sessions/12/questions/34/tts/file.mp3",
+  "mime_type": "audio/mpeg",
+  "file_size_bytes": 24876,
+  "duration_estimate_seconds": 6,
+  "metadata": {
+    "audio_encoding": "MP3",
+    "character_count": 87
+  },
+  "generated_at": "2026-06-24T08:10:00Z"
+}
+```
+
+Transcription response:
+
+```json
+{
+  "id": "response-public-id",
+  "question":  "question-public-id",
+  "response_type": "VOICE",
+  "audio_url": "/media/interviews/sessions/12/responses/file.webm",
+  "audio_mime_type": "audio/webm",
+  "audio_file_size_bytes": 98123,
+  "transcript": "I would keep the child safe first.",
+  "original_transcript": "I would keep the child safe first.",
+  "transcript_language": "en",
+  "stt_provider": "OPENAI",
+  "stt_model": "whisper-1",
+  "stt_request_id": "req_123",
+  "stt_confidence": null,
+  "stt_status": "COMPLETED",
+  "stt_error_code": "",
+  "stt_error_message": "",
+  "duration_seconds": 18
+}
+```
+
+### Audit Events
+
+The voice pipeline writes these key actions:
+
+- `AUDIO_UPLOAD_STARTED`
+- `AUDIO_UPLOAD_COMPLETED`
+- `QUESTION_AUDIO_GENERATED`
+- `TRANSCRIPTION_REQUESTED`
+- `TRANSCRIPTION_COMPLETED`
+- `TRANSCRIPTION_FAILED`
+- `RESPONSE_ATTACHED`
+- `SESSION_MOVED_TO_NEXT_QUESTION`
+
+Example audit payload fields:
+
+```json
+{
+  "session_id": "session-public-id",
+  "question_id": "question-public-id",
+  "candidate_response_id": "response-public-id",
+  "access_context": "session_token",
+  "provider": "OPENAI",
+  "request_id": "req_123",
+  "processing_status": "COMPLETED"
+}
+```
+
+### Week 4 Guardrail
+
+This Week 4 implementation does not introduce AI scoring or hiring decisions. Voice services are limited to audio storage, transcription, synthesis, and traceability so later evaluation modules can consume clean artifacts without violating the project rule: `AI Assists - Rules Decide - Humans Hire`.

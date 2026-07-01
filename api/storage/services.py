@@ -1,7 +1,11 @@
 import base64
 import json
+import os
+from pathlib import Path
 
 from django.conf import settings
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 
 
 class AzureQueueService:
@@ -48,3 +52,40 @@ class AzureQueueService:
 
 def enqueue_background_job(job_type, payload, queue_name=None):
     return AzureQueueService(queue_name=queue_name).send_job(job_type, payload)
+
+
+class MediaStorageService:
+    @classmethod
+    def save_uploaded_file(cls, *, uploaded_file, target_path):
+        saved_name = default_storage.save(target_path, uploaded_file)
+        return cls._build_file_details(saved_name)
+
+    @classmethod
+    def save_bytes(cls, *, content, target_path):
+        saved_name = default_storage.save(target_path, ContentFile(content))
+        return cls._build_file_details(saved_name)
+
+    @classmethod
+    def resolve_url(cls, storage_key):
+        if not storage_key:
+            return ""
+        try:
+            return default_storage.url(storage_key)
+        except Exception:
+            media_url = getattr(settings, "MEDIA_URL", "/media/")
+            return os.path.join(media_url.rstrip("/"), storage_key.lstrip("/"))
+
+    @classmethod
+    def _build_file_details(cls, storage_key):
+        file_size = None
+        try:
+            file_size = default_storage.size(storage_key)
+        except Exception:
+            file_size = None
+
+        return {
+            "storage_key": storage_key,
+            "storage_url": cls.resolve_url(storage_key),
+            "file_size_bytes": file_size,
+            "filename": Path(storage_key).name,
+        }

@@ -13,11 +13,12 @@ from rest_framework.test import APIClient, APITestCase
 from api.accounts.models import User
 from api.audit.models import AuditLog
 from api.candidates.models import Candidate
-from api.core.constants import AuditLogAction, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, Roles
-from api.interviews.models import InterviewConfiguration, InterviewRubric
+from api.core.constants import AuditLogAction, CoverageLevel, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, Roles
+from api.interviews.models import InterviewConfiguration, InterviewRubric, PackageSessionConfig, RolePackageCoverage
 from api.interviews.voice_services import VoiceProviderError
 from api.questions.models import QuestionTemplate
 from api.sessions.models import CandidateResponse, InterviewSession
+from api.evaluations.models import Evaluation
 from meritlense.asgi import application
 
 
@@ -217,6 +218,61 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(patch_response.status_code, 200)
         self.assertEqual(patch_response.data["notes"], "Updated")
 
+    def test_can_crud_package_session_config_and_role_coverage(self):
+        package_response = self.client.post(
+            "/api/v1/interviews/package-configs/",
+            {
+                "package_code": "starter",
+                "package_name": "Starter",
+                "audience": "B2B",
+                "evaluation_tier": "SCREENING",
+                "min_questions": 5,
+                "max_questions": 8,
+                "default_question_count": 8,
+                "duration_minutes": 15,
+                "task_observation_enabled": False,
+                "readiness_indicator_enabled": False,
+                "certificate_enabled": False,
+                "basic_report_enabled": True,
+                "analytics_enabled": False,
+                "api_access_enabled": False,
+                "video_introduction_enabled": False,
+                "behavioral_indicators_enabled": False,
+                "points_balance": 100,
+                "monthly_fee_display": "Pilot pricing",
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(package_response.status_code, 201, package_response.data)
+        package_id = package_response.data["id"]
+
+        coverage_response = self.client.post(
+            "/api/v1/interviews/role-coverage/",
+            {
+                "role_name": "Nanny",
+                "role_code": "nanny",
+                "package_code": "starter",
+                "package_name": "Starter",
+                "audience": "B2B",
+                "coverage_level": "SCREENING",
+                "evaluation_tier": "SCREENING",
+                "readiness_indicator_enabled": False,
+                "certificate_enabled": False,
+                "video_introduction_enabled": False,
+                "behavioral_indicators_enabled": False,
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(coverage_response.status_code, 201, coverage_response.data)
+
+        list_packages = self.client.get("/api/v1/interviews/package-configs/")
+        list_coverage = self.client.get("/api/v1/interviews/role-coverage/")
+        self.assertEqual(list_packages.status_code, 200)
+        self.assertEqual(list_coverage.status_code, 200)
+        self.assertTrue(any(item["id"] == package_id for item in list_packages.data))
+
     def test_team_member_cannot_manage_interview_setup(self):
         team_member = User.objects.create_user(
             email="team@example.com",
@@ -305,6 +361,204 @@ class InterviewSessionApiTests(APITestCase):
         )
         self.assertEqual(complete_response.status_code, 200)
         self.assertEqual(complete_response.data["status"], "COMPLETED")
+
+    def test_create_session_applies_package_architecture_context(self):
+        package = PackageSessionConfig.objects.create(
+            package_code="basic",
+            package_name="Basic",
+            audience="B2C",
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            min_questions=5,
+            max_questions=8,
+            default_question_count=8,
+            duration_minutes=15,
+            task_observation_enabled=False,
+            readiness_indicator_enabled=False,
+            certificate_enabled=False,
+            basic_report_enabled=True,
+        )
+        RolePackageCoverage.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            package_code="basic",
+            package_name="Basic",
+            audience="B2C",
+            coverage_level=CoverageLevel.SCREENING,
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            readiness_indicator_enabled=False,
+            certificate_enabled=False,
+        )
+
+        response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+                "package_code": "basic",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        session = InterviewSession.objects.get(public_id=response.data["id"])
+        self.assertEqual(session.package_session_config, package)
+        self.assertEqual(session.package_code, "basic")
+        self.assertEqual(session.coverage_level, CoverageLevel.SCREENING)
+        self.assertEqual(session.evaluation_tier, InterviewEvaluationTier.SCREENING)
+        self.assertFalse(session.readiness_indicator_enabled)
+        self.assertFalse(session.certificate_enabled)
+
+    def test_session_completion_creates_linked_evaluation_with_package_flags(self):
+        package = PackageSessionConfig.objects.create(
+            package_code="advanced",
+            package_name="Advanced",
+            audience="B2C",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            min_questions=10,
+            max_questions=12,
+            default_question_count=12,
+            duration_minutes=30,
+            task_observation_enabled=True,
+            readiness_indicator_enabled=True,
+            certificate_enabled=True,
+            basic_report_enabled=True,
+        )
+        RolePackageCoverage.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            package_code="advanced",
+            package_name="Advanced",
+            audience="B2C",
+            coverage_level=CoverageLevel.FULL,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            readiness_indicator_enabled=True,
+            certificate_enabled=True,
+            video_introduction_enabled=False,
+            behavioral_indicators_enabled=False,
+        )
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+                "package_code": "advanced",
+            },
+            format="json",
+        )
+        session_id = create_response.data["id"]
+        self.client.post(f"/api/v1/interviews/{session_id}/start/", {}, format="json")
+        session = InterviewSession.objects.get(public_id=session_id)
+        question = self._mark_first_question_asked(session)
+        self.client.post(
+            f"/api/v1/interviews/{session_id}/submit-response/",
+            {
+                "question_id": str(question.public_id),
+                "transcript": "Answer one",
+                "text_response": "Answer one",
+            },
+            format="json",
+        )
+        for remaining in session.questions.filter(status="PENDING").order_by("question_order"):
+            remaining.status = "ASKED"
+            remaining.asked_at = timezone.now()
+            remaining.save(update_fields=["status", "asked_at", "updated_at"])
+            self.client.post(
+                f"/api/v1/interviews/{session_id}/submit-response/",
+                {
+                    "question_id": str(remaining.public_id),
+                    "transcript": f"Answer {remaining.question_order}",
+                    "text_response": f"Answer {remaining.question_order}",
+                },
+                format="json",
+            )
+
+        self.client.post(
+            f"/api/v1/interviews/{session_id}/complete/",
+            {},
+            format="json",
+        )
+
+        session.refresh_from_db()
+        evaluation = Evaluation.objects.get(session=session)
+        self.assertEqual(evaluation.evaluation_tier, InterviewEvaluationTier.FULL)
+        self.assertEqual(evaluation.package_code, "advanced")
+        self.assertEqual(evaluation.coverage_level, CoverageLevel.FULL)
+        self.assertTrue(evaluation.readiness_indicator_enabled)
+        self.assertTrue(evaluation.certificate_enabled)
+        self.assertEqual(evaluation.status, "COMPLETED")
+
+    def test_screening_package_creates_gated_evaluation_end_to_end(self):
+        PackageSessionConfig.objects.create(
+            package_code="basic",
+            package_name="Basic",
+            audience="B2C",
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            min_questions=5,
+            max_questions=8,
+            default_question_count=8,
+            duration_minutes=15,
+            task_observation_enabled=False,
+            readiness_indicator_enabled=False,
+            certificate_enabled=False,
+            basic_report_enabled=True,
+        )
+        RolePackageCoverage.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            package_code="basic",
+            package_name="Basic",
+            audience="B2C",
+            coverage_level=CoverageLevel.SCREENING,
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            readiness_indicator_enabled=False,
+            certificate_enabled=False,
+            video_introduction_enabled=False,
+            behavioral_indicators_enabled=False,
+        )
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+                "package_code": "basic",
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        self.client.post(f"/api/v1/interviews/{session_id}/start/", {}, format="json")
+        session = InterviewSession.objects.get(public_id=session_id)
+
+        for question in session.questions.order_by("question_order"):
+            question.status = "ASKED"
+            question.asked_at = timezone.now()
+            question.save(update_fields=["status", "asked_at", "updated_at"])
+            response = self.client.post(
+                f"/api/v1/interviews/{session_id}/submit-response/",
+                {
+                    "question_id": str(question.public_id),
+                    "transcript": f"Answer {question.question_order}",
+                    "text_response": f"Answer {question.question_order}",
+                },
+                format="json",
+            )
+            self.assertEqual(response.status_code, 200, response.data)
+
+        complete_response = self.client.post(
+            f"/api/v1/interviews/{session_id}/complete/",
+            {},
+            format="json",
+        )
+        self.assertEqual(complete_response.status_code, 200, complete_response.data)
+
+        evaluation = Evaluation.objects.get(session=session)
+        self.assertEqual(evaluation.evaluation_tier, InterviewEvaluationTier.SCREENING)
+        self.assertEqual(evaluation.coverage_level, CoverageLevel.SCREENING)
+        self.assertFalse(evaluation.readiness_indicator_enabled)
+        self.assertFalse(evaluation.certificate_enabled)
+        self.assertEqual(evaluation.certificate_status, "NOT_ISSUED")
 
     def test_current_question_endpoint_returns_active_question(self):
         session = self._create_and_start_session()

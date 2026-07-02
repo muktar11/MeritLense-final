@@ -4,8 +4,10 @@ from django.core.validators import MinValueValidator
 from api.core.models import TimeStampedModel, SoftDeleteModel
 from api.core.constants import (
     CertificateStatus,
+    CoverageLevel,
     EvaluationStatus,
     EvaluationType,
+    InterviewEvaluationTier,
     JobRoles,
     Languages,
     ReadinessStatus,
@@ -96,6 +98,36 @@ class Evaluation(TimeStampedModel, SoftDeleteModel):
         null=True,
         blank=True,
         help_text="Score achieved in the evaluation (if applicable)"
+    )
+
+    evaluation_tier = models.CharField(
+        max_length=20,
+        choices=InterviewEvaluationTier.CHOICES,
+        default=InterviewEvaluationTier.FULL,
+        help_text="Package-controlled evaluation tier for this session"
+    )
+
+    package_code = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Subscription package that initiated the evaluation"
+    )
+
+    coverage_level = models.CharField(
+        max_length=20,
+        choices=CoverageLevel.CHOICES,
+        default=CoverageLevel.FULL,
+        help_text="Role coverage level derived from package architecture"
+    )
+
+    readiness_indicator_enabled = models.BooleanField(
+        default=True,
+        help_text="Whether readiness output is enabled for this evaluation"
+    )
+
+    certificate_enabled = models.BooleanField(
+        default=True,
+        help_text="Whether certificate issuance is allowed for this evaluation"
     )
 
     readiness_status = models.CharField(

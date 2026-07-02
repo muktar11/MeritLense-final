@@ -3,15 +3,7 @@ from django.utils import timezone
 
 from api.accounts.models import User
 from api.candidates.models import Candidate
-from api.core.constants import (
-    CandidateResponseType,
-    EvaluationType,
-    InterviewEvaluationTier,
-    QuestionDifficulty,
-    QuestionLifecycleStatus,
-    ReadinessStatus,
-    Roles,
-)
+from api.core.constants import CandidateResponseType, CoverageLevel, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles
 from api.evaluations.models import Evaluation
 from api.questions.models import QuestionTemplate
 from api.scores.models import CandidateScore, ScoreSet
@@ -156,6 +148,45 @@ class EvaluationRuleEngineTests(TestCase):
             transcript="Safe answer",
             text_response="Safe answer",
             metadata={"score": 3},
+        )
+        score_set = ScoreSet.objects.create(
+            candidate=self.candidate,
+            evaluation=self.evaluation,
+            created_by=self.user,
+            company=self.candidate.company,
+        )
+        CandidateScore.objects.create(
+            candidate=self.candidate,
+            evaluation=self.evaluation,
+            area="COMMUNICATION",
+            score=85,
+            created_by=self.user,
+            company=self.candidate.company,
+        )
+
+        score_set.calculate_average()
+        self.evaluation.refresh_from_db()
+
+        self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.PENDING)
+        self.assertFalse(self.evaluation.readiness_override_applied)
+
+    def test_screening_evaluation_skips_readiness_override(self):
+        self.session.evaluation_tier = InterviewEvaluationTier.SCREENING
+        self.session.coverage_level = CoverageLevel.SCREENING
+        self.session.readiness_indicator_enabled = False
+        self.session.save(update_fields=["evaluation_tier", "coverage_level", "readiness_indicator_enabled", "updated_at"])
+        self.evaluation.evaluation_tier = InterviewEvaluationTier.SCREENING
+        self.evaluation.coverage_level = CoverageLevel.SCREENING
+        self.evaluation.readiness_indicator_enabled = False
+        self.evaluation.save(update_fields=["evaluation_tier", "coverage_level", "readiness_indicator_enabled", "updated_at"])
+
+        CandidateResponse.objects.create(
+            session=self.session,
+            question=self.session_question,
+            response_type=CandidateResponseType.TEXT,
+            transcript="Unsafe answer",
+            text_response="Unsafe answer",
+            metadata={"score": 0},
         )
         score_set = ScoreSet.objects.create(
             candidate=self.candidate,

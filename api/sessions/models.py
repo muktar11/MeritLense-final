@@ -10,6 +10,7 @@ from api.accounts.models import User
 from api.candidates.models import Candidate
 from api.core.constants import (
     CandidateResponseType,
+    CoverageLevel,
     IdentityVerificationStatus,
     InterviewSessionStatus,
     SessionQuestionStatus,
@@ -45,6 +46,13 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
         on_delete=models.PROTECT,
         related_name="sessions",
     )
+    package_session_config = models.ForeignKey(
+        "interviews.PackageSessionConfig",
+        on_delete=models.SET_NULL,
+        related_name="sessions",
+        null=True,
+        blank=True,
+    )
     status = models.CharField(
         max_length=30,
         choices=InterviewSessionStatus.CHOICES,
@@ -60,6 +68,16 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
     current_question_index = models.PositiveIntegerField(default=0)
     total_questions = models.PositiveIntegerField(default=0)
     evaluation_tier = models.CharField(max_length=20, default="FULL")
+    package_code = models.CharField(max_length=50, blank=True)
+    package_name = models.CharField(max_length=100, blank=True)
+    coverage_level = models.CharField(
+        max_length=20,
+        choices=CoverageLevel.CHOICES,
+        default=CoverageLevel.FULL,
+    )
+    task_observation_enabled = models.BooleanField(default=False)
+    readiness_indicator_enabled = models.BooleanField(default=True)
+    certificate_enabled = models.BooleanField(default=True)
     rubric_version = models.CharField(max_length=20, blank=True)
     question_set_version = models.CharField(max_length=20, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)

@@ -7,7 +7,12 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from api.core.public_ids import PUBLIC_ID_OR_PK_REGEX, build_object_identifier_filter
-from api.interviews.models import InterviewConfiguration, InterviewRubric
+from api.interviews.models import (
+    InterviewConfiguration,
+    InterviewRubric,
+    PackageSessionConfig,
+    RolePackageCoverage,
+)
 from api.questions.models import QuestionTemplate
 from api.sessions.models import InterviewSession
 from api.sessions.services import InterviewSessionService, InterviewVoicePipelineService
@@ -18,8 +23,10 @@ from .serializers import (
     InterviewSessionCreateSerializer,
     InterviewSessionSerializer,
     InterviewRubricSerializer,
+    PackageSessionConfigSerializer,
     QuestionAudioArtifactSerializer,
     QuestionTemplateSerializer,
+    RolePackageCoverageSerializer,
     SessionAudioUploadSerializer,
     SessionQuestionSerializer,
     SessionResponseSubmitSerializer,
@@ -61,6 +68,32 @@ class InterviewRubricViewSet(CanManageInterviewSetupMixin, viewsets.ModelViewSet
     lookup_field = "public_id"
     lookup_url_kwarg = "id"
     lookup_value_regex = PUBLIC_ID_OR_PK_REGEX
+
+
+class PackageSessionConfigViewSet(CanManageInterviewSetupMixin, viewsets.ModelViewSet):
+    serializer_class = PackageSessionConfigSerializer
+    lookup_field = "public_id"
+    lookup_url_kwarg = "id"
+    lookup_value_regex = PUBLIC_ID_OR_PK_REGEX
+
+    def get_queryset(self):
+        queryset = PackageSessionConfig.objects.all()
+        if self.action == "list":
+            return queryset.filter(is_active=True)
+        return queryset
+
+
+class RolePackageCoverageViewSet(CanManageInterviewSetupMixin, viewsets.ModelViewSet):
+    serializer_class = RolePackageCoverageSerializer
+    lookup_field = "public_id"
+    lookup_url_kwarg = "id"
+    lookup_value_regex = PUBLIC_ID_OR_PK_REGEX
+
+    def get_queryset(self):
+        queryset = RolePackageCoverage.objects.all()
+        if self.action == "list":
+            return queryset.filter(is_active=True)
+        return queryset
 
 
 class QuestionTemplateViewSet(CanManageInterviewSetupMixin, viewsets.ModelViewSet):
@@ -130,6 +163,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             candidate=serializer.validated_data["candidate"],
             config=serializer.validated_data["config"],
             created_by=request.user,
+            package_code=serializer.validated_data.get("package_code", ""),
         )
         output = InterviewSessionSerializer(session, context={"request": request})
         return Response(output.data, status=status.HTTP_201_CREATED)

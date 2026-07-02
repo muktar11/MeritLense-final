@@ -3,7 +3,12 @@ from rest_framework import serializers
 from api.candidates.models import Candidate
 from api.core.public_ids import get_by_identifier
 from api.core.serializers import PublicIdModelSerializer
-from api.interviews.models import InterviewConfiguration, InterviewRubric
+from api.interviews.models import (
+    InterviewConfiguration,
+    InterviewRubric,
+    PackageSessionConfig,
+    RolePackageCoverage,
+)
 from api.questions.models import QuestionTemplate
 from api.sessions.models import CandidateResponse, InterviewSession, QuestionAudioArtifact, SessionQuestion
 
@@ -118,6 +123,59 @@ class InterviewRubricSerializer(PublicIdModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at"]
 
 
+class PackageSessionConfigSerializer(PublicIdModelSerializer):
+    class Meta:
+        model = PackageSessionConfig
+        fields = [
+            "id",
+            "package_code",
+            "package_name",
+            "audience",
+            "evaluation_tier",
+            "min_questions",
+            "max_questions",
+            "default_question_count",
+            "duration_minutes",
+            "task_observation_enabled",
+            "readiness_indicator_enabled",
+            "certificate_enabled",
+            "basic_report_enabled",
+            "analytics_enabled",
+            "api_access_enabled",
+            "video_introduction_enabled",
+            "behavioral_indicators_enabled",
+            "points_balance",
+            "monthly_fee_display",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class RolePackageCoverageSerializer(PublicIdModelSerializer):
+    class Meta:
+        model = RolePackageCoverage
+        fields = [
+            "id",
+            "role_name",
+            "role_code",
+            "package_code",
+            "package_name",
+            "audience",
+            "coverage_level",
+            "evaluation_tier",
+            "readiness_indicator_enabled",
+            "certificate_enabled",
+            "video_introduction_enabled",
+            "behavioral_indicators_enabled",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
 class SessionQuestionSerializer(PublicIdModelSerializer):
     class Meta:
         model = SessionQuestion
@@ -196,6 +254,7 @@ class QuestionAudioArtifactSerializer(PublicIdModelSerializer):
 class InterviewSessionSerializer(PublicIdModelSerializer):
     candidate_name = serializers.SerializerMethodField()
     config_details = InterviewConfigurationSerializer(source="config", read_only=True)
+    package_config_details = PackageSessionConfigSerializer(source="package_session_config", read_only=True)
     questions = SessionQuestionSerializer(many=True, read_only=True)
     progress_percent = serializers.SerializerMethodField()
     access_token = serializers.CharField(read_only=True)
@@ -209,6 +268,8 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
             "organization",
             "config",
             "config_details",
+            "package_session_config",
+            "package_config_details",
             "status",
             "role_name",
             "role_code",
@@ -220,6 +281,12 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
             "current_question_index",
             "total_questions",
             "evaluation_tier",
+            "package_code",
+            "package_name",
+            "coverage_level",
+            "task_observation_enabled",
+            "readiness_indicator_enabled",
+            "certificate_enabled",
             "rubric_version",
             "question_set_version",
             "progress_percent",
@@ -251,6 +318,7 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
 class InterviewSessionCreateSerializer(serializers.Serializer):
     candidate_id = serializers.CharField()
     config_id = serializers.CharField()
+    package_code = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, attrs):
         try:
@@ -266,6 +334,9 @@ class InterviewSessionCreateSerializer(serializers.Serializer):
         request = self.context["request"]
         if not attrs["candidate"].can_access(request.user):
             raise serializers.ValidationError({"candidate_id": "You do not have access to this candidate"})
+
+        if attrs.get("package_code"):
+            attrs["package_code"] = attrs["package_code"].strip().lower()
 
         return attrs
 

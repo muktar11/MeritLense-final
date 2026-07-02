@@ -1,6 +1,6 @@
 from decimal import Decimal, InvalidOperation
 
-from api.core.constants import ReadinessStatus
+from api.core.constants import InterviewEvaluationTier, ReadinessStatus
 
 
 class EvaluationRuleEngine:
@@ -8,6 +8,29 @@ class EvaluationRuleEngine:
 
     @classmethod
     def apply_readiness_rules(cls, evaluation):
+        if (
+            evaluation.evaluation_tier != InterviewEvaluationTier.FULL
+            or not evaluation.readiness_indicator_enabled
+        ):
+            if evaluation.readiness_override_applied or evaluation.readiness_override_reason:
+                evaluation.readiness_override_applied = False
+                evaluation.readiness_override_reason = ""
+            if evaluation.readiness_status != ReadinessStatus.PENDING:
+                evaluation.readiness_status = ReadinessStatus.PENDING
+            evaluation.save(
+                update_fields=[
+                    "readiness_status",
+                    "readiness_override_applied",
+                    "readiness_override_reason",
+                    "updated_at",
+                ]
+            )
+            return {
+                "override_applied": False,
+                "reason": None,
+                "question_code": None,
+            }
+
         result = cls._find_critical_zero_score(evaluation)
         if result is None:
             if evaluation.readiness_override_applied and evaluation.readiness_override_reason:

@@ -22,6 +22,8 @@ class EvaluationSerializer(PublicIdModelSerializer):
             'evaluation_type', 'evaluation_type_display',
             'status', 'status_display',
             'scheduled_date', 'duration_minutes',
+            'evaluation_tier', 'package_code', 'coverage_level',
+            'readiness_indicator_enabled', 'certificate_enabled',
             'certificate_status', 'certificate_status_display',
             'certificate_issued_at', 'certificate_url',
             'last_evaluation_date',
@@ -38,6 +40,8 @@ class EvaluationSerializer(PublicIdModelSerializer):
             'id', 'candidate_first_name', 'candidate_last_name', 'candidate_email',
             'candidate_passport_id', 'candidate_job_role', 'candidate_preferred_language',
             'created_by', 'company', 'completed_at', 'cancelled_at',
+            'evaluation_tier', 'package_code', 'coverage_level',
+            'readiness_indicator_enabled', 'certificate_enabled',
             'readiness_status', 'readiness_override_applied', 'readiness_override_reason',
             'created_at', 'updated_at'
         ]

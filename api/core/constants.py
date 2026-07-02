@@ -80,6 +80,30 @@ class InterviewEvaluationTier:
     ]
 
 
+class PackageAudience:
+    B2C = "B2C"
+    B2B = "B2B"
+    BOTH = "BOTH"
+
+    CHOICES = [
+        (B2C, "B2C"),
+        (B2B, "B2B"),
+        (BOTH, "Both"),
+    ]
+
+
+class CoverageLevel:
+    SCREENING = "SCREENING"
+    PARTIAL = "PARTIAL"
+    FULL = "FULL"
+
+    CHOICES = [
+        (SCREENING, "Screening"),
+        (PARTIAL, "Partial"),
+        (FULL, "Full"),
+    ]
+
+
 class InterviewQuestionType:
     SAFETY = "safety"
     INTEGRITY = "integrity"

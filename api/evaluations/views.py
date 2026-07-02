@@ -233,16 +233,27 @@ class EvaluationViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
         
         serializer = EvaluationCompleteSerializer(data=request.data)
         if serializer.is_valid():
+            if not evaluation.certificate_enabled and serializer.validated_data.get('certificate_status') == 'ISSUED':
+                return Response(
+                    {'error': 'Certificate issuance is disabled for this evaluation tier'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             old_status = evaluation.status
             evaluation.complete(
                 score=serializer.validated_data.get('score'),
                 feedback=serializer.validated_data.get('feedback')
             )
+
+            if not evaluation.readiness_indicator_enabled:
+                evaluation.readiness_status = 'PENDING'
+                evaluation.readiness_override_applied = False
+                evaluation.readiness_override_reason = ''
             
             certificate_info = {}
             if 'certificate_status' in serializer.validated_data:
-                evaluation.certificate_status = serializer.validated_data['certificate_status']
-                if serializer.validated_data['certificate_status'] == 'ISSUED':
+                requested_certificate_status = serializer.validated_data['certificate_status']
+                evaluation.certificate_status = requested_certificate_status if evaluation.certificate_enabled else 'NOT_ISSUED'
+                if evaluation.certificate_status == 'ISSUED':
                     evaluation.certificate_issued_at = timezone.now()
                     evaluation.certificate_url = serializer.validated_data.get('certificate_url', '')
                     certificate_info = {

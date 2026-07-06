@@ -14,8 +14,9 @@ from api.interviews.models import (
     RolePackageCoverage,
 )
 from api.questions.models import QuestionTemplate
-from api.sessions.models import InterviewSession
+from api.sessions.models import CandidateResponse, InterviewSession
 from api.sessions.services import InterviewSessionService, InterviewVoicePipelineService
+from api.translation.services import AIProcessingError, AIProcessingOrchestrationService
 
 from .serializers import (
     CandidateResponseSerializer,
@@ -27,6 +28,9 @@ from .serializers import (
     QuestionAudioArtifactSerializer,
     QuestionTemplateSerializer,
     RolePackageCoverageSerializer,
+    ResponseAIActionSerializer,
+    ResponseAIProcessingStatusSerializer,
+    SessionAIProcessingSummarySerializer,
     SessionAudioUploadSerializer,
     SessionQuestionSerializer,
     SessionResponseSubmitSerializer,
@@ -144,6 +148,8 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             return SessionAudioUploadSerializer
         if self.action == "transcribe_response":
             return SessionTranscriptionSerializer
+        if self.action == "ai_processing_summary":
+            return SessionAIProcessingSummarySerializer
         if self.action == "submit_response":
             return SessionResponseSubmitSerializer
         if self.action == "start":
@@ -304,6 +310,15 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         serializer = InterviewSessionSerializer(session, context={"request": request})
         return Response(serializer.data)
 
+    @extend_schema(request=SessionTokenSerializer, responses={200: SessionAIProcessingSummarySerializer})
+    @action(detail=True, methods=["get"], url_path="ai-processing-summary")
+    def ai_processing_summary(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        payload = AIProcessingOrchestrationService.get_session_summary_payload(session)
+        serializer = SessionAIProcessingSummarySerializer(payload)
+        return Response(serializer.data)
+
     def _get_session(self):
         queryset = InterviewSession.objects.select_related(
             "candidate",
@@ -331,3 +346,140 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             or request.query_params.get("token")
             or request.data.get("token")
         )
+
+
+class ResponseAIProcessingViewSet(viewsets.GenericViewSet):
+    lookup_field = "public_id"
+    lookup_url_kwarg = "id"
+    lookup_value_regex = PUBLIC_ID_OR_PK_REGEX
+
+    def get_permissions(self):
+        return [AllowAny()]
+
+    def get_serializer_class(self):
+        if self.action == "ai_processing_status":
+            return ResponseAIProcessingStatusSerializer
+        return ResponseAIActionSerializer
+
+    def get_queryset(self):
+        return CandidateResponse.objects.select_related(
+            "session",
+            "question",
+            "question__question_template",
+        )
+
+    def _get_response(self):
+        try:
+            lookup = build_object_identifier_filter(self.kwargs["id"])
+        except ValueError as exc:
+            raise ValidationError({"id": str(exc)}) from exc
+        queryset = self.get_queryset()
+        return get_object_or_404(queryset, **lookup)
+
+    def _get_token(self, request):
+        return (
+            request.headers.get("X-Session-Token")
+            or request.query_params.get("token")
+            or request.data.get("token")
+        )
+
+    def _ensure_access(self, response, request):
+        session = response.session
+        if request.user.is_authenticated and session.can_manage(request.user):
+            return
+        token = self._get_token(request)
+        if session.token_is_valid(token):
+            return
+        raise PermissionDenied("You do not have access to this interview response")
+
+    def _serialize_status(self, response):
+        payload = AIProcessingOrchestrationService.get_response_status_payload(response)
+        serializer = ResponseAIProcessingStatusSerializer(payload)
+        return serializer.data
+
+    @extend_schema(request=ResponseAIActionSerializer, responses={200: CandidateResponseSerializer})
+    @action(detail=True, methods=["post"], url_path="translate")
+    def translate(self, request, id=None):
+        response_obj = self._get_response()
+        self._ensure_access(response_obj, request)
+        serializer = self.get_serializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        updated = AIProcessingOrchestrationService.translate_response(
+            response=response_obj,
+            actor=request.user if request.user.is_authenticated else None,
+            force=serializer.validated_data["force"],
+            target_override=serializer.validated_data.get("target_language", ""),
+            idempotency_key=serializer.validated_data.get("idempotency_key", ""),
+        )
+        return Response(CandidateResponseSerializer(updated, context={"request": request}).data)
+
+    @extend_schema(request=ResponseAIActionSerializer, responses={200: CandidateResponseSerializer})
+    @action(detail=True, methods=["post"], url_path="interpret")
+    def interpret(self, request, id=None):
+        response_obj = self._get_response()
+        self._ensure_access(response_obj, request)
+        serializer = self.get_serializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        try:
+            updated = AIProcessingOrchestrationService.interpret_response(
+                response=response_obj,
+                actor=request.user if request.user.is_authenticated else None,
+                force=serializer.validated_data["force"],
+                idempotency_key=serializer.validated_data.get("idempotency_key", ""),
+            )
+        except AIProcessingError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        return Response(CandidateResponseSerializer(updated, context={"request": request}).data)
+
+    @extend_schema(request=ResponseAIActionSerializer, responses={200: CandidateResponseSerializer})
+    @action(detail=True, methods=["post"], url_path="prepare-evaluation-input")
+    def prepare_evaluation_input(self, request, id=None):
+        response_obj = self._get_response()
+        self._ensure_access(response_obj, request)
+        serializer = self.get_serializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        try:
+            updated = AIProcessingOrchestrationService.prepare_evaluation_input(
+                response=response_obj,
+                actor=request.user if request.user.is_authenticated else None,
+                force=serializer.validated_data["force"],
+                idempotency_key=serializer.validated_data.get("idempotency_key", ""),
+            )
+        except AIProcessingError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        return Response(CandidateResponseSerializer(updated, context={"request": request}).data)
+
+    @extend_schema(request=ResponseAIActionSerializer, responses={200: CandidateResponseSerializer})
+    @action(detail=True, methods=["post"], url_path="process-ai")
+    def process_ai(self, request, id=None):
+        response_obj = self._get_response()
+        self._ensure_access(response_obj, request)
+        serializer = self.get_serializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        try:
+            if serializer.validated_data.get("async_execution", False):
+                _, updated = AIProcessingOrchestrationService.queue_process_response_ai(
+                    response=response_obj,
+                    actor=request.user if request.user.is_authenticated else None,
+                    force=serializer.validated_data["force"],
+                    target_override=serializer.validated_data.get("target_language", ""),
+                    idempotency_key=serializer.validated_data.get("idempotency_key", ""),
+                )
+            else:
+                updated = AIProcessingOrchestrationService.process_response_ai(
+                    response=response_obj,
+                    actor=request.user if request.user.is_authenticated else None,
+                    force=serializer.validated_data["force"],
+                    target_override=serializer.validated_data.get("target_language", ""),
+                    idempotency_key=serializer.validated_data.get("idempotency_key", ""),
+                )
+        except AIProcessingError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        return Response(CandidateResponseSerializer(updated, context={"request": request}).data)
+
+    @extend_schema(request=ResponseAIActionSerializer, responses={200: ResponseAIProcessingStatusSerializer})
+    @action(detail=True, methods=["get"], url_path="ai-processing-status")
+    def ai_processing_status(self, request, id=None):
+        response_obj = self._get_response()
+        self._ensure_access(response_obj, request)
+        return Response(self._serialize_status(response_obj))

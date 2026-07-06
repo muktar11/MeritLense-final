@@ -195,6 +195,10 @@ class SessionQuestionSerializer(PublicIdModelSerializer):
 
 
 class CandidateResponseSerializer(PublicIdModelSerializer):
+    translation_artifact = serializers.SerializerMethodField()
+    interpretation_artifact = serializers.SerializerMethodField()
+    evaluation_input_artifact = serializers.SerializerMethodField()
+
     class Meta:
         model = CandidateResponse
         fields = [
@@ -210,6 +214,15 @@ class CandidateResponseSerializer(PublicIdModelSerializer):
             "transcript",
             "original_transcript",
             "transcript_language",
+            "translated_transcript",
+            "translation_source_language",
+            "translation_target_language",
+            "translation_provider",
+            "translation_model",
+            "translation_status",
+            "translation_error",
+            "translation_metadata",
+            "translated_at",
             "stt_provider",
             "stt_model",
             "stt_request_id",
@@ -219,12 +232,44 @@ class CandidateResponseSerializer(PublicIdModelSerializer):
             "stt_error_message",
             "stt_processed_at",
             "stt_metadata",
+            "interpretation_status",
+            "interpretation_error",
+            "interpreted_at",
+            "processing_status",
+            "ai_processing_idempotency_key",
             "duration_seconds",
             "attempt_number",
             "metadata",
+            "translation_artifact",
+            "interpretation_artifact",
+            "evaluation_input_artifact",
             "created_at",
         ]
         read_only_fields = fields
+
+    def get_translation_artifact(self, obj):
+        artifact = getattr(obj, "translation_artifact", None)
+        if artifact is None:
+            return None
+        from api.translation.serializers import CandidateResponseTranslationSerializer
+
+        return CandidateResponseTranslationSerializer(artifact).data
+
+    def get_interpretation_artifact(self, obj):
+        artifact = getattr(obj, "ai_interpretation", None)
+        if artifact is None:
+            return None
+        from api.translation.serializers import CandidateResponseInterpretationSerializer
+
+        return CandidateResponseInterpretationSerializer(artifact).data
+
+    def get_evaluation_input_artifact(self, obj):
+        artifact = getattr(obj, "evaluation_input_artifact", None)
+        if artifact is None:
+            return None
+        from api.translation.serializers import EvaluationInputArtifactSerializer
+
+        return EvaluationInputArtifactSerializer(artifact).data
 
 
 class QuestionAudioArtifactSerializer(PublicIdModelSerializer):
@@ -389,3 +434,69 @@ class SessionTranscriptionSerializer(serializers.Serializer):
             return get_by_identifier(session.responses.all(), value)
         except CandidateResponse.DoesNotExist:
             raise serializers.ValidationError("Response not found")
+
+
+class ResponseAIActionSerializer(serializers.Serializer):
+    token = serializers.CharField(required=False, allow_blank=True)
+    force = serializers.BooleanField(required=False, default=False)
+    target_language = serializers.CharField(required=False, allow_blank=True)
+    async_execution = serializers.BooleanField(required=False, default=False)
+    idempotency_key = serializers.CharField(required=False, allow_blank=True, max_length=120)
+
+
+class ResponseAIProcessingStatusSerializer(serializers.Serializer):
+    candidate_response_id = serializers.CharField(read_only=True)
+    session_id = serializers.CharField(read_only=True)
+    question_id = serializers.CharField(read_only=True)
+    translation_status = serializers.CharField(read_only=True)
+    interpretation_status = serializers.CharField(read_only=True)
+    processing_status = serializers.CharField(read_only=True)
+    ai_processing_idempotency_key = serializers.CharField(read_only=True)
+    translation = serializers.SerializerMethodField()
+    interpretation = serializers.SerializerMethodField()
+    evaluation_input = serializers.SerializerMethodField()
+    async_job = serializers.SerializerMethodField()
+
+    def get_translation(self, obj):
+        artifact = obj.get("translation")
+        if artifact is None:
+            return None
+        from api.translation.serializers import CandidateResponseTranslationSerializer
+
+        return CandidateResponseTranslationSerializer(artifact).data
+
+    def get_interpretation(self, obj):
+        artifact = obj.get("interpretation")
+        if artifact is None:
+            return None
+        from api.translation.serializers import CandidateResponseInterpretationSerializer
+
+        return CandidateResponseInterpretationSerializer(artifact).data
+
+    def get_evaluation_input(self, obj):
+        artifact = obj.get("evaluation_input")
+        if artifact is None:
+            return None
+        from api.translation.serializers import EvaluationInputArtifactSerializer
+
+        return EvaluationInputArtifactSerializer(artifact).data
+
+    def get_async_job(self, obj):
+        job = obj.get("async_job")
+        if job is None:
+            return None
+        return {
+            "id": str(job.public_id),
+            "job_type": job.job_type,
+            "status": job.status,
+            "idempotency_key": job.idempotency_key,
+            "queue_name": job.queue_name,
+            "queue_message_id": job.queue_message_id,
+            "error_message": job.error_message,
+        }
+
+
+class SessionAIProcessingSummarySerializer(serializers.Serializer):
+    session_id = serializers.CharField(read_only=True)
+    completed = serializers.BooleanField(read_only=True)
+    responses = serializers.ListField(read_only=True)

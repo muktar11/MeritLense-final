@@ -17,6 +17,14 @@ class AzureQueueService:
     def is_configured(self):
         return bool(self.connection_string and self.queue_name)
 
+    def get_client(self, queue_name=None):
+        from azure.storage.queue import QueueClient
+
+        return QueueClient.from_connection_string(
+            conn_str=self.connection_string,
+            queue_name=queue_name or self.queue_name,
+        )
+
     def send_job(self, job_type, payload):
         if not self.is_configured:
             return {
@@ -25,12 +33,7 @@ class AzureQueueService:
             }
 
         from azure.core.exceptions import ResourceExistsError
-        from azure.storage.queue import QueueClient
-
-        queue = QueueClient.from_connection_string(
-            conn_str=self.connection_string,
-            queue_name=self.queue_name,
-        )
+        queue = self.get_client()
         try:
             queue.create_queue()
         except ResourceExistsError:
@@ -48,6 +51,14 @@ class AzureQueueService:
             "queue": self.queue_name,
             "message_id": result.id,
         }
+
+    @staticmethod
+    def decode_job_message(content):
+        decoded = base64.b64decode(content, validate=True).decode("utf-8")
+        message = json.loads(decoded)
+        if not isinstance(message, dict) or not isinstance(message.get("payload"), dict):
+            raise ValueError("Queue message must contain a job_type and payload object")
+        return message
 
 
 def enqueue_background_job(job_type, payload, queue_name=None):

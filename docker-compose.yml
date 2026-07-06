@@ -1,4 +1,16 @@
 services:
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.35.0
+    container_name: meritlense_azurite
+    command: azurite-queue --queueHost 0.0.0.0 --location /data
+    environment:
+      - AZURITE_ACCOUNTS=meritlense:bG9jYWwtbWVyaXRsZW5zZS1henVyaXRlLWtleQ==
+    volumes:
+      - azurite_data:/data
+    ports:
+      - "10001:10001"
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     container_name: meritlense_redis
@@ -58,15 +70,49 @@ services:
       - DB_PASSWORD=meritlense_password
       - DB_HOST=db
       - DB_PORT=5432
-      - AZURE_QUEUE_CONNECTION_STRING=
+      - AZURE_QUEUE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=meritlense;AccountKey=bG9jYWwtbWVyaXRsZW5zZS1henVyaXRlLWtleQ==;QueueEndpoint=http://azurite:10001/meritlense;
       - AZURE_STORAGE_CONNECTION_STRING=
       - AZURE_STORAGE_CONTAINER_NAME=meritlense-media
       - AZURE_DEFAULT_QUEUE_NAME=meritlense-jobs
+      - AZURE_QUEUE_POISON_NAME=meritlense-jobs-poison
+      - ENABLE_ASYNC_AI_PROCESSING=True
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
       redis:
+        condition: service_started
+      azurite:
+        condition: service_started
+    restart: unless-stopped
+
+  ai-worker:
+    build: .
+    container_name: meritlense_ai_worker
+    command: python manage.py run_ai_queue_worker
+    volumes:
+      - .:/app
+      - media_volume:/app/media
+    environment:
+      - DJANGO_SETTINGS_MODULE=meritlense.settings
+      - DJANGO_SECRET_KEY=django-insecure-local-docker-change-me
+      - DEBUG=True
+      - DB_NAME=meritlense_db
+      - DB_USER=merit_user
+      - DB_PASSWORD=meritlense_password
+      - DB_HOST=db
+      - DB_PORT=5432
+      - AZURE_QUEUE_CONNECTION_STRING=DefaultEndpointsProtocol=http;AccountName=meritlense;AccountKey=bG9jYWwtbWVyaXRsZW5zZS1henVyaXRlLWtleQ==;QueueEndpoint=http://azurite:10001/meritlense;
+      - AZURE_DEFAULT_QUEUE_NAME=meritlense-jobs
+      - AZURE_QUEUE_POISON_NAME=meritlense-jobs-poison
+      - ENABLE_ASYNC_AI_PROCESSING=True
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GOOGLE_TRANSLATE_API_KEY=${GOOGLE_TRANSLATE_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      azurite:
         condition: service_started
     restart: unless-stopped
 
@@ -74,3 +120,4 @@ volumes:
   postgres_data:
   static_volume:
   media_volume:
+  azurite_data:

@@ -1,6 +1,6 @@
 from django.db import models
 
-from api.core.constants import InterviewEvaluationTier
+from api.core.constants import CoverageLevel, InterviewEvaluationTier, PackageAudience
 from api.core.models import TimeStampedModel
 
 
@@ -31,6 +31,80 @@ class InterviewConfiguration(TimeStampedModel):
 
     def __str__(self):
         return f"{self.role_name} ({self.language} / {self.evaluation_tier})"
+
+
+class PackageSessionConfig(TimeStampedModel):
+    package_code = models.CharField(max_length=50, unique=True)
+    package_name = models.CharField(max_length=100)
+    audience = models.CharField(
+        max_length=10,
+        choices=PackageAudience.CHOICES,
+        default=PackageAudience.BOTH,
+    )
+    evaluation_tier = models.CharField(
+        max_length=20,
+        choices=InterviewEvaluationTier.CHOICES,
+        default=InterviewEvaluationTier.SCREENING,
+    )
+    min_questions = models.PositiveIntegerField(default=5)
+    max_questions = models.PositiveIntegerField(default=8)
+    default_question_count = models.PositiveIntegerField(default=5)
+    duration_minutes = models.PositiveIntegerField(default=15)
+    task_observation_enabled = models.BooleanField(default=False)
+    readiness_indicator_enabled = models.BooleanField(default=False)
+    certificate_enabled = models.BooleanField(default=False)
+    basic_report_enabled = models.BooleanField(default=True)
+    analytics_enabled = models.BooleanField(default=False)
+    api_access_enabled = models.BooleanField(default=False)
+    video_introduction_enabled = models.BooleanField(default=False)
+    behavioral_indicators_enabled = models.BooleanField(default=False)
+    points_balance = models.PositiveIntegerField(null=True, blank=True)
+    monthly_fee_display = models.CharField(max_length=100, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Package Session Config"
+        verbose_name_plural = "Package Session Configs"
+        ordering = ["audience", "package_name"]
+
+    def __str__(self):
+        return f"{self.package_name} ({self.package_code})"
+
+
+class RolePackageCoverage(TimeStampedModel):
+    role_name = models.CharField(max_length=100)
+    role_code = models.CharField(max_length=100)
+    package_code = models.CharField(max_length=50)
+    package_name = models.CharField(max_length=100)
+    audience = models.CharField(
+        max_length=10,
+        choices=PackageAudience.CHOICES,
+        default=PackageAudience.BOTH,
+    )
+    coverage_level = models.CharField(
+        max_length=20,
+        choices=CoverageLevel.CHOICES,
+        default=CoverageLevel.SCREENING,
+    )
+    evaluation_tier = models.CharField(
+        max_length=20,
+        choices=InterviewEvaluationTier.CHOICES,
+        default=InterviewEvaluationTier.SCREENING,
+    )
+    readiness_indicator_enabled = models.BooleanField(default=False)
+    certificate_enabled = models.BooleanField(default=False)
+    video_introduction_enabled = models.BooleanField(default=False)
+    behavioral_indicators_enabled = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Role Package Coverage"
+        verbose_name_plural = "Role Package Coverage"
+        unique_together = [("role_code", "package_code")]
+        ordering = ["role_name", "package_name"]
+
+    def __str__(self):
+        return f"{self.role_code} / {self.package_code} ({self.coverage_level})"
 
 
 class InterviewRubric(TimeStampedModel):

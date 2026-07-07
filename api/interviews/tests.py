@@ -5,6 +5,7 @@ import tempfile
 from unittest.mock import patch
 
 from asgiref.testing import ApplicationCommunicator
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
@@ -13,11 +14,13 @@ from rest_framework.test import APIClient, APITestCase
 from api.accounts.models import User
 from api.audit.models import AuditLog
 from api.candidates.models import Candidate
-from api.core.constants import AuditLogAction, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, Roles
-from api.interviews.models import InterviewConfiguration, InterviewRubric
+from api.core.constants import AuditLogAction, CoverageLevel, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, Roles
+from api.interviews.models import InterviewConfiguration, InterviewRubric, PackageSessionConfig, RolePackageCoverage
 from api.interviews.voice_services import VoiceProviderError
 from api.questions.models import QuestionTemplate
 from api.sessions.models import CandidateResponse, InterviewSession
+from api.translation.models import CandidateResponseInterpretation, CandidateResponseTranslation, EvaluationInputArtifact
+from api.evaluations.models import Evaluation
 from meritlense.asgi import application
 
 
@@ -217,6 +220,61 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(patch_response.status_code, 200)
         self.assertEqual(patch_response.data["notes"], "Updated")
 
+    def test_can_crud_package_session_config_and_role_coverage(self):
+        package_response = self.client.post(
+            "/api/v1/interviews/package-configs/",
+            {
+                "package_code": "starter",
+                "package_name": "Starter",
+                "audience": "B2B",
+                "evaluation_tier": "SCREENING",
+                "min_questions": 5,
+                "max_questions": 8,
+                "default_question_count": 8,
+                "duration_minutes": 15,
+                "task_observation_enabled": False,
+                "readiness_indicator_enabled": False,
+                "certificate_enabled": False,
+                "basic_report_enabled": True,
+                "analytics_enabled": False,
+                "api_access_enabled": False,
+                "video_introduction_enabled": False,
+                "behavioral_indicators_enabled": False,
+                "points_balance": 100,
+                "monthly_fee_display": "Pilot pricing",
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(package_response.status_code, 201, package_response.data)
+        package_id = package_response.data["id"]
+
+        coverage_response = self.client.post(
+            "/api/v1/interviews/role-coverage/",
+            {
+                "role_name": "Nanny",
+                "role_code": "nanny",
+                "package_code": "starter",
+                "package_name": "Starter",
+                "audience": "B2B",
+                "coverage_level": "SCREENING",
+                "evaluation_tier": "SCREENING",
+                "readiness_indicator_enabled": False,
+                "certificate_enabled": False,
+                "video_introduction_enabled": False,
+                "behavioral_indicators_enabled": False,
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(coverage_response.status_code, 201, coverage_response.data)
+
+        list_packages = self.client.get("/api/v1/interviews/package-configs/")
+        list_coverage = self.client.get("/api/v1/interviews/role-coverage/")
+        self.assertEqual(list_packages.status_code, 200)
+        self.assertEqual(list_coverage.status_code, 200)
+        self.assertTrue(any(item["id"] == package_id for item in list_packages.data))
+
     def test_team_member_cannot_manage_interview_setup(self):
         team_member = User.objects.create_user(
             email="team@example.com",
@@ -305,6 +363,204 @@ class InterviewSessionApiTests(APITestCase):
         )
         self.assertEqual(complete_response.status_code, 200)
         self.assertEqual(complete_response.data["status"], "COMPLETED")
+
+    def test_create_session_applies_package_architecture_context(self):
+        package = PackageSessionConfig.objects.create(
+            package_code="basic",
+            package_name="Basic",
+            audience="B2C",
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            min_questions=5,
+            max_questions=8,
+            default_question_count=8,
+            duration_minutes=15,
+            task_observation_enabled=False,
+            readiness_indicator_enabled=False,
+            certificate_enabled=False,
+            basic_report_enabled=True,
+        )
+        RolePackageCoverage.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            package_code="basic",
+            package_name="Basic",
+            audience="B2C",
+            coverage_level=CoverageLevel.SCREENING,
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            readiness_indicator_enabled=False,
+            certificate_enabled=False,
+        )
+
+        response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+                "package_code": "basic",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        session = InterviewSession.objects.get(public_id=response.data["id"])
+        self.assertEqual(session.package_session_config, package)
+        self.assertEqual(session.package_code, "basic")
+        self.assertEqual(session.coverage_level, CoverageLevel.SCREENING)
+        self.assertEqual(session.evaluation_tier, InterviewEvaluationTier.SCREENING)
+        self.assertFalse(session.readiness_indicator_enabled)
+        self.assertFalse(session.certificate_enabled)
+
+    def test_session_completion_creates_linked_evaluation_with_package_flags(self):
+        package = PackageSessionConfig.objects.create(
+            package_code="advanced",
+            package_name="Advanced",
+            audience="B2C",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            min_questions=10,
+            max_questions=12,
+            default_question_count=12,
+            duration_minutes=30,
+            task_observation_enabled=True,
+            readiness_indicator_enabled=True,
+            certificate_enabled=True,
+            basic_report_enabled=True,
+        )
+        RolePackageCoverage.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            package_code="advanced",
+            package_name="Advanced",
+            audience="B2C",
+            coverage_level=CoverageLevel.FULL,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            readiness_indicator_enabled=True,
+            certificate_enabled=True,
+            video_introduction_enabled=False,
+            behavioral_indicators_enabled=False,
+        )
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+                "package_code": "advanced",
+            },
+            format="json",
+        )
+        session_id = create_response.data["id"]
+        self.client.post(f"/api/v1/interviews/{session_id}/start/", {}, format="json")
+        session = InterviewSession.objects.get(public_id=session_id)
+        question = self._mark_first_question_asked(session)
+        self.client.post(
+            f"/api/v1/interviews/{session_id}/submit-response/",
+            {
+                "question_id": str(question.public_id),
+                "transcript": "Answer one",
+                "text_response": "Answer one",
+            },
+            format="json",
+        )
+        for remaining in session.questions.filter(status="PENDING").order_by("question_order"):
+            remaining.status = "ASKED"
+            remaining.asked_at = timezone.now()
+            remaining.save(update_fields=["status", "asked_at", "updated_at"])
+            self.client.post(
+                f"/api/v1/interviews/{session_id}/submit-response/",
+                {
+                    "question_id": str(remaining.public_id),
+                    "transcript": f"Answer {remaining.question_order}",
+                    "text_response": f"Answer {remaining.question_order}",
+                },
+                format="json",
+            )
+
+        self.client.post(
+            f"/api/v1/interviews/{session_id}/complete/",
+            {},
+            format="json",
+        )
+
+        session.refresh_from_db()
+        evaluation = Evaluation.objects.get(session=session)
+        self.assertEqual(evaluation.evaluation_tier, InterviewEvaluationTier.FULL)
+        self.assertEqual(evaluation.package_code, "advanced")
+        self.assertEqual(evaluation.coverage_level, CoverageLevel.FULL)
+        self.assertTrue(evaluation.readiness_indicator_enabled)
+        self.assertTrue(evaluation.certificate_enabled)
+        self.assertEqual(evaluation.status, "COMPLETED")
+
+    def test_screening_package_creates_gated_evaluation_end_to_end(self):
+        PackageSessionConfig.objects.create(
+            package_code="basic",
+            package_name="Basic",
+            audience="B2C",
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            min_questions=5,
+            max_questions=8,
+            default_question_count=8,
+            duration_minutes=15,
+            task_observation_enabled=False,
+            readiness_indicator_enabled=False,
+            certificate_enabled=False,
+            basic_report_enabled=True,
+        )
+        RolePackageCoverage.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            package_code="basic",
+            package_name="Basic",
+            audience="B2C",
+            coverage_level=CoverageLevel.SCREENING,
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            readiness_indicator_enabled=False,
+            certificate_enabled=False,
+            video_introduction_enabled=False,
+            behavioral_indicators_enabled=False,
+        )
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+                "package_code": "basic",
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        self.client.post(f"/api/v1/interviews/{session_id}/start/", {}, format="json")
+        session = InterviewSession.objects.get(public_id=session_id)
+
+        for question in session.questions.order_by("question_order"):
+            question.status = "ASKED"
+            question.asked_at = timezone.now()
+            question.save(update_fields=["status", "asked_at", "updated_at"])
+            response = self.client.post(
+                f"/api/v1/interviews/{session_id}/submit-response/",
+                {
+                    "question_id": str(question.public_id),
+                    "transcript": f"Answer {question.question_order}",
+                    "text_response": f"Answer {question.question_order}",
+                },
+                format="json",
+            )
+            self.assertEqual(response.status_code, 200, response.data)
+
+        complete_response = self.client.post(
+            f"/api/v1/interviews/{session_id}/complete/",
+            {},
+            format="json",
+        )
+        self.assertEqual(complete_response.status_code, 200, complete_response.data)
+
+        evaluation = Evaluation.objects.get(session=session)
+        self.assertEqual(evaluation.evaluation_tier, InterviewEvaluationTier.SCREENING)
+        self.assertEqual(evaluation.coverage_level, CoverageLevel.SCREENING)
+        self.assertFalse(evaluation.readiness_indicator_enabled)
+        self.assertFalse(evaluation.certificate_enabled)
+        self.assertEqual(evaluation.certificate_status, "NOT_ISSUED")
 
     def test_current_question_endpoint_returns_active_question(self):
         session = self._create_and_start_session()
@@ -627,6 +883,358 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Text-to-speech provider timed out", str(response.data["detail"]))
         self.assertFalse(session.question_audio_artifacts.exists())
+
+    def test_process_ai_runs_translation_interpretation_and_rule_input_end_to_end(self):
+        session = self._create_and_start_session()
+        session.translation_target = "EN"
+        session.save(update_fields=["translation_target", "updated_at"])
+        question = self._mark_first_question_asked(session)
+        response = CandidateResponse.objects.create(
+            session=session,
+            question=question,
+            response_type="TEXT",
+            transcript="ابق الطفل بعيدا ثم نظف السائل",
+            original_transcript="ابق الطفل بعيدا ثم نظف السائل",
+            transcript_language="ar",
+            stt_status="COMPLETED",
+        )
+
+        class FakeTranslationProvider:
+            def __init__(self):
+                self.provider = "GOOGLE"
+
+            def translate(self, **kwargs):
+                return {
+                    "provider": "GOOGLE",
+                    "provider_model": "google-translate-v2",
+                    "translated_text": "Keep the child away, then clean the spill.",
+                    "source_language": "ar",
+                    "target_language": "en",
+                    "metadata": {"request_id": "translate-123"},
+                }
+
+        class FakeInterpretationProvider:
+            def interpret(self, **kwargs):
+                return {
+                    "provider": "OPENAI",
+                    "model": "gpt-4o-mini",
+                    "raw_content": json.dumps(
+                        {
+                            "answer_relevance": "high",
+                            "mentioned_steps": ["keep child away", "clean spill"],
+                            "missing_steps": ["prevent recurrence"],
+                            "safety_risks": [],
+                            "compliance_risks": [],
+                            "language_quality": "clear",
+                            "confidence_notes": ["direct answer"],
+                            "uncertainty_notes": [],
+                            "transcript_issues": [],
+                            "key_evidence_phrases": ["keep the child away"],
+                        }
+                    ),
+                    "metadata": {"request_id": "interpret-123"},
+                }
+
+        with patch("api.translation.services.TranslationService.provider_class", FakeTranslationProvider), patch(
+            "api.translation.services.ResponseInterpretationService.get_provider",
+            return_value=FakeInterpretationProvider(),
+        ):
+            api_response = self.client.post(
+                f"/api/v1/interviews/responses/{response.public_id}/process-ai/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(api_response.status_code, 200, api_response.data)
+        stored = CandidateResponse.objects.get(pk=response.pk)
+        self.assertEqual(stored.translation_status, "COMPLETED")
+        self.assertEqual(stored.translated_transcript, "Keep the child away, then clean the spill.")
+        self.assertEqual(stored.original_transcript, "ابق الطفل بعيدا ثم نظف السائل")
+        self.assertEqual(stored.interpretation_status, "COMPLETED")
+        self.assertEqual(stored.processing_status, "PROCESSING_COMPLETED")
+        self.assertTrue(CandidateResponseTranslation.objects.filter(response=stored, status="COMPLETED").exists())
+        self.assertTrue(CandidateResponseInterpretation.objects.filter(response=stored, status="COMPLETED").exists())
+        artifact = EvaluationInputArtifact.objects.get(response=stored)
+        self.assertEqual(artifact.observed_indicators, ["keep child away", "clean spill"])
+        self.assertEqual(artifact.missing_indicators, ["prevent recurrence"])
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TRANSLATION_COMPLETED).exists())
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.INTERPRETATION_COMPLETED).exists())
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.RULE_INPUT_PREPARATION_COMPLETED).exists())
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.AI_PROCESSING_COMPLETED).exists())
+
+    def test_process_ai_skips_translation_when_languages_match(self):
+        session = self._create_and_start_session()
+        session.translation_target = "EN"
+        session.save(update_fields=["translation_target", "updated_at"])
+        question = self._mark_first_question_asked(session)
+        response = CandidateResponse.objects.create(
+            session=session,
+            question=question,
+            response_type="TEXT",
+            transcript="I would secure the child and clean the spill.",
+            original_transcript="I would secure the child and clean the spill.",
+            transcript_language="en",
+            stt_status="COMPLETED",
+        )
+        token_client = APIClient()
+
+        class FakeInterpretationProvider:
+            def interpret(self, **kwargs):
+                return {
+                    "provider": "OPENAI",
+                    "model": "gpt-4o-mini",
+                    "raw_content": json.dumps(
+                        {
+                            "answer_relevance": "high",
+                            "mentioned_steps": ["secure child", "clean spill"],
+                            "missing_steps": [],
+                            "safety_risks": [],
+                            "compliance_risks": [],
+                            "language_quality": "clear",
+                            "confidence_notes": [],
+                            "uncertainty_notes": [],
+                            "transcript_issues": [],
+                            "key_evidence_phrases": ["secure the child"],
+                        }
+                    ),
+                    "metadata": {},
+                }
+
+        with patch(
+            "api.translation.services.ResponseInterpretationService.get_provider",
+            return_value=FakeInterpretationProvider(),
+        ):
+            api_response = token_client.post(
+                f"/api/v1/interviews/responses/{response.public_id}/process-ai/",
+                {"token": session.access_token},
+                format="json",
+                HTTP_X_SESSION_TOKEN=session.access_token,
+            )
+            status_response = token_client.get(
+                f"/api/v1/interviews/responses/{response.public_id}/ai-processing-status/",
+                {"token": session.access_token},
+                HTTP_X_SESSION_TOKEN=session.access_token,
+            )
+
+        self.assertEqual(api_response.status_code, 200, api_response.data)
+        self.assertEqual(status_response.status_code, 200, status_response.data)
+        stored = CandidateResponse.objects.get(pk=response.pk)
+        self.assertEqual(stored.translation_status, "NOT_REQUIRED")
+        self.assertEqual(stored.translated_transcript, "")
+        self.assertEqual(status_response.data["translation_status"], "NOT_REQUIRED")
+        self.assertEqual(status_response.data["processing_status"], "PROCESSING_COMPLETED")
+
+    def test_interpret_rejects_prohibited_scoring_fields(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+        response = CandidateResponse.objects.create(
+            session=session,
+            question=question,
+            response_type="TEXT",
+            transcript="I would clean the spill.",
+            original_transcript="I would clean the spill.",
+            transcript_language="en",
+            translation_status="NOT_REQUIRED",
+            stt_status="COMPLETED",
+        )
+
+        class FakeInterpretationProvider:
+            def interpret(self, **kwargs):
+                return {
+                    "provider": "OPENAI",
+                    "model": "gpt-4o-mini",
+                    "raw_content": json.dumps(
+                        {
+                            "answer_relevance": "medium",
+                            "mentioned_steps": ["clean spill"],
+                            "final_score": 95,
+                        }
+                    ),
+                    "metadata": {},
+                }
+
+        with patch(
+            "api.translation.services.ResponseInterpretationService.get_provider",
+            return_value=FakeInterpretationProvider(),
+        ):
+            api_response = self.client.post(
+                f"/api/v1/interviews/responses/{response.public_id}/interpret/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(api_response.status_code, 200, api_response.data)
+        stored = CandidateResponse.objects.get(pk=response.pk)
+        self.assertEqual(stored.interpretation_status, "FAILED")
+        self.assertIn("prohibited", stored.interpretation_error.lower())
+        self.assertFalse(EvaluationInputArtifact.objects.filter(response=stored).exists())
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.INTERPRETATION_FAILED).exists())
+
+    @override_settings(AI_INTERPRETATION_MIN_CONFIDENCE=0.75)
+    def test_process_ai_flags_low_confidence_for_human_review(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+        response = CandidateResponse.objects.create(
+            session=session,
+            question=question,
+            response_type="TEXT",
+            transcript="I think maybe I would clean it.",
+            original_transcript="I think maybe I would clean it.",
+            transcript_language="en",
+            translation_status="NOT_REQUIRED",
+            stt_status="COMPLETED",
+        )
+
+        class FakeInterpretationProvider:
+            def interpret(self, **kwargs):
+                return {
+                    "provider": "OPENAI",
+                    "model": "gpt-4o-mini",
+                    "raw_content": json.dumps(
+                        {
+                            "answer_relevance": "medium",
+                            "mentioned_steps": ["clean spill"],
+                            "missing_steps": ["protect child"],
+                            "safety_risks": [],
+                            "compliance_risks": [],
+                            "language_quality": "unclear",
+                            "extraction_confidence": 0.62,
+                            "confidence_notes": [],
+                            "uncertainty_notes": ["candidate sounded unsure"],
+                            "transcript_issues": [],
+                            "key_evidence_phrases": ["I think maybe"],
+                        }
+                    ),
+                    "metadata": {},
+                }
+
+        with patch(
+            "api.translation.services.ResponseInterpretationService.get_provider",
+            return_value=FakeInterpretationProvider(),
+        ):
+            api_response = self.client.post(
+                f"/api/v1/interviews/responses/{response.public_id}/process-ai/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(api_response.status_code, 200, api_response.data)
+        stored = CandidateResponse.objects.get(pk=response.pk)
+        artifact = EvaluationInputArtifact.objects.get(response=stored)
+        interpretation = CandidateResponseInterpretation.objects.get(response=stored)
+        self.assertEqual(stored.processing_status, "PROCESSING_COMPLETED")
+        self.assertEqual(str(interpretation.confidence_score), "0.620")
+        self.assertTrue(artifact.requires_human_review)
+        self.assertIn("below the configured threshold", artifact.review_reason)
+        self.assertEqual(
+            artifact.legal_disclaimer,
+            "AI outputs are advisory extraction artifacts only and never constitute employment decisions.",
+        )
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.AI_PROCESSING_REQUIRES_HUMAN_REVIEW).exists())
+
+    @override_settings(ENABLE_ASYNC_AI_PROCESSING=True, AZURE_QUEUE_CONNECTION_STRING="UseDevelopmentStorage=true")
+    def test_process_ai_can_queue_async_job_with_idempotency_key(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+        response = CandidateResponse.objects.create(
+            session=session,
+            question=question,
+            response_type="TEXT",
+            transcript="I would secure the area and clean it.",
+            original_transcript="I would secure the area and clean it.",
+            transcript_language="en",
+            translation_status="NOT_REQUIRED",
+            stt_status="COMPLETED",
+        )
+
+        with patch("api.translation.services.enqueue_background_job") as enqueue_mock:
+            enqueue_mock.return_value = {
+                "queued": True,
+                "queue": "meritlense-jobs",
+                "message_id": "msg-123",
+            }
+            api_response = self.client.post(
+                f"/api/v1/interviews/responses/{response.public_id}/process-ai/",
+                {
+                    "async_execution": True,
+                    "idempotency_key": "resp-queue-1",
+                },
+                format="json",
+            )
+            status_response = self.client.get(
+                f"/api/v1/interviews/responses/{response.public_id}/ai-processing-status/"
+            )
+
+        self.assertEqual(api_response.status_code, 200, api_response.data)
+        self.assertEqual(status_response.status_code, 200, status_response.data)
+        stored = CandidateResponse.objects.get(pk=response.pk)
+        self.assertEqual(stored.processing_status, "QUEUED")
+        self.assertEqual(stored.ai_processing_idempotency_key, "resp-queue-1")
+        self.assertEqual(status_response.data["async_job"]["status"], "QUEUED")
+        self.assertEqual(status_response.data["async_job"]["idempotency_key"], "resp-queue-1")
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.AI_PROCESSING_QUEUED).exists())
+
+    def test_process_ai_job_command_processes_queued_job(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+        response = CandidateResponse.objects.create(
+            session=session,
+            question=question,
+            response_type="TEXT",
+            transcript="I would first move the child away and then clean the spill.",
+            original_transcript="I would first move the child away and then clean the spill.",
+            transcript_language="en",
+            translation_status="NOT_REQUIRED",
+            stt_status="COMPLETED",
+        )
+
+        class FakeInterpretationProvider:
+            def interpret(self, **kwargs):
+                return {
+                    "provider": "OPENAI",
+                    "model": "gpt-4o-mini",
+                    "raw_content": json.dumps(
+                        {
+                            "answer_relevance": "high",
+                            "mentioned_steps": ["move child away", "clean spill"],
+                            "missing_steps": [],
+                            "safety_risks": [],
+                            "compliance_risks": [],
+                            "language_quality": "clear",
+                            "extraction_confidence": 0.91,
+                            "confidence_notes": [],
+                            "uncertainty_notes": [],
+                            "transcript_issues": [],
+                            "key_evidence_phrases": ["move the child away"],
+                        }
+                    ),
+                    "metadata": {},
+                }
+
+        with patch("api.translation.services.enqueue_background_job") as enqueue_mock:
+            enqueue_mock.return_value = {
+                "queued": True,
+                "queue": "meritlense-jobs",
+                "message_id": "msg-456",
+            }
+            self.client.post(
+                f"/api/v1/interviews/responses/{response.public_id}/process-ai/",
+                {"async_execution": True, "idempotency_key": "resp-job-1"},
+                format="json",
+            )
+
+        job = response.ai_processing_jobs.get(idempotency_key="resp-job-1")
+        with patch(
+            "api.translation.services.ResponseInterpretationService.get_provider",
+            return_value=FakeInterpretationProvider(),
+        ):
+            call_command("process_ai_job", job_id=str(job.public_id))
+
+        stored = CandidateResponse.objects.get(pk=response.pk)
+        job.refresh_from_db()
+        self.assertEqual(job.status, "COMPLETED")
+        self.assertEqual(stored.processing_status, "PROCESSING_COMPLETED")
+        self.assertTrue(EvaluationInputArtifact.objects.filter(response=stored).exists())
 
     def test_cannot_start_expired_session(self):
         session = InterviewSession.objects.create(

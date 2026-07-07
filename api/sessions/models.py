@@ -10,6 +10,7 @@ from api.accounts.models import User
 from api.candidates.models import Candidate
 from api.core.constants import (
     CandidateResponseType,
+    CoverageLevel,
     IdentityVerificationStatus,
     InterviewSessionStatus,
     SessionQuestionStatus,
@@ -45,6 +46,13 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
         on_delete=models.PROTECT,
         related_name="sessions",
     )
+    package_session_config = models.ForeignKey(
+        "interviews.PackageSessionConfig",
+        on_delete=models.SET_NULL,
+        related_name="sessions",
+        null=True,
+        blank=True,
+    )
     status = models.CharField(
         max_length=30,
         choices=InterviewSessionStatus.CHOICES,
@@ -60,6 +68,16 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
     current_question_index = models.PositiveIntegerField(default=0)
     total_questions = models.PositiveIntegerField(default=0)
     evaluation_tier = models.CharField(max_length=20, default="FULL")
+    package_code = models.CharField(max_length=50, blank=True)
+    package_name = models.CharField(max_length=100, blank=True)
+    coverage_level = models.CharField(
+        max_length=20,
+        choices=CoverageLevel.CHOICES,
+        default=CoverageLevel.FULL,
+    )
+    task_observation_enabled = models.BooleanField(default=False)
+    readiness_indicator_enabled = models.BooleanField(default=True)
+    certificate_enabled = models.BooleanField(default=True)
     rubric_version = models.CharField(max_length=20, blank=True)
     question_set_version = models.CharField(max_length=20, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
@@ -249,6 +267,15 @@ class CandidateResponse(TimeStampedModel):
     transcript = models.TextField(blank=True)
     original_transcript = models.TextField(blank=True)
     transcript_language = models.CharField(max_length=20, blank=True)
+    translated_transcript = models.TextField(blank=True)
+    translation_source_language = models.CharField(max_length=20, blank=True)
+    translation_target_language = models.CharField(max_length=20, blank=True)
+    translation_provider = models.CharField(max_length=100, blank=True)
+    translation_model = models.CharField(max_length=120, blank=True)
+    translation_status = models.CharField(max_length=30, default="NOT_STARTED")
+    translation_error = models.TextField(blank=True)
+    translation_metadata = models.JSONField(default=dict, blank=True)
+    translated_at = models.DateTimeField(null=True, blank=True)
     stt_provider = models.CharField(max_length=100, blank=True)
     stt_model = models.CharField(max_length=100, blank=True)
     stt_request_id = models.CharField(max_length=150, blank=True)
@@ -258,6 +285,11 @@ class CandidateResponse(TimeStampedModel):
     stt_error_message = models.TextField(blank=True)
     stt_processed_at = models.DateTimeField(null=True, blank=True)
     stt_metadata = models.JSONField(default=dict, blank=True)
+    interpretation_status = models.CharField(max_length=30, default="NOT_STARTED")
+    interpretation_error = models.TextField(blank=True)
+    interpreted_at = models.DateTimeField(null=True, blank=True)
+    processing_status = models.CharField(max_length=30, default="NOT_STARTED")
+    ai_processing_idempotency_key = models.CharField(max_length=120, blank=True)
     duration_seconds = models.PositiveIntegerField(default=0)
     attempt_number = models.PositiveIntegerField(default=1)
     metadata = models.JSONField(default=dict, blank=True)

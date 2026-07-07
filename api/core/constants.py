@@ -80,6 +80,30 @@ class InterviewEvaluationTier:
     ]
 
 
+class PackageAudience:
+    B2C = "B2C"
+    B2B = "B2B"
+    BOTH = "BOTH"
+
+    CHOICES = [
+        (B2C, "B2C"),
+        (B2B, "B2B"),
+        (BOTH, "Both"),
+    ]
+
+
+class CoverageLevel:
+    SCREENING = "SCREENING"
+    PARTIAL = "PARTIAL"
+    FULL = "FULL"
+
+    CHOICES = [
+        (SCREENING, "Screening"),
+        (PARTIAL, "Partial"),
+        (FULL, "Full"),
+    ]
+
+
 class InterviewQuestionType:
     SAFETY = "safety"
     INTEGRITY = "integrity"
@@ -599,6 +623,7 @@ class AuditLogCategory:
     SESSION = "SESSION"
     QUESTION = "QUESTION"
     VOICE = "VOICE"
+    AI_PROCESSING = "AI_PROCESSING"
     INTEGRITY = "INTEGRITY"
     EVALUATION = "EVALUATION"
     SUBSCRIPTION = "SUBSCRIPTION"
@@ -616,6 +641,7 @@ class AuditLogCategory:
         (SESSION, "Interview Session"),
         (QUESTION, "Interview Question"),
         (VOICE, "Voice Pipeline"),
+        (AI_PROCESSING, "AI Processing"),
         (INTEGRITY, "Integrity Monitoring"),
         (EVALUATION, "Evaluation"),
         (SUBSCRIPTION, "Subscription"),
@@ -665,6 +691,19 @@ class AuditLogAction:
     TRANSCRIPTION_REQUESTED = "TRANSCRIPTION_REQUESTED"
     TRANSCRIPTION_COMPLETED = "TRANSCRIPTION_COMPLETED"
     TRANSCRIPTION_FAILED = "TRANSCRIPTION_FAILED"
+    TRANSLATION_REQUESTED = "TRANSLATION_REQUESTED"
+    TRANSLATION_COMPLETED = "TRANSLATION_COMPLETED"
+    TRANSLATION_FAILED = "TRANSLATION_FAILED"
+    INTERPRETATION_REQUESTED = "INTERPRETATION_REQUESTED"
+    INTERPRETATION_COMPLETED = "INTERPRETATION_COMPLETED"
+    INTERPRETATION_FAILED = "INTERPRETATION_FAILED"
+    RULE_INPUT_PREPARATION_STARTED = "RULE_INPUT_PREPARATION_STARTED"
+    RULE_INPUT_PREPARATION_COMPLETED = "RULE_INPUT_PREPARATION_COMPLETED"
+    RULE_INPUT_PREPARATION_FAILED = "RULE_INPUT_PREPARATION_FAILED"
+    AI_PROCESSING_QUEUED = "AI_PROCESSING_QUEUED"
+    AI_PROCESSING_STARTED = "AI_PROCESSING_STARTED"
+    AI_PROCESSING_REQUIRES_HUMAN_REVIEW = "AI_PROCESSING_REQUIRES_HUMAN_REVIEW"
+    AI_PROCESSING_COMPLETED = "AI_PROCESSING_COMPLETED"
     RESPONSE_ATTACHED = "RESPONSE_ATTACHED"
     SESSION_MOVED_TO_NEXT_QUESTION = "SESSION_MOVED_TO_NEXT_QUESTION"
 
@@ -817,6 +856,19 @@ class AuditLogAction:
         (TRANSCRIPTION_REQUESTED, "Transcription Requested"),
         (TRANSCRIPTION_COMPLETED, "Transcription Completed"),
         (TRANSCRIPTION_FAILED, "Transcription Failed"),
+        (TRANSLATION_REQUESTED, "Translation Requested"),
+        (TRANSLATION_COMPLETED, "Translation Completed"),
+        (TRANSLATION_FAILED, "Translation Failed"),
+        (INTERPRETATION_REQUESTED, "Interpretation Requested"),
+        (INTERPRETATION_COMPLETED, "Interpretation Completed"),
+        (INTERPRETATION_FAILED, "Interpretation Failed"),
+        (RULE_INPUT_PREPARATION_STARTED, "Rule Input Preparation Started"),
+        (RULE_INPUT_PREPARATION_COMPLETED, "Rule Input Preparation Completed"),
+        (RULE_INPUT_PREPARATION_FAILED, "Rule Input Preparation Failed"),
+        (AI_PROCESSING_QUEUED, "AI Processing Queued"),
+        (AI_PROCESSING_STARTED, "AI Processing Started"),
+        (AI_PROCESSING_REQUIRES_HUMAN_REVIEW, "AI Processing Requires Human Review"),
+        (AI_PROCESSING_COMPLETED, "AI Processing Completed"),
         (RESPONSE_ATTACHED, "Response Attached"),
         (SESSION_MOVED_TO_NEXT_QUESTION, "Session Moved To Next Question"),
         

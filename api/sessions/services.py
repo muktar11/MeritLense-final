@@ -17,7 +17,11 @@ from api.core.constants import (
     InterviewSessionStatus,
     QuestionLifecycleStatus,
     SessionQuestionStatus,
+    EvaluationStatus,
+    EvaluationType,
 )
+from api.evaluations.models import Evaluation
+from api.interviews.package_services import PackageArchitectureService
 from api.interviews.voice_services import (
     SpeechToTextService,
     TextToSpeechService,
@@ -137,12 +141,40 @@ class QuestionGenerationService:
 class InterviewSessionService:
     @classmethod
     @transaction.atomic
-    def create_session(cls, *, candidate, config, created_by):
+    def create_session(cls, *, candidate, config, created_by, package_code=""):
         language = candidate.preferred_language or config.language or "EN"
+        package_context = PackageArchitectureService.resolve_session_package_context(
+            user=created_by,
+            role_code=config.role_code,
+            requested_package_code=package_code,
+        )
+        session_evaluation_tier = config.evaluation_tier
+        package_session_config = None
+        resolved_package_code = ""
+        resolved_package_name = ""
+        coverage_level = "FULL"
+        task_observation_enabled = config.enable_task_module
+        readiness_indicator_enabled = config.evaluation_tier == InterviewEvaluationTier.FULL
+        certificate_enabled = config.evaluation_tier == InterviewEvaluationTier.FULL
+        expiry_duration = config.duration_minutes
+
+        if package_context is not None:
+            package_session_config = package_context["package"]
+            coverage = package_context["coverage"]
+            session_evaluation_tier = package_context["evaluation_tier"]
+            resolved_package_code = package_session_config.package_code
+            resolved_package_name = package_session_config.package_name
+            coverage_level = coverage.coverage_level
+            task_observation_enabled = package_context["task_observation_enabled"]
+            readiness_indicator_enabled = package_context["readiness_indicator_enabled"]
+            certificate_enabled = package_context["certificate_enabled"]
+            expiry_duration = package_session_config.duration_minutes or config.duration_minutes
+
         session = InterviewSession.objects.create(
             candidate=candidate,
             organization=candidate.company,
             config=config,
+            package_session_config=package_session_config,
             role_name=config.role_name or candidate.get_job_role_display(),
             role_code=config.role_code,
             ui_language=config.language or language,
@@ -151,13 +183,20 @@ class InterviewSessionService:
             stt_language_code=LANGUAGE_CODE_MAP.get(language, "en-US"),
             translation_target=config.language if config.enable_translation else "",
             total_questions=config.total_questions,
-            evaluation_tier=config.evaluation_tier,
+            evaluation_tier=session_evaluation_tier,
+            package_code=resolved_package_code,
+            package_name=resolved_package_name,
+            coverage_level=coverage_level,
+            task_observation_enabled=task_observation_enabled,
+            readiness_indicator_enabled=readiness_indicator_enabled,
+            certificate_enabled=certificate_enabled,
             rubric_version=config.rubric_version,
             question_set_version=config.question_set_version,
-            expires_at=InterviewSession.build_expiry(config.duration_minutes),
+            expires_at=InterviewSession.build_expiry(expiry_duration),
             created_by=created_by,
         )
         QuestionGenerationService.generate_questions(session)
+        cls._ensure_linked_evaluation(session, status=EvaluationStatus.SCHEDULED)
         AuditLogService.log(
             user=created_by,
             action=AuditLogAction.SESSION_CREATED,
@@ -209,6 +248,7 @@ class InterviewSessionService:
             events.append(("SESSION_READY", AuditLogAction.SESSION_READY))
 
         session.start()
+        cls._ensure_linked_evaluation(session, status=EvaluationStatus.IN_PROGRESS)
         events.append(("SESSION_STARTED", AuditLogAction.SESSION_STARTED))
         cls._log_and_broadcast(actor, session, events)
         return session
@@ -389,6 +429,16 @@ class InterviewSessionService:
     @transaction.atomic
     def complete_session(cls, session, actor=None):
         session.complete()
+        evaluation = cls._ensure_linked_evaluation(session, status=EvaluationStatus.IN_PROGRESS)
+        if evaluation.status != EvaluationStatus.COMPLETED:
+            evaluation.complete()
+            if not evaluation.certificate_enabled:
+                evaluation.certificate_status = "NOT_ISSUED"
+            if not evaluation.readiness_indicator_enabled:
+                evaluation.readiness_status = "PENDING"
+                evaluation.readiness_override_applied = False
+                evaluation.readiness_override_reason = ""
+            evaluation.save()
         if actor:
             AuditLogService.log(
                 user=actor,
@@ -407,6 +457,49 @@ class InterviewSessionService:
             {"event": "SESSION_COMPLETED", **session_event_payload(session)},
         )
         return session
+
+    @classmethod
+    def _ensure_linked_evaluation(cls, session, status=EvaluationStatus.SCHEDULED):
+        evaluation, created = Evaluation.objects.get_or_create(
+            session=session,
+            defaults={
+                "candidate": session.candidate,
+                "evaluation_type": EvaluationType.INTERVIEW,
+                "status": status,
+                "scheduled_date": session.started_at or timezone.now(),
+                "duration_minutes": session.package_session_config.duration_minutes if session.package_session_config else session.config.duration_minutes,
+                "created_by": session.created_by,
+                "company": session.organization,
+                "evaluation_tier": session.evaluation_tier,
+                "package_code": session.package_code,
+                "coverage_level": session.coverage_level,
+                "readiness_indicator_enabled": session.readiness_indicator_enabled,
+                "certificate_enabled": session.certificate_enabled,
+            },
+        )
+        changed_fields = []
+        if evaluation.status != status and evaluation.status != EvaluationStatus.COMPLETED:
+            evaluation.status = status
+            changed_fields.append("status")
+        if evaluation.evaluation_tier != session.evaluation_tier:
+            evaluation.evaluation_tier = session.evaluation_tier
+            changed_fields.append("evaluation_tier")
+        if evaluation.package_code != session.package_code:
+            evaluation.package_code = session.package_code
+            changed_fields.append("package_code")
+        if evaluation.coverage_level != session.coverage_level:
+            evaluation.coverage_level = session.coverage_level
+            changed_fields.append("coverage_level")
+        if evaluation.readiness_indicator_enabled != session.readiness_indicator_enabled:
+            evaluation.readiness_indicator_enabled = session.readiness_indicator_enabled
+            changed_fields.append("readiness_indicator_enabled")
+        if evaluation.certificate_enabled != session.certificate_enabled:
+            evaluation.certificate_enabled = session.certificate_enabled
+            changed_fields.append("certificate_enabled")
+        if changed_fields:
+            changed_fields.append("updated_at")
+            evaluation.save(update_fields=changed_fields)
+        return evaluation
 
     @classmethod
     def log_integrity_event(cls, session, *, event_type, severity="INFO", details=None):

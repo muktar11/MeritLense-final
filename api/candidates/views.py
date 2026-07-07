@@ -1,5 +1,6 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -7,9 +8,10 @@ from django.db.models import Q
 from drf_spectacular.utils import OpenApiExample, extend_schema, extend_schema_view
 
 from api.audit.services import AuditLogService
+from api.payments.mixins import SubscriptionUsageMixin
 from .models import Candidate
 from .serializers import (
-    CandidateSerializer, 
+    CandidateSerializer,
     CandidateCreateSerializer,
     CandidateUpdateSerializer,
     CandidateShareSerializer
@@ -55,7 +57,7 @@ from api.accounts.models import User
         responses={200: CandidateSerializer},
     ),
 )
-class CandidateViewSet(viewsets.ModelViewSet):
+class CandidateViewSet(SubscriptionUsageMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = CandidateSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -125,8 +127,15 @@ class CandidateViewSet(viewsets.ModelViewSet):
         return False
     
     def perform_create(self, serializer):
+        if not self.check_subscription_limit(self.request.user, 'candidate_limit'):
+            raise PermissionDenied(
+                "You've reached the candidate limit for your current package. "
+                "Upgrade your plan to add more candidates."
+            )
+
         candidate = serializer.save()
-        
+        self.increment_subscription_usage(self.request.user, 'candidate_limit')
+
         AuditLogService.log(
             user=self.request.user,
             action=AuditLogAction.CANDIDATE_CREATED,
@@ -197,9 +206,10 @@ class CandidateViewSet(viewsets.ModelViewSet):
             },
             request=self.request
         )
-        
+
         instance.delete()
-    
+        self.decrement_subscription_usage(self.request.user, 'candidate_limit')
+
     @action(detail=True, methods=['post'])
     def share(self, request, id=None):
         candidate = self.get_object()

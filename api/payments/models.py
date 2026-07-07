@@ -4,8 +4,8 @@ from django.utils import timezone
 import stripe
 from api.core.models import TimeStampedModel
 from api.core.constants import (
-    CompanySize, PaymentStatus, PaymentMethodConstants, 
-    SubscriptionStatus, BillingInterval, InvoiceStatus
+    CompanySize, PaymentStatus, PaymentMethodConstants,
+    SubscriptionStatus, BillingInterval, InvoiceStatus, InterviewEvaluationTier
 )
 from api.accounts.models import User, Company
 
@@ -54,7 +54,30 @@ class Price(TimeStampedModel):
         default=BillingInterval.MONTHLY
     )
     interval_count = models.PositiveIntegerField(default=1)
-    
+
+    billing_type = models.CharField(
+        max_length=10,
+        choices=[
+            ('RECURRING', 'Recurring'),
+            ('ONE_TIME', 'One-Time'),
+        ],
+        default='RECURRING',
+        help_text="Whether this package is a recurring subscription or a one-time purchase"
+    )
+
+    evaluation_tier = models.CharField(
+        max_length=20,
+        choices=InterviewEvaluationTier.CHOICES,
+        null=True,
+        blank=True,
+        help_text="Evaluation tier this package grants (Screening/Full/Both)"
+    )
+
+    task_observation_enabled = models.BooleanField(
+        default=False,
+        help_text="Whether this package includes task observation sessions"
+    )
+
     features = models.JSONField(default=dict, blank=True)
     
     feature_limits = models.JSONField(

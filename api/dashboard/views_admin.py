@@ -111,7 +111,7 @@ class AdminSystemLoadTrendView(APIView):
         
         users = User.objects.filter(
             created_at__gte=start_date,
-            role__in=[Roles.B2C, Roles.B2B]
+            role=Roles.B2C
         ).annotate(
             date=TruncDate('created_at')
         ).values('date').annotate(

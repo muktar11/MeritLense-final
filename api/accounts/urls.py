@@ -1,6 +1,8 @@
 from django.urls import path
 from .views import (
     AcceptInvitationView,
+    AdminCreateB2CEmployerView,
+    AdminCreateB2BEmployerView,
     AdminDashboardStatsView,
     AdminStatsView,
     AdminUserDetailView,
@@ -44,9 +46,11 @@ urlpatterns = [
     path('documents/upload', ProfileDocumentUploadView.as_view(), name='profile-document-upload'),
     path('stats', AdminStatsView.as_view(), name='admin-stats'),
     path('admin/users/create', CreateAdminView.as_view(), name='admin-create'),
-    path('admin/users/<int:user_id>', AdminUserDetailView.as_view(), name='admin-detail'),
+    path('admin/users/<uuid:user_id>', AdminUserDetailView.as_view(), name='admin-detail'),
     path('admin/users', AdminUserListView.as_view(), name='admin-list'),
     path('admin/employers', EmployerListView.as_view(), name='employer-list'),
+    path('admin/employers/create/b2c', AdminCreateB2CEmployerView.as_view(), name='admin-create-employer-b2c'),
+    path('admin/employers/create/b2b', AdminCreateB2BEmployerView.as_view(), name='admin-create-employer-b2b'),
     path('admin/employers/<int:user_id>', EmployerDetailView.as_view(), name='employer-detail'),
     path('admin/employers/pending-verification', PendingVerificationListView.as_view(), name='pending-verification'),
     path('admin/employers/verify-documents', VerifyDocumentsView.as_view(), name='verify-documents'),

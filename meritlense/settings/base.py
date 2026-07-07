@@ -6,9 +6,10 @@ import json
 from dotenv import load_dotenv
 
 
-load_dotenv()
-
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+_env_file = BASE_DIR / ".env.dev" if (BASE_DIR / ".env.dev").exists() else BASE_DIR / ".env"
+load_dotenv(_env_file)
 
 
 def env_bool(name, default=False):
@@ -90,6 +91,7 @@ MIDDLEWARE = [
 ]
 
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS")
 
 ROOT_URLCONF = "meritlense.urls"
 WSGI_APPLICATION = "meritlense.wsgi.application"

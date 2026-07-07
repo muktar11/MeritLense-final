@@ -1,6 +1,7 @@
 from django.db import models
 from rest_framework import viewsets
 from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q
@@ -15,10 +16,17 @@ from .serializers import AuditLogSerializer, AuditLogFilterSerializer
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 
 
+class AuditLogPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
 class AuditLogViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
     serializer_class = AuditLogSerializer
-    
+    pagination_class = AuditLogPagination
+
     def get_queryset(self):
         queryset = AuditLog.objects.all()
         

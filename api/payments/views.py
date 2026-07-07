@@ -1,5 +1,6 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.http import HttpResponse, JsonResponse
@@ -10,7 +11,7 @@ from django.utils import timezone
 import stripe
 from api.accounts.models import User
 from api.core.constants import Roles, SubscriptionStatus
-from api.core.permisssions import IsAdminOrSuperAdmin
+from api.core.permisssions import IsAdminOrSuperAdmin, IsSuperAdmin
 from api.payments.subscription_serializers import CancelSubscriptionSerializer, ChangePlanSerializer, SubscriptionListSerializer, UpdateQuantitySerializer
 from meritlense import settings
 from api.audit.services import AuditLogService
@@ -19,7 +20,7 @@ from api.core.public_ids import PublicIdLookupMixin, get_by_identifier
 
 from .models import Price, Customer, PaymentMethod, Subscription, Payment, Invoice
 from .serializers import (
-    PriceSerializer, CustomerSerializer, PaymentMethodSerializer,
+    PriceSerializer, PriceAdminSerializer, CustomerSerializer, PaymentMethodSerializer,
     SubscriptionSerializer, PaymentSerializer, InvoiceSerializer,
     CreatePaymentIntentSerializer, AttachPaymentMethodSerializer, CreateSubscriptionSerializer
 )
@@ -547,12 +548,17 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
                 new_price = get_by_identifier(Price.objects.filter(is_active=True), price_id)
                 
                 stripe.api_key = settings.STRIPE_SECRET_KEY
-                
+
+                # Stripe's items[].id must be the Subscription Item ID (si_...),
+                # not the Price ID — it identifies which line item to swap.
+                stripe_subscription = stripe.Subscription.retrieve(subscription.stripe_subscription_id)
+                subscription_item_id = stripe_subscription['items']['data'][0]['id']
+
                 items = [{
-                    'id': subscription.stripe_price.stripe_price_id,
+                    'id': subscription_item_id,
                     'price': new_price.stripe_price_id,
                 }]
-                
+
                 stripe.Subscription.modify(
                     subscription.stripe_subscription_id,
                     items=items,
@@ -864,27 +870,190 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
         return Response(serializer.data)
 
 
+class AdminPricePagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+class AdminPriceViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
+    """SuperAdmin-only CRUD over packages (Price rows).
+
+    Distinct from the read-only, role-filtered PriceViewSet above, which
+    regular authenticated users hit to see the packages available to them.
+    This viewset is the only write path for packages and always keeps
+    every Price row (including deactivated ones) visible to the SuperAdmin.
+    """
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
+    serializer_class = PriceAdminSerializer
+    pagination_class = AdminPricePagination
+
+    # Fields that Stripe treats as immutable on a Price object — changing
+    # any of these requires retiring the old Stripe Price and minting a new one.
+    IMMUTABLE_PRICE_FIELDS = {'unit_amount', 'currency', 'billing_type', 'interval', 'interval_count'}
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Price.objects.none()
+
+        queryset = Price.objects.all()
+
+        target_user_type = self.request.query_params.get('target_user_type')
+        if target_user_type:
+            queryset = queryset.filter(target_user_type=target_user_type)
+
+        billing_type = self.request.query_params.get('billing_type')
+        if billing_type:
+            queryset = queryset.filter(billing_type=billing_type)
+
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == 'true')
+
+        return queryset.order_by('target_user_type', 'unit_amount')
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        try:
+            stripe_price, product = StripeService().create_price_and_product(data)
+        except stripe.error.StripeError as e:
+            return Response({'error': f'Stripe error: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        price = Price.objects.create(
+            stripe_price_id=stripe_price.id,
+            stripe_product_id=product.id,
+            **data
+        )
+
+        AuditLogService.log(
+            user=request.user,
+            action='PACKAGE_CREATED',
+            category=AuditLogCategory.SUBSCRIPTION,
+            description=f"Package created: {price.name}",
+            resource=price,
+            data={'name': price.name, 'target_user_type': price.target_user_type},
+            request=request
+        )
+
+        return Response(self.get_serializer(price).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        pricing_changed = any(field in data for field in self.IMMUTABLE_PRICE_FIELDS)
+
+        try:
+            service = StripeService()
+            if pricing_changed:
+                new_price = service.retire_and_replace_price(instance, data)
+                result = new_price
+            else:
+                service.update_price_metadata(instance, data)
+                for field, value in data.items():
+                    setattr(instance, field, value)
+                instance.save()
+                result = instance
+        except stripe.error.StripeError as e:
+            return Response({'error': f'Stripe error: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        AuditLogService.log(
+            user=request.user,
+            action='PACKAGE_UPDATED',
+            category=AuditLogCategory.SUBSCRIPTION,
+            description=f"Package updated: {result.name}",
+            resource=result,
+            data={'changes': list(data.keys()), 'pricing_changed': pricing_changed},
+            request=request
+        )
+
+        return Response(self.get_serializer(result).data)
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        try:
+            stripe.api_key = settings.STRIPE_SECRET_KEY
+            stripe.Price.modify(instance.stripe_price_id, active=False)
+        except stripe.error.StripeError as e:
+            logger.warning(f"Could not archive Stripe price {instance.stripe_price_id}: {e}")
+
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
+
+        AuditLogService.log(
+            user=request.user,
+            action='PACKAGE_DEACTIVATED',
+            category=AuditLogCategory.SUBSCRIPTION,
+            description=f"Package deactivated: {instance.name}",
+            resource=instance,
+            request=request
+        )
+
+        return Response(self.get_serializer(instance).data, status=status.HTTP_200_OK)
+
+
+class AdminSubscriptionPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
 class AdminSubscriptionViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
     serializer_class = SubscriptionSerializer
-    
+    pagination_class = AdminSubscriptionPagination
+
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Subscription.objects.none()
-        return Subscription.objects.all()
+
+        queryset = Subscription.objects.select_related('user', 'company', 'stripe_price').all()
+
+        status_filter = self.request.query_params.get('status')
+        if status_filter:
+            queryset = queryset.filter(status__iexact=status_filter)
+
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(user__email__icontains=search) |
+                Q(user__first_name__icontains=search) |
+                Q(user__last_name__icontains=search) |
+                Q(company__name__icontains=search)
+            )
+
+        return queryset.order_by('-created_at')
     
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
-        
+
+        if hasattr(response, 'data') and isinstance(response.data, dict):
+            result_count = response.data.get('count', 0)
+        elif hasattr(response, 'data'):
+            result_count = len(response.data)
+        else:
+            result_count = 0
+
         AuditLogService.log(
             user=request.user,
             action='ADMIN_VIEW_ALL_SUBSCRIPTIONS',
             category=AuditLogCategory.SUBSCRIPTION,
             description="Admin viewed all subscriptions",
-            data={'count': len(response.data) if hasattr(response, 'data') else 0},
+            data={'count': result_count},
             request=request
         )
-        
+
         return response
     
     def retrieve(self, request, *args, **kwargs):
@@ -1293,11 +1462,19 @@ def debug_subscription_payment(request):
         stripe.api_key = settings.STRIPE_SECRET_KEY
         stripe_sub = stripe.Subscription.retrieve(
             sub.stripe_subscription_id,
-            expand=['latest_invoice', 'latest_invoice.payment_intent']
+            expand=['latest_invoice.payment_intent', 'latest_invoice.payments.data.payment']
         )
-        
+
         invoice = stripe_sub.latest_invoice if hasattr(stripe_sub, 'latest_invoice') else None
-        payment_intent = invoice.payment_intent if invoice and hasattr(invoice, 'payment_intent') else None
+        payment_intent = None
+        if invoice and hasattr(invoice, 'payment_intent') and invoice.payment_intent:
+            payment_intent = invoice.payment_intent
+        elif invoice and getattr(invoice, 'payments', None) and invoice.payments.data:
+            pi_ref = getattr(invoice.payments.data[0].payment, 'payment_intent', None)
+            if isinstance(pi_ref, str):
+                payment_intent = stripe.PaymentIntent.retrieve(pi_ref)
+            else:
+                payment_intent = pi_ref
         
         results.append({
             'subscription_id': str(sub.public_id),
@@ -1341,9 +1518,9 @@ def sync_subscription_status(request):
         )
         
         old_status = subscription.status
-        
-        if subscription.status != stripe_sub.status:
-            subscription.status = stripe_sub.status
+
+        if subscription.status != stripe_sub.status.upper():
+            subscription.status = stripe_sub.status.upper()
             subscription.save()
         
         if hasattr(stripe_sub, 'current_period_start') and stripe_sub.current_period_start:
@@ -1437,14 +1614,14 @@ def sync_all_subscriptions(request):
             stripe_sub = stripe.Subscription.retrieve(sub.stripe_subscription_id)
             
             old_status = sub.status
-            if sub.status != stripe_sub.status:
-                sub.status = stripe_sub.status
+            if sub.status != stripe_sub.status.upper():
+                sub.status = stripe_sub.status.upper()
                 sub.save()
                 synced_count += 1
                 synced_details.append({
                     'id': str(sub.public_id),
                     'old_status': old_status,
-                    'new_status': stripe_sub.status
+                    'new_status': stripe_sub.status.upper()
                 })
         except Exception as e:
             print(f"Error syncing subscription {sub.public_id}: {e}")

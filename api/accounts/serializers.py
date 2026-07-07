@@ -581,7 +581,7 @@ class UserStatusUpdateSerializer(serializers.Serializer):
 
 
 class DocumentVerificationSerializer(serializers.Serializer):
-    user_id = serializers.IntegerField()
+    user_id = serializers.CharField()
     status = serializers.ChoiceField(choices=['APPROVED', 'REJECTED'])
     rejection_reason = serializers.CharField(required=False, allow_blank=True)
     verification_notes = serializers.CharField(required=False, allow_blank=True)

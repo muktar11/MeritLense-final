@@ -80,10 +80,11 @@ celerybeat-schedule.*
 
 *.sage.py 
 
-.env 
-.venv 
-env/ 
-venv/ 
+.env
+.env.*
+.venv
+env/
+venv/
 ENV/ 
 env.bak/ 
 venv.bak/ 
@@ -113,10 +114,8 @@ GitHub.sublime-settings
 !.vscode/extensions.json
 .history
 
-# Frontend build artifacts
-MeritLense-ui/node_modules/
-MeritLense-ui/.next/
-MeritLense-ui/out/
+# Frontend lives in its own repo — do not track it here
+MeritLense-ui/
 
 # Django collected static files
 staticfiles/

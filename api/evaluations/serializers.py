@@ -51,8 +51,8 @@ class EvaluationSerializer(PublicIdModelSerializer):
         return value
 
 
-class EvaluationCreateSerializer(serializers.ModelSerializer):
-    
+class EvaluationCreateSerializer(PublicIdModelSerializer):
+
     class Meta:
         model = Evaluation
         fields = [

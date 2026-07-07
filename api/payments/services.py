@@ -4,6 +4,7 @@ from django.conf import settings
 from django.utils import timezone
 from decimal import Decimal
 from api.core.public_ids import get_by_identifier
+from api.core.constants import SubscriptionStatus
 from .models import (
     Price, Customer, PaymentMethod, 
     Subscription, Payment, Invoice
@@ -203,7 +204,131 @@ class StripeService:
         except stripe.error.StripeError as e:
             print(f"Stripe error confirming payment intent: {e}")
             return None
-    
+
+    def _build_stripe_product_metadata(self, data):
+        metadata = {
+            'target_user_type': data.get('target_user_type', 'BOTH'),
+        }
+        if data.get('min_company_size'):
+            metadata['min_company_size'] = data['min_company_size']
+        if data.get('max_company_size'):
+            metadata['max_company_size'] = data['max_company_size']
+        feature_limits = data.get('feature_limits') or {}
+        for key in ('candidate_limit', 'evaluation_limit', 'team_member_limit', 'points_granted'):
+            if feature_limits.get(key) is not None:
+                metadata[key] = str(feature_limits[key])
+        return metadata
+
+    def create_price_and_product(self, data):
+        """Create a brand-new Stripe Product + Price for an admin-authored package.
+
+        Package fields that don't exist on Stripe's Price object (feature_limits,
+        evaluation_tier, task_observation_enabled, etc.) are mirrored into the
+        Stripe Product's metadata for visibility in the Stripe dashboard, but the
+        local `Price` row remains the single source of truth the app reads from.
+        """
+        product = stripe.Product.create(
+            name=data['name'],
+            metadata=self._build_stripe_product_metadata(data),
+        )
+
+        price_params = {
+            'product': product.id,
+            'unit_amount': int(Decimal(str(data['unit_amount'])) * 100),
+            'currency': data.get('currency', 'eur'),
+            'metadata': data.get('metadata', {}) or {},
+        }
+
+        if data.get('billing_type', 'RECURRING') != 'ONE_TIME':
+            # Our BillingInterval choices (MONTHLY/QUARTERLY/YEARLY) don't map
+            # 1:1 onto Stripe's accepted recurring[interval] values (day/week/
+            # month/year) — QUARTERLY in particular has no Stripe equivalent
+            # and must be expressed as interval=month, interval_count=3.
+            stripe_interval, base_count = {
+                'MONTHLY': ('month', 1),
+                'QUARTERLY': ('month', 3),
+                'YEARLY': ('year', 1),
+            }.get(data.get('interval', 'MONTHLY'), ('month', 1))
+            price_params['recurring'] = {
+                'interval': stripe_interval,
+                'interval_count': base_count * data.get('interval_count', 1),
+            }
+
+        stripe_price = stripe.Price.create(**price_params)
+
+        return stripe_price, product
+
+    def update_price_metadata(self, price, data):
+        """Update a package's non-pricing fields in place (name, limits, tier, flags, is_active).
+
+        Does not touch amount/currency/interval/billing_type — those require
+        retire_and_replace_price because Stripe Price objects are immutable.
+        """
+        product_updates = {}
+        if 'name' in data:
+            product_updates['name'] = data['name']
+        product_updates['metadata'] = self._build_stripe_product_metadata({**price.__dict__, **data})
+
+        stripe.Product.modify(price.stripe_product_id, **product_updates)
+
+        if 'is_active' in data and data['is_active'] != price.is_active:
+            stripe.Price.modify(price.stripe_price_id, active=data['is_active'])
+
+        return price
+
+    def retire_and_replace_price(self, old_price, data):
+        """Archive the old Stripe Price and local row, create a new one with the new terms.
+
+        Stripe Prices are immutable once created, so any amount/currency/interval/
+        billing_type change must create a brand-new Stripe Price + local Price row.
+        The old row is kept (is_active=False), not deleted, so existing
+        Subscription.stripe_price FKs keep resolving to the terms they actually bought.
+        """
+        try:
+            stripe.Price.modify(old_price.stripe_price_id, active=False)
+        except stripe.error.StripeError as e:
+            logger.warning(f"Could not archive old Stripe price {old_price.stripe_price_id}: {e}")
+
+        old_price.is_active = False
+        old_price.save(update_fields=['is_active'])
+
+        merged = {
+            'name': data.get('name', old_price.name),
+            'target_user_type': data.get('target_user_type', old_price.target_user_type),
+            'min_company_size': data.get('min_company_size', old_price.min_company_size),
+            'max_company_size': data.get('max_company_size', old_price.max_company_size),
+            'unit_amount': data.get('unit_amount', old_price.unit_amount),
+            'currency': data.get('currency', old_price.currency),
+            'billing_type': data.get('billing_type', old_price.billing_type),
+            'interval': data.get('interval', old_price.interval),
+            'interval_count': data.get('interval_count', old_price.interval_count),
+            'feature_limits': data.get('feature_limits', old_price.feature_limits),
+            'metadata': data.get('metadata', old_price.metadata),
+        }
+
+        stripe_price, product = self.create_price_and_product(merged)
+
+        new_price = Price.objects.create(
+            name=merged['name'],
+            stripe_price_id=stripe_price.id,
+            stripe_product_id=product.id,
+            target_user_type=merged['target_user_type'],
+            min_company_size=merged['min_company_size'],
+            max_company_size=merged['max_company_size'],
+            unit_amount=merged['unit_amount'],
+            currency=merged['currency'],
+            billing_type=merged['billing_type'],
+            interval=merged['interval'],
+            interval_count=merged['interval_count'],
+            evaluation_tier=data.get('evaluation_tier', old_price.evaluation_tier),
+            task_observation_enabled=data.get('task_observation_enabled', old_price.task_observation_enabled),
+            features=data.get('features', old_price.features),
+            feature_limits=merged['feature_limits'],
+            is_active=True,
+            metadata=merged['metadata'],
+        )
+
+        return new_price
 
 
 
@@ -224,7 +349,12 @@ class StripeService:
             subscription_params = {
                 'customer': customer.stripe_customer_id,
                 'items': [{'price': price.stripe_price_id, 'quantity': quantity}],
-                'expand': ['latest_invoice.payment_intent', 'latest_invoice'],
+                # Stripe's newer API versions ("clover") dropped Invoice.payment_intent
+                # in favor of Invoice.payments[].payment.payment_intent — expand both
+                # paths so this works regardless of which API version the account is on.
+                # Stripe caps expand depth at 4 levels, so `.payment_intent` on the
+                # nested payment is fetched as a plain ID rather than expanded further.
+                'expand': ['latest_invoice.payment_intent', 'latest_invoice.payments.data.payment'],
                 'metadata': {
                     'user_id': str(user.id),
                     'price_id': str(price_id),
@@ -265,7 +395,7 @@ class StripeService:
                 customer=customer,
                 stripe_subscription_id=stripe_subscription.id,
                 stripe_price=price,
-                status=stripe_subscription.status,
+                status=stripe_subscription.status.upper(),
                 current_period_start=current_period_start,
                 current_period_end=current_period_end,
                 quantity=quantity,
@@ -288,22 +418,29 @@ class StripeService:
             
             if hasattr(stripe_subscription, 'latest_invoice') and stripe_subscription.latest_invoice:
                 invoice = stripe_subscription.latest_invoice
+                payment_intent_id = None
+                payment_intent_metadata = {}
                 if hasattr(invoice, 'payment_intent') and invoice.payment_intent:
-                    payment_intent = invoice.payment_intent
-                    payment = Payment.objects.create(
+                    payment_intent_id = invoice.payment_intent.id
+                    payment_intent_metadata = invoice.payment_intent.metadata
+                elif getattr(invoice, 'payments', None) and invoice.payments.data:
+                    pi_ref = getattr(invoice.payments.data[0].payment, 'payment_intent', None)
+                    if pi_ref:
+                        payment_intent_id = pi_ref if isinstance(pi_ref, str) else pi_ref.id
+
+                if payment_intent_id:
+                    is_paid = invoice.status == 'paid' if hasattr(invoice, 'status') else bool(getattr(invoice, 'paid', False))
+                    Payment.objects.create(
                         user=user,
                         customer=customer,
                         subscription=subscription,
-                        stripe_payment_intent_id=payment_intent.id,
+                        stripe_payment_intent_id=payment_intent_id,
                         amount=Decimal(invoice.amount_due) / 100,
                         currency=invoice.currency,
-                        status='SUCCEEDED' if invoice.paid else 'PENDING',
-                        paid_at=timezone.now() if invoice.paid else None,
-                        metadata=payment_intent.metadata
+                        status='SUCCEEDED' if is_paid else 'PENDING',
+                        paid_at=timezone.now() if is_paid else None,
+                        metadata=payment_intent_metadata
                     )
-                    
-                    subscription.latest_invoice = payment
-                    subscription.save()
             
             logger.info(f"Subscription created successfully in database: {subscription.id}")
             return subscription
@@ -355,7 +492,7 @@ class StripeService:
                 
                 if price_id:
                     subscription.stripe_price = new_price
-                subscription.status = stripe_subscription.status
+                subscription.status = stripe_subscription.status.upper()
                 subscription.current_period_end = timezone.datetime.fromtimestamp(
                     stripe_subscription.current_period_end
                 )
@@ -416,18 +553,69 @@ class StripeService:
                     'receipt_url': payment_intent.get('receipt_url', ''),
                 }
             )
-            
+
             if not created:
                 payment.status = 'SUCCEEDED'
                 payment.paid_at = timezone.now()
                 payment.receipt_url = payment_intent.get('receipt_url', '')
                 payment.save()
-            
+
             logger.info(f"Payment succeeded: {payment_intent['id']}")
+
+            self._grant_one_time_package(payment, payment_intent)
+
             return payment
         except Exception as e:
             logger.error(f"Error handling payment succeeded: {e}")
             return None
+
+    def _grant_one_time_package(self, payment, payment_intent):
+        """For a one-time package purchase, create a local Subscription bookkeeping
+        row on payment success so the existing usage/limit machinery (built for
+        Stripe Subscriptions) can be reused unchanged for one-time purchases.
+
+        Idempotent: skips if this payment has already granted a subscription
+        (webhooks can be delivered more than once for the same event).
+        """
+        if payment.subscription_id:
+            return
+
+        price_id = (payment_intent.get('metadata') or {}).get('price_id')
+        if not price_id:
+            return
+
+        try:
+            price = get_by_identifier(Price.objects.all(), price_id)
+        except Price.DoesNotExist:
+            logger.warning(f"One-time package grant skipped: price {price_id} not found")
+            return
+
+        if price.billing_type != 'ONE_TIME':
+            return
+
+        validity_days = int((price.metadata or {}).get('validity_days', 365))
+        now = timezone.now()
+
+        subscription = Subscription.objects.create(
+            user=payment.user,
+            customer=payment.customer,
+            stripe_subscription_id=f"one_time_{payment.stripe_payment_intent_id}",
+            stripe_price=price,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=now,
+            current_period_end=now + timezone.timedelta(days=validity_days),
+            current_usage={},
+            metadata={'purchase_type': 'one_time', 'payment_id': payment.id},
+        )
+
+        if hasattr(payment.user, 'company_profile') and payment.user.company_profile:
+            subscription.company = payment.user.company_profile.company
+            subscription.save(update_fields=['company'])
+
+        payment.subscription = subscription
+        payment.save(update_fields=['subscription'])
+
+        logger.info(f"Granted one-time package '{price.name}' to user {payment.user.id} via payment {payment.id}")
     
     def handle_payment_failed(self, payment_intent):
         try:
@@ -494,7 +682,7 @@ class StripeService:
             ).first()
             
             if subscription:
-                subscription.status = subscription_data['status']
+                subscription.status = subscription_data['status'].upper()
                 subscription.current_period_end = timezone.datetime.fromtimestamp(
                     subscription_data['current_period_end']
                 )
@@ -514,8 +702,8 @@ class StripeService:
                 stripe_subscription_id=subscription_data['id']
             )
             old_status = subscription.status
-            subscription.status = subscription_data['status']
-            
+            subscription.status = subscription_data['status'].upper()
+
             if 'current_period_start' in subscription_data:
                 subscription.current_period_start = timezone.datetime.fromtimestamp(
                     subscription_data['current_period_start']
@@ -581,8 +769,8 @@ class StripeService:
                     invoice.subscription = subscription
                     invoice.save()
                     
-                    if subscription.status == 'incomplete':
-                        subscription.status = 'active'
+                    if subscription.status == 'INCOMPLETE':
+                        subscription.status = 'ACTIVE'
                         subscription.save()
                         logger.info(f"Subscription {subscription.id} status updated to active after payment")
             

@@ -10,7 +10,7 @@ from .models import (
 class PriceSerializer(PublicIdModelSerializer):
     formatted_price = serializers.SerializerMethodField()
     target_user_type_display = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = Price
         fields = [
@@ -18,15 +18,52 @@ class PriceSerializer(PublicIdModelSerializer):
             'target_user_type', 'target_user_type_display',
             'min_company_size', 'max_company_size',
             'unit_amount', 'currency', 'formatted_price',
-            'interval', 'interval_count', 'features', 'feature_limits',
+            'interval', 'interval_count', 'billing_type',
+            'evaluation_tier', 'task_observation_enabled',
+            'features', 'feature_limits',
             'is_active', 'metadata', 'created_at'
         ]
-    
+
     def get_formatted_price(self, obj):
         return obj.get_formatted_price()
-    
+
     def get_target_user_type_display(self, obj):
         return dict(obj._meta.get_field('target_user_type').choices).get(obj.target_user_type, '')
+
+
+class PriceAdminSerializer(PublicIdModelSerializer):
+    """Admin-facing serializer for creating/editing packages (Price rows).
+
+    stripe_price_id/stripe_product_id are intentionally read-only: they are
+    always system-generated via StripeService, never typed in by an admin,
+    so a package can't be wired to a mismatched/bogus Stripe object.
+    """
+    formatted_price = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Price
+        fields = [
+            'id', 'name', 'stripe_price_id', 'stripe_product_id',
+            'target_user_type', 'min_company_size', 'max_company_size',
+            'unit_amount', 'currency', 'formatted_price',
+            'billing_type', 'interval', 'interval_count',
+            'evaluation_tier', 'task_observation_enabled',
+            'features', 'feature_limits',
+            'is_active', 'metadata', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'stripe_price_id', 'stripe_product_id', 'created_at', 'updated_at']
+
+    def get_formatted_price(self, obj):
+        return obj.get_formatted_price()
+
+    def validate(self, data):
+        billing_type = data.get('billing_type', getattr(self.instance, 'billing_type', 'RECURRING'))
+        if billing_type == 'ONE_TIME' and data.get('interval'):
+            # interval is meaningless for a one-time price; ignore rather than error,
+            # so the same form can be reused for both billing types without extra client logic.
+            data.pop('interval', None)
+            data.pop('interval_count', None)
+        return data
 
 class CustomerSerializer(PublicIdModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)

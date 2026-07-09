@@ -131,6 +131,7 @@ class Agreement(TimeStampedModel):
     otp_reference = models.CharField(max_length=64, blank=True)
     otp_code = models.CharField(max_length=10, blank=True)
     otp_attempts = models.PositiveIntegerField(default=0)
+    otp_failed_attempts = models.PositiveIntegerField(default=0)
     otp_expires_at = models.DateTimeField(null=True, blank=True)
     otp_last_sent_at = models.DateTimeField(null=True, blank=True)
     auth_checkbox_confirmed = models.BooleanField(default=False)

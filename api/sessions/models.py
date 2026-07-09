@@ -193,6 +193,7 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
             and self.identity_verified
             and self.face_match_score is not None
             and float(self.face_match_score) >= 85.0
+            and self.device_check_completed_at
             and self.verbal_confirmation_recorded_at
             and self.privacy_notice_acknowledged_at
         )

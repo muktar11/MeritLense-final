@@ -144,3 +144,20 @@ class SessionPrivacyNoticeSerializer(serializers.Serializer):
             raise serializers.ValidationError({"token": "A valid session token is required"})
         attrs["session"] = session
         return attrs
+
+
+class SessionIdentityVerificationSerializer(serializers.Serializer):
+    session_id = serializers.CharField()
+    token = serializers.CharField()
+    face_match_score = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
+    single_face_detected = serializers.BooleanField(default=True)
+
+    def validate(self, attrs):
+        try:
+            session = get_by_identifier(InterviewSession.objects.select_related("candidate", "created_by"), attrs["session_id"])
+        except InterviewSession.DoesNotExist:
+            raise serializers.ValidationError({"session_id": "Interview session not found"})
+        if not session.token_is_valid(attrs["token"]):
+            raise serializers.ValidationError({"token": "A valid session token is required"})
+        attrs["session"] = session
+        return attrs

@@ -13,6 +13,7 @@ from .views import (
     CookieConsentCreateView,
     CookieConsentStatusView,
     SessionDeviceCheckView,
+    SessionIdentityVerificationView,
     SessionPrivacyNoticeView,
     SessionVerbalConfirmationView,
 )
@@ -31,6 +32,7 @@ urlpatterns = [
     path("cookies/consent", CookieConsentCreateView.as_view(), name="cookies-consent-create"),
     path("cookies/consent/<str:user_id>", CookieConsentStatusView.as_view(), name="cookies-consent-status"),
     path("candidate/verbal-confirmation", SessionVerbalConfirmationView.as_view(), name="candidate-verbal-confirmation"),
+    path("candidate/identity-verification", SessionIdentityVerificationView.as_view(), name="candidate-identity-verification"),
     path("candidate/privacy-notice", SessionPrivacyNoticeView.as_view(), name="candidate-privacy-notice"),
     path("candidate/device-check", SessionDeviceCheckView.as_view(), name="candidate-device-check"),
 ]

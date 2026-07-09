@@ -1,10 +1,11 @@
 import shutil
 import tempfile
 
+from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from rest_framework import status
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient, APITestCase
 
 from api.accounts.models import User
 from api.candidates.models import Candidate
@@ -149,6 +150,8 @@ class ContractApiTests(APITestCase):
         self.assertEqual(agreement.status, "signed")
         self.assertTrue(agreement.pdf_path)
         self.assertTrue(agreement.pdf_hash)
+        self.assertGreaterEqual(len(mail.outbox), 2)
+        self.assertTrue(any(message.attachments for message in mail.outbox))
 
         version_response = self.client.get("/api/v1/agreements/version-check")
         self.assertEqual(version_response.status_code, status.HTTP_200_OK, version_response.data)
@@ -186,6 +189,15 @@ class ContractApiTests(APITestCase):
         self.assertIn("Authorization checkbox", str(response.data))
 
     def test_candidate_consent_privacy_notice_verbal_and_device_endpoints(self):
+        token_client = APIClient()
+        blocked_start = token_client.post(
+            f"/api/v1/interviews/{self.session.public_id}/start/",
+            {"token": self.session.access_token},
+            format="json",
+            HTTP_X_SESSION_TOKEN=self.session.access_token,
+        )
+        self.assertEqual(blocked_start.status_code, status.HTTP_400_BAD_REQUEST, blocked_start.data)
+
         initiate_response = self.client.post(
             "/api/v1/agreements/sign/initiate",
             {
@@ -208,6 +220,18 @@ class ContractApiTests(APITestCase):
             format="json",
         )
         self.assertEqual(confirm_response.status_code, status.HTTP_200_OK, confirm_response.data)
+
+        identity_response = self.client.post(
+            "/api/v1/candidate/identity-verification",
+            {
+                "session_id": str(self.session.public_id),
+                "token": self.session.access_token,
+                "face_match_score": "91.50",
+                "single_face_detected": True,
+            },
+            format="json",
+        )
+        self.assertEqual(identity_response.status_code, status.HTTP_200_OK, identity_response.data)
 
         privacy_response = self.client.post(
             "/api/v1/candidate/privacy-notice",
@@ -246,11 +270,21 @@ class ContractApiTests(APITestCase):
         self.assertTrue(self.session.device_check_completed_at)
         self.assertTrue(self.session.verbal_confirmation_recorded_at)
 
+        start_response = token_client.post(
+            f"/api/v1/interviews/{self.session.public_id}/start/",
+            {"token": self.session.access_token},
+            format="json",
+            HTTP_X_SESSION_TOKEN=self.session.access_token,
+        )
+        self.assertEqual(start_response.status_code, status.HTTP_200_OK, start_response.data)
+        self.assertEqual(start_response.data["status"], "IN_PROGRESS")
+
     def test_cookie_consent_can_be_recorded_and_retrieved(self):
         self.authenticate()
         create_response = self.client.post(
             "/api/v1/cookies/consent",
             {
+                "visitor_key": "anon-123",
                 "categories_accepted": {
                     "strictly_necessary": True,
                     "functional": False,
@@ -265,3 +299,39 @@ class ContractApiTests(APITestCase):
         get_response = self.client.get(f"/api/v1/cookies/consent/{self.user.public_id}")
         self.assertEqual(get_response.status_code, status.HTTP_200_OK, get_response.data)
         self.assertTrue(get_response.data["categories_accepted"]["analytics"])
+
+        self.client.credentials()
+        anonymous_get = self.client.get("/api/v1/cookies/consent?visitor_key=anon-123")
+        self.assertEqual(anonymous_get.status_code, status.HTTP_200_OK, anonymous_get.data)
+        self.assertEqual(anonymous_get.data["visitor_key"], "anon-123")
+
+    def test_invalid_otp_increments_failed_attempts_and_locks_after_five_tries(self):
+        self.authenticate()
+        initiate_response = self.client.post(
+            "/api/v1/agreements/sign/initiate",
+            {
+                "agreement_type": AgreementType.B2C_AGREEMENT,
+                "signatory_name": self.user.get_full_name(),
+            },
+            format="json",
+        )
+        self.assertEqual(initiate_response.status_code, status.HTTP_201_CREATED, initiate_response.data)
+        agreement = Agreement.objects.get(public_id=initiate_response.data["id"])
+        wrong_code = "111111" if agreement.otp_code != "111111" else "222222"
+
+        response = None
+        for _ in range(5):
+            response = self.client.post(
+                "/api/v1/agreements/sign/confirm",
+                {
+                    "agreement_id": str(agreement.public_id),
+                    "otp_code": wrong_code,
+                },
+                format="json",
+            )
+
+        self.assertIsNotNone(response)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
+        agreement.refresh_from_db()
+        self.assertEqual(agreement.otp_failed_attempts, 5)
+        self.assertEqual(agreement.status, "pending_review")

@@ -1,4 +1,6 @@
 from django.http import FileResponse
+from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema, inline_serializer
+from rest_framework import serializers
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -18,10 +20,92 @@ from .serializers import (
     CookieConsentSerializer,
     InitiateAgreementSigningSerializer,
     ResendAgreementOtpSerializer,
+    SessionIdentityVerificationSerializer,
     SessionPrivacyNoticeSerializer,
     SessionVerbalConfirmationSerializer,
 )
 from .services import AgreementService, CookieConsentService, open_signed_pdf
+
+
+error_response_serializer = inline_serializer(
+    name="ContractsErrorResponse",
+    fields={
+        "detail": serializers.CharField(),
+    },
+)
+
+agreement_initiate_response_serializer = inline_serializer(
+    name="AgreementInitiateResponse",
+    fields={
+        "id": serializers.UUIDField(),
+        "agreement_id": serializers.CharField(),
+        "agreement_type": serializers.CharField(),
+        "version": serializers.CharField(),
+        "status": serializers.CharField(),
+        "method": serializers.CharField(),
+        "signatory_name": serializers.CharField(),
+        "signed_at": serializers.DateTimeField(required=False, allow_null=True),
+        "otp_reference": serializers.CharField(),
+        "otp_attempts": serializers.IntegerField(),
+        "pdf_path": serializers.CharField(required=False, allow_blank=True),
+        "pdf_hash": serializers.CharField(required=False, allow_blank=True),
+        "verification_url": serializers.CharField(required=False, allow_blank=True),
+        "auth_checkbox_confirmed": serializers.BooleanField(),
+        "verbal_audio_path": serializers.CharField(required=False, allow_blank=True),
+        "created_at": serializers.DateTimeField(),
+        "updated_at": serializers.DateTimeField(),
+        "otp_expires_at": serializers.DateTimeField(required=False, allow_null=True),
+        "resend_available_in_seconds": serializers.IntegerField(),
+    },
+)
+
+agreement_status_response_serializer = inline_serializer(
+    name="AgreementStatusResponse",
+    fields={
+        "user_id": serializers.CharField(),
+        "agreements": serializers.ListField(child=serializers.JSONField()),
+    },
+)
+
+agreement_audit_response_serializer = inline_serializer(
+    name="AgreementAuditResponse",
+    fields={
+        "agreement": serializers.JSONField(),
+        "events": serializers.ListField(child=serializers.JSONField()),
+    },
+)
+
+agreement_verify_response_serializer = inline_serializer(
+    name="AgreementVerifyResponse",
+    fields={
+        "agreement_id": serializers.CharField(),
+        "type": serializers.CharField(),
+        "version": serializers.CharField(),
+        "signatory_name": serializers.CharField(),
+        "signed_at": serializers.DateTimeField(required=False, allow_null=True),
+        "status": serializers.CharField(),
+        "sha256_hash": serializers.CharField(),
+    },
+)
+
+agreement_version_check_response_serializer = inline_serializer(
+    name="AgreementVersionCheckResponse",
+    fields={
+        "mismatches": serializers.ListField(child=serializers.JSONField()),
+    },
+)
+
+session_step_response_serializer = inline_serializer(
+    name="SessionStepResponse",
+    fields={
+        "session_id": serializers.CharField(),
+        "identity_verified": serializers.BooleanField(required=False),
+        "face_match_score": serializers.DecimalField(max_digits=5, decimal_places=2, required=False),
+        "verification_status": serializers.CharField(required=False),
+        "privacy_notice_acknowledged_at": serializers.DateTimeField(required=False),
+        "device_check_completed_at": serializers.DateTimeField(required=False),
+    },
+)
 
 
 class ContractPermissionMixin:
@@ -41,6 +125,24 @@ class ContractPermissionMixin:
 class AgreementCheckboxAcceptanceView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        summary="Accept checkbox agreements",
+        description="Record acceptance of Privacy Policy & Terms and AI Disclosure for the current authenticated employer user.",
+        request=CheckboxAcceptanceSerializer,
+        responses={
+            201: AgreementSerializer(many=True),
+            400: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Checkbox acceptance",
+                value={
+                    "privacy_terms_accepted": True,
+                    "ai_disclosure_accepted": True,
+                },
+            )
+        ],
+    )
     def post(self, request):
         serializer = CheckboxAcceptanceSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -61,6 +163,42 @@ class AgreementCheckboxAcceptanceView(APIView):
 class AgreementInitiateSigningView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        summary="Initiate OTP agreement signing",
+        description="Start OTP-based signing for B2B, B2C, or candidate consent agreements.",
+        request=InitiateAgreementSigningSerializer,
+        responses={
+            200: agreement_initiate_response_serializer,
+            201: agreement_initiate_response_serializer,
+            400: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "B2C agreement",
+                value={
+                    "agreement_type": "b2c_agreement",
+                    "signatory_name": "Auryetca Demo",
+                },
+            ),
+            OpenApiExample(
+                "B2B agreement",
+                value={
+                    "agreement_type": "b2b_agreement",
+                    "signatory_name": "Authorized Signatory",
+                    "auth_checkbox_confirmed": True,
+                },
+            ),
+            OpenApiExample(
+                "Candidate consent",
+                value={
+                    "agreement_type": "candidate_consent",
+                    "signatory_name": "Candidate Name",
+                    "session_id": "SESSION_PUBLIC_ID",
+                    "token": "SESSION_ACCESS_TOKEN",
+                },
+            ),
+        ],
+    )
     def post(self, request):
         serializer = InitiateAgreementSigningSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -87,6 +225,24 @@ class AgreementInitiateSigningView(APIView):
 class AgreementConfirmSigningView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        summary="Confirm OTP agreement signing",
+        request=ConfirmAgreementSigningSerializer,
+        responses={
+            200: AgreementSerializer,
+            400: error_response_serializer,
+            403: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Confirm OTP",
+                value={
+                    "agreement_id": "AGREEMENT_PUBLIC_ID",
+                    "otp_code": "123456",
+                },
+            )
+        ],
+    )
     def post(self, request):
         serializer = ConfirmAgreementSigningSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -110,6 +266,23 @@ class AgreementConfirmSigningView(APIView):
 class AgreementResendOtpView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        summary="Resend agreement OTP",
+        request=ResendAgreementOtpSerializer,
+        responses={
+            200: AgreementSerializer,
+            400: error_response_serializer,
+            403: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Resend OTP",
+                value={
+                    "agreement_id": "AGREEMENT_PUBLIC_ID",
+                },
+            )
+        ],
+    )
     def post(self, request):
         serializer = ResendAgreementOtpSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -129,6 +302,17 @@ class AgreementResendOtpView(APIView):
 class AgreementStatusView(ContractPermissionMixin, APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        summary="Get agreement status for a user",
+        responses={
+            200: agreement_status_response_serializer,
+            403: error_response_serializer,
+            404: error_response_serializer,
+        },
+        parameters=[
+            OpenApiParameter(name="user_id", location=OpenApiParameter.PATH, type=str),
+        ],
+    )
     def get(self, request, user_id):
         try:
             target_user = get_by_identifier(User.objects.all(), user_id)
@@ -143,6 +327,17 @@ class AgreementStatusView(ContractPermissionMixin, APIView):
 class AgreementDownloadView(ContractPermissionMixin, APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        summary="Download signed agreement PDF",
+        responses={
+            200: OpenApiResponse(description="Binary PDF download"),
+            403: error_response_serializer,
+            404: error_response_serializer,
+        },
+        parameters=[
+            OpenApiParameter(name="id", location=OpenApiParameter.PATH, type=str),
+        ],
+    )
     def get(self, request, id):
         try:
             agreement = get_by_identifier(Agreement.objects.all(), id)
@@ -161,6 +356,16 @@ class AgreementDownloadView(ContractPermissionMixin, APIView):
 class AgreementVerifyView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        summary="Public agreement verification",
+        responses={
+            200: agreement_verify_response_serializer,
+            404: error_response_serializer,
+        },
+        parameters=[
+            OpenApiParameter(name="id", location=OpenApiParameter.PATH, type=str),
+        ],
+    )
     def get(self, request, id):
         try:
             agreement = get_by_identifier(Agreement.objects.all(), id)
@@ -182,6 +387,17 @@ class AgreementVerifyView(APIView):
 class AgreementAuditTrailView(ContractPermissionMixin, APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        summary="Get agreement audit trail",
+        responses={
+            200: agreement_audit_response_serializer,
+            403: error_response_serializer,
+            404: error_response_serializer,
+        },
+        parameters=[
+            OpenApiParameter(name="id", location=OpenApiParameter.PATH, type=str),
+        ],
+    )
     def get(self, request, id):
         try:
             agreement = get_by_identifier(Agreement.objects.prefetch_related("events"), id)
@@ -200,6 +416,12 @@ class AgreementAuditTrailView(ContractPermissionMixin, APIView):
 class AgreementVersionCheckView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        summary="Check agreement version mismatches",
+        responses={
+            200: agreement_version_check_response_serializer,
+        },
+    )
     def get(self, request):
         mismatches = AgreementService.version_mismatches_for_user(request.user)
         return Response({"mismatches": mismatches})
@@ -208,6 +430,47 @@ class AgreementVersionCheckView(APIView):
 class CookieConsentCreateView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        summary="Get anonymous cookie consent by visitor key",
+        responses={
+            200: CookieConsentSerializer,
+            400: error_response_serializer,
+            404: error_response_serializer,
+        },
+        parameters=[
+            OpenApiParameter(name="visitor_key", location=OpenApiParameter.QUERY, type=str, required=True),
+        ],
+    )
+    def get(self, request):
+        visitor_key = request.query_params.get("visitor_key", "").strip()
+        if not visitor_key:
+            return Response({"detail": "visitor_key query parameter is required"}, status=status.HTTP_400_BAD_REQUEST)
+        consent = CookieConsentService.get_current_for_visitor(visitor_key)
+        if consent is None:
+            return Response({"detail": "Cookie consent not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(CookieConsentSerializer(consent).data)
+
+    @extend_schema(
+        summary="Record cookie consent",
+        request=CookieConsentCreateSerializer,
+        responses={
+            201: CookieConsentSerializer,
+            400: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Cookie consent",
+                value={
+                    "visitor_key": "browser-visitor-1",
+                    "categories_accepted": {
+                        "strictly_necessary": True,
+                        "functional": False,
+                        "analytics": True,
+                    },
+                },
+            )
+        ],
+    )
     def post(self, request):
         serializer = CookieConsentCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -223,6 +486,17 @@ class CookieConsentCreateView(APIView):
 class CookieConsentStatusView(ContractPermissionMixin, APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        summary="Get authenticated user's cookie consent",
+        responses={
+            200: CookieConsentSerializer,
+            403: error_response_serializer,
+            404: error_response_serializer,
+        },
+        parameters=[
+            OpenApiParameter(name="user_id", location=OpenApiParameter.PATH, type=str),
+        ],
+    )
     def get(self, request, user_id):
         try:
             target_user = get_by_identifier(User.objects.all(), user_id)
@@ -239,6 +513,22 @@ class CookieConsentStatusView(ContractPermissionMixin, APIView):
 class SessionVerbalConfirmationView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        summary="Upload candidate verbal confirmation audio",
+        request=SessionVerbalConfirmationSerializer,
+        responses={
+            201: inline_serializer(
+                name="SessionVerbalConfirmationResponse",
+                fields={
+                    "storage_key": serializers.CharField(),
+                    "storage_url": serializers.CharField(),
+                    "file_size_bytes": serializers.IntegerField(required=False, allow_null=True),
+                    "filename": serializers.CharField(),
+                },
+            ),
+            400: error_response_serializer,
+        },
+    )
     def post(self, request):
         serializer = SessionVerbalConfirmationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -253,6 +543,14 @@ class SessionVerbalConfirmationView(APIView):
 class SessionPrivacyNoticeView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        summary="Acknowledge candidate privacy notice",
+        request=SessionPrivacyNoticeSerializer,
+        responses={
+            200: session_step_response_serializer,
+            400: error_response_serializer,
+        },
+    )
     def post(self, request):
         serializer = SessionPrivacyNoticeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -271,6 +569,14 @@ class SessionPrivacyNoticeView(APIView):
 class SessionDeviceCheckView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        summary="Record candidate device check completion",
+        request=SessionPrivacyNoticeSerializer,
+        responses={
+            200: session_step_response_serializer,
+            400: error_response_serializer,
+        },
+    )
     def post(self, request):
         serializer = SessionPrivacyNoticeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -279,5 +585,46 @@ class SessionDeviceCheckView(APIView):
             {
                 "session_id": str(session.public_id),
                 "device_check_completed_at": session.device_check_completed_at,
+            }
+        )
+
+
+class SessionIdentityVerificationView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        summary="Record candidate identity verification result",
+        request=SessionIdentityVerificationSerializer,
+        responses={
+            200: session_step_response_serializer,
+            400: error_response_serializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Identity verification success",
+                value={
+                    "session_id": "SESSION_PUBLIC_ID",
+                    "token": "SESSION_ACCESS_TOKEN",
+                    "face_match_score": "91.50",
+                    "single_face_detected": True,
+                },
+            )
+        ],
+    )
+    def post(self, request):
+        serializer = SessionIdentityVerificationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        session = AgreementService.record_identity_verification(
+            session=serializer.validated_data["session"],
+            face_match_score=serializer.validated_data["face_match_score"],
+            single_face_detected=serializer.validated_data["single_face_detected"],
+            request=request,
+        )
+        return Response(
+            {
+                "session_id": str(session.public_id),
+                "identity_verified": session.identity_verified,
+                "face_match_score": session.face_match_score,
+                "verification_status": session.verification_status,
             }
         )

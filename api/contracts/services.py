@@ -3,12 +3,15 @@ import secrets
 from dataclasses import dataclass
 from datetime import timedelta
 
+from django.core.mail import EmailMessage
 from django.core.files.storage import default_storage
 from django.db import transaction
 from django.utils import timezone
 
+from api.accounts.utils import safe_send_mail
 from api.audit.services import AuditLogService
 from api.core.constants import AuditLogAction, AuditLogCategory, AuditLogSeverity, Roles
+from api.core.constants import IdentityVerificationStatus
 from api.storage.services import MediaStorageService
 
 from .models import (
@@ -295,6 +298,7 @@ class AgreementService:
                 "updated_at",
             ]
         )
+        cls._deliver_otp(agreement)
         cls._log_event(
             agreement,
             AgreementEventType.OTP_RESENT if is_resend else AgreementEventType.OTP_SENT,
@@ -303,7 +307,7 @@ class AgreementService:
             data={
                 "otp_reference": agreement.otp_reference,
                 "expires_at": agreement.otp_expires_at.isoformat() if agreement.otp_expires_at else None,
-                "attempts": agreement.otp_attempts,
+                "resend_attempts": agreement.otp_attempts,
             },
         )
 
@@ -315,7 +319,6 @@ class AgreementService:
         return agreement
 
     @classmethod
-    @transaction.atomic
     def confirm_otp(cls, *, agreement, otp_code, request):
         if agreement.status != AgreementStatus.PENDING_SIGNATURE:
             raise ValueError("Agreement is not awaiting OTP confirmation")
@@ -324,6 +327,12 @@ class AgreementService:
             agreement.save(update_fields=["status", "updated_at"])
             raise ValueError("OTP has expired. Please restart signing.")
         if agreement.otp_code != str(otp_code).strip():
+            agreement.otp_failed_attempts += 1
+            update_fields = ["otp_failed_attempts", "updated_at"]
+            if agreement.otp_failed_attempts >= OTP_MAX_ATTEMPTS:
+                agreement.status = AgreementStatus.PENDING_REVIEW
+                update_fields.append("status")
+            agreement.save(update_fields=update_fields)
             raise ValueError("Invalid OTP code")
 
         agreement.status = AgreementStatus.SIGNED
@@ -344,6 +353,7 @@ class AgreementService:
                 "signed_at",
                 "ip_address",
                 "user_agent",
+                "otp_failed_attempts",
                 "pdf_path",
                 "pdf_hash",
                 "verification_url",
@@ -370,6 +380,7 @@ class AgreementService:
             data={"pdf_path": agreement.pdf_path, "pdf_hash": agreement.pdf_hash},
         )
         cls._write_audit_log(agreement, request=request, action=AuditLogAction.DOCUMENT_UPLOADED)
+        cls._email_signed_agreement(agreement, pdf_result["storage_url"], final_bytes=pdf_result["content"])
         return agreement
 
     @classmethod
@@ -384,6 +395,7 @@ class AgreementService:
             "storage_key": file_details["storage_key"],
             "storage_url": file_details["storage_url"],
             "sha256": final_hash,
+            "content": final_bytes,
         }
 
     @classmethod
@@ -472,6 +484,51 @@ class AgreementService:
             request=request,
             severity=AuditLogSeverity.INFO,
         )
+
+    @classmethod
+    def _deliver_otp(cls, agreement):
+        recipient = cls._resolve_recipient_email(agreement)
+        if not recipient:
+            return
+        subject = f"Your MeritLense OTP for {cls.get_definition(agreement.agreement_type).label}"
+        message = (
+            f"Your OTP is {agreement.otp_code}. "
+            f"It is valid for {OTP_TTL_MINUTES} minutes. "
+            f"Reference: {agreement.otp_reference}."
+        )
+        safe_send_mail(subject, message, [recipient])
+
+    @classmethod
+    def _resolve_recipient_email(cls, agreement):
+        if agreement.user_id:
+            return agreement.user.email
+        if agreement.candidate_id:
+            return agreement.candidate.email
+        return ""
+
+    @classmethod
+    def _email_signed_agreement(cls, agreement, storage_url, final_bytes=None):
+        recipient = cls._resolve_recipient_email(agreement)
+        if not recipient:
+            return 0
+        subject = f"Signed MeritLense Agreement: {cls.get_definition(agreement.agreement_type).label}"
+        body = (
+            f"Agreement ID: {agreement.agreement_id}\n"
+            f"Version: {agreement.version}\n"
+            f"Signed At (UTC): {agreement.signed_at.strftime('%Y-%m-%d %H:%M:%S') if agreement.signed_at else ''}\n"
+            f"Verification URL: {agreement.verification_url}\n"
+            f"SHA-256: {agreement.pdf_hash}\n"
+        )
+        if final_bytes is None and agreement.pdf_path:
+            with default_storage.open(agreement.pdf_path, "rb") as handle:
+                final_bytes = handle.read()
+        email = EmailMessage(subject, body, to=[recipient])
+        if final_bytes:
+            email.attach(f"{agreement.agreement_id}.pdf", final_bytes, "application/pdf")
+        try:
+            return email.send(fail_silently=True)
+        except Exception:
+            return 0
 
     @classmethod
     def get_status_payload_for_user(cls, user):
@@ -575,6 +632,28 @@ class AgreementService:
     def record_device_check(cls, *, session):
         session.device_check_completed_at = timezone.now()
         session.save(update_fields=["device_check_completed_at", "updated_at"])
+        return session
+
+    @classmethod
+    def record_identity_verification(cls, *, session, face_match_score, single_face_detected, request=None):
+        score = float(face_match_score)
+        session.face_match_score = score
+        session.single_face_detected = single_face_detected
+        if single_face_detected and score >= 85.0:
+            session.identity_verified = True
+            session.verification_status = IdentityVerificationStatus.VERIFIED
+        else:
+            session.identity_verified = False
+            session.verification_status = IdentityVerificationStatus.FAILED
+        session.save(
+            update_fields=[
+                "face_match_score",
+                "single_face_detected",
+                "identity_verified",
+                "verification_status",
+                "updated_at",
+            ]
+        )
         return session
 
 

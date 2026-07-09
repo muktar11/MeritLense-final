@@ -16,6 +16,7 @@ from rest_framework import serializers
 from api.audit.services import AuditLogService
 from api.core.constants import AdminPermissions, AuditLogAction, AuditLogCategory, AuditLogSeverity, CompanyTeamPermissions, DocumentStatus, Roles
 from api.core.permisssions import CanVerifyDocuments, IsAdminOrSuperAdmin, IsB2BTeamMember, IsB2BUser, IsEmployer, IsOwnerOrAdmin, IsSuperAdmin
+from api.core.public_ids import get_by_identifier
 from .models import Company, TeamInvitation, TeamMemberProfile, User, IndividualEmployerProfile, CompanyEmployerProfile, AdminProfile
 from .serializers import (
     AcceptInvitationSerializer,
@@ -41,7 +42,7 @@ from .serializers import (
     TeamMemberUpdateSerializer,
     UserStatusUpdateSerializer
 )
-from .utils import send_password_reset_email, send_verification_email, send_team_invitation_email
+from .utils import send_password_reset_email, send_verification_email, send_team_invitation_email, send_admin_credentials_email, send_employer_welcome_email
 import random
 
 
@@ -237,6 +238,7 @@ team_member_permissions_list_response_serializer = inline_serializer(
 
 class B2CRegistrationView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
     parser_classes = [MultiPartParser, FormParser]
 
     @extend_schema(
@@ -332,6 +334,7 @@ class B2CRegistrationView(APIView):
 
 class B2BRegistrationView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
     parser_classes = [MultiPartParser, FormParser]
 
     @extend_schema(
@@ -458,12 +461,192 @@ class B2BRegistrationView(APIView):
                 'message': 'Registration successful. Please check your email for the 5-digit verification code.',
                 'email': user.email
             }, status=status.HTTP_201_CREATED)
-        
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AdminCreateB2CEmployerView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+    parser_classes = [MultiPartParser, FormParser]
+
+    @extend_schema(
+        summary="Admin: create an individual employer account",
+        description="Create a B2C individual employer account on behalf of a user. The account is created "
+                    "already verified, and the user is emailed login instructions instead of a verification code.",
+        request=B2CRegistrationSerializer,
+        responses={
+            201: inline_serializer(
+                name="AdminCreateB2CEmployerResponse",
+                fields={
+                    "message": serializers.CharField(),
+                    "employer": serializers.JSONField(),
+                },
+            ),
+            400: inline_serializer(
+                name="AdminCreateEmployerErrorResponse",
+                fields={"detail": serializers.CharField(required=False)},
+            ),
+        },
+    )
+    def post(self, request):
+        serializer = B2CRegistrationSerializer(data=request.data, context={'request': request})
+
+        if serializer.is_valid():
+            try:
+                with transaction.atomic():
+                    user = serializer.save()
+                    profile_data = serializer.context.get('profile_data', {})
+
+                    IndividualEmployerProfile.objects.create(
+                        user=user,
+                        passport_id=profile_data.get('passport_id'),
+                        job_role=profile_data.get('job_role'),
+                        nationality=profile_data.get('nationality'),
+                        preferred_language=profile_data.get('preferred_language'),
+                        phone_number=profile_data.get('phone_number'),
+                        date_of_birth=profile_data.get('date_of_birth'),
+                        address=profile_data.get('address'),
+                        id_document=profile_data.get('id_document'),
+                        resume_document=profile_data.get('resume_document')
+                    )
+
+                    user.is_verified = True
+                    user.save(update_fields=['is_verified'])
+
+                    send_employer_welcome_email(user, request)
+
+                    AuditLogService.log(
+                        user=request.user,
+                        action=AuditLogAction.USER_CREATED,
+                        category=AuditLogCategory.USER,
+                        description=f"B2C employer created by admin: {user.email}",
+                        resource=user,
+                        data={'registration_type': 'B2C', 'created_by': request.user.email},
+                        request=request
+                    )
+            except IntegrityError:
+                return Response(
+                    {'detail': 'Creation failed because one of the submitted unique values already exists.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            return Response({
+                'message': 'Employer account created successfully.',
+                'employer': EmployerListSerializer(user).data
+            }, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AdminCreateB2BEmployerView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+    parser_classes = [MultiPartParser, FormParser]
+
+    @extend_schema(
+        summary="Admin: create a company employer account",
+        description="Create a B2B company employer account on behalf of a user. The account is created "
+                    "already verified, and the user is emailed login instructions instead of a verification code.",
+        request=B2BRegistrationSerializer,
+        responses={
+            201: inline_serializer(
+                name="AdminCreateB2BEmployerResponse",
+                fields={
+                    "message": serializers.CharField(),
+                    "employer": serializers.JSONField(),
+                },
+            ),
+            400: inline_serializer(
+                name="AdminCreateEmployerErrorResponse2",
+                fields={"detail": serializers.CharField(required=False)},
+            ),
+        },
+    )
+    def post(self, request):
+        serializer = B2BRegistrationSerializer(data=request.data, context={'request': request})
+
+        if serializer.is_valid():
+            try:
+                with transaction.atomic():
+                    user = serializer.save()
+                    profile_data = serializer.context.get('profile_data', {})
+
+                    profile = CompanyEmployerProfile.objects.create(
+                        user=user,
+                        company_name=profile_data.get('company_name'),
+                        company_registration_number=profile_data.get('company_registration_number'),
+                        company_size=profile_data.get('company_size'),
+                        country=profile_data.get('country'),
+                        city=profile_data.get('city'),
+                        preferred_language=profile_data.get('preferred_language'),
+                        phone_number=profile_data.get('phone_number'),
+                        website=profile_data.get('website'),
+                        industry=profile_data.get('industry'),
+                        address=profile_data.get('address'),
+                        registration_certificate=profile_data.get('registration_certificate'),
+                        resachetified_license=profile_data.get('resachetified_license'),
+                        tax_id_document=profile_data.get('tax_id_document')
+                    )
+
+                    company = Company.objects.create(
+                        name=profile.company_name,
+                        registration_number=profile.company_registration_number,
+                        company_size=profile.company_size,
+                        industry=profile.industry,
+                        phone_number=profile.phone_number,
+                        country=profile.country,
+                        city=profile.city,
+                        address=profile.address,
+                        website=profile.website,
+                        admin_user=user,
+                        registration_certificate=profile.registration_certificate,
+                        tax_id_document=profile.tax_id_document,
+                        is_verified=False
+                    )
+
+                    profile.company = company
+                    profile.save()
+
+                    user.is_verified = True
+                    user.save(update_fields=['is_verified'])
+
+                    send_employer_welcome_email(user, request)
+
+                    AuditLogService.log(
+                        user=request.user,
+                        action=AuditLogAction.COMPANY_CREATED,
+                        category=AuditLogCategory.COMPANY,
+                        description=f"Company created by admin: {company.name}",
+                        resource=company,
+                        data={'company_name': company.name, 'registration_number': company.registration_number, 'created_by': request.user.email},
+                        request=request
+                    )
+
+                    AuditLogService.log(
+                        user=request.user,
+                        action=AuditLogAction.USER_CREATED,
+                        category=AuditLogCategory.USER,
+                        description=f"B2B employer created by admin: {user.email}",
+                        resource=user,
+                        data={'registration_type': 'B2B', 'company': company.name, 'created_by': request.user.email},
+                        request=request
+                    )
+            except IntegrityError:
+                return Response(
+                    {'detail': 'Creation failed because one of the submitted unique values already exists.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            return Response({
+                'message': 'Employer account created successfully.',
+                'employer': EmployerListSerializer(user).data
+            }, status=status.HTTP_201_CREATED)
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class EmailVerificationView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
 
     @extend_schema(
         summary="Verify email",
@@ -539,6 +722,7 @@ class EmailVerificationView(APIView):
 
 class ResendVerificationView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
 
     @extend_schema(
         summary="Resend verification code",
@@ -580,6 +764,7 @@ class ResendVerificationView(APIView):
 
 class ForgotPasswordView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
 
     @extend_schema(
         summary="Request password reset",
@@ -621,6 +806,7 @@ class ForgotPasswordView(APIView):
 
 class ResetPasswordView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
 
     @extend_schema(
         summary="Reset password",
@@ -736,6 +922,7 @@ class ChangePasswordView(APIView):
 
 class ValidateResetTokenView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
 
     @extend_schema(
         summary="Validate password reset token",
@@ -1070,7 +1257,9 @@ class CreateAdminView(APIView):
         
         if serializer.is_valid():
             admin_user = serializer.save()
-            
+
+            send_admin_credentials_email(admin_user, admin_user.admin_permissions, request)
+
             AuditLogService.log(
                 user=request.user,
                 action=AuditLogAction.USER_CREATED,
@@ -1080,7 +1269,7 @@ class CreateAdminView(APIView):
                 data={'created_by': request.user.email},
                 request=request
             )
-            
+
             return Response({
                 'message': 'Admin user created successfully',
                 'admin': AdminUserSerializer(admin_user).data
@@ -1093,10 +1282,10 @@ class AdminUserDetailView(APIView):
     
     def get_object(self, user_id):
         try:
-            return User.objects.get(id=user_id, role__in=[Roles.SUPERADMIN, Roles.ADMIN])
+            return User.objects.get(public_id=user_id, role__in=[Roles.SUPERADMIN, Roles.ADMIN])
         except User.DoesNotExist:
             return None
-    
+
     @extend_schema(
         summary="Get an admin user",
         responses={200: AdminUserSerializer, 404: error_response_serializer},
@@ -1378,7 +1567,7 @@ class VerifyDocumentsView(APIView):
             OpenApiExample(
                 "Approve documents example",
                 value={
-                    "user_id": 1,
+                    "user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
                     "status": "APPROVED",
                     "verification_notes": "All submitted documents are valid.",
                 },
@@ -1387,7 +1576,7 @@ class VerifyDocumentsView(APIView):
             OpenApiExample(
                 "Reject documents example",
                 value={
-                    "user_id": 1,
+                    "user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
                     "status": "REJECTED",
                     "rejection_reason": "Registration certificate is unreadable.",
                     "verification_notes": "Please re-upload a clear copy.",
@@ -1401,9 +1590,9 @@ class VerifyDocumentsView(APIView):
         
         if serializer.is_valid():
             try:
-                user = User.objects.get(
-                    id=serializer.validated_data['user_id'],
-                    role__in=[Roles.B2B, Roles.B2C]
+                user = get_by_identifier(
+                    User.objects.filter(role__in=[Roles.B2B, Roles.B2C]),
+                    serializer.validated_data['user_id']
                 )
             except User.DoesNotExist:
                 return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -1483,7 +1672,7 @@ class RejectDocumentsView(APIView):
         request=inline_serializer(
             name="RejectDocumentsRequest",
             fields={
-                "user_id": serializers.IntegerField(),
+                "user_id": serializers.CharField(),
                 "rejection_reason": serializers.CharField(),
                 "verification_notes": serializers.CharField(required=False, allow_blank=True),
             },
@@ -1503,7 +1692,7 @@ class RejectDocumentsView(APIView):
             OpenApiExample(
                 "Reject documents direct example",
                 value={
-                    "user_id": 1,
+                    "user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
                     "rejection_reason": "Tax ID document is missing.",
                     "verification_notes": "Upload the missing file and resubmit.",
                 },
@@ -1523,17 +1712,17 @@ class RejectDocumentsView(APIView):
             return Response({'error': 'rejection_reason is required'}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            user = User.objects.get(
-                id=user_id,
-                role__in=[Roles.B2B, Roles.B2C]
+            user = get_by_identifier(
+                User.objects.filter(role__in=[Roles.B2B, Roles.B2C]),
+                user_id
             )
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-        
+
         profile = user.get_profile()
         if not profile:
             return Response({'error': 'User profile not found'}, status=status.HTTP_404_NOT_FOUND)
-        
+
         user.documents_verified = False
         user.documents_verification_status = DocumentStatus.REJECTED
         user.documents_verified_at = None
@@ -1952,6 +2141,7 @@ class CancelInvitationView(APIView):
 
 class AcceptInvitationView(APIView):
     permission_classes = []
+    authentication_classes = []
 
     @extend_schema(
         summary="Accept a team invitation",

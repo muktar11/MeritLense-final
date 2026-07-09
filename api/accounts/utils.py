@@ -165,6 +165,82 @@ def send_password_reset_email(user, request):
     
     safe_send_mail(subject, message, [user.email])
 
+def send_admin_credentials_email(user, permissions, request=None):
+    locale = request.GET.get('locale', 'en') if request else 'en'
+    login_url = f"{settings.FRONTEND_URL}/{locale}/auth/login"
+
+    permission_descriptions = {
+        'can_manage_users': 'Manage Users',
+        'can_verify_companies': 'Company Verification',
+        'can_verify_documents': 'Document Verification',
+        'can_access_financial': 'Financial Access',
+        'can_access_reports': 'Reports Access',
+    }
+
+    permissions_text = ""
+    for perm in permissions:
+        desc = permission_descriptions.get(perm, perm.replace('_', ' ').title())
+        permissions_text += f"  • {desc}\n"
+
+    if not permissions_text:
+        permissions_text = "  • No additional permissions assigned\n"
+
+    subject = "Your Meritlense Admin Account"
+
+    message = f"""
+Hello {user.first_name},
+
+An administrator account has been created for you on Meritlense.
+
+Login Email: {user.email}
+
+Your Access Permissions:
+{permissions_text}
+
+To sign in, go to:
+{login_url}
+
+If you don't already have your password, use "Forgot Password" on the login page to set one.
+
+Best regards,
+Meritlense Team
+"""
+
+    safe_send_mail(subject, message, [user.email])
+
+
+def send_employer_welcome_email(user, request=None):
+    locale = request.GET.get('locale', 'en') if request else 'en'
+    login_url = f"{settings.FRONTEND_URL}/{locale}/auth/login"
+
+    if user.role == Roles.B2C:
+        account_type = "Individual Employer"
+    elif user.role == Roles.B2B:
+        account_type = "Company Employer"
+    else:
+        account_type = "Employer"
+
+    subject = "Your Meritlense Account Has Been Created"
+
+    message = f"""
+Hello {user.first_name},
+
+An administrator has created a {account_type} account for you on Meritlense.
+
+Login Email: {user.email}
+
+To sign in, go to:
+{login_url}
+
+If you don't already have your password, use "Forgot Password" on the login page to set one.
+
+Best regards,
+Meritlense Team
+"""
+
+    safe_send_mail(subject, message, [user.email])
+
+
 def send_team_invitation_email(invitation, request):
     
     locale = request.GET.get('locale', 'en') if request else 'ar'

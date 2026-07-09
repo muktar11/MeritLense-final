@@ -3,13 +3,15 @@ import tempfile
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
+from django.utils import timezone
 from drf_spectacular.generators import SchemaGenerator
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from api.accounts.models import Company, CompanyEmployerProfile, TeamMemberProfile, User
 from api.candidates.models import Candidate
-from api.core.constants import CompanySize, CompanyTeamPermissions, Languages, Roles, candidateJobRoles
+from api.core.constants import CompanySize, CompanyTeamPermissions, Languages, Roles, SubscriptionStatus, candidateJobRoles
+from api.payments.models import Customer, Price, Subscription
 
 
 def make_file(name="document.pdf", content=b"candidate-file", content_type="application/pdf"):
@@ -29,6 +31,34 @@ class CandidatesWeek2Tests(APITestCase):
         cls._override.disable()
         shutil.rmtree(cls._media_dir, ignore_errors=True)
         super().tearDownClass()
+
+    def create_active_subscription(self, user, company=None, candidate_limit=50):
+        suffix = f"{user.id}-{Subscription.objects.count()}"
+        price = Price.objects.create(
+            name=f"Candidate Test Plan {suffix}",
+            stripe_price_id=f"price_candidate_test_{suffix}",
+            stripe_product_id=f"prod_candidate_test_{suffix}",
+            target_user_type="B2B" if company else "B2C",
+            unit_amount=0,
+            feature_limits={"candidate_limit": candidate_limit},
+        )
+        customer = Customer.objects.create(
+            user=user,
+            stripe_customer_id=f"cus_candidate_test_{suffix}",
+            email=user.email,
+            name=user.get_full_name(),
+        )
+        return Subscription.objects.create(
+            user=user,
+            company=company,
+            customer=customer,
+            stripe_subscription_id=f"sub_candidate_test_{suffix}",
+            stripe_price=price,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=timezone.now(),
+            current_period_end=timezone.now() + timezone.timedelta(days=30),
+            current_usage={"candidate_limit": 0},
+        )
 
     def create_b2b_company(self, email, company_name, registration_number):
         user = User.objects.create_user(
@@ -68,6 +98,7 @@ class CandidatesWeek2Tests(APITestCase):
             resachetified_license=make_file(f"{registration_number}-license.pdf"),
             company=company,
         )
+        self.create_active_subscription(user, company=company)
         return user, company
 
     def create_team_member(self, company, email):
@@ -89,10 +120,11 @@ class CandidatesWeek2Tests(APITestCase):
             permissions=[CompanyTeamPermissions.VIEW_CANDIDATES],
             invited_by=company.admin_user,
         )
+        self.create_active_subscription(user)
         return user, profile
 
     def create_b2c_user(self, email):
-        return User.objects.create_user(
+        user = User.objects.create_user(
             email=email,
             password="Password123!",
             first_name="Solo",
@@ -100,6 +132,8 @@ class CandidatesWeek2Tests(APITestCase):
             role=Roles.B2C,
             is_verified=True,
         )
+        self.create_active_subscription(user)
+        return user
 
     def authenticate(self, user, password="Password123!"):
         response = self.client.post(

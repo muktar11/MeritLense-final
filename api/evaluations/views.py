@@ -1,10 +1,12 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q
 from django.utils import timezone
 from api.audit.services import AuditLogService
+from api.payments.mixins import SubscriptionUsageMixin
 from .utils import (
     send_evaluation_scheduled_email,
     send_evaluation_rescheduled_email,
@@ -27,7 +29,7 @@ from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverit
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier
 
 
-class EvaluationViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
+class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = EvaluationSerializer
     
@@ -97,8 +99,15 @@ class EvaluationViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
         return super().get_permissions()
     
     def perform_create(self, serializer):
+        if not self.check_subscription_limit(self.request.user, 'evaluation_limit'):
+            raise PermissionDenied(
+                "You've reached the evaluation limit for your current package. "
+                "Upgrade your plan to schedule more evaluations."
+            )
+
         evaluation = serializer.save()
-        
+        self.increment_subscription_usage(self.request.user, 'evaluation_limit')
+
         AuditLogService.log(
             user=self.request.user,
             action=AuditLogAction.EVALUATION_CREATED,
@@ -184,9 +193,10 @@ class EvaluationViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
             request=self.request,
             severity=AuditLogSeverity.WARNING
         )
-        
+
         instance.delete()
-    
+        self.decrement_subscription_usage(self.request.user, 'evaluation_limit')
+
     def retrieve(self, request, *args, **kwargs):
         response = super().retrieve(request, *args, **kwargs)
         

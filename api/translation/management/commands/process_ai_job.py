@@ -1,9 +1,6 @@
 from django.core.management.base import BaseCommand, CommandError
 
 from api.core.public_ids import build_object_identifier_filter
-from api.translation.models import AIProcessingJob
-from api.translation.services import AIProcessingOrchestrationService
-
 
 class Command(BaseCommand):
     help = "Process a queued AI processing job."
@@ -12,6 +9,9 @@ class Command(BaseCommand):
         parser.add_argument("--job-id", required=True, help="AIProcessingJob public id or database id")
 
     def handle(self, *args, **options):
+        from api.translation.models import AIProcessingJob
+        from api.translation.services import AIProcessingOrchestrationService
+
         try:
             lookup = build_object_identifier_filter(options["job_id"])
         except ValueError as exc:

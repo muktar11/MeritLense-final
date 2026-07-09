@@ -33,6 +33,7 @@ class AzureQueueService:
             }
 
         from azure.core.exceptions import ResourceExistsError
+
         queue = self.get_client()
         try:
             queue.create_queue()

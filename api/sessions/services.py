@@ -226,7 +226,13 @@ class InterviewSessionService:
             raise ValueError("Cannot restart completed session")
 
         events = []
-        if session.status == InterviewSessionStatus.CREATED:
+        token_start = actor is None
+        if token_start and not session.candidate_prechecks_complete():
+            raise ValueError(
+                "Candidate session cannot start until consent, identity verification, device check, verbal confirmation, and privacy notice acknowledgement are complete"
+            )
+
+        if session.status == InterviewSessionStatus.CREATED and not token_start:
             session.verification_status = IdentityVerificationStatus.PENDING
             session.status = InterviewSessionStatus.VERIFICATION_PENDING
             session.save(update_fields=["status", "verification_status", "updated_at"])
@@ -245,6 +251,10 @@ class InterviewSessionService:
                     "updated_at",
                 ]
             )
+            events.append(("SESSION_READY", AuditLogAction.SESSION_READY))
+        elif session.status == InterviewSessionStatus.CREATED and token_start:
+            session.status = InterviewSessionStatus.READY
+            session.save(update_fields=["status", "updated_at"])
             events.append(("SESSION_READY", AuditLogAction.SESSION_READY))
 
         session.start()

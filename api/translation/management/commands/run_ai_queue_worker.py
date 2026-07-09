@@ -1,13 +1,11 @@
 import signal
 import time
 
+from azure.core.exceptions import ResourceExistsError
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from api.sessions.models import CandidateResponse
 from api.storage.services import AzureQueueService
-from api.translation.models import AIProcessingJob
-from api.translation.services import AIProcessingOrchestrationService
 
 
 class Command(BaseCommand):
@@ -27,7 +25,7 @@ class Command(BaseCommand):
             signal.signal(signal_number, self._request_stop)
 
         queue = queue_service.get_client()
-        queue.create_queue()
+        self._ensure_queue_exists(queue)
         processed_count = 0
         self.stdout.write(f"Listening on Azure queue '{queue_service.queue_name}'")
 
@@ -61,7 +59,17 @@ class Command(BaseCommand):
     def _request_stop(self, *_args):
         self._stopping = True
 
+    def _ensure_queue_exists(self, queue):
+        try:
+            queue.create_queue()
+        except ResourceExistsError:
+            pass
+
     def _process_message(self, queue_service, message):
+        from api.sessions.models import CandidateResponse
+        from api.translation.models import AIProcessingJob
+        from api.translation.services import AIProcessingOrchestrationService
+
         envelope = queue_service.decode_job_message(message.content)
         if envelope.get("job_type") != "PROCESS_AI_RESPONSE":
             raise ValueError(f"Unsupported job type: {envelope.get('job_type')}")
@@ -81,7 +89,7 @@ class Command(BaseCommand):
 
     def _move_to_poison_queue(self, queue_service, message, error):
         poison = queue_service.get_client(settings.AZURE_QUEUE_POISON_NAME)
-        poison.create_queue()
+        self._ensure_queue_exists(poison)
         poison.send_message(message.content)
         queue_service.get_client().delete_message(message.id, message.pop_receipt)
         self.stderr.write(

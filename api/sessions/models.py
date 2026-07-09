@@ -105,6 +105,18 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
         choices=IdentityVerificationStatus.CHOICES,
         default=IdentityVerificationStatus.NOT_STARTED,
     )
+    candidate_consent_agreement = models.ForeignKey(
+        "contracts.Agreement",
+        on_delete=models.SET_NULL,
+        related_name="linked_sessions",
+        null=True,
+        blank=True,
+    )
+    verbal_confirmation_path = models.TextField(blank=True)
+    verbal_confirmation_recorded_at = models.DateTimeField(null=True, blank=True)
+    privacy_notice_acknowledged_at = models.DateTimeField(null=True, blank=True)
+    privacy_notice_ip_address = models.GenericIPAddressField(null=True, blank=True)
+    device_check_completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Interview Session"
@@ -174,6 +186,17 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
     def mark_ready(self):
         self.status = InterviewSessionStatus.READY
         self.save(update_fields=["status", "updated_at"])
+
+    def candidate_prechecks_complete(self):
+        return bool(
+            self.candidate_consent_agreement_id
+            and self.identity_verified
+            and self.face_match_score is not None
+            and float(self.face_match_score) >= 85.0
+            and self.device_check_completed_at
+            and self.verbal_confirmation_recorded_at
+            and self.privacy_notice_acknowledged_at
+        )
 
     def start(self):
         if self.is_expired():

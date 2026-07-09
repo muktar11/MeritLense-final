@@ -604,7 +604,7 @@ class CompanySerializer(PublicIdModelSerializer):
             'id', 'name', 'registration_number', 'company_size',
             'industry', 'phone_number', 'country', 'city',
             'address', 'website', 'admin_user', 'admin_user_email', 'admin_name',
-            'is_verified', 'verified_at', 'team_member_count',
+            'is_verified', 'verified_at', 'team_member_count', 'stamp_image',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'admin_user', 'is_verified', 'verified_at', 'created_at', 'updated_at']

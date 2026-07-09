@@ -262,6 +262,13 @@ class Company(TimeStampedModel):
     
     registration_certificate = models.FileField(upload_to='companies/certificates/')
     tax_id_document = models.FileField(upload_to='companies/tax/', null=True, blank=True)
+
+    stamp_image = models.ImageField(
+        upload_to='companies/stamps/',
+        null=True,
+        blank=True,
+        help_text="Company stamp/seal, applied automatically to signed B2B agreement PDFs.",
+    )
     
     class Meta:
         verbose_name = "Company"

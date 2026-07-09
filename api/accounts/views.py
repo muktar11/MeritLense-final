@@ -5,7 +5,7 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, MultiPartParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
@@ -1800,6 +1800,7 @@ class AdminDashboardStatsView(APIView):
 
 class CompanyProfileView(APIView):
     permission_classes = [IsAuthenticated, IsB2BUser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     @extend_schema(
         summary="Get company profile",

@@ -42,3 +42,4 @@ urllib3==2.6.3
 weasyprint==68.1
 webencodings==0.5.1
 zopfli==0.4.0
+qrcode==8.2

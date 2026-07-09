@@ -1,0 +1,53 @@
+{% extends "contracts/_base.html" %}
+{% block content %}
+<h1>B2C Agreement</h1>
+<div class="doc-meta">
+  <span>Version {{ version }}</span>
+  <span>Generated {{ generated_at }}</span>
+</div>
+
+<div class="placeholder-notice">
+  ⚠ PLACEHOLDER TEXT — this document body has not yet been reviewed by legal. Replace this
+  template with the approved B2C Agreement text before any real individual employer relies on it.
+</div>
+
+<p>
+  This B2C Agreement ("Agreement") is entered into between <span class="field">MeritLense</span>
+  and <span class="field">{{ individual_name }}</span>
+  {% if individual_nationality %}(<span class="field">{{ individual_nationality }}</span>){% endif %}
+  ("the Employer"), effective as of the date of signing below.
+</p>
+
+<h2>1. Services</h2>
+<p>
+  MeritLense will provide AI-powered candidate evaluation, assessment, and reporting services
+  to the Employer, subject to the terms of the Employer's selected package and the MeritLense
+  Platform Terms of Use.
+</p>
+
+<h2>2. Term &amp; Termination</h2>
+<p>
+  This Agreement remains in effect for as long as the Employer maintains an active package with
+  MeritLense, and may be terminated by either party in accordance with the notice periods set
+  out in the Employer's package.
+</p>
+
+<h2>3. Fees</h2>
+<p>
+  Fees are as set out in the Employer's selected package at the time of signing, and are subject
+  to change with notice as described in the MeritLense Platform Terms of Use.
+</p>
+
+<h2>4. Data Protection</h2>
+<p>
+  MeritLense processes personal data submitted by the Employer, and by candidates evaluated on
+  the Employer's behalf, in accordance with the MeritLense Privacy Policy.
+</p>
+
+<div class="signature-block">
+  <p>Signed electronically by:</p>
+  <p><strong>{{ signatory_name }}</strong></p>
+</div>
+
+{% include "contracts/_seal.html" %}
+{% endblock %}

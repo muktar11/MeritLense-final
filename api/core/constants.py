@@ -819,7 +819,14 @@ class AuditLogAction:
     SYSTEM_CONFIG_CHANGED = "SYSTEM_CONFIG_CHANGED"
     API_KEY_CREATED = "API_KEY_CREATED"
     API_KEY_REVOKED = "API_KEY_REVOKED"
-    
+
+    AGREEMENT_ACCEPTED = "AGREEMENT_ACCEPTED"
+    AGREEMENT_SIGN_INITIATED = "AGREEMENT_SIGN_INITIATED"
+    AGREEMENT_SIGNED = "AGREEMENT_SIGNED"
+    AGREEMENT_SIGN_FAILED = "AGREEMENT_SIGN_FAILED"
+    AGREEMENT_VERSION_UPDATED = "AGREEMENT_VERSION_UPDATED"
+    COMPANY_STAMP_UPLOADED = "COMPANY_STAMP_UPLOADED"
+
     CHOICES = [
         (USER_CREATED, "User Created"),
         (USER_UPDATED, "User Updated"),
@@ -973,6 +980,13 @@ class AuditLogAction:
         (SYSTEM_CONFIG_CHANGED, "System Config Changed"),
         (API_KEY_CREATED, "API Key Created"),
         (API_KEY_REVOKED, "API Key Revoked"),
+
+        (AGREEMENT_ACCEPTED, "Agreement Accepted"),
+        (AGREEMENT_SIGN_INITIATED, "Agreement Sign Initiated"),
+        (AGREEMENT_SIGNED, "Agreement Signed"),
+        (AGREEMENT_SIGN_FAILED, "Agreement Sign Failed"),
+        (AGREEMENT_VERSION_UPDATED, "Agreement Version Updated"),
+        (COMPANY_STAMP_UPLOADED, "Company Stamp Uploaded"),
     ]
 
 
@@ -987,4 +1001,48 @@ class AuditLogSeverity:
         (WARNING, "Warning"),
         (ERROR, "Error"),
         (CRITICAL, "Critical"),
+    ]
+
+
+class AgreementType:
+    PRIVACY_TERMS = "PRIVACY_TERMS"
+    AI_DISCLOSURE = "AI_DISCLOSURE"
+    B2B_AGREEMENT = "B2B_AGREEMENT"
+    DPA = "DPA"
+    B2C_AGREEMENT = "B2C_AGREEMENT"
+    CANDIDATE_CONSENT = "CANDIDATE_CONSENT"
+
+    CHOICES = [
+        (PRIVACY_TERMS, "Privacy Policy & Terms of Use"),
+        (AI_DISCLOSURE, "AI Transparency & Disclosure Notice"),
+        (B2B_AGREEMENT, "B2B Agreement"),
+        (DPA, "Data Processing Agreement"),
+        (B2C_AGREEMENT, "B2C Agreement"),
+        (CANDIDATE_CONSENT, "Candidate Consent Form"),
+    ]
+
+    # Which agreements are blocking/binding via OTP signature vs. informational checkbox.
+    OTP_TYPES = {B2B_AGREEMENT, DPA, B2C_AGREEMENT, CANDIDATE_CONSENT}
+    CHECKBOX_TYPES = {PRIVACY_TERMS, AI_DISCLOSURE}
+
+
+class AgreementMethod:
+    CHECKBOX = "CHECKBOX"
+    OTP_SIGNATURE = "OTP_SIGNATURE"
+
+    CHOICES = [
+        (CHECKBOX, "Checkbox"),
+        (OTP_SIGNATURE, "OTP Signature"),
+    ]
+
+
+class AgreementStatus:
+    PENDING = "PENDING"
+    SIGNED = "SIGNED"
+    SUPERSEDED = "SUPERSEDED"
+
+    CHOICES = [
+        (PENDING, "Pending"),
+        (SIGNED, "Signed"),
+        (SUPERSEDED, "Superseded"),
     ]

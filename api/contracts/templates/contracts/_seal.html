@@ -1,0 +1,33 @@
+{% if is_preview %}
+<div class="ml-seal ml-seal-preview">
+  <div class="ml-seal-header">
+    <span class="ml-seal-wordmark">Merit<span class="ml-seal-wordmark-accent">Lense</span></span>
+    <span class="ml-seal-title">Not Yet Signed</span>
+  </div>
+  <p class="ml-seal-preview-note">
+    This is a preview. Once signed, this space will contain the Contract ID, signatory,
+    timestamp, IP address, verification QR code, and company stamp (where applicable).
+  </p>
+</div>
+{% else %}
+<div class="ml-seal">
+  <div class="ml-seal-header">
+    <span class="ml-seal-wordmark">Merit<span class="ml-seal-wordmark-accent">Lense</span></span>
+    <span class="ml-seal-title">Digitally Signed Document</span>
+  </div>
+  <table class="ml-seal-table">
+    <tr><td>Contract ID</td><td>{{ contract_id }}</td></tr>
+    <tr><td>Signed by</td><td>{{ signatory_name }}</td></tr>
+    <tr><td>Signed at</td><td>{{ signed_at }}</td></tr>
+    <tr><td>IP address</td><td>{{ ip_address }}</td></tr>
+    <tr><td>Verification ref</td><td>{{ otp_reference }}</td></tr>
+    <tr><td>Verify at</td><td>{{ verification_url }}</td></tr>
+  </table>
+  {% if qr_data_uri %}
+  <img class="ml-seal-qr" src="{{ qr_data_uri }}" alt="Verification QR code" />
+  {% endif %}
+  {% if stamp_data_uri %}
+  <img class="ml-seal-stamp" src="{{ stamp_data_uri }}" alt="Company stamp" />
+  {% endif %}
+</div>
+{% endif %}

@@ -1,0 +1,54 @@
+{% extends "contracts/_base.html" %}
+{% block content %}
+<h1>B2B Agreement</h1>
+<div class="doc-meta">
+  <span>Version {{ version }}</span>
+  <span>Generated {{ generated_at }}</span>
+</div>
+
+<div class="placeholder-notice">
+  ⚠ PLACEHOLDER TEXT — this document body has not yet been reviewed by legal. Replace this
+  template with the approved B2B Agreement text before any real company relies on it.
+</div>
+
+<p>
+  This B2B Agreement ("Agreement") is entered into between <span class="field">MeritLense</span>
+  and <span class="field">{{ company_name }}</span> (Company Registration No.
+  <span class="field">{{ company_registration_number }}</span>), a company registered in
+  <span class="field">{{ company_country }}</span> ("the Employer"), effective as of the date of
+  signing below.
+</p>
+
+<h2>1. Services</h2>
+<p>
+  MeritLense will provide AI-powered candidate evaluation, assessment, and reporting services
+  to the Employer, subject to the terms of the Employer's selected subscription package and the
+  MeritLense Platform Terms of Use.
+</p>
+
+<h2>2. Term &amp; Termination</h2>
+<p>
+  This Agreement remains in effect for as long as the Employer maintains an active subscription
+  with MeritLense, and may be terminated by either party in accordance with the notice periods
+  set out in the Employer's subscription plan.
+</p>
+
+<h2>3. Fees</h2>
+<p>
+  Fees are as set out in the Employer's selected subscription package at the time of signing,
+  and are subject to change with notice as described in the MeritLense Platform Terms of Use.
+</p>
+
+<h2>4. Data Protection</h2>
+<p>
+  Processing of personal data under this Agreement is governed by the accompanying Data
+  Processing Agreement (DPA), signed together with this Agreement.
+</p>
+
+<div class="signature-block">
+  <p>Signed electronically by the Employer's authorized representative:</p>
+  <p><strong>{{ signatory_name }}</strong></p>
+</div>
+
+{% include "contracts/_seal.html" %}
+{% endblock %}

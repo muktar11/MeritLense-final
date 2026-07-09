@@ -1,0 +1,58 @@
+{% extends "contracts/_base.html" %}
+{% block content %}
+<h1>Data Processing Agreement (DPA)</h1>
+<div class="doc-meta">
+  <span>Version {{ version }}</span>
+  <span>Generated {{ generated_at }}</span>
+</div>
+
+<div class="placeholder-notice">
+  ⚠ PLACEHOLDER TEXT — this document body has not yet been reviewed by legal. Replace this
+  template with the approved DPA text before any real company relies on it.
+</div>
+
+<p>
+  This Data Processing Agreement ("DPA") forms part of the B2B Agreement between
+  <span class="field">MeritLense</span> (the "Processor") and
+  <span class="field">{{ company_name }}</span> (the "Controller"), and governs MeritLense's
+  processing of personal data on the Controller's behalf.
+</p>
+
+<h2>1. Subject Matter and Duration</h2>
+<p>
+  MeritLense processes candidate and employer personal data solely to provide the evaluation
+  and assessment services described in the B2B Agreement, for the duration of that Agreement.
+</p>
+
+<h2>2. Nature and Purpose of Processing</h2>
+<p>
+  Processing includes collection, storage, AI-assisted evaluation, and reporting of candidate
+  assessment data submitted by the Controller or its candidates.
+</p>
+
+<h2>3. Data Subject Rights</h2>
+<p>
+  MeritLense will assist the Controller in responding to data subject requests (access,
+  rectification, erasure, portability) in accordance with applicable data protection law,
+  including GDPR.
+</p>
+
+<h2>4. Security Measures</h2>
+<p>
+  MeritLense maintains appropriate technical and organizational measures to protect personal
+  data against unauthorized access, loss, or disclosure.
+</p>
+
+<h2>5. Sub-processors</h2>
+<p>
+  MeritLense may engage sub-processors to support service delivery and will ensure equivalent
+  data protection obligations are imposed on any sub-processor.
+</p>
+
+<div class="signature-block">
+  <p>Signed electronically by the Controller's authorized representative:</p>
+  <p><strong>{{ signatory_name }}</strong></p>
+</div>
+
+{% include "contracts/_seal.html" %}
+{% endblock %}

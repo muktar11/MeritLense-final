@@ -15,18 +15,24 @@ from .utils import (
 )
 from .models import Evaluation
 from .serializers import (
+    CompetencyEvaluationResultSerializer,
     EvaluationSerializer,
     EvaluationCreateSerializer,
     EvaluationUpdateSerializer,
     EvaluationListSerializer,
     EvaluationCompleteSerializer,
     EvaluationRescheduleSerializer,
-    EvaluationCancelSerializer
+    EvaluationCancelSerializer,
+    ResponseEvaluationResultSerializer,
+    ScoringRuleSetSerializer,
+    SessionEvaluationSummarySerializer,
 )
 from .permissions import CanManageEvaluation, CanViewEvaluation
 from api.core.constants import Roles, EvaluationStatus
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
-from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier
+from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
+from .models import ScoringRuleSet
+from .scoring_services import Week6ScoringError, Week6ScoringService
 
 
 class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.ModelViewSet):
@@ -295,6 +301,97 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             return Response(EvaluationSerializer(evaluation).data)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='run-scoring')
+    def run_scoring(self, request, id=None):
+        evaluation = self.get_object()
+        rule_set_id = request.data.get("rule_set_id")
+        rule_set = None
+        try:
+            if rule_set_id:
+                rule_set = get_by_identifier(ScoringRuleSet.objects.all(), rule_set_id)
+            summary = Week6ScoringService.run_for_evaluation(
+                evaluation=evaluation,
+                actor=request.user,
+                rule_set=rule_set,
+            )
+        except (ScoringRuleSet.DoesNotExist, Week6ScoringError) as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = SessionEvaluationSummarySerializer(summary)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='scoring-summary')
+    def scoring_summary(self, request, id=None):
+        evaluation = self.get_object()
+        summary = evaluation.session_summaries.select_related("rule_set").first()
+        if summary is None:
+            return Response({"detail": "No scoring summary has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(SessionEvaluationSummarySerializer(summary).data)
+
+    @action(detail=True, methods=['get'], url_path='response-results')
+    def response_results(self, request, id=None):
+        evaluation = self.get_object()
+        results = evaluation.response_results.select_related("rule_set", "question", "response").all()
+        return Response(ResponseEvaluationResultSerializer(results, many=True).data)
+
+    @action(detail=True, methods=['get'], url_path='competency-results')
+    def competency_results(self, request, id=None):
+        evaluation = self.get_object()
+        results = evaluation.competency_results.select_related("rule_set").all()
+        return Response(CompetencyEvaluationResultSerializer(results, many=True).data)
+
+    @action(detail=False, methods=['get'])
+    def upcoming(self, request):
+        queryset = self.get_queryset().filter(
+            status__in=[EvaluationStatus.SCHEDULED, EvaluationStatus.RESCHEDULED],
+            scheduled_date__gte=timezone.now()
+        ).order_by('scheduled_date')[:20]
+        
+        AuditLogService.log(
+            user=request.user,
+            action='VIEW_UPCOMING_EVALUATIONS',
+            category=AuditLogCategory.EVALUATION,
+            description="Viewed upcoming evaluations",
+            data={'count': queryset.count()},
+            request=request
+        )
+        
+        serializer = EvaluationListSerializer(queryset, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def past(self, request):
+        queryset = self.get_queryset().filter(
+            scheduled_date__lt=timezone.now()
+        ).order_by('-scheduled_date')[:50]
+        
+        AuditLogService.log(
+            user=request.user,
+            action='VIEW_PAST_EVALUATIONS',
+            category=AuditLogCategory.EVALUATION,
+            description="Viewed past evaluations",
+            data={'count': queryset.count()},
+            request=request
+        )
+        
+        serializer = EvaluationListSerializer(queryset, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def my_evaluations(self, request):
+        queryset = self.get_queryset().filter(created_by=request.user)
+        
+        AuditLogService.log(
+            user=request.user,
+            action='VIEW_MY_EVALUATIONS',
+            category=AuditLogCategory.EVALUATION,
+            description="Viewed evaluations created by user",
+            data={'count': queryset.count()},
+            request=request
+        )
+        
+        serializer = EvaluationListSerializer(queryset, many=True)
+        return Response(serializer.data)
     
     @action(detail=True, methods=['post'])
     def reschedule(self, request, id=None):
@@ -383,61 +480,39 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             })
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    @action(detail=False, methods=['get'])
-    def upcoming(self, request):
-        user = request.user
-        queryset = self.get_queryset().filter(
-            status__in=[EvaluationStatus.SCHEDULED, EvaluationStatus.RESCHEDULED],
-            scheduled_date__gte=timezone.now()
-        ).order_by('scheduled_date')[:20]
-        
-        AuditLogService.log(
-            user=request.user,
-            action='VIEW_UPCOMING_EVALUATIONS',
-            category=AuditLogCategory.EVALUATION,
-            description="Viewed upcoming evaluations",
-            data={'count': queryset.count()},
-            request=request
-        )
-        
-        serializer = EvaluationListSerializer(queryset, many=True)
-        return Response(serializer.data)
-    
-    @action(detail=False, methods=['get'])
-    def past(self, request):
-        user = request.user
-        queryset = self.get_queryset().filter(
-            scheduled_date__lt=timezone.now()
-        ).order_by('-scheduled_date')[:50]
-        
-        AuditLogService.log(
-            user=request.user,
-            action='VIEW_PAST_EVALUATIONS',
-            category=AuditLogCategory.EVALUATION,
-            description="Viewed past evaluations",
-            data={'count': queryset.count()},
-            request=request
-        )
-        
-        serializer = EvaluationListSerializer(queryset, many=True)
-        return Response(serializer.data)
-    
-    @action(detail=False, methods=['get'])
-    def my_evaluations(self, request):
-        queryset = self.get_queryset().filter(created_by=request.user)
-        
-        AuditLogService.log(
-            user=request.user,
-            action='VIEW_MY_EVALUATIONS',
-            category=AuditLogCategory.EVALUATION,
-            description="Viewed evaluations created by user",
-            data={'count': queryset.count()},
-            request=request
-        )
-        
-        serializer = EvaluationListSerializer(queryset, many=True)
-        return Response(serializer.data)
+
+
+class ScoringRuleSetViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = ScoringRuleSetSerializer
+
+    def get_queryset(self):
+        queryset = ScoringRuleSet.objects.prefetch_related("rules").all()
+        role_code = self.request.query_params.get("role_code")
+        if role_code:
+            queryset = queryset.filter(role_code=role_code)
+        evaluation_tier = self.request.query_params.get("evaluation_tier")
+        if evaluation_tier:
+            queryset = queryset.filter(evaluation_tier=evaluation_tier)
+        is_active = self.request.query_params.get("is_active")
+        if is_active in {"true", "false"}:
+            queryset = queryset.filter(is_active=is_active == "true")
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        if request.user.role not in [Roles.ADMIN, Roles.SUPERADMIN, Roles.B2B, Roles.B2C]:
+            raise PermissionDenied("You do not have permission to create scoring rule sets")
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if request.user.role not in [Roles.ADMIN, Roles.SUPERADMIN, Roles.B2B, Roles.B2C]:
+            raise PermissionDenied("You do not have permission to update scoring rule sets")
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if request.user.role not in [Roles.ADMIN, Roles.SUPERADMIN]:
+            raise PermissionDenied("Only admins can delete scoring rule sets")
+        return super().destroy(request, *args, **kwargs)
     
     @action(detail=False, methods=['get'])
     def for_candidate(self, request):

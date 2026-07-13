@@ -1,6 +1,13 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import Evaluation
+from .models import (
+    CompetencyEvaluationResult,
+    Evaluation,
+    ResponseEvaluationResult,
+    ScoringRule,
+    ScoringRuleSet,
+    SessionEvaluationSummary,
+)
 from api.core.constants import CertificateStatus
 from api.core.serializers import PublicIdModelSerializer
 from api.candidates.serializers import CandidateSerializer
@@ -12,6 +19,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     certificate_status_display = serializers.CharField(source='get_certificate_status_display', read_only=True)
     created_by_name = serializers.SerializerMethodField()
+    latest_session_summary = serializers.SerializerMethodField()
     
     class Meta:
         model = Evaluation
@@ -28,6 +36,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
             'certificate_issued_at', 'certificate_url',
             'last_evaluation_date',
             'score', 'feedback',
+            'latest_session_summary',
             'readiness_status', 'readiness_override_applied', 'readiness_override_reason',
             'meeting_link', 'meeting_id', 'meeting_password',
             'location',
@@ -48,6 +57,12 @@ class EvaluationSerializer(PublicIdModelSerializer):
     
     def get_created_by_name(self, obj):
         return obj.created_by.get_full_name()
+
+    def get_latest_session_summary(self, obj):
+        summary = obj.session_summaries.select_related("rule_set").first()
+        if summary is None:
+            return None
+        return SessionEvaluationSummarySerializer(summary).data
     
     def validate_scheduled_date(self, value):
         if value <= timezone.now():
@@ -128,14 +143,186 @@ class EvaluationListSerializer(PublicIdModelSerializer):
     candidate_name = serializers.SerializerMethodField()
     evaluation_type_display = serializers.CharField(source='get_evaluation_type_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    latest_session_summary = serializers.SerializerMethodField()
     
     class Meta:
         model = Evaluation
         fields = [
             'id', 'candidate_name', 'evaluation_type', 'evaluation_type_display',
             'status', 'status_display', 'scheduled_date', 'duration_minutes',
-            'score', 'readiness_status', 'readiness_override_applied', 'created_by', 'created_at'
+            'score', 'latest_session_summary', 'readiness_status', 'readiness_override_applied', 'created_by', 'created_at'
         ]
     
     def get_candidate_name(self, obj):
         return f"{obj.candidate_first_name} {obj.candidate_last_name}"
+
+    def get_latest_session_summary(self, obj):
+        summary = obj.session_summaries.select_related("rule_set").first()
+        if summary is None:
+            return None
+        return SessionEvaluationSummarySerializer(summary).data
+
+
+class ScoringRuleSerializer(PublicIdModelSerializer):
+    class Meta:
+        model = ScoringRule
+        fields = [
+            "id",
+            "rule_set",
+            "competency_code",
+            "competency_name",
+            "question_template",
+            "question_code",
+            "question_type",
+            "expected_indicators",
+            "required_indicators",
+            "weighted_indicators",
+            "critical_failure_indicators",
+            "risk_flags",
+            "max_score",
+            "pass_threshold",
+            "weight",
+            "scoring_method",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate(self, attrs):
+        weighted_indicators = attrs.get("weighted_indicators", getattr(self.instance, "weighted_indicators", {})) or {}
+        max_score = attrs.get("max_score", getattr(self.instance, "max_score", 0))
+        if weighted_indicators and sum(float(value) for value in weighted_indicators.values()) <= 0:
+            raise serializers.ValidationError({"weighted_indicators": "Weighted indicators must add up to more than zero"})
+        if attrs.get("pass_threshold", getattr(self.instance, "pass_threshold", 0)) > max_score:
+            raise serializers.ValidationError({"pass_threshold": "Pass threshold cannot exceed max score"})
+        return attrs
+
+
+class ScoringRuleSetSerializer(PublicIdModelSerializer):
+    rules = ScoringRuleSerializer(many=True, required=False)
+    has_usage = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = ScoringRuleSet
+        fields = [
+            "id",
+            "name",
+            "version",
+            "description",
+            "role_code",
+            "role_name",
+            "evaluation_tier",
+            "is_active",
+            "has_usage",
+            "created_by",
+            "rules",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "has_usage", "created_by", "created_at", "updated_at"]
+
+    def create(self, validated_data):
+        rules_data = validated_data.pop("rules", [])
+        validated_data["created_by"] = self.context["request"].user
+        rule_set = ScoringRuleSet.objects.create(**validated_data)
+        for rule_data in rules_data:
+            ScoringRule.objects.create(rule_set=rule_set, **rule_data)
+        return rule_set
+
+    def update(self, instance, validated_data):
+        if instance.has_usage:
+            raise serializers.ValidationError("This rule set has already been used and can no longer be modified")
+        rules_data = validated_data.pop("rules", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if rules_data is not None:
+            instance.rules.all().delete()
+            for rule_data in rules_data:
+                ScoringRule.objects.create(rule_set=instance, **rule_data)
+        return instance
+
+
+class ResponseEvaluationResultSerializer(PublicIdModelSerializer):
+    rule_set_version = serializers.CharField(source="rule_set.version", read_only=True)
+    question_id = serializers.UUIDField(source="question.public_id", read_only=True)
+    response_id = serializers.UUIDField(source="response.public_id", read_only=True)
+
+    class Meta:
+        model = ResponseEvaluationResult
+        fields = [
+            "id",
+            "response_id",
+            "question_id",
+            "competency_code",
+            "competency_name",
+            "score",
+            "max_score",
+            "percentage",
+            "passed_required_indicators",
+            "critical_failure",
+            "requires_human_review",
+            "observed_indicators",
+            "matched_indicators",
+            "missing_indicators",
+            "risk_flags",
+            "explanation",
+            "rule_set_version",
+            "metadata",
+            "scored_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class CompetencyEvaluationResultSerializer(PublicIdModelSerializer):
+    rule_set_version = serializers.CharField(source="rule_set.version", read_only=True)
+
+    class Meta:
+        model = CompetencyEvaluationResult
+        fields = [
+            "id",
+            "competency_code",
+            "competency_name",
+            "total_score",
+            "max_score",
+            "percentage",
+            "pass_threshold",
+            "status",
+            "response_count",
+            "completed_response_count",
+            "incomplete_response_count",
+            "rule_set_version",
+            "metadata",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class SessionEvaluationSummarySerializer(PublicIdModelSerializer):
+    rule_set_version = serializers.CharField(source="rule_set.version", read_only=True)
+
+    class Meta:
+        model = SessionEvaluationSummary
+        fields = [
+            "id",
+            "total_score",
+            "max_score",
+            "overall_percentage",
+            "evaluated_response_count",
+            "total_response_count",
+            "incomplete_response_count",
+            "competencies_summary",
+            "critical_failures",
+            "below_threshold_competencies",
+            "status",
+            "rule_set_version",
+            "metadata",
+            "generated_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields

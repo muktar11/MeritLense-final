@@ -1,5 +1,6 @@
 from django.utils import timezone
 from django.db import models
+from django.db.models import Q
 from django.core.validators import MinValueValidator
 from api.core.models import TimeStampedModel, SoftDeleteModel
 from api.core.constants import (
@@ -257,6 +258,314 @@ class Evaluation(TimeStampedModel, SoftDeleteModel):
         self.candidate.save(update_fields=['last_evaluation_date'])
         
         self.save()
+
+
+class ScoringRuleSet(TimeStampedModel):
+    name = models.CharField(max_length=150)
+    version = models.CharField(max_length=40)
+    description = models.TextField(blank=True)
+    role_code = models.CharField(max_length=100, blank=True)
+    role_name = models.CharField(max_length=100, blank=True)
+    evaluation_tier = models.CharField(
+        max_length=20,
+        choices=InterviewEvaluationTier.CHOICES,
+        default=InterviewEvaluationTier.FULL,
+    )
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_scoring_rule_sets",
+    )
+
+    class Meta:
+        verbose_name = "Scoring Rule Set"
+        verbose_name_plural = "Scoring Rule Sets"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["role_code", "evaluation_tier", "version"],
+                name="unique_scoring_ruleset_role_tier_version",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["role_code", "evaluation_tier", "is_active"]),
+            models.Index(fields=["version"]),
+        ]
+        ordering = ["role_code", "evaluation_tier", "-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.version})"
+
+    @property
+    def has_usage(self):
+        return (
+            self.response_results.exists()
+            or self.competency_results.exists()
+            or self.session_summaries.exists()
+        )
+
+
+class ScoringRule(TimeStampedModel):
+    SCORING_METHOD_ALL_OR_NOTHING = "ALL_OR_NOTHING"
+    SCORING_METHOD_WEIGHTED_MATCH = "WEIGHTED_INDICATOR_MATCH"
+    SCORING_METHOD_REQUIRED_GATE = "REQUIRED_INDICATOR_GATE"
+    SCORING_METHOD_CRITICAL_FAILURE = "CRITICAL_FAILURE_OVERRIDE"
+
+    SCORING_METHOD_CHOICES = [
+        (SCORING_METHOD_ALL_OR_NOTHING, "All Or Nothing"),
+        (SCORING_METHOD_WEIGHTED_MATCH, "Weighted Indicator Match"),
+        (SCORING_METHOD_REQUIRED_GATE, "Required Indicator Gate"),
+        (SCORING_METHOD_CRITICAL_FAILURE, "Critical Failure Override"),
+    ]
+
+    rule_set = models.ForeignKey(
+        ScoringRuleSet,
+        on_delete=models.PROTECT,
+        related_name="rules",
+    )
+    competency_code = models.CharField(max_length=150)
+    competency_name = models.CharField(max_length=150, blank=True)
+    question_template = models.ForeignKey(
+        "questions.QuestionTemplate",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="scoring_rules",
+    )
+    question_code = models.CharField(max_length=50, blank=True)
+    question_type = models.CharField(max_length=50, blank=True)
+    expected_indicators = models.JSONField(default=list, blank=True)
+    required_indicators = models.JSONField(default=list, blank=True)
+    weighted_indicators = models.JSONField(default=dict, blank=True)
+    critical_failure_indicators = models.JSONField(default=list, blank=True)
+    risk_flags = models.JSONField(default=list, blank=True)
+    max_score = models.DecimalField(max_digits=6, decimal_places=2, default=10)
+    pass_threshold = models.DecimalField(max_digits=6, decimal_places=2, default=7)
+    weight = models.DecimalField(max_digits=6, decimal_places=2, default=1)
+    scoring_method = models.CharField(
+        max_length=40,
+        choices=SCORING_METHOD_CHOICES,
+        default=SCORING_METHOD_WEIGHTED_MATCH,
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Scoring Rule"
+        verbose_name_plural = "Scoring Rules"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["rule_set", "question_template"],
+                condition=Q(question_template__isnull=False),
+                name="unique_scoring_rule_per_template",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["rule_set", "competency_code"]),
+            models.Index(fields=["question_code"]),
+        ]
+        ordering = ["competency_code", "question_code", "created_at"]
+
+    def __str__(self):
+        return f"{self.rule_set.version} - {self.competency_code} - {self.question_code or 'generic'}"
+
+
+class ResponseEvaluationResult(TimeStampedModel):
+    evaluation = models.ForeignKey(
+        Evaluation,
+        on_delete=models.CASCADE,
+        related_name="response_results",
+    )
+    session = models.ForeignKey(
+        "interview_sessions.InterviewSession",
+        on_delete=models.CASCADE,
+        related_name="response_evaluation_results",
+    )
+    candidate = models.ForeignKey(
+        Candidate,
+        on_delete=models.CASCADE,
+        related_name="response_evaluation_results",
+    )
+    response = models.ForeignKey(
+        "interview_sessions.CandidateResponse",
+        on_delete=models.CASCADE,
+        related_name="evaluation_results",
+    )
+    question = models.ForeignKey(
+        "interview_sessions.SessionQuestion",
+        on_delete=models.CASCADE,
+        related_name="evaluation_results",
+    )
+    rule_set = models.ForeignKey(
+        ScoringRuleSet,
+        on_delete=models.PROTECT,
+        related_name="response_results",
+    )
+    rule = models.ForeignKey(
+        ScoringRule,
+        on_delete=models.PROTECT,
+        related_name="response_results",
+        null=True,
+        blank=True,
+    )
+    competency_code = models.CharField(max_length=150, blank=True)
+    competency_name = models.CharField(max_length=150, blank=True)
+    score = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    max_score = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    percentage = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    passed_required_indicators = models.BooleanField(default=False)
+    critical_failure = models.BooleanField(default=False)
+    requires_human_review = models.BooleanField(default=False)
+    observed_indicators = models.JSONField(default=list, blank=True)
+    matched_indicators = models.JSONField(default=list, blank=True)
+    missing_indicators = models.JSONField(default=list, blank=True)
+    risk_flags = models.JSONField(default=list, blank=True)
+    explanation = models.TextField(blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    scored_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Response Evaluation Result"
+        verbose_name_plural = "Response Evaluation Results"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["response", "rule_set"],
+                name="unique_response_result_per_ruleset",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["evaluation", "competency_code"]),
+            models.Index(fields=["session", "scored_at"]),
+        ]
+        ordering = ["question__question_order", "created_at"]
+
+
+class CompetencyEvaluationResult(TimeStampedModel):
+    STATUS_NOT_STARTED = "NOT_STARTED"
+    STATUS_INCOMPLETE = "INCOMPLETE"
+    STATUS_EVALUATED = "EVALUATED"
+    STATUS_BELOW_THRESHOLD = "BELOW_THRESHOLD"
+    STATUS_MEETS_THRESHOLD = "MEETS_THRESHOLD"
+
+    STATUS_CHOICES = [
+        (STATUS_NOT_STARTED, "Not Started"),
+        (STATUS_INCOMPLETE, "Incomplete"),
+        (STATUS_EVALUATED, "Evaluated"),
+        (STATUS_BELOW_THRESHOLD, "Below Threshold"),
+        (STATUS_MEETS_THRESHOLD, "Meets Threshold"),
+    ]
+
+    evaluation = models.ForeignKey(
+        Evaluation,
+        on_delete=models.CASCADE,
+        related_name="competency_results",
+    )
+    session = models.ForeignKey(
+        "interview_sessions.InterviewSession",
+        on_delete=models.CASCADE,
+        related_name="competency_evaluation_results",
+    )
+    candidate = models.ForeignKey(
+        Candidate,
+        on_delete=models.CASCADE,
+        related_name="competency_evaluation_results",
+    )
+    rule_set = models.ForeignKey(
+        ScoringRuleSet,
+        on_delete=models.PROTECT,
+        related_name="competency_results",
+    )
+    competency_code = models.CharField(max_length=150)
+    competency_name = models.CharField(max_length=150, blank=True)
+    total_score = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    max_score = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    percentage = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    pass_threshold = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default=STATUS_NOT_STARTED)
+    response_count = models.PositiveIntegerField(default=0)
+    completed_response_count = models.PositiveIntegerField(default=0)
+    incomplete_response_count = models.PositiveIntegerField(default=0)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "Competency Evaluation Result"
+        verbose_name_plural = "Competency Evaluation Results"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["evaluation", "rule_set", "competency_code"],
+                name="unique_competency_result_per_ruleset",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["evaluation", "status"]),
+            models.Index(fields=["session", "competency_code"]),
+        ]
+        ordering = ["competency_code", "created_at"]
+
+
+class SessionEvaluationSummary(TimeStampedModel):
+    STATUS_PENDING = "PENDING"
+    STATUS_PARTIALLY_EVALUATED = "PARTIALLY_EVALUATED"
+    STATUS_EVALUATED = "EVALUATED"
+    STATUS_EVALUATION_FAILED = "EVALUATION_FAILED"
+    STATUS_REQUIRES_HUMAN_REVIEW = "REQUIRES_HUMAN_REVIEW"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_PARTIALLY_EVALUATED, "Partially Evaluated"),
+        (STATUS_EVALUATED, "Evaluated"),
+        (STATUS_EVALUATION_FAILED, "Evaluation Failed"),
+        (STATUS_REQUIRES_HUMAN_REVIEW, "Requires Human Review"),
+    ]
+
+    evaluation = models.ForeignKey(
+        Evaluation,
+        on_delete=models.CASCADE,
+        related_name="session_summaries",
+    )
+    session = models.ForeignKey(
+        "interview_sessions.InterviewSession",
+        on_delete=models.CASCADE,
+        related_name="evaluation_summaries",
+    )
+    candidate = models.ForeignKey(
+        Candidate,
+        on_delete=models.CASCADE,
+        related_name="session_evaluation_summaries",
+    )
+    rule_set = models.ForeignKey(
+        ScoringRuleSet,
+        on_delete=models.PROTECT,
+        related_name="session_summaries",
+    )
+    total_score = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    max_score = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    overall_percentage = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    evaluated_response_count = models.PositiveIntegerField(default=0)
+    total_response_count = models.PositiveIntegerField(default=0)
+    incomplete_response_count = models.PositiveIntegerField(default=0)
+    competencies_summary = models.JSONField(default=list, blank=True)
+    critical_failures = models.JSONField(default=list, blank=True)
+    below_threshold_competencies = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    metadata = models.JSONField(default=dict, blank=True)
+    generated_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Session Evaluation Summary"
+        verbose_name_plural = "Session Evaluation Summaries"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["evaluation", "rule_set"],
+                name="unique_session_summary_per_ruleset",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["evaluation", "status"]),
+            models.Index(fields=["session", "generated_at"]),
+        ]
+        ordering = ["-generated_at", "-created_at"]
     
     def cancel(self, reason=None):
         self.status = EvaluationStatus.CANCELLED

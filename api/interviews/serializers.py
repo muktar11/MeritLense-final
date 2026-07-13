@@ -198,6 +198,7 @@ class CandidateResponseSerializer(PublicIdModelSerializer):
     translation_artifact = serializers.SerializerMethodField()
     interpretation_artifact = serializers.SerializerMethodField()
     evaluation_input_artifact = serializers.SerializerMethodField()
+    response_evaluation_result = serializers.SerializerMethodField()
 
     class Meta:
         model = CandidateResponse
@@ -243,6 +244,7 @@ class CandidateResponseSerializer(PublicIdModelSerializer):
             "translation_artifact",
             "interpretation_artifact",
             "evaluation_input_artifact",
+            "response_evaluation_result",
             "created_at",
         ]
         read_only_fields = fields
@@ -270,6 +272,14 @@ class CandidateResponseSerializer(PublicIdModelSerializer):
         from api.translation.serializers import EvaluationInputArtifactSerializer
 
         return EvaluationInputArtifactSerializer(artifact).data
+
+    def get_response_evaluation_result(self, obj):
+        result = obj.evaluation_results.select_related("rule_set").order_by("-created_at").first()
+        if result is None:
+            return None
+        from api.evaluations.serializers import ResponseEvaluationResultSerializer
+
+        return ResponseEvaluationResultSerializer(result).data
 
 
 class QuestionAudioArtifactSerializer(PublicIdModelSerializer):
@@ -303,6 +313,8 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
     questions = SessionQuestionSerializer(many=True, read_only=True)
     progress_percent = serializers.SerializerMethodField()
     access_token = serializers.CharField(read_only=True)
+    linked_evaluation_id = serializers.SerializerMethodField()
+    latest_scoring_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = InterviewSession
@@ -340,6 +352,8 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
             "expires_at",
             "created_by",
             "access_token",
+            "linked_evaluation_id",
+            "latest_scoring_summary",
             "identity_verified",
             "face_match_score",
             "single_face_detected",
@@ -364,6 +378,20 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
             return 0
         answered = obj.questions.filter(status="ANSWERED").count()
         return int((answered / obj.total_questions) * 100)
+
+    def get_linked_evaluation_id(self, obj):
+        evaluation = getattr(obj, "linked_evaluation", None)
+        if evaluation is None:
+            return None
+        return str(evaluation.public_id)
+
+    def get_latest_scoring_summary(self, obj):
+        summary = obj.evaluation_summaries.select_related("rule_set").first()
+        if summary is None:
+            return None
+        from api.evaluations.serializers import SessionEvaluationSummarySerializer
+
+        return SessionEvaluationSummarySerializer(summary).data
 
 
 class InterviewSessionCreateSerializer(serializers.Serializer):

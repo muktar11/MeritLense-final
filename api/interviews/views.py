@@ -17,6 +17,8 @@ from api.questions.models import QuestionTemplate
 from api.sessions.models import CandidateResponse, InterviewSession
 from api.sessions.services import InterviewSessionService, InterviewVoicePipelineService
 from api.translation.services import AIProcessingError, AIProcessingOrchestrationService
+from api.evaluations.scoring_services import Week6ScoringError, Week6ScoringService
+from api.evaluations.serializers import SessionEvaluationSummarySerializer
 
 from .serializers import (
     CandidateResponseSerializer,
@@ -318,6 +320,31 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         payload = AIProcessingOrchestrationService.get_session_summary_payload(session)
         serializer = SessionAIProcessingSummarySerializer(payload)
         return Response(serializer.data)
+
+    @extend_schema(request=None, responses={200: SessionEvaluationSummarySerializer})
+    @action(detail=True, methods=["post"], url_path="run-scoring")
+    def run_scoring(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        evaluation = InterviewSessionService._ensure_linked_evaluation(session)
+        try:
+            summary = Week6ScoringService.run_for_evaluation(
+                evaluation=evaluation,
+                actor=request.user if request.user.is_authenticated else None,
+            )
+        except Week6ScoringError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        return Response(SessionEvaluationSummarySerializer(summary).data)
+
+    @extend_schema(request=None, responses={200: SessionEvaluationSummarySerializer})
+    @action(detail=True, methods=["get"], url_path="scoring-summary")
+    def scoring_summary(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        summary = session.evaluation_summaries.select_related("rule_set").first()
+        if summary is None:
+            return Response({"detail": "No scoring summary has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(SessionEvaluationSummarySerializer(summary).data)
 
     def _get_session(self):
         queryset = InterviewSession.objects.select_related(

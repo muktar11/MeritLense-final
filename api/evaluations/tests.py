@@ -1,11 +1,14 @@
 from django.test import TestCase
+from django.db import DatabaseError
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from api.accounts.models import User
+from api.audit.models import AuditLog
 from api.candidates.models import Candidate
-from api.core.constants import CandidateResponseType, CoverageLevel, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles
-from api.evaluations.models import Evaluation, ResponseEvaluationResult, ScoringRule, ScoringRuleSet, SessionEvaluationSummary
+from api.core.constants import AuditLogAction, CandidateResponseType, CoverageLevel, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles
+from api.evaluations.models import Evaluation, EvaluationReadinessDecisionRecord, ResponseEvaluationResult, ScoringRule, ScoringRuleSet, SessionEvaluationSummary
 from api.evaluations.scoring_services import Week6ScoringService
 from api.questions.models import QuestionTemplate
 from api.scores.models import CandidateScore, ScoreSet
@@ -142,6 +145,11 @@ class EvaluationRuleEngineTests(TestCase):
         self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.NOT_READY)
         self.assertTrue(self.evaluation.readiness_override_applied)
         self.assertIn("HK-SAF-001", self.evaluation.readiness_override_reason)
+        record = EvaluationReadinessDecisionRecord.objects.get(evaluation=self.evaluation)
+        self.assertEqual(record.readiness_indicator, "غير جاهز")
+        self.assertTrue(record.override_triggered)
+        self.assertEqual(record.session, self.session)
+        self.assertIn("HK-SAF-001", record.readiness_reason)
 
     def test_non_zero_critical_score_does_not_trigger_override(self):
         CandidateResponse.objects.create(
@@ -340,6 +348,37 @@ class Week6ScoringServiceTests(TestCase):
         self.assertEqual(float(summary.overall_percentage), 70.0)
         self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.READY)
         self.assertEqual(float(self.evaluation.score), 70.0)
+        record = EvaluationReadinessDecisionRecord.objects.get(evaluation=self.evaluation)
+        self.assertEqual(record.readiness_indicator, "جاهز")
+        self.assertFalse(record.override_triggered)
+        self.assertEqual(record.rule_engine_version, "v1.0")
+        self.assertEqual(record.session, self.session)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action=AuditLogAction.RULE_ENGINE_DECISION_RECORDED,
+                resource_id=self.evaluation.id,
+            ).exists()
+        )
+
+    def test_readiness_legal_record_is_immutable_after_generation(self):
+        Week6ScoringService.run_for_evaluation(
+            evaluation=self.evaluation,
+            actor=self.user,
+            rule_set=self.rule_set,
+        )
+        record = EvaluationReadinessDecisionRecord.objects.get(evaluation=self.evaluation)
+        record.readiness_reason = "changed later"
+
+        with self.assertRaises(ValidationError):
+            record.save()
+
+        with self.assertRaises(DatabaseError):
+            EvaluationReadinessDecisionRecord.objects.filter(pk=record.pk).update(
+                readiness_reason="changed via queryset"
+            )
+
+        with self.assertRaises(DatabaseError):
+            EvaluationReadinessDecisionRecord.objects.filter(pk=record.pk).delete()
 
     def test_run_scoring_endpoint_returns_frontend_ready_summary(self):
         response = self.client.post(
@@ -355,6 +394,12 @@ class Week6ScoringServiceTests(TestCase):
         session_response = self.client.get(f"/api/v1/interviews/{self.session.public_id}/scoring-summary/")
         self.assertEqual(session_response.status_code, 200)
         self.assertEqual(session_response.data["status"], SessionEvaluationSummary.STATUS_EVALUATED)
+
+        legal_record_response = self.client.get(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/readiness-legal-record"
+        )
+        self.assertEqual(legal_record_response.status_code, 200)
+        self.assertEqual(legal_record_response.data["readiness_indicator"], "جاهز")
 
     def test_screening_evaluation_skips_readiness_override(self):
         self.session.evaluation_tier = InterviewEvaluationTier.SCREENING

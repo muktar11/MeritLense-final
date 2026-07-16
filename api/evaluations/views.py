@@ -16,6 +16,7 @@ from .utils import (
 from .models import Evaluation
 from .serializers import (
     CompetencyEvaluationResultSerializer,
+    EvaluationReadinessDecisionRecordSerializer,
     EvaluationSerializer,
     EvaluationCreateSerializer,
     EvaluationUpdateSerializer,
@@ -31,7 +32,7 @@ from .permissions import CanManageEvaluation, CanViewEvaluation
 from api.core.constants import Roles, EvaluationStatus
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
-from .models import ScoringRuleSet
+from .models import EvaluationReadinessDecisionRecord, ScoringRuleSet
 from .scoring_services import Week6ScoringError, Week6ScoringService
 
 
@@ -339,6 +340,20 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         evaluation = self.get_object()
         results = evaluation.competency_results.select_related("rule_set").all()
         return Response(CompetencyEvaluationResultSerializer(results, many=True).data)
+
+    @action(detail=True, methods=['get'], url_path='readiness-legal-record')
+    def readiness_legal_record(self, request, id=None):
+        evaluation = self.get_object()
+        try:
+            record = evaluation.readiness_legal_record
+        except EvaluationReadinessDecisionRecord.DoesNotExist:
+            record = None
+        if record is None:
+            return Response(
+                {"detail": "No readiness legal record has been generated yet."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(EvaluationReadinessDecisionRecordSerializer(record).data)
 
     @action(detail=False, methods=['get'])
     def upcoming(self, request):

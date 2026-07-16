@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     CompetencyEvaluationResult,
     Evaluation,
+    EvaluationReadinessDecisionRecord,
     ResponseEvaluationResult,
     ScoringRule,
     ScoringRuleSet,
@@ -70,3 +71,23 @@ class SessionEvaluationSummaryAdmin(admin.ModelAdmin):
     list_display = ("evaluation", "overall_percentage", "status", "evaluated_response_count", "incomplete_response_count", "generated_at")
     list_filter = ("status", "rule_set__version")
     search_fields = ("evaluation__candidate_email", "rule_set__version")
+
+
+@admin.register(EvaluationReadinessDecisionRecord)
+class EvaluationReadinessDecisionRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        "evaluation",
+        "session",
+        "readiness_indicator",
+        "override_triggered",
+        "rule_engine_version",
+        "decided_at",
+    )
+    list_filter = ("readiness_indicator", "override_triggered", "rule_engine_version")
+    search_fields = ("evaluation__candidate_email", "session__public_id", "readiness_reason")
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

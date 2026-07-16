@@ -8,6 +8,7 @@ from api.core.constants import AuditLogAction, AuditLogCategory, ReadinessStatus
 from api.sessions.models import CandidateResponse
 from api.translation.models import EvaluationInputArtifact
 
+from .readiness_record_services import EvaluationReadinessRecordService
 from .models import (
     CompetencyEvaluationResult,
     Evaluation,
@@ -67,7 +68,7 @@ class Week6ScoringService:
             response_results=results,
             competency_results=competency_results,
         )
-        cls._apply_evaluation_rollups(evaluation=evaluation, summary=summary)
+        cls._apply_evaluation_rollups(evaluation=evaluation, summary=summary, actor=actor)
         cls._log_scoring_events(
             actor=actor,
             evaluation=evaluation,
@@ -301,6 +302,8 @@ class Week6ScoringService:
                 "response_id": str(result.response.public_id),
                 "question_id": str(result.question.public_id),
                 "competency_code": result.competency_code,
+                "question_code": result.metadata.get("question_code", ""),
+                "topic": result.competency_name or result.question.skill,
                 "explanation": result.explanation,
             }
             for result in response_results
@@ -368,31 +371,78 @@ class Week6ScoringService:
         return summary
 
     @classmethod
-    def _apply_evaluation_rollups(cls, *, evaluation, summary):
+    def _apply_evaluation_rollups(cls, *, evaluation, summary, actor=None):
+        existing_record = EvaluationReadinessRecordService.get_existing(evaluation)
+        if existing_record is not None:
+            evaluation.readiness_status = EvaluationReadinessRecordService.status_from_indicator(
+                existing_record.readiness_indicator
+            )
+            evaluation.readiness_override_applied = existing_record.override_triggered
+            evaluation.readiness_override_reason = existing_record.readiness_reason
+            evaluation.score = summary.overall_percentage
+            evaluation.save(
+                update_fields=[
+                    "score",
+                    "readiness_status",
+                    "readiness_override_applied",
+                    "readiness_override_reason",
+                    "updated_at",
+                ]
+            )
+            return
+
         update_fields = ["score", "updated_at"]
         evaluation.score = summary.overall_percentage
+        readiness_reason = ""
+        override_triggered = False
+        record_metadata = {
+            "summary_status": summary.status,
+            "overall_percentage": str(summary.overall_percentage),
+            "rule_set_version": summary.rule_set.version,
+        }
 
         if not evaluation.readiness_indicator_enabled:
             evaluation.readiness_status = ReadinessStatus.PENDING
             evaluation.readiness_override_applied = False
             evaluation.readiness_override_reason = ""
         elif summary.critical_failures:
+            first_failure = summary.critical_failures[0]
+            topic = first_failure.get("topic")
             evaluation.readiness_status = ReadinessStatus.NOT_READY
             evaluation.readiness_override_applied = True
-            evaluation.readiness_override_reason = "Critical failure detected by deterministic scoring engine."
+            readiness_reason = f"Failed critical question: {first_failure.get('question_code') or 'UNKNOWN'}"
+            if topic:
+                readiness_reason = f"{readiness_reason} ({topic})"
+            override_triggered = True
+            record_metadata["critical_failure"] = first_failure
+            evaluation.readiness_override_reason = readiness_reason
             update_fields.extend(["readiness_status", "readiness_override_applied", "readiness_override_reason"])
         elif summary.status == SessionEvaluationSummary.STATUS_EVALUATED:
             evaluation.readiness_status = ReadinessStatus.READY
             evaluation.readiness_override_applied = False
             evaluation.readiness_override_reason = ""
+            readiness_reason = "Deterministic scoring completed without critical failures."
             update_fields.extend(["readiness_status", "readiness_override_applied", "readiness_override_reason"])
         else:
             evaluation.readiness_status = ReadinessStatus.PENDING
             evaluation.readiness_override_applied = False
             evaluation.readiness_override_reason = ""
+            readiness_reason = (
+                "Evaluation remains in a medium state because scoring is incomplete, pending review, "
+                "or requires human follow-up."
+            )
             update_fields.extend(["readiness_status", "readiness_override_applied", "readiness_override_reason"])
 
         evaluation.save(update_fields=list(dict.fromkeys(update_fields)))
+        if evaluation.readiness_indicator_enabled:
+            EvaluationReadinessRecordService.persist_once(
+                evaluation=evaluation,
+                readiness_status=evaluation.readiness_status,
+                readiness_reason=readiness_reason,
+                override_triggered=override_triggered,
+                actor=actor,
+                metadata=record_metadata,
+            )
 
     @classmethod
     def _log_scoring_events(cls, *, actor, evaluation, rule_set, response_results, competency_results, summary):

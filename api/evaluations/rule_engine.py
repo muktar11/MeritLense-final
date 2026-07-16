@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from api.core.constants import InterviewEvaluationTier, ReadinessStatus
+from .readiness_record_services import EvaluationReadinessRecordService
 
 
 class EvaluationRuleEngine:
@@ -8,6 +9,17 @@ class EvaluationRuleEngine:
 
     @classmethod
     def apply_readiness_rules(cls, evaluation):
+        existing_record = EvaluationReadinessRecordService.get_existing(evaluation)
+        if existing_record is not None:
+            cls._sync_evaluation_from_legal_record(evaluation, existing_record)
+            return {
+                "override_applied": existing_record.override_triggered,
+                "reason": existing_record.readiness_reason,
+                "question_code": existing_record.metadata.get("question_code", ""),
+                "topic": existing_record.metadata.get("topic", ""),
+                "frozen_legal_record": True,
+            }
+
         if (
             evaluation.evaluation_tier != InterviewEvaluationTier.FULL
             or not evaluation.readiness_indicator_enabled
@@ -52,12 +64,12 @@ class EvaluationRuleEngine:
                 "question_code": None,
             }
 
-        question_code, score = result
+        question_code, topic, score = result
         evaluation.readiness_status = ReadinessStatus.NOT_READY
         evaluation.readiness_override_applied = True
         evaluation.readiness_override_reason = (
-            f"Critical question {question_code or 'UNKNOWN'} scored 0. "
-            "Readiness overridden by Rule Engine."
+            f"Failed critical question: {question_code or 'UNKNOWN'}"
+            f"{f' ({topic})' if topic else ''}"
         )
         evaluation.save(
             update_fields=[
@@ -67,10 +79,23 @@ class EvaluationRuleEngine:
                 "updated_at",
             ]
         )
+        EvaluationReadinessRecordService.persist_once(
+            evaluation=evaluation,
+            readiness_status=evaluation.readiness_status,
+            readiness_reason=evaluation.readiness_override_reason,
+            override_triggered=True,
+            metadata={
+                "question_code": question_code or "",
+                "topic": topic or "",
+                "legacy_rule_engine": True,
+                "score": str(score),
+            },
+        )
         return {
             "override_applied": True,
             "reason": evaluation.readiness_override_reason,
             "question_code": question_code,
+            "topic": topic,
             "score": score,
         }
 
@@ -87,7 +112,8 @@ class EvaluationRuleEngine:
                 continue
             score = cls._extract_score(response.metadata)
             if score is not None and score == Decimal("0"):
-                return template.question_code or str(template.public_id), score
+                topic = template.skill_tag or template.skill or template.domain
+                return template.question_code or str(template.public_id), topic, score
         return None
 
     @classmethod
@@ -102,3 +128,19 @@ class EvaluationRuleEngine:
             except (InvalidOperation, TypeError, ValueError):
                 return None
         return None
+
+    @classmethod
+    def _sync_evaluation_from_legal_record(cls, evaluation, record):
+        evaluation.readiness_status = EvaluationReadinessRecordService.status_from_indicator(
+            record.readiness_indicator
+        )
+        evaluation.readiness_override_applied = record.override_triggered
+        evaluation.readiness_override_reason = record.readiness_reason
+        evaluation.save(
+            update_fields=[
+                "readiness_status",
+                "readiness_override_applied",
+                "readiness_override_reason",
+                "updated_at",
+            ]
+        )

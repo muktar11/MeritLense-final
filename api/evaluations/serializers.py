@@ -3,6 +3,7 @@ from django.utils import timezone
 from .models import (
     CompetencyEvaluationResult,
     Evaluation,
+    EvaluationReadinessDecisionRecord,
     ResponseEvaluationResult,
     ScoringRule,
     ScoringRuleSet,
@@ -20,6 +21,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
     certificate_status_display = serializers.CharField(source='get_certificate_status_display', read_only=True)
     created_by_name = serializers.SerializerMethodField()
     latest_session_summary = serializers.SerializerMethodField()
+    readiness_legal_record = serializers.SerializerMethodField()
     
     class Meta:
         model = Evaluation
@@ -37,6 +39,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
             'last_evaluation_date',
             'score', 'feedback',
             'latest_session_summary',
+            'readiness_legal_record',
             'readiness_status', 'readiness_override_applied', 'readiness_override_reason',
             'meeting_link', 'meeting_id', 'meeting_password',
             'location',
@@ -63,6 +66,15 @@ class EvaluationSerializer(PublicIdModelSerializer):
         if summary is None:
             return None
         return SessionEvaluationSummarySerializer(summary).data
+
+    def get_readiness_legal_record(self, obj):
+        try:
+            record = obj.readiness_legal_record
+        except EvaluationReadinessDecisionRecord.DoesNotExist:
+            record = None
+        if record is None:
+            return None
+        return EvaluationReadinessDecisionRecordSerializer(record).data
     
     def validate_scheduled_date(self, value):
         if value <= timezone.now():
@@ -144,13 +156,14 @@ class EvaluationListSerializer(PublicIdModelSerializer):
     evaluation_type_display = serializers.CharField(source='get_evaluation_type_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     latest_session_summary = serializers.SerializerMethodField()
+    readiness_legal_record = serializers.SerializerMethodField()
     
     class Meta:
         model = Evaluation
         fields = [
             'id', 'candidate_name', 'evaluation_type', 'evaluation_type_display',
             'status', 'status_display', 'scheduled_date', 'duration_minutes',
-            'score', 'latest_session_summary', 'readiness_status', 'readiness_override_applied', 'created_by', 'created_at'
+            'score', 'latest_session_summary', 'readiness_legal_record', 'readiness_status', 'readiness_override_applied', 'created_by', 'created_at'
         ]
     
     def get_candidate_name(self, obj):
@@ -161,6 +174,37 @@ class EvaluationListSerializer(PublicIdModelSerializer):
         if summary is None:
             return None
         return SessionEvaluationSummarySerializer(summary).data
+
+    def get_readiness_legal_record(self, obj):
+        try:
+            record = obj.readiness_legal_record
+        except EvaluationReadinessDecisionRecord.DoesNotExist:
+            record = None
+        if record is None:
+            return None
+        return EvaluationReadinessDecisionRecordSerializer(record).data
+
+
+class EvaluationReadinessDecisionRecordSerializer(PublicIdModelSerializer):
+    session_id = serializers.UUIDField(source="session.public_id", read_only=True)
+    evaluation_id = serializers.UUIDField(source="evaluation.public_id", read_only=True)
+
+    class Meta:
+        model = EvaluationReadinessDecisionRecord
+        fields = [
+            "id",
+            "evaluation_id",
+            "session_id",
+            "readiness_indicator",
+            "readiness_reason",
+            "override_triggered",
+            "rule_engine_version",
+            "decided_at",
+            "metadata",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
 
 
 class ScoringRuleSerializer(PublicIdModelSerializer):

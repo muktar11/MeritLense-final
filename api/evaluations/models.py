@@ -2,6 +2,7 @@ from django.utils import timezone
 from django.db import models
 from django.db.models import Q
 from django.core.validators import MinValueValidator
+from django.core.exceptions import ValidationError
 from api.core.models import TimeStampedModel, SoftDeleteModel
 from api.core.constants import (
     CertificateStatus,
@@ -258,6 +259,47 @@ class Evaluation(TimeStampedModel, SoftDeleteModel):
         self.candidate.save(update_fields=['last_evaluation_date'])
         
         self.save()
+
+
+class EvaluationReadinessDecisionRecord(TimeStampedModel):
+    evaluation = models.OneToOneField(
+        Evaluation,
+        on_delete=models.CASCADE,
+        related_name="readiness_legal_record",
+    )
+    session = models.ForeignKey(
+        "interview_sessions.InterviewSession",
+        on_delete=models.PROTECT,
+        related_name="readiness_legal_records",
+    )
+    readiness_indicator = models.CharField(max_length=20)
+    readiness_reason = models.TextField(blank=True)
+    override_triggered = models.BooleanField(default=False)
+    rule_engine_version = models.CharField(max_length=30)
+    decided_at = models.DateTimeField(default=timezone.now)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "Evaluation Readiness Decision Record"
+        verbose_name_plural = "Evaluation Readiness Decision Records"
+        indexes = [
+            models.Index(fields=["session", "decided_at"]),
+            models.Index(fields=["rule_engine_version"]),
+        ]
+        ordering = ["-decided_at", "-created_at"]
+
+    def __str__(self):
+        return f"{self.evaluation_id} - {self.readiness_indicator} - {self.rule_engine_version}"
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Evaluation readiness decision records are immutable once generated.")
+        if not self.session_id and self.evaluation.session_id:
+            self.session = self.evaluation.session
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Evaluation readiness decision records cannot be deleted.")
 
 
 class ScoringRuleSet(TimeStampedModel):

@@ -19,6 +19,8 @@ from api.sessions.services import InterviewSessionService, InterviewVoicePipelin
 from api.translation.services import AIProcessingError, AIProcessingOrchestrationService
 from api.evaluations.scoring_services import Week6ScoringError, Week6ScoringService
 from api.evaluations.serializers import SessionEvaluationSummarySerializer
+from api.reports.serializers import EvaluationReportSerializer
+from api.reports.services import EvaluationReportService
 
 from .serializers import (
     CandidateResponseSerializer,
@@ -345,6 +347,18 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         if summary is None:
             return Response({"detail": "No scoring summary has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
         return Response(SessionEvaluationSummarySerializer(summary).data)
+
+    @extend_schema(request=None, responses={200: EvaluationReportSerializer})
+    @action(detail=True, methods=["get"], url_path="report")
+    def report(self, request, id=None):
+        session = self._get_session()
+        if not request.user.is_authenticated or not session.can_manage(request.user):
+            raise PermissionDenied("You do not have access to this interview report")
+        evaluation = InterviewSessionService._ensure_linked_evaluation(session)
+        report = evaluation.reports.select_related("generated_by").first()
+        if report is None:
+            return Response({"detail": "No evaluation report has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(EvaluationReportSerializer(report).data)
 
     def _get_session(self):
         queryset = InterviewSession.objects.select_related(

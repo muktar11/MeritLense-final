@@ -34,6 +34,8 @@ from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverit
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
 from .models import EvaluationReadinessDecisionRecord, ScoringRuleSet
 from .scoring_services import Week6ScoringError, Week6ScoringService
+from api.reports.serializers import EvaluationReportSerializer
+from api.reports.services import EvaluationReportError, EvaluationReportService
 
 
 class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.ModelViewSet):
@@ -354,6 +356,42 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response(EvaluationReadinessDecisionRecordSerializer(record).data)
+
+    @action(detail=True, methods=["post"], url_path="generate-report")
+    def generate_report(self, request, id=None):
+        evaluation = self.get_object()
+        try:
+            report = EvaluationReportService.generate_for_evaluation(
+                evaluation=evaluation,
+                actor=request.user,
+            )
+        except EvaluationReportError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(EvaluationReportSerializer(report).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="report")
+    def report(self, request, id=None):
+        evaluation = self.get_object()
+        report = evaluation.reports.select_related("generated_by").first()
+        if report is None:
+            return Response(
+                {"detail": "No evaluation report has been generated yet."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        AuditLogService.log(
+            user=request.user,
+            action=AuditLogAction.REPORT_VIEWED,
+            category=AuditLogCategory.EVALUATION,
+            description=f"Latest report viewed for evaluation {evaluation.public_id}",
+            resource=report,
+            data={
+                "evaluation_id": str(evaluation.public_id),
+                "report_id": str(report.public_id),
+                "report_number": report.report_number,
+            },
+            request=request,
+        )
+        return Response(EvaluationReportSerializer(report).data)
 
     @action(detail=False, methods=['get'])
     def upcoming(self, request):

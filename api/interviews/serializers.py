@@ -315,6 +315,7 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
     access_token = serializers.CharField(read_only=True)
     linked_evaluation_id = serializers.SerializerMethodField()
     latest_scoring_summary = serializers.SerializerMethodField()
+    latest_report = serializers.SerializerMethodField()
 
     class Meta:
         model = InterviewSession
@@ -354,6 +355,7 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
             "access_token",
             "linked_evaluation_id",
             "latest_scoring_summary",
+            "latest_report",
             "identity_verified",
             "face_match_score",
             "single_face_detected",
@@ -392,6 +394,17 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
         from api.evaluations.serializers import SessionEvaluationSummarySerializer
 
         return SessionEvaluationSummarySerializer(summary).data
+
+    def get_latest_report(self, obj):
+        evaluation = getattr(obj, "linked_evaluation", None)
+        if evaluation is None:
+            return None
+        report = evaluation.reports.first()
+        if report is None:
+            return None
+        from api.reports.serializers import EvaluationReportListSerializer
+
+        return EvaluationReportListSerializer(report).data
 
 
 class InterviewSessionCreateSerializer(serializers.Serializer):

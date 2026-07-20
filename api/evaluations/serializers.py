@@ -22,6 +22,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
     created_by_name = serializers.SerializerMethodField()
     latest_session_summary = serializers.SerializerMethodField()
     readiness_legal_record = serializers.SerializerMethodField()
+    latest_report = serializers.SerializerMethodField()
     
     class Meta:
         model = Evaluation
@@ -40,6 +41,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
             'score', 'feedback',
             'latest_session_summary',
             'readiness_legal_record',
+            'latest_report',
             'readiness_status', 'readiness_override_applied', 'readiness_override_reason',
             'meeting_link', 'meeting_id', 'meeting_password',
             'location',
@@ -75,6 +77,14 @@ class EvaluationSerializer(PublicIdModelSerializer):
         if record is None:
             return None
         return EvaluationReadinessDecisionRecordSerializer(record).data
+
+    def get_latest_report(self, obj):
+        report = obj.reports.first()
+        if report is None:
+            return None
+        from api.reports.serializers import EvaluationReportListSerializer
+
+        return EvaluationReportListSerializer(report).data
     
     def validate_scheduled_date(self, value):
         if value <= timezone.now():
@@ -157,13 +167,14 @@ class EvaluationListSerializer(PublicIdModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     latest_session_summary = serializers.SerializerMethodField()
     readiness_legal_record = serializers.SerializerMethodField()
+    latest_report = serializers.SerializerMethodField()
     
     class Meta:
         model = Evaluation
         fields = [
             'id', 'candidate_name', 'evaluation_type', 'evaluation_type_display',
             'status', 'status_display', 'scheduled_date', 'duration_minutes',
-            'score', 'latest_session_summary', 'readiness_legal_record', 'readiness_status', 'readiness_override_applied', 'created_by', 'created_at'
+            'score', 'latest_session_summary', 'readiness_legal_record', 'latest_report', 'readiness_status', 'readiness_override_applied', 'created_by', 'created_at'
         ]
     
     def get_candidate_name(self, obj):
@@ -183,6 +194,14 @@ class EvaluationListSerializer(PublicIdModelSerializer):
         if record is None:
             return None
         return EvaluationReadinessDecisionRecordSerializer(record).data
+
+    def get_latest_report(self, obj):
+        report = obj.reports.first()
+        if report is None:
+            return None
+        from api.reports.serializers import EvaluationReportListSerializer
+
+        return EvaluationReportListSerializer(report).data
 
 
 class EvaluationReadinessDecisionRecordSerializer(PublicIdModelSerializer):

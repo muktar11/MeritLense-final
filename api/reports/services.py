@@ -143,6 +143,7 @@ class EvaluationReportService:
         if summary.status not in {
             SessionEvaluationSummary.STATUS_EVALUATED,
             SessionEvaluationSummary.STATUS_REQUIRES_HUMAN_REVIEW,
+            SessionEvaluationSummary.STATUS_EVALUATION_FAILED,
         }:
             raise EvaluationReportError(
                 f"Report generation requires completed scoring. Current summary status: {summary.status}."

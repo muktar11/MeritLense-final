@@ -387,7 +387,17 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
             return None
         return str(evaluation.public_id)
 
+    def _requesting_user_can_manage(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request is not None else None
+        return obj.can_manage(user)
+
     def get_latest_scoring_summary(self, obj):
+        # Scoring/readiness data must never reach a candidate holding only
+        # their own session token — this field is staff-only even though
+        # the endpoints that render this serializer also accept a token.
+        if not self._requesting_user_can_manage(obj):
+            return None
         summary = obj.evaluation_summaries.select_related("rule_set").first()
         if summary is None:
             return None
@@ -396,6 +406,11 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
         return SessionEvaluationSummarySerializer(summary).data
 
     def get_latest_report(self, obj):
+        # Same staff-only restriction as get_latest_scoring_summary: the
+        # legal evaluation report must not leak to a candidate via a plain
+        # session token on GET/start/complete.
+        if not self._requesting_user_can_manage(obj):
+            return None
         evaluation = getattr(obj, "linked_evaluation", None)
         if evaluation is None:
             return None

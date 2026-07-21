@@ -250,7 +250,7 @@ class ScoringRuleSerializer(PublicIdModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "rule_set", "created_at", "updated_at"]
 
     def validate(self, attrs):
         weighted_indicators = attrs.get("weighted_indicators", getattr(self.instance, "weighted_indicators", {})) or {}

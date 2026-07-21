@@ -11,11 +11,22 @@ class EvaluationReportAdmin(admin.ModelAdmin):
         "report_status",
         "overall_percentage",
         "readiness_status",
+        "readiness_indicator",
+        "override_triggered",
+        "rule_engine_version",
         "requires_human_review",
         "scoring_rule_version",
         "generated_at",
     )
-    list_filter = ("report_status", "readiness_status", "requires_human_review", "scoring_rule_version")
+    list_filter = (
+        "report_status",
+        "readiness_status",
+        "readiness_indicator",
+        "override_triggered",
+        "requires_human_review",
+        "scoring_rule_version",
+        "rule_engine_version",
+    )
     search_fields = (
         "report_number",
         "evaluation__candidate_email",
@@ -32,6 +43,10 @@ class EvaluationReportAdmin(admin.ModelAdmin):
         "max_score",
         "overall_percentage",
         "readiness_status",
+        "readiness_indicator",
+        "readiness_reason",
+        "override_triggered",
+        "rule_engine_version",
         "requires_human_review",
         "scoring_rule_set_name",
         "scoring_rule_version",
@@ -40,6 +55,7 @@ class EvaluationReportAdmin(admin.ModelAdmin):
         "response_evidence_summary",
         "human_review_flags",
         "critical_failures",
+        "readiness_legal_record",
         "generated_by",
         "generated_at",
         "last_regenerated_at",

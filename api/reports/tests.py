@@ -1,3 +1,5 @@
+from django.core.exceptions import ValidationError
+from django.db import DatabaseError
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -235,13 +237,34 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["report_status"], EvaluationReport.STATUS_GENERATED)
         self.assertEqual(response.data["scoring_rule_version"], "week6-v1")
+        self.assertEqual(response.data["rule_engine_version"], "v1.0")
+        self.assertFalse(response.data["override_triggered"])
+        self.assertEqual(response.data["readiness_indicator"], "متوسط")
         self.assertTrue(response.data["requires_human_review"])
         self.assertEqual(response.data["report_payload"]["overall_result"]["readiness_status"], "PENDING")
+        self.assertEqual(response.data["report_payload"]["overall_result"]["readiness_indicator"], "متوسط")
+        self.assertEqual(response.data["report_payload"]["traceability"]["rule_engine_version"], "v1.0")
+        self.assertEqual(
+            response.data["report_payload"]["traceability"]["readiness_legal_record_id"],
+            str(self.evaluation.readiness_legal_record.public_id),
+        )
+        self.assertEqual(
+            response.data["report_payload"]["legal_disclaimer"],
+            "This evaluation report provides decision support only and does not constitute an employment decision. Final hiring decisions remain with the employer.",
+        )
+        self.assertEqual(
+            response.data["report_payload"]["traceability"]["evaluation_flow_reference"],
+            "Interview Session -> Responses -> AI Processing -> Deterministic Scoring -> Rule Engine -> Evaluation Report",
+        )
         self.assertEqual(response.data["report_payload"]["interview_summary"]["package_code"], "premium")
         self.assertEqual(response.data["response_evidence_summary"][0]["traceability"]["translation_reference"]["status"], "COMPLETED")
 
         report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status=EvaluationReport.STATUS_GENERATED)
         self.assertEqual(report.report_payload["report_header"]["report_number"], report.report_number)
+        self.assertEqual(report.rule_engine_version, "v1.0")
+        self.assertEqual(report.readiness_indicator, "متوسط")
+        self.assertFalse(report.override_triggered)
+        self.assertEqual(report.readiness_legal_record, self.evaluation.readiness_legal_record)
 
         latest_report = self.client.get(f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/report")
         self.assertEqual(latest_report.status_code, 200)
@@ -285,6 +308,29 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(EvaluationReport.objects.filter(evaluation=self.evaluation).count(), 2)
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.PREVIOUS_REPORT_MARKED_STALE).exists())
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.REPORT_REGENERATED).exists())
+
+    def test_report_is_immutable_except_for_controlled_stale_transition(self):
+        generate = self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+        report = EvaluationReport.objects.get(public_id=generate.data["id"])
+
+        report.report_payload["tampered"] = True
+        with self.assertRaises(ValidationError):
+            report.save()
+
+        with self.assertRaises(ValidationError):
+            report.delete()
+
+        with self.assertRaises(DatabaseError):
+            EvaluationReport.objects.filter(pk=report.pk).update(
+                readiness_reason="changed later",
+            )
+
+        with self.assertRaises(DatabaseError):
+            EvaluationReport.objects.filter(pk=report.pk).delete()
 
     def test_generate_report_fails_when_scoring_summary_missing(self):
         new_session = InterviewSession.objects.create(

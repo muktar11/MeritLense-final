@@ -20,6 +20,13 @@ class EvaluationReportError(Exception):
 
 class EvaluationReportService:
     REPORT_VERSION = "week7-v1"
+    LEGAL_DISCLAIMER = (
+        "This evaluation report provides decision support only and does not constitute an employment decision. "
+        "Final hiring decisions remain with the employer."
+    )
+    EVALUATION_FLOW_REFERENCE = (
+        "Interview Session -> Responses -> AI Processing -> Deterministic Scoring -> Rule Engine -> Evaluation Report"
+    )
 
     @classmethod
     def generate_for_evaluation(cls, *, evaluation, actor):
@@ -27,6 +34,7 @@ class EvaluationReportService:
         try:
             with transaction.atomic():
                 summary = cls._get_summary(evaluation)
+                readiness_record = cls._get_readiness_record(evaluation)
                 response_results = list(
                     ResponseEvaluationResult.objects.filter(
                         evaluation=evaluation,
@@ -86,6 +94,10 @@ class EvaluationReportService:
                     max_score=summary.max_score,
                     overall_percentage=summary.overall_percentage,
                     readiness_status=evaluation.readiness_status,
+                    readiness_indicator=cls._get_readiness_indicator(evaluation, readiness_record),
+                    readiness_reason=cls._get_readiness_reason(evaluation, readiness_record),
+                    override_triggered=cls._get_override_triggered(evaluation, readiness_record),
+                    rule_engine_version=cls._get_rule_engine_version(readiness_record),
                     requires_human_review=requires_human_review,
                     scoring_rule_set_name=summary.rule_set.name,
                     scoring_rule_version=summary.rule_set.version,
@@ -94,6 +106,7 @@ class EvaluationReportService:
                     response_evidence_summary=response_evidence_summary,
                     human_review_flags=human_review_flags,
                     critical_failures=summary.critical_failures,
+                    readiness_legal_record=readiness_record,
                     generated_by=actor if getattr(actor, "is_authenticated", False) else None,
                     generated_at=timezone.now(),
                     last_regenerated_at=timezone.now() if stale_count else None,
@@ -137,6 +150,13 @@ class EvaluationReportService:
         if evaluation.candidate_id is None:
             raise EvaluationReportError("Report generation requires a linked candidate.")
         return summary
+
+    @classmethod
+    def _get_readiness_record(cls, evaluation):
+        try:
+            return evaluation.readiness_legal_record
+        except Exception:
+            return None
 
     @classmethod
     def _build_report_number(cls, *, evaluation):
@@ -360,6 +380,11 @@ class EvaluationReportService:
     ):
         candidate = evaluation.candidate
         session = evaluation.session
+        readiness_record = cls._get_readiness_record(evaluation)
+        readiness_indicator = cls._get_readiness_indicator(evaluation, readiness_record)
+        readiness_reason = cls._get_readiness_reason(evaluation, readiness_record)
+        override_triggered = cls._get_override_triggered(evaluation, readiness_record)
+        rule_engine_version = cls._get_rule_engine_version(readiness_record)
         return {
             "report_header": {
                 "report_number": report_number,
@@ -392,6 +417,9 @@ class EvaluationReportService:
                 "max_score": cls._decimal(summary.max_score),
                 "overall_percentage": cls._decimal(summary.overall_percentage),
                 "readiness_status": evaluation.readiness_status,
+                "readiness_indicator": readiness_indicator,
+                "readiness_reason": readiness_reason,
+                "override_triggered": override_triggered,
                 "requires_human_review": bool(human_review_flags),
             },
             "competency_breakdown": competency_breakdown,
@@ -400,9 +428,15 @@ class EvaluationReportService:
             "traceability": {
                 "scoring_rule_set_name": summary.rule_set.name,
                 "scoring_rule_version": summary.rule_set.version,
+                "rule_engine_version": rule_engine_version,
+                "override_triggered": override_triggered,
+                "readiness_indicator": readiness_indicator,
+                "readiness_reason": readiness_reason,
                 "readiness_legal_record_id": cls._get_readiness_record_id(evaluation),
                 "audit_reference_type": "evaluation_report",
+                "evaluation_flow_reference": cls.EVALUATION_FLOW_REFERENCE,
             },
+            "legal_disclaimer": cls.LEGAL_DISCLAIMER,
             "technical_metadata": {
                 "summary_status": summary.status,
                 "generated_from_stored_outputs": True,
@@ -478,3 +512,31 @@ class EvaluationReportService:
             return str(evaluation.readiness_legal_record.public_id)
         except Exception:
             return None
+
+    @staticmethod
+    def _get_rule_engine_version(readiness_record):
+        if readiness_record is None:
+            return ""
+        return readiness_record.rule_engine_version
+
+    @staticmethod
+    def _get_override_triggered(evaluation, readiness_record):
+        if readiness_record is not None:
+            return readiness_record.override_triggered
+        return bool(evaluation.readiness_override_applied)
+
+    @staticmethod
+    def _get_readiness_reason(evaluation, readiness_record):
+        if readiness_record is not None:
+            return readiness_record.readiness_reason
+        return evaluation.readiness_override_reason or ""
+
+    @staticmethod
+    def _get_readiness_indicator(evaluation, readiness_record):
+        if readiness_record is not None:
+            return readiness_record.readiness_indicator
+        if evaluation.readiness_status == "READY":
+            return "جاهز"
+        if evaluation.readiness_status == "NOT_READY":
+            return "غير جاهز"
+        return "متوسط"

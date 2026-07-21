@@ -8,6 +8,7 @@ on:
       - 'meritlense/**'
       - 'requirements/**'
       - 'manage.py'
+  workflow_dispatch: {}
 
 jobs:
   deploy:

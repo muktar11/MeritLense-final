@@ -1,0 +1,46 @@
+name: Deploy Backend (VM)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - 'meritlense/**'
+      - 'requirements/**'
+      - 'manage.py'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to production VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            set -e
+            cd /home/azureuser/meritlense
+            git fetch origin main
+            git reset --hard origin/main
+            venv/bin/pip install -r requirements/production.txt
+            venv/bin/python manage.py migrate --noinput
+            sudo -n systemctl restart gunicorn.service
+            sleep 2
+            sudo -n systemctl is-active gunicorn.service
+
+      - name: Verify deployment
+        run: |
+          for i in 1 2 3 4 5; do
+            status=$(curl -s -o /dev/null -w "%{http_code}" https://api.meritlense.com/api/v1/evaluations/rule-sets)
+            if [ "$status" = "401" ]; then
+              echo "Backend is responding correctly (HTTP $status)"
+              exit 0
+            fi
+            echo "Attempt $i: got HTTP $status, retrying..."
+            sleep 5
+          done
+          echo "Backend did not respond as expected after deploy"
+          exit 1

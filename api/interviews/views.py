@@ -14,8 +14,8 @@ from api.interviews.models import (
     RolePackageCoverage,
 )
 from api.questions.models import QuestionTemplate
-from api.sessions.models import CandidateResponse, InterviewSession
-from api.sessions.services import InterviewSessionService, InterviewVoicePipelineService
+from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionObservedTask, TaskObservationResult
+from api.sessions.services import InterviewSessionService, InterviewVoicePipelineService, TaskObservationService
 from api.translation.services import AIProcessingError, AIProcessingOrchestrationService
 from api.evaluations.scoring_services import Week6ScoringError, Week6ScoringService
 from api.evaluations.serializers import SessionEvaluationSummarySerializer
@@ -28,19 +28,23 @@ from .serializers import (
     InterviewSessionCreateSerializer,
     InterviewSessionSerializer,
     InterviewRubricSerializer,
+    ObservedTaskDefinitionSerializer,
     PackageSessionConfigSerializer,
     QuestionAudioArtifactSerializer,
     QuestionTemplateSerializer,
     RolePackageCoverageSerializer,
     ResponseAIActionSerializer,
+    SessionObservedTaskSerializer,
     ResponseAIProcessingStatusSerializer,
     SessionAIProcessingSummarySerializer,
     SessionAudioUploadSerializer,
     SessionQuestionSerializer,
     SessionResponseSubmitSerializer,
     SessionStartSerializer,
+    SessionTaskCompletionSerializer,
     SessionTranscriptionSerializer,
     SessionTokenSerializer,
+    TaskObservationResultSerializer,
 )
 
 
@@ -112,6 +116,73 @@ class QuestionTemplateViewSet(CanManageInterviewSetupMixin, viewsets.ModelViewSe
     lookup_value_regex = PUBLIC_ID_OR_PK_REGEX
 
 
+class ObservedTaskDefinitionViewSet(CanManageInterviewSetupMixin, viewsets.ModelViewSet):
+    serializer_class = ObservedTaskDefinitionSerializer
+    lookup_field = "public_id"
+    lookup_url_kwarg = "id"
+    lookup_value_regex = PUBLIC_ID_OR_PK_REGEX
+
+    def get_queryset(self):
+        queryset = ObservedTaskDefinition.objects.all()
+        if self.action == "list":
+            queryset = queryset.filter(is_active=True)
+        role_code = self.request.query_params.get("role_code")
+        if role_code:
+            queryset = queryset.filter(role_code__iexact=role_code)
+        return queryset
+
+
+class TaskObservationResultViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = TaskObservationResultSerializer
+    lookup_field = "public_id"
+    lookup_url_kwarg = "id"
+    lookup_value_regex = PUBLIC_ID_OR_PK_REGEX
+
+    def get_permissions(self):
+        return [IsAuthenticated()]
+
+    def get_queryset(self):
+        queryset = TaskObservationResult.objects.select_related(
+            "session",
+            "candidate",
+            "session_task",
+            "session_task__task_definition",
+            "generated_by",
+        )
+        user = self.request.user
+        if user.role in {"ADMIN", "SUPERADMIN"}:
+            return queryset
+        if hasattr(user, "managed_company"):
+            return queryset.filter(session__organization=user.managed_company)
+        if user.role == "B2B_TEAM_MEMBER":
+            return queryset.filter(candidate__shared_with=user).distinct()
+        return queryset.filter(session__created_by=user)
+
+    def retrieve(self, request, *args, **kwargs):
+        result = self.get_object()
+        response = super().retrieve(request, *args, **kwargs)
+        actor = request.user if request.user.is_authenticated else None
+        if actor is not None:
+            from api.audit.services import AuditLogService
+            from api.core.constants import AuditLogAction, AuditLogCategory
+
+            AuditLogService.log(
+                user=actor,
+                action=AuditLogAction.TASK_RESULT_VIEWED,
+                category=AuditLogCategory.SESSION,
+                description=f"Task observation result viewed for session {result.session.public_id}",
+                resource=result.session,
+                data={
+                    "session_id": str(result.session.public_id),
+                    "task_result_id": str(result.public_id),
+                    "task_id": str(result.session_task.public_id),
+                    "task_code": result.session_task.task_definition.task_code,
+                },
+                request=request,
+            )
+        return response
+
+
 class InterviewSessionViewSet(viewsets.GenericViewSet):
     serializer_class = InterviewSessionSerializer
     lookup_field = "public_id"
@@ -148,6 +219,10 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
     def get_serializer_class(self):
         if self.action == "create":
             return InterviewSessionCreateSerializer
+        if self.action == "start_task":
+            return SessionTokenSerializer
+        if self.action == "complete_task":
+            return SessionTaskCompletionSerializer
         if self.action == "upload_response_audio":
             return SessionAudioUploadSerializer
         if self.action == "transcribe_response":
@@ -347,6 +422,78 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         if summary is None:
             return Response({"detail": "No scoring summary has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
         return Response(SessionEvaluationSummarySerializer(summary).data)
+
+    @extend_schema(request=SessionTokenSerializer, responses={200: SessionObservedTaskSerializer})
+    @action(detail=True, methods=["post"], url_path="tasks/start")
+    def start_task(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        serializer = self.get_serializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        try:
+            task = TaskObservationService.start_task(
+                session=session,
+                actor=request.user if request.user.is_authenticated else None,
+            )
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        return Response(SessionObservedTaskSerializer(task).data)
+
+    @extend_schema(request=None, responses={200: SessionObservedTaskSerializer})
+    @action(detail=True, methods=["get"], url_path="tasks/current")
+    def current_task(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        try:
+            task = TaskObservationService.current_task(session=session)
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        if task is None:
+            return Response({"status": "COMPLETED"})
+        return Response(SessionObservedTaskSerializer(task).data)
+
+    @extend_schema(request=SessionTaskCompletionSerializer, responses={200: TaskObservationResultSerializer})
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path=rf"tasks/(?P<task_id>{PUBLIC_ID_OR_PK_REGEX})/complete",
+    )
+    def complete_task(self, request, id=None, task_id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        serializer = self.get_serializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        try:
+            session_task = get_object_or_404(
+                SessionObservedTask.objects.select_related("task_definition"),
+                **build_object_identifier_filter(task_id),
+            )
+            result = TaskObservationService.complete_task(
+                session=session,
+                session_task=session_task,
+                execution_time_seconds=serializer.validated_data["execution_time_seconds"],
+                observed_steps=serializer.validated_data["observed_steps"],
+                review_required=serializer.validated_data.get("review_required", False),
+                review_reason=serializer.validated_data.get("review_reason", ""),
+                integrity_flags=serializer.validated_data.get("integrity_flags", []),
+                result_payload=serializer.validated_data.get("result_payload", {}),
+                actor=request.user if request.user.is_authenticated else None,
+            )
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        return Response(TaskObservationResultSerializer(result).data)
+
+    @extend_schema(request=None, responses={200: TaskObservationResultSerializer(many=True)})
+    @action(detail=True, methods=["get"], url_path="tasks/results")
+    def task_results(self, request, id=None):
+        session = self._get_session()
+        if not request.user.is_authenticated or not session.can_manage(request.user):
+            raise PermissionDenied("You do not have access to these task observation results")
+        try:
+            results = TaskObservationService.list_results(session=session)
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        return Response(TaskObservationResultSerializer(results, many=True).data)
 
     @extend_schema(request=None, responses={200: EvaluationReportSerializer})
     @action(detail=True, methods=["get"], url_path="report")

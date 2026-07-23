@@ -1,6 +1,15 @@
 from django.contrib import admin
 
-from .models import CandidateResponse, IntegrityLog, InterviewSession, QuestionAudioArtifact, SessionQuestion
+from .models import (
+    CandidateResponse,
+    IntegrityLog,
+    InterviewSession,
+    ObservedTaskDefinition,
+    QuestionAudioArtifact,
+    SessionObservedTask,
+    SessionQuestion,
+    TaskObservationResult,
+)
 
 
 @admin.register(InterviewSession)
@@ -61,3 +70,34 @@ class IntegrityLogAdmin(admin.ModelAdmin):
     list_display = ("public_id", "session", "candidate", "event_type", "severity", "detected_at")
     list_filter = ("severity", "event_type")
     search_fields = ("event_type", "candidate__first_name", "candidate__last_name")
+
+
+@admin.register(ObservedTaskDefinition)
+class ObservedTaskDefinitionAdmin(admin.ModelAdmin):
+    list_display = ("task_code", "task_name", "role_code", "max_duration_seconds", "is_active")
+    list_filter = ("is_active", "role_code")
+    search_fields = ("task_code", "task_name", "role_code")
+
+
+@admin.register(SessionObservedTask)
+class SessionObservedTaskAdmin(admin.ModelAdmin):
+    list_display = ("public_id", "session", "task_definition", "task_order", "status", "attempt_count")
+    list_filter = ("status", "task_definition__role_code")
+    search_fields = ("session__public_id", "task_definition__task_code", "task_definition__task_name")
+
+
+@admin.register(TaskObservationResult)
+class TaskObservationResultAdmin(admin.ModelAdmin):
+    list_display = (
+        "public_id",
+        "session",
+        "session_task",
+        "status",
+        "task_completed",
+        "sequence_correct",
+        "execution_time_seconds",
+        "review_required",
+        "generated_at",
+    )
+    list_filter = ("status", "review_required", "task_completed", "sequence_correct")
+    search_fields = ("session__public_id", "candidate__email", "session_task__task_definition__task_code")

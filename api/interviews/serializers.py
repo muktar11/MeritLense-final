@@ -11,6 +11,7 @@ from api.interviews.models import (
 )
 from api.questions.models import QuestionTemplate
 from api.sessions.models import CandidateResponse, InterviewSession, QuestionAudioArtifact, SessionQuestion
+from api.sessions.models import ObservedTaskDefinition, SessionObservedTask, TaskObservationResult
 
 
 class InterviewConfigurationSerializer(PublicIdModelSerializer):
@@ -121,6 +122,95 @@ class InterviewRubricSerializer(PublicIdModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class ObservedTaskDefinitionSerializer(PublicIdModelSerializer):
+    class Meta:
+        model = ObservedTaskDefinition
+        fields = [
+            "id",
+            "task_code",
+            "task_name",
+            "role_code",
+            "description",
+            "instruction_text",
+            "expected_steps",
+            "max_duration_seconds",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_expected_steps(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Expected steps must be a list")
+        return value
+
+
+class SessionObservedTaskSerializer(PublicIdModelSerializer):
+    task_definition_id = serializers.UUIDField(source="task_definition.public_id", read_only=True)
+    task_code = serializers.CharField(source="task_definition.task_code", read_only=True)
+    task_name = serializers.CharField(source="task_definition.task_name", read_only=True)
+    instruction_text = serializers.CharField(source="task_definition.instruction_text", read_only=True)
+    expected_steps = serializers.ListField(source="task_definition.expected_steps", read_only=True)
+    max_duration_seconds = serializers.IntegerField(source="task_definition.max_duration_seconds", read_only=True)
+
+    class Meta:
+        model = SessionObservedTask
+        fields = [
+            "id",
+            "task_definition_id",
+            "task_code",
+            "task_name",
+            "instruction_text",
+            "expected_steps",
+            "max_duration_seconds",
+            "task_order",
+            "status",
+            "assigned_at",
+            "started_at",
+            "completed_at",
+            "attempt_count",
+            "metadata",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class TaskObservationResultSerializer(PublicIdModelSerializer):
+    session_id = serializers.UUIDField(source="session.public_id", read_only=True)
+    candidate_id = serializers.UUIDField(source="candidate.public_id", read_only=True)
+    session_task_id = serializers.UUIDField(source="session_task.public_id", read_only=True)
+    task_code = serializers.CharField(source="session_task.task_definition.task_code", read_only=True)
+    task_name = serializers.CharField(source="session_task.task_definition.task_name", read_only=True)
+
+    class Meta:
+        model = TaskObservationResult
+        fields = [
+            "id",
+            "session_id",
+            "candidate_id",
+            "session_task_id",
+            "task_code",
+            "task_name",
+            "status",
+            "task_completed",
+            "sequence_correct",
+            "execution_time_seconds",
+            "review_required",
+            "review_reason",
+            "observed_steps",
+            "missing_steps",
+            "integrity_flags",
+            "result_payload",
+            "generated_by",
+            "generated_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
 
 
 class PackageSessionConfigSerializer(PublicIdModelSerializer):
@@ -316,6 +406,8 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
     linked_evaluation_id = serializers.SerializerMethodField()
     latest_scoring_summary = serializers.SerializerMethodField()
     latest_report = serializers.SerializerMethodField()
+    observed_tasks = serializers.SerializerMethodField()
+    task_results = serializers.SerializerMethodField()
 
     class Meta:
         model = InterviewSession
@@ -356,6 +448,8 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
             "linked_evaluation_id",
             "latest_scoring_summary",
             "latest_report",
+            "observed_tasks",
+            "task_results",
             "identity_verified",
             "face_match_score",
             "single_face_detected",
@@ -421,6 +515,14 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
 
         return EvaluationReportListSerializer(report).data
 
+    def get_observed_tasks(self, obj):
+        tasks = obj.observed_tasks.select_related("task_definition").order_by("task_order")
+        return SessionObservedTaskSerializer(tasks, many=True).data
+
+    def get_task_results(self, obj):
+        results = obj.task_observation_results.select_related("session_task", "session_task__task_definition").all()
+        return TaskObservationResultSerializer(results, many=True).data
+
 
 class InterviewSessionCreateSerializer(serializers.Serializer):
     candidate_id = serializers.CharField()
@@ -470,6 +572,25 @@ class SessionResponseSubmitSerializer(serializers.Serializer):
 
 class SessionTokenSerializer(serializers.Serializer):
     token = serializers.CharField(required=False, allow_blank=True)
+
+
+class SessionTaskCompletionSerializer(serializers.Serializer):
+    token = serializers.CharField(required=False, allow_blank=True)
+    event = serializers.CharField(required=False, allow_blank=True, default="TASK_COMPLETED")
+    execution_time_seconds = serializers.IntegerField(min_value=0)
+    observed_steps = serializers.ListField(
+        child=serializers.CharField(),
+        allow_empty=True,
+    )
+    review_required = serializers.BooleanField(required=False, default=False)
+    review_reason = serializers.CharField(required=False, allow_blank=True)
+    integrity_flags = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True,
+        default=list,
+    )
+    result_payload = serializers.DictField(required=False, default=dict)
 
 
 class SessionAudioUploadSerializer(serializers.Serializer):

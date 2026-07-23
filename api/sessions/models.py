@@ -13,7 +13,9 @@ from api.core.constants import (
     CoverageLevel,
     IdentityVerificationStatus,
     InterviewSessionStatus,
+    SessionObservedTaskStatus,
     SessionQuestionStatus,
+    TaskObservationResultStatus,
 )
 from api.core.models import SoftDeleteModel, TimeStampedModel
 
@@ -394,3 +396,121 @@ class IntegrityLog(TimeStampedModel):
 
     def __str__(self):
         return f"{self.session_id} - {self.event_type}"
+
+
+class ObservedTaskDefinition(TimeStampedModel):
+    task_code = models.CharField(max_length=100, unique=True)
+    task_name = models.CharField(max_length=150)
+    role_code = models.CharField(max_length=100, blank=True)
+    description = models.TextField(blank=True)
+    instruction_text = models.TextField(blank=True)
+    expected_steps = models.JSONField(default=list, blank=True)
+    max_duration_seconds = models.PositiveIntegerField(default=60)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Observed Task Definition"
+        verbose_name_plural = "Observed Task Definitions"
+        indexes = [
+            models.Index(fields=["role_code", "is_active"]),
+            models.Index(fields=["task_code"]),
+        ]
+        ordering = ["role_code", "task_name"]
+
+    def __str__(self):
+        return f"{self.task_code} - {self.task_name}"
+
+
+class SessionObservedTask(TimeStampedModel):
+    session = models.ForeignKey(
+        InterviewSession,
+        on_delete=models.CASCADE,
+        related_name="observed_tasks",
+    )
+    candidate = models.ForeignKey(
+        Candidate,
+        on_delete=models.CASCADE,
+        related_name="observed_tasks",
+    )
+    task_definition = models.ForeignKey(
+        ObservedTaskDefinition,
+        on_delete=models.PROTECT,
+        related_name="session_tasks",
+    )
+    task_order = models.PositiveIntegerField(default=1)
+    status = models.CharField(
+        max_length=30,
+        choices=SessionObservedTaskStatus.CHOICES,
+        default=SessionObservedTaskStatus.READY,
+    )
+    assigned_at = models.DateTimeField(default=timezone.now)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    attempt_count = models.PositiveIntegerField(default=0)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "Session Observed Task"
+        verbose_name_plural = "Session Observed Tasks"
+        unique_together = [("session", "task_order"), ("session", "task_definition")]
+        indexes = [
+            models.Index(fields=["session", "status"]),
+            models.Index(fields=["candidate", "status"]),
+        ]
+        ordering = ["task_order", "created_at"]
+
+    def __str__(self):
+        return f"{self.session_id} - Task {self.task_order} - {self.status}"
+
+
+class TaskObservationResult(TimeStampedModel):
+    session = models.ForeignKey(
+        InterviewSession,
+        on_delete=models.CASCADE,
+        related_name="task_observation_results",
+    )
+    candidate = models.ForeignKey(
+        Candidate,
+        on_delete=models.CASCADE,
+        related_name="task_observation_results",
+    )
+    session_task = models.OneToOneField(
+        SessionObservedTask,
+        on_delete=models.CASCADE,
+        related_name="result",
+    )
+    status = models.CharField(
+        max_length=30,
+        choices=TaskObservationResultStatus.CHOICES,
+        default=TaskObservationResultStatus.INCOMPLETE,
+    )
+    task_completed = models.BooleanField(default=False)
+    sequence_correct = models.BooleanField(default=False)
+    execution_time_seconds = models.PositiveIntegerField(default=0)
+    review_required = models.BooleanField(default=False)
+    review_reason = models.TextField(blank=True)
+    observed_steps = models.JSONField(default=list, blank=True)
+    missing_steps = models.JSONField(default=list, blank=True)
+    integrity_flags = models.JSONField(default=list, blank=True)
+    result_payload = models.JSONField(default=dict, blank=True)
+    generated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="generated_task_observation_results",
+    )
+    generated_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Task Observation Result"
+        verbose_name_plural = "Task Observation Results"
+        indexes = [
+            models.Index(fields=["session", "generated_at"]),
+            models.Index(fields=["candidate", "generated_at"]),
+            models.Index(fields=["status"]),
+        ]
+        ordering = ["session_task__task_order", "-generated_at"]
+
+    def __str__(self):
+        return f"{self.session_id} - {self.session_task_id} - {self.status}"

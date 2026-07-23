@@ -18,7 +18,7 @@ from api.core.constants import AuditLogAction, CoverageLevel, InterviewEvaluatio
 from api.interviews.models import InterviewConfiguration, InterviewRubric, PackageSessionConfig, RolePackageCoverage
 from api.interviews.voice_services import VoiceProviderError
 from api.questions.models import QuestionTemplate
-from api.sessions.models import CandidateResponse, InterviewSession
+from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionObservedTask, TaskObservationResult
 from api.translation.models import CandidateResponseInterpretation, CandidateResponseTranslation, EvaluationInputArtifact
 from api.evaluations.models import Evaluation
 from meritlense.asgi import application
@@ -570,6 +570,276 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["question_order"], 1)
         self.assertEqual(response.data["status"], "ASKED")
+
+    def test_question_generation_avoids_repeating_prior_question_codes_for_candidate(self):
+        previous_session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            role_code=self.config.role_code,
+            ui_language="EN",
+            candidate_language="EN",
+            tts_language_code="en-US",
+            stt_language_code="en-US",
+            translation_target="",
+            total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v1",
+            question_set_version="v1",
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+            status="COMPLETED",
+            started_at=timezone.now() - timezone.timedelta(days=2),
+            ended_at=timezone.now() - timezone.timedelta(days=2),
+        )
+        repeated_template = QuestionTemplate.objects.get(question_code="NAN-001")
+        previous_session.questions.create(
+            question_template=repeated_template,
+            question_text=repeated_template.question_text,
+            domain=repeated_template.domain,
+            skill=repeated_template.skill,
+            difficulty=repeated_template.difficulty,
+            question_order=1,
+            status="ANSWERED",
+            asked_at=timezone.now() - timezone.timedelta(days=2),
+            answered_at=timezone.now() - timezone.timedelta(days=2),
+        )
+        QuestionTemplate.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            question_code="NAN-101",
+            question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE,
+            domain="Communication",
+            skill_tag="Greeting",
+            skill="Greeting",
+            sequence_number=10,
+            difficulty=QuestionDifficulty.EASY,
+            question_text="How do you greet a child in the morning?",
+            question_type="communication",
+            question_format="TEXT",
+            expected_steps=["greet", "smile"],
+            keywords=["greet", "morning"],
+            language="EN",
+            scoring_type="0/3/5",
+            difficulty_score=1,
+            estimated_time_seconds=30,
+            expected_answer_type="structured",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v1",
+            question_set_version="v1",
+        )
+
+        response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        generated_codes = {
+            question.question_template.question_code
+            for question in InterviewSession.objects.get(public_id=response.data["id"]).questions.select_related("question_template")
+        }
+        self.assertNotIn("NAN-001", generated_codes)
+
+    def test_question_generation_balances_context_across_domains_and_skills(self):
+        QuestionTemplate.objects.all().delete()
+        fixtures = [
+            ("NAN-A1", "Safety", "Hazard Awareness", "What would you do if the floor is wet?", "safety", QuestionDifficulty.EASY),
+            ("NAN-A2", "Safety", "Emergency Response", "What would you do in a kitchen fire?", "safety", QuestionDifficulty.MEDIUM),
+            ("NAN-B1", "Care", "Child Comfort", "How do you calm a crying child?", "behavioral", QuestionDifficulty.MEDIUM),
+            ("NAN-C1", "Communication", "Employer Update", "How do you report a problem to an employer?", "communication", QuestionDifficulty.HARD),
+        ]
+        for index, (code, domain, skill, text, qtype, difficulty) in enumerate(fixtures, start=1):
+            QuestionTemplate.objects.create(
+                role_name="Nanny",
+                role_code="nanny",
+                question_code=code,
+                question_version="1.0",
+                question_status=QuestionLifecycleStatus.ACTIVE,
+                domain=domain,
+                skill_tag=skill,
+                skill=skill,
+                sequence_number=index,
+                difficulty=difficulty,
+                question_text=text,
+                question_type=qtype,
+                question_format="TEXT",
+                expected_steps=["step1", "step2"],
+                keywords=[domain.lower(), skill.lower()],
+                language="EN",
+                scoring_type="0/3/5",
+                difficulty_score=2,
+                estimated_time_seconds=30,
+                expected_answer_type="structured",
+                evaluation_tier=InterviewEvaluationTier.FULL,
+                rubric_version="v1",
+                question_set_version="v1",
+            )
+
+        response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        session = InterviewSession.objects.get(public_id=response.data["id"])
+        generated = list(session.questions.select_related("question_template").order_by("question_order"))
+        domains = {question.domain for question in generated}
+        skills = {question.skill for question in generated}
+        self.assertGreaterEqual(len(domains), 3)
+        self.assertEqual(len(skills), len(generated))
+
+    def test_task_observation_flow_assigns_starts_and_completes_task(self):
+        task_config = InterviewConfiguration.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=30,
+            total_questions=2,
+            allow_retries=True,
+            max_retries=1,
+            enable_task_module=True,
+            rubric_version="v1",
+            question_set_version="v1",
+        )
+        ObservedTaskDefinition.objects.create(
+            task_code="NAN-TASK-001",
+            task_name="Pick Up Toy",
+            role_code="nanny",
+            description="Observe basic object handling",
+            instruction_text="Pick up the toy, show it, and place it back.",
+            expected_steps=["picked_object", "showed_object", "returned_object"],
+            max_duration_seconds=20,
+            is_active=True,
+        )
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(task_config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session = InterviewSession.objects.get(public_id=create_response.data["id"])
+        self.assertTrue(session.task_observation_enabled)
+        self.assertEqual(session.observed_tasks.count(), 1)
+
+        self.client.post(f"/api/v1/interviews/{session.public_id}/start/", {}, format="json")
+
+        start_task = self.client.post(f"/api/v1/interviews/{session.public_id}/tasks/start/", {}, format="json")
+        self.assertEqual(start_task.status_code, 200, start_task.data)
+        self.assertEqual(start_task.data["status"], "IN_PROGRESS")
+
+        task_id = start_task.data["id"]
+        complete_task = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/tasks/{task_id}/complete/",
+            {
+                "execution_time_seconds": 10,
+                "observed_steps": ["picked_object", "showed_object", "returned_object"],
+                "review_required": False,
+                "result_payload": {"source": "frontend-camera-flow"},
+            },
+            format="json",
+        )
+        self.assertEqual(complete_task.status_code, 200, complete_task.data)
+        self.assertEqual(complete_task.data["status"], "COMPLETED")
+        self.assertTrue(complete_task.data["task_completed"])
+        self.assertTrue(complete_task.data["sequence_correct"])
+
+        session_task = SessionObservedTask.objects.get(public_id=task_id)
+        self.assertEqual(session_task.status, "COMPLETED")
+        result = TaskObservationResult.objects.get(session_task=session_task)
+        self.assertEqual(result.execution_time_seconds, 10)
+        self.assertEqual(result.result_payload["source"], "frontend-camera-flow")
+
+        current_task = self.client.get(f"/api/v1/interviews/{session.public_id}/tasks/current/")
+        self.assertEqual(current_task.status_code, 200)
+        self.assertEqual(current_task.data["status"], "COMPLETED")
+
+        results = self.client.get(f"/api/v1/interviews/{session.public_id}/tasks/results/")
+        self.assertEqual(results.status_code, 200)
+        self.assertEqual(len(results.data), 1)
+
+        detail = self.client.get(f"/api/v1/interviews/tasks/{result.public_id}")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.data["id"], str(result.public_id))
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TASK_OBSERVATION_STARTED).exists())
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TASK_OBSERVATION_COMPLETED).exists())
+
+    def test_task_completion_requires_start_and_logs_invalid_transition(self):
+        session = self._create_task_enabled_session()
+
+        task = session.observed_tasks.first()
+        response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/tasks/{task.public_id}/complete/",
+            {
+                "execution_time_seconds": 8,
+                "observed_steps": ["picked_object"],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("started", response.data["detail"].lower())
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TASK_OBSERVATION_INVALID_TRANSITION).exists())
+
+    def test_task_completion_with_session_token_supports_review_flow(self):
+        session = self._create_task_enabled_session()
+        token_client = APIClient()
+
+        start = token_client.post(
+            f"/api/v1/interviews/{session.public_id}/tasks/start/",
+            {"token": session.access_token},
+            format="json",
+            HTTP_X_SESSION_TOKEN=session.access_token,
+        )
+        self.assertEqual(start.status_code, 200, start.data)
+
+        complete = token_client.post(
+            f"/api/v1/interviews/{session.public_id}/tasks/{start.data['id']}/complete/",
+            {
+                "token": session.access_token,
+                "execution_time_seconds": 25,
+                "observed_steps": ["picked_object", "returned_object"],
+                "integrity_flags": ["camera_occlusion"],
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=session.access_token,
+        )
+
+        self.assertEqual(complete.status_code, 200, complete.data)
+        self.assertTrue(complete.data["review_required"])
+        self.assertEqual(complete.data["status"], "INCOMPLETE")
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TASK_OBSERVATION_REQUIRES_REVIEW).exists())
+
+    def test_unauthorized_user_cannot_access_task_observation_endpoints(self):
+        session = self._create_task_enabled_session()
+        other_user = User.objects.create_user(
+            email="outsider@example.com",
+            password="testpass123",
+            first_name="Out",
+            last_name="Sider",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.client.force_authenticate(other_user)
+
+        response = self.client.post(f"/api/v1/interviews/{session.public_id}/tasks/start/", {}, format="json")
+
+        self.assertEqual(response.status_code, 403)
 
     def test_upload_response_audio_persists_voice_metadata_and_audits(self):
         session = self._create_and_start_session()
@@ -1336,6 +1606,43 @@ class InterviewSessionApiTests(APITestCase):
                 question_order=index,
                 is_mandatory=template.is_mandatory,
             )
+        return session
+
+    def _create_task_enabled_session(self):
+        ObservedTaskDefinition.objects.create(
+            task_code="NAN-TASK-001",
+            task_name="Pick Up Toy",
+            role_code="nanny",
+            description="Observe basic object handling",
+            instruction_text="Pick up the toy, show it, and place it back.",
+            expected_steps=["picked_object", "showed_object", "returned_object"],
+            max_duration_seconds=20,
+            is_active=True,
+        )
+        task_config = InterviewConfiguration.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=30,
+            total_questions=2,
+            allow_retries=True,
+            max_retries=1,
+            enable_task_module=True,
+            rubric_version="v1",
+            question_set_version="v1",
+        )
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(task_config.public_id),
+            },
+            format="json",
+        )
+        session = InterviewSession.objects.get(public_id=create_response.data["id"])
+        self.client.post(f"/api/v1/interviews/{session.public_id}/start/", {}, format="json")
+        session.refresh_from_db()
         return session
 
     def _mark_first_question_asked(self, session):

@@ -1,4 +1,5 @@
 import random
+from collections import Counter
 
 from django.db import transaction
 from django.utils import timezone
@@ -16,7 +17,9 @@ from api.core.constants import (
     InterviewEvaluationTier,
     InterviewSessionStatus,
     QuestionLifecycleStatus,
+    SessionObservedTaskStatus,
     SessionQuestionStatus,
+    TaskObservationResultStatus,
     EvaluationStatus,
     EvaluationType,
 )
@@ -31,7 +34,16 @@ from api.interviews.voice_services import (
 from api.questions.models import QuestionTemplate
 from api.storage.services import MediaStorageService
 
-from .models import CandidateResponse, IntegrityLog, InterviewSession, QuestionAudioArtifact, SessionQuestion
+from .models import (
+    CandidateResponse,
+    IntegrityLog,
+    InterviewSession,
+    ObservedTaskDefinition,
+    QuestionAudioArtifact,
+    SessionObservedTask,
+    SessionQuestion,
+    TaskObservationResult,
+)
 from .realtime import InterviewSessionSocketRegistry
 
 
@@ -99,7 +111,7 @@ class QuestionGenerationService:
         if len(localized) < target_count:
             localized = list(QuestionTemplate.objects.filter(is_active=True))
 
-        selected_templates = cls._mix_difficulties(localized, target_count)
+        selected_templates = cls._select_templates(session, localized, target_count)
         questions = []
         for order, template in enumerate(selected_templates, start=1):
             questions.append(
@@ -121,21 +133,186 @@ class QuestionGenerationService:
         return list(session.questions.order_by("question_order"))
 
     @classmethod
-    def _mix_difficulties(cls, templates, target_count):
-        by_difficulty = {"EASY": [], "MEDIUM": [], "HARD": [], "OTHER": []}
+    def _select_templates(cls, session, templates, target_count):
+        if not templates:
+            return []
+
+        template_pool = cls._dedupe_templates(templates)
+        candidate_skills = {
+            skill.strip().lower()
+            for skill in session.candidate.get_skills_list()
+            if skill.strip()
+        }
+        previous_context = cls._build_candidate_history(session)
+        selected = []
+        selected_context = {
+            "domains": Counter(),
+            "skills": Counter(),
+            "question_types": Counter(),
+            "difficulties": Counter(),
+            "has_critical": False,
+        }
+
+        while len(selected) < target_count and template_pool:
+            scored = [
+                (
+                    cls._score_template(
+                        session=session,
+                        template=template,
+                        candidate_skills=candidate_skills,
+                        previous_context=previous_context,
+                        selected_context=selected_context,
+                    ),
+                    random.random(),
+                    template,
+                )
+                for template in template_pool
+            ]
+            scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+            chosen = scored[0][2]
+            selected.append(chosen)
+            cls._update_selected_context(selected_context, chosen)
+            template_pool = [
+                template
+                for template in template_pool
+                if template.id != chosen.id and not cls._is_same_prompt_family(template, chosen)
+            ]
+
+        return selected
+
+    @classmethod
+    def _dedupe_templates(cls, templates):
+        best_by_key = {}
         for template in templates:
-            by_difficulty.get(template.difficulty, by_difficulty["OTHER"]).append(template)
+            key = (
+                (template.question_code or "").strip().lower() or str(template.id),
+                (template.language or "").strip().lower(),
+            )
+            current = best_by_key.get(key)
+            if current is None or cls._template_specificity_score(template) > cls._template_specificity_score(current):
+                best_by_key[key] = template
+        return list(best_by_key.values())
 
-        for items in by_difficulty.values():
-            random.shuffle(items)
+    @classmethod
+    def _template_specificity_score(cls, template):
+        return (
+            (20 if template.role_code else 0)
+            + (10 if template.language else 0)
+            + (8 if template.rubric_version else 0)
+            + (8 if template.question_set_version else 0)
+            + (6 if template.question_code else 0)
+            + (4 if template.skill_tag else 0)
+            + (2 if template.critical_question else 0)
+        )
 
-        ordered = []
-        while len(ordered) < target_count and any(by_difficulty.values()):
-            for key in ("EASY", "MEDIUM", "HARD", "OTHER"):
-                if by_difficulty[key] and len(ordered) < target_count:
-                    ordered.append(by_difficulty[key].pop())
+    @classmethod
+    def _build_candidate_history(cls, session):
+        prior_questions = (
+            SessionQuestion.objects.filter(session__candidate=session.candidate)
+            .exclude(session=session)
+            .select_related("question_template")
+        )
+        question_codes = Counter()
+        domains = Counter()
+        skills = Counter()
+        question_types = Counter()
+        for prior in prior_questions:
+            template = prior.question_template
+            question_code = ((template.question_code if template else "") or "").strip().lower()
+            domain = (prior.domain or "").strip().lower()
+            skill = (prior.skill or "").strip().lower()
+            question_type = ((template.question_type if template else "") or "").strip().lower()
+            if question_code:
+                question_codes[question_code] += 1
+            if domain:
+                domains[domain] += 1
+            if skill:
+                skills[skill] += 1
+            if question_type:
+                question_types[question_type] += 1
+        return {
+            "question_codes": question_codes,
+            "domains": domains,
+            "skills": skills,
+            "question_types": question_types,
+        }
 
-        return ordered
+    @classmethod
+    def _score_template(cls, *, session, template, candidate_skills, previous_context, selected_context):
+        score = 0
+        template_language = (template.language or "").strip().lower()
+        session_language = (session.candidate_language or "").strip().lower()
+        domain = (template.domain or "").strip().lower()
+        skill = (template.skill_tag or template.skill or "").strip().lower()
+        question_type = (template.question_type or "").strip().lower()
+        difficulty = (template.difficulty or "").strip().upper()
+        question_code = (template.question_code or "").strip().lower()
+
+        if template_language == session_language:
+            score += 40
+        if session.rubric_version and template.rubric_version == session.rubric_version:
+            score += 16
+        if session.question_set_version and template.question_set_version == session.question_set_version:
+            score += 16
+        if skill and any(candidate_skill in skill or skill in candidate_skill for candidate_skill in candidate_skills):
+            score += 24
+        elif domain and any(candidate_skill in domain for candidate_skill in candidate_skills):
+            score += 12
+        if template.critical_question and not selected_context["has_critical"]:
+            score += 14
+        if template.is_mandatory:
+            score += 6
+
+        score -= previous_context["question_codes"].get(question_code, 0) * 80
+        score -= previous_context["domains"].get(domain, 0) * 12
+        score -= previous_context["skills"].get(skill, 0) * 14
+        score -= previous_context["question_types"].get(question_type, 0) * 8
+
+        score -= selected_context["domains"].get(domain, 0) * 18
+        score -= selected_context["skills"].get(skill, 0) * 22
+        score -= selected_context["question_types"].get(question_type, 0) * 14
+        score -= selected_context["difficulties"].get(difficulty, 0) * 4
+
+        if difficulty == "MEDIUM":
+            score += 4
+        return score
+
+    @classmethod
+    def _update_selected_context(cls, selected_context, template):
+        domain = (template.domain or "").strip().lower()
+        skill = (template.skill_tag or template.skill or "").strip().lower()
+        question_type = (template.question_type or "").strip().lower()
+        difficulty = (template.difficulty or "").strip().upper()
+        if domain:
+            selected_context["domains"][domain] += 1
+        if skill:
+            selected_context["skills"][skill] += 1
+        if question_type:
+            selected_context["question_types"][question_type] += 1
+        if difficulty:
+            selected_context["difficulties"][difficulty] += 1
+        if template.critical_question:
+            selected_context["has_critical"] = True
+
+    @classmethod
+    def _is_same_prompt_family(cls, left, right):
+        left_code = (left.question_code or "").strip().lower()
+        right_code = (right.question_code or "").strip().lower()
+        if left_code and right_code and left_code == right_code:
+            return True
+        left_skill = (left.skill_tag or left.skill or "").strip().lower()
+        right_skill = (right.skill_tag or right.skill or "").strip().lower()
+        left_domain = (left.domain or "").strip().lower()
+        right_domain = (right.domain or "").strip().lower()
+        return bool(
+            left_skill
+            and right_skill
+            and left_domain
+            and right_domain
+            and left_skill == right_skill
+            and left_domain == right_domain
+            and left.question_text.strip().lower() == right.question_text.strip().lower()
+        )
 
 
 class InterviewSessionService:
@@ -196,6 +373,7 @@ class InterviewSessionService:
             created_by=created_by,
         )
         QuestionGenerationService.generate_questions(session)
+        TaskObservationService.assign_tasks(session)
         cls._ensure_linked_evaluation(session, status=EvaluationStatus.SCHEDULED)
         AuditLogService.log(
             user=created_by,
@@ -587,6 +765,316 @@ class InterviewSessionService:
             severity=severity,
             data=data,
         )
+
+
+class TaskObservationService:
+    @classmethod
+    @transaction.atomic
+    def assign_tasks(cls, session):
+        if not session.task_observation_enabled:
+            return []
+        if session.observed_tasks.exists():
+            return list(session.observed_tasks.select_related("task_definition").order_by("task_order"))
+
+        queryset = ObservedTaskDefinition.objects.filter(is_active=True)
+        if session.role_code:
+            scoped = queryset.filter(role_code__iexact=session.role_code)
+            definitions = list(scoped) or list(queryset.filter(role_code=""))
+        else:
+            definitions = list(queryset.filter(role_code=""))
+
+        tasks = [
+            SessionObservedTask(
+                session=session,
+                candidate=session.candidate,
+                task_definition=definition,
+                task_order=index,
+                status=SessionObservedTaskStatus.READY,
+            )
+            for index, definition in enumerate(definitions, start=1)
+        ]
+        if tasks:
+            SessionObservedTask.objects.bulk_create(tasks)
+        return list(session.observed_tasks.select_related("task_definition").order_by("task_order"))
+
+    @classmethod
+    @transaction.atomic
+    def start_task(cls, *, session, actor=None):
+        cls._ensure_task_observation_enabled(session)
+        cls._ensure_session_active(session)
+        task = cls._get_current_or_next_task(session)
+        if task is None:
+            raise ValueError("No observed tasks are assigned to this session.")
+        if task.status == SessionObservedTaskStatus.IN_PROGRESS:
+            return task
+
+        task.status = SessionObservedTaskStatus.IN_PROGRESS
+        if task.started_at is None:
+            task.started_at = timezone.now()
+        task.attempt_count += 1
+        task.save(update_fields=["status", "started_at", "attempt_count", "updated_at"])
+
+        access_context = "staff" if actor else "session_token"
+        InterviewSessionService._log_voice_or_session_event(
+            actor=actor,
+            action=AuditLogAction.TASK_OBSERVATION_STARTED,
+            category=AuditLogCategory.SESSION,
+            description=f"Task observation started for task {task.task_definition.task_code}",
+            resource=session,
+            data=cls._task_event_payload(session, task, access_context=access_context),
+        )
+        InterviewSessionService._broadcast_to_channel_layer(
+            str(session.public_id),
+            {"event": "TASK_OBSERVATION_STARTED", **cls._task_event_payload(session, task)},
+        )
+        return task
+
+    @classmethod
+    def current_task(cls, *, session):
+        cls._ensure_task_observation_enabled(session)
+        task = cls._get_current_or_next_task(session)
+        if task is None:
+            return None
+        return task
+
+    @classmethod
+    def complete_task(
+        cls,
+        *,
+        session,
+        session_task,
+        execution_time_seconds,
+        observed_steps,
+        review_required=False,
+        review_reason="",
+        integrity_flags=None,
+        result_payload=None,
+        actor=None,
+    ):
+        cls._ensure_task_observation_enabled(session)
+        cls._ensure_session_active(session)
+        if session_task.session_id != session.id:
+            cls._log_invalid_transition(
+                session=session,
+                session_task=session_task,
+                actor=actor,
+                reason="Task does not belong to this session",
+            )
+            raise ValueError("Task does not belong to this session")
+
+        if session_task.status in {SessionObservedTaskStatus.COMPLETED, SessionObservedTaskStatus.REQUIRES_REVIEW}:
+            existing = getattr(session_task, "result", None)
+            if existing is not None:
+                return existing
+            cls._log_invalid_transition(
+                session=session,
+                session_task=session_task,
+                actor=actor,
+                reason="Task has already been completed",
+            )
+            raise ValueError("Task has already been completed")
+
+        if session_task.status != SessionObservedTaskStatus.IN_PROGRESS:
+            cls._log_invalid_transition(
+                session=session,
+                session_task=session_task,
+                actor=actor,
+                reason="Task must be in progress before completion",
+            )
+            raise ValueError("Task must be started before completion")
+
+        observed_steps = observed_steps or []
+        integrity_flags = integrity_flags or []
+        result_payload = result_payload or {}
+        expected_steps = session_task.task_definition.expected_steps or []
+        missing_steps = [step for step in expected_steps if step not in observed_steps]
+        task_completed = bool(expected_steps) and not missing_steps
+        if not expected_steps:
+            task_completed = bool(observed_steps)
+        sequence_correct = cls._steps_match_order(expected_steps, observed_steps)
+
+        duration_reason = ""
+        if (
+            session_task.task_definition.max_duration_seconds
+            and execution_time_seconds > session_task.task_definition.max_duration_seconds
+        ):
+            duration_reason = (
+                f"Task exceeded max duration of {session_task.task_definition.max_duration_seconds} seconds."
+            )
+
+        computed_review_reason = review_reason.strip()
+        effective_review_required = bool(
+            review_required
+            or missing_steps
+            or not sequence_correct
+            or duration_reason
+            or not task_completed
+            or integrity_flags
+        )
+        if not computed_review_reason:
+            reasons = []
+            if missing_steps:
+                reasons.append("Required steps were missing.")
+            if not sequence_correct:
+                reasons.append("Observed steps were out of sequence.")
+            if duration_reason:
+                reasons.append(duration_reason)
+            if integrity_flags:
+                reasons.append("Integrity flags were raised during task observation.")
+            if not task_completed and not reasons:
+                reasons.append("Task evidence was incomplete.")
+            computed_review_reason = " ".join(reasons)
+
+        result_status = TaskObservationResultStatus.COMPLETED
+        session_status = SessionObservedTaskStatus.COMPLETED
+        if effective_review_required:
+            result_status = TaskObservationResultStatus.COMPLETED_WITH_REVIEW if task_completed else TaskObservationResultStatus.INCOMPLETE
+            session_status = SessionObservedTaskStatus.REQUIRES_REVIEW
+
+        with transaction.atomic():
+            session_task.status = session_status
+            session_task.completed_at = timezone.now()
+            session_task.metadata = {
+                **(session_task.metadata or {}),
+                "last_execution_time_seconds": execution_time_seconds,
+                "last_task_completed": task_completed,
+                "last_sequence_correct": sequence_correct,
+            }
+            session_task.save(update_fields=["status", "completed_at", "metadata", "updated_at"])
+
+            result, _ = TaskObservationResult.objects.update_or_create(
+                session_task=session_task,
+                defaults={
+                    "session": session,
+                    "candidate": session.candidate,
+                    "status": result_status,
+                    "task_completed": task_completed,
+                    "sequence_correct": sequence_correct,
+                    "execution_time_seconds": execution_time_seconds,
+                    "review_required": effective_review_required,
+                    "review_reason": computed_review_reason,
+                    "observed_steps": observed_steps,
+                    "missing_steps": missing_steps,
+                    "integrity_flags": integrity_flags,
+                    "result_payload": {
+                        **result_payload,
+                        "task_definition_code": session_task.task_definition.task_code,
+                        "task_definition_name": session_task.task_definition.task_name,
+                        "expected_steps": expected_steps,
+                    },
+                    "generated_by": actor if getattr(actor, "is_authenticated", False) else None,
+                    "generated_at": timezone.now(),
+                },
+            )
+
+        action = (
+            AuditLogAction.TASK_OBSERVATION_REQUIRES_REVIEW
+            if effective_review_required
+            else AuditLogAction.TASK_OBSERVATION_COMPLETED
+        )
+        description = (
+            f"Task observation requires review for task {session_task.task_definition.task_code}"
+            if effective_review_required
+            else f"Task observation completed for task {session_task.task_definition.task_code}"
+        )
+        access_context = "staff" if actor else "session_token"
+        InterviewSessionService._log_voice_or_session_event(
+            actor=actor,
+            action=action,
+            category=AuditLogCategory.SESSION,
+            description=description,
+            resource=session,
+            data=cls._task_event_payload(
+                session,
+                session_task,
+                result=result,
+                extra={
+                    "execution_time_seconds": execution_time_seconds,
+                    "task_completed": task_completed,
+                    "sequence_correct": sequence_correct,
+                    "review_required": effective_review_required,
+                    "review_reason": computed_review_reason,
+                },
+                access_context=access_context,
+            ),
+        )
+        InterviewSessionService._broadcast_to_channel_layer(
+            str(session.public_id),
+            {
+                "event": "TASK_OBSERVATION_COMPLETED",
+                **cls._task_event_payload(session, session_task, result=result),
+            },
+        )
+        return result
+
+    @classmethod
+    def list_results(cls, *, session):
+        cls._ensure_task_observation_enabled(session)
+        return session.task_observation_results.select_related("session_task", "session_task__task_definition").all()
+
+    @classmethod
+    def _get_current_or_next_task(cls, session):
+        current = session.observed_tasks.select_related("task_definition").filter(
+            status=SessionObservedTaskStatus.IN_PROGRESS
+        ).order_by("task_order").first()
+        if current:
+            return current
+        return session.observed_tasks.select_related("task_definition").filter(
+            status__in=[SessionObservedTaskStatus.READY, SessionObservedTaskStatus.PENDING]
+        ).order_by("task_order").first()
+
+    @classmethod
+    def _steps_match_order(cls, expected_steps, observed_steps):
+        if not expected_steps:
+            return bool(observed_steps)
+        observed_relevant = [step for step in observed_steps if step in expected_steps]
+        return observed_relevant == expected_steps[: len(observed_relevant)] and len(observed_relevant) == len(expected_steps)
+
+    @classmethod
+    def _ensure_task_observation_enabled(cls, session):
+        if not session.task_observation_enabled:
+            raise ValueError("Task observation is not enabled for this interview session")
+
+    @classmethod
+    def _ensure_session_active(cls, session):
+        if session.is_closed():
+            raise ValueError("Cannot process task observation on a closed session")
+        if session.status != InterviewSessionStatus.IN_PROGRESS:
+            raise ValueError("Session must be in progress")
+
+    @classmethod
+    def _log_invalid_transition(cls, *, session, session_task, actor, reason):
+        access_context = "staff" if actor else "session_token"
+        InterviewSessionService._log_voice_or_session_event(
+            actor=actor,
+            action=AuditLogAction.TASK_OBSERVATION_INVALID_TRANSITION,
+            category=AuditLogCategory.SESSION,
+            description=reason,
+            resource=session,
+            severity=AuditLogSeverity.WARNING,
+            data=cls._task_event_payload(session, session_task, extra={"reason": reason}, access_context=access_context),
+        )
+
+    @classmethod
+    def _task_event_payload(cls, session, session_task, *, result=None, extra=None, access_context="staff"):
+        payload = session_event_payload(
+            session,
+            {
+                "access_context": access_context,
+                "task_id": str(session_task.public_id),
+                "task_definition_id": str(session_task.task_definition.public_id),
+                "task_code": session_task.task_definition.task_code,
+                "task_name": session_task.task_definition.task_name,
+                "task_order": session_task.task_order,
+                "task_status": session_task.status,
+            },
+        )
+        if result is not None:
+            payload["task_result_id"] = str(result.public_id)
+            payload["task_result_status"] = result.status
+        if extra:
+            payload.update(extra)
+        return payload
 
 
 class InterviewVoicePipelineService:

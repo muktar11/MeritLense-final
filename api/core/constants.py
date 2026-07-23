@@ -68,6 +68,38 @@ class CandidateResponseType:
     ]
 
 
+class SessionObservedTaskStatus:
+    PENDING = "PENDING"
+    READY = "READY"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    REQUIRES_REVIEW = "REQUIRES_REVIEW"
+
+    CHOICES = [
+        (PENDING, "Pending"),
+        (READY, "Ready"),
+        (IN_PROGRESS, "In Progress"),
+        (COMPLETED, "Completed"),
+        (FAILED, "Failed"),
+        (REQUIRES_REVIEW, "Requires Review"),
+    ]
+
+
+class TaskObservationResultStatus:
+    COMPLETED = "COMPLETED"
+    COMPLETED_WITH_REVIEW = "COMPLETED_WITH_REVIEW"
+    INCOMPLETE = "INCOMPLETE"
+    FAILED = "FAILED"
+
+    CHOICES = [
+        (COMPLETED, "Completed"),
+        (COMPLETED_WITH_REVIEW, "Completed With Review"),
+        (INCOMPLETE, "Incomplete"),
+        (FAILED, "Failed"),
+    ]
+
+
 class InterviewEvaluationTier:
     FULL = "FULL"
     SCREENING = "SCREENING"
@@ -723,6 +755,12 @@ class AuditLogAction:
     PREVIOUS_REPORT_MARKED_STALE = "PREVIOUS_REPORT_MARKED_STALE"
     REPORT_EXPORT_PAYLOAD_REQUESTED = "REPORT_EXPORT_PAYLOAD_REQUESTED"
     REPORT_ACCESS_DENIED = "REPORT_ACCESS_DENIED"
+    TASK_OBSERVATION_STARTED = "TASK_OBSERVATION_STARTED"
+    TASK_OBSERVATION_COMPLETED = "TASK_OBSERVATION_COMPLETED"
+    TASK_OBSERVATION_FAILED = "TASK_OBSERVATION_FAILED"
+    TASK_RESULT_VIEWED = "TASK_RESULT_VIEWED"
+    TASK_OBSERVATION_REQUIRES_REVIEW = "TASK_OBSERVATION_REQUIRES_REVIEW"
+    TASK_OBSERVATION_INVALID_TRANSITION = "TASK_OBSERVATION_INVALID_TRANSITION"
     VIEW_EVALUATION = "VIEW_EVALUATION"
     VIEW_EVALUATIONS_LIST = "VIEW_EVALUATIONS_LIST"
     VIEW_UPCOMING_EVALUATIONS = "VIEW_UPCOMING_EVALUATIONS"
@@ -903,6 +941,12 @@ class AuditLogAction:
         (PREVIOUS_REPORT_MARKED_STALE, "Previous Report Marked Stale"),
         (REPORT_EXPORT_PAYLOAD_REQUESTED, "Report Export Payload Requested"),
         (REPORT_ACCESS_DENIED, "Report Access Denied"),
+        (TASK_OBSERVATION_STARTED, "Task Observation Started"),
+        (TASK_OBSERVATION_COMPLETED, "Task Observation Completed"),
+        (TASK_OBSERVATION_FAILED, "Task Observation Failed"),
+        (TASK_RESULT_VIEWED, "Task Result Viewed"),
+        (TASK_OBSERVATION_REQUIRES_REVIEW, "Task Observation Requires Review"),
+        (TASK_OBSERVATION_INVALID_TRANSITION, "Task Observation Invalid Transition"),
         (VIEW_EVALUATION, "Viewed Evaluation Details"),
         (VIEW_EVALUATIONS_LIST, "Viewed Evaluations List"),
         (VIEW_UPCOMING_EVALUATIONS, "Viewed Upcoming Evaluations"),

@@ -364,6 +364,41 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(complete_response.status_code, 200)
         self.assertEqual(complete_response.data["status"], "COMPLETED")
 
+    @patch("api.translation.services.AIProcessingOrchestrationService.auto_process_response_ai")
+    def test_submit_response_triggers_automatic_ai_processing_for_text_answers(self, auto_process_mock):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        session_id = create_response.data["id"]
+        self.client.post(f"/api/v1/interviews/{session_id}/start/", {}, format="json")
+
+        next_question = self.client.get(f"/api/v1/interviews/{session_id}/next-question/")
+        question_id = next_question.data["id"]
+
+        answer_response = self.client.post(
+            f"/api/v1/interviews/{session_id}/submit-response/",
+            {
+                "question_id": question_id,
+                "transcript": "I would keep the child safe first.",
+                "text_response": "I would keep the child safe first.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(answer_response.status_code, 200, answer_response.data)
+        stored = CandidateResponse.objects.get(public_id=answer_response.data["response_id"])
+        self.assertEqual(stored.original_transcript, "I would keep the child safe first.")
+        self.assertEqual(stored.transcript_language, "EN")
+        self.assertEqual(stored.stt_status, "COMPLETED")
+        self.assertEqual(stored.processing_status, "TRANSCRIPT_READY")
+        auto_process_mock.assert_called_once()
+        self.assertEqual(auto_process_mock.call_args.kwargs["response"].id, stored.id)
+
     def test_create_session_applies_package_architecture_context(self):
         package = PackageSessionConfig.objects.create(
             package_code="basic",
@@ -1029,6 +1064,48 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(stored.stt_status, "COMPLETED")
         self.assertEqual(stored.stt_provider, "OPENAI")
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TRANSCRIPTION_COMPLETED).exists())
+
+    @patch("api.translation.services.AIProcessingOrchestrationService.auto_process_response_ai")
+    def test_transcribe_response_triggers_automatic_ai_processing(self, auto_process_mock):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+        upload_response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/upload-response-audio/",
+            {
+                "question_id": str(question.public_id),
+                "duration_seconds": 9,
+                "audio_file": SimpleUploadedFile("answer.webm", b"voice-bytes", content_type="audio/webm"),
+            },
+            format="multipart",
+        )
+        response_id = upload_response.data["id"]
+
+        class FakeSttService:
+            provider = "OPENAI"
+
+            def transcribe(self, **kwargs):
+                return {
+                    "provider": "OPENAI",
+                    "provider_model": "whisper-1",
+                    "request_id": "req_123",
+                    "detected_language": "en",
+                    "confidence": None,
+                    "processing_status": "COMPLETED",
+                    "transcript": "I would keep the child safe first.",
+                    "metadata": {"segments": []},
+                }
+
+        with patch("api.sessions.services.InterviewVoicePipelineService.stt_service_class", FakeSttService):
+            response = self.client.post(
+                f"/api/v1/interviews/{session.public_id}/transcribe-response/",
+                {"response_id": response_id},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        stored = CandidateResponse.objects.get(public_id=response_id)
+        auto_process_mock.assert_called_once()
+        self.assertEqual(auto_process_mock.call_args.kwargs["response"].id, stored.id)
 
     def test_transcribe_response_is_retry_safe_after_success(self):
         session = self._create_and_start_session()

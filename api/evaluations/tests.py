@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.accounts.models import User
+from api.accounts.models import Company, CompanyEmployerProfile, User
 from api.audit.models import AuditLog
 from api.candidates.models import Candidate
 from api.core.constants import AuditLogAction, CandidateResponseType, CoverageLevel, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles
@@ -310,6 +310,7 @@ class Week6ScoringServiceTests(TestCase):
             evaluation_tier=InterviewEvaluationTier.FULL,
             is_active=True,
             created_by=self.user,
+            company=self.candidate.company,
         )
         ScoringRule.objects.create(
             rule_set=self.rule_set,
@@ -359,6 +360,28 @@ class Week6ScoringServiceTests(TestCase):
                 resource_id=self.evaluation.id,
             ).exists()
         )
+
+    def test_critical_failure_preserves_raw_score_and_sets_flag(self):
+        rule = self.rule_set.rules.get(question_code="HK-SAF-002")
+        rule.critical_failure_indicators = ["clean spill"]
+        rule.save(update_fields=["critical_failure_indicators", "updated_at"])
+
+        summary = Week6ScoringService.run_for_evaluation(
+            evaluation=self.evaluation,
+            actor=self.user,
+            rule_set=self.rule_set,
+        )
+
+        response_result = ResponseEvaluationResult.objects.get(evaluation=self.evaluation, response=self.response)
+        self.evaluation.refresh_from_db()
+
+        self.assertTrue(response_result.critical_failure)
+        self.assertEqual(float(response_result.score), 7.0)
+        self.assertEqual(response_result.metadata["raw_score"], "7.00")
+        self.assertEqual(response_result.metadata["effective_score"], "0.00")
+        self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.NOT_READY)
+        self.assertTrue(self.evaluation.readiness_override_applied)
+        self.assertEqual(summary.critical_failures[0]["score"], 7.0)
 
     def test_readiness_legal_record_is_immutable_after_generation(self):
         Week6ScoringService.run_for_evaluation(
@@ -439,3 +462,104 @@ class Week6ScoringServiceTests(TestCase):
 
         self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.PENDING)
         self.assertFalse(self.evaluation.readiness_override_applied)
+
+
+class ScoringRuleSetTenantScopingTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user(
+            email="b2b-owner@example.com",
+            password="testpass123",
+            first_name="Owner",
+            last_name="One",
+            role=Roles.B2B,
+            is_verified=True,
+        )
+        self.other_owner = User.objects.create_user(
+            email="b2b-other@example.com",
+            password="testpass123",
+            first_name="Owner",
+            last_name="Two",
+            role=Roles.B2B,
+            is_verified=True,
+        )
+        self.company = Company.objects.create(
+            name="Alpha Care",
+            registration_number="ALPHA-001",
+            company_size="11-50",
+            industry="Care",
+            phone_number="+251900000001",
+            country="Ethiopia",
+            city="Addis Ababa",
+            admin_user=self.owner,
+            registration_certificate="companies/certificates/alpha.pdf",
+        )
+        self.other_company = Company.objects.create(
+            name="Beta Care",
+            registration_number="BETA-001",
+            company_size="11-50",
+            industry="Care",
+            phone_number="+251900000002",
+            country="Ethiopia",
+            city="Addis Ababa",
+            admin_user=self.other_owner,
+            registration_certificate="companies/certificates/beta.pdf",
+        )
+        CompanyEmployerProfile.objects.create(
+            user=self.owner,
+            company_name=self.company.name,
+            company_registration_number=self.company.registration_number,
+            company_size=self.company.company_size,
+            company=self.company,
+        )
+        CompanyEmployerProfile.objects.create(
+            user=self.other_owner,
+            company_name=self.other_company.name,
+            company_registration_number=self.other_company.registration_number,
+            company_size=self.other_company.company_size,
+            company=self.other_company,
+        )
+        self.rule_set = ScoringRuleSet.objects.create(
+            name="Tenant Scoped Rules",
+            version="v1",
+            role_code="nanny",
+            role_name="Nanny",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            is_active=True,
+            created_by=self.owner,
+            company=self.company,
+        )
+
+    def test_b2b_user_only_sees_own_company_rule_sets(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.get("/api/v1/evaluations/rule-sets")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], str(self.rule_set.public_id))
+
+    def test_b2b_user_cannot_retrieve_other_company_rule_set(self):
+        self.client.force_authenticate(self.other_owner)
+        response = self.client.get(f"/api/v1/evaluations/rule-sets/{self.rule_set.public_id}")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_b2b_rule_set_creation_is_automatically_company_scoped(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            "/api/v1/evaluations/rule-sets",
+            {
+                "name": "New Company Rules",
+                "version": "v2",
+                "role_code": "nanny",
+                "role_name": "Nanny",
+                "evaluation_tier": InterviewEvaluationTier.FULL,
+                "is_active": True,
+                "rules": [],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        created = ScoringRuleSet.objects.get(public_id=response.data["id"])
+        self.assertEqual(created.company, self.company)

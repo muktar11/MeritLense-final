@@ -321,17 +321,25 @@ class ScoringRuleSet(TimeStampedModel):
         blank=True,
         related_name="created_scoring_rule_sets",
     )
+    company = models.ForeignKey(
+        "accounts.Company",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="scoring_rule_sets",
+    )
 
     class Meta:
         verbose_name = "Scoring Rule Set"
         verbose_name_plural = "Scoring Rule Sets"
         constraints = [
             models.UniqueConstraint(
-                fields=["role_code", "evaluation_tier", "version"],
-                name="unique_scoring_ruleset_role_tier_version",
+                fields=["company", "role_code", "evaluation_tier", "version"],
+                name="unique_scoring_ruleset_company_role_tier_version",
             ),
         ]
         indexes = [
+            models.Index(fields=["company", "role_code", "evaluation_tier", "is_active"]),
             models.Index(fields=["role_code", "evaluation_tier", "is_active"]),
             models.Index(fields=["version"]),
         ]

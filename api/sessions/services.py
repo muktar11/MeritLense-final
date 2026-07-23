@@ -555,10 +555,14 @@ class InterviewSessionService:
             question=question,
             response_type=response_type,
             transcript=transcript,
+            original_transcript=transcript,
+            transcript_language=session.candidate_language or session.stt_language_code,
             text_response=text_response or transcript,
             duration_seconds=duration_seconds,
             attempt_number=attempt_number,
             metadata=metadata or {},
+            stt_status="COMPLETED" if response_type == CandidateResponseType.TEXT else "PENDING",
+            processing_status="TRANSCRIPT_READY" if transcript else "NOT_STARTED",
         )
 
         question.status = SessionQuestionStatus.ANSWERED
@@ -611,6 +615,14 @@ class InterviewSessionService:
                 ),
             },
         )
+        if transcript:
+            from api.translation.services import AIProcessingOrchestrationService
+
+            AIProcessingOrchestrationService.auto_process_response_ai(
+                response=response,
+                actor=actor,
+                target_override=session.translation_target,
+            )
         return response
 
     @classmethod
@@ -1316,6 +1328,14 @@ class InterviewVoicePipelineService:
                 access_context=access_context,
             ),
         )
+        if response.stt_status == "COMPLETED" and response.original_transcript:
+            from api.translation.services import AIProcessingOrchestrationService
+
+            AIProcessingOrchestrationService.auto_process_response_ai(
+                response=response,
+                actor=actor,
+                target_override=session.translation_target,
+            )
         return response
 
     @classmethod

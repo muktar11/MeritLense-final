@@ -42,16 +42,22 @@ LANGUAGE_NORMALIZATION_MAP = {
     "EN": "en",
     "EN-US": "en",
     "EN-GB": "en",
+    "ENGLISH": "en",
     "ES": "es",
     "ES-ES": "es",
+    "SPANISH": "es",
     "FR": "fr",
     "FR-FR": "fr",
+    "FRENCH": "fr",
     "AR": "ar",
     "AR-SA": "ar",
+    "ARABIC": "ar",
     "DE": "de",
     "DE-DE": "de",
+    "GERMAN": "de",
     "ZH": "zh",
     "ZH-CN": "zh",
+    "CHINESE": "zh",
 }
 
 PROHIBITED_INTERPRETATION_FIELDS = {

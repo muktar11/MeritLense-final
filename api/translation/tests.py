@@ -7,6 +7,21 @@ from django.core.management import call_command
 from django.test import SimpleTestCase, override_settings
 
 from api.storage.services import AzureQueueService
+from api.translation.services import normalize_language_code
+
+
+class LanguageNormalizationTests(SimpleTestCase):
+    def test_normalizes_full_language_names_from_whisper(self):
+        self.assertEqual(normalize_language_code("english"), "en")
+        self.assertEqual(normalize_language_code("Spanish"), "es")
+        self.assertEqual(normalize_language_code("FRENCH"), "fr")
+        self.assertEqual(normalize_language_code("arabic"), "ar")
+        self.assertEqual(normalize_language_code("german"), "de")
+        self.assertEqual(normalize_language_code("chinese"), "zh")
+
+    def test_normalizes_iso_codes(self):
+        self.assertEqual(normalize_language_code("EN"), "en")
+        self.assertEqual(normalize_language_code("en-US"), "en")
 
 
 class AzureQueueWorkerTests(SimpleTestCase):

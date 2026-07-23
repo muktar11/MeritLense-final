@@ -361,6 +361,63 @@ class Week6ScoringServiceTests(TestCase):
             ).exists()
         )
 
+    def test_unanswered_response_is_skipped_as_incomplete_instead_of_blocking_scoring(self):
+        unmapped_template = QuestionTemplate.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            question_code="HK-SAF-003",
+            question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE,
+            domain="Communication",
+            skill_tag="communication",
+            skill="Communication",
+            sequence_number=2,
+            difficulty=QuestionDifficulty.MEDIUM,
+            question_text="How do you greet the family each morning?",
+            question_type="behavioral",
+            question_format="SCENARIO",
+            language="EN",
+            scoring_type="0/3/5",
+            difficulty_score=1,
+            estimated_time_seconds=30,
+            expected_answer_type="multi_step",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            critical_question=False,
+            is_active=True,
+        )
+        unanswered_question = SessionQuestion.objects.create(
+            session=self.session,
+            question_template=unmapped_template,
+            question_text=unmapped_template.question_text,
+            domain=unmapped_template.domain,
+            skill=unmapped_template.skill_tag,
+            difficulty=unmapped_template.difficulty,
+            question_order=2,
+            status="PENDING",
+            is_mandatory=True,
+        )
+        unanswered_response = CandidateResponse.objects.create(
+            session=self.session,
+            question=unanswered_question,
+            response_type=CandidateResponseType.VOICE,
+        )
+
+        summary = Week6ScoringService.run_for_evaluation(
+            evaluation=self.evaluation,
+            actor=self.user,
+            rule_set=self.rule_set,
+        )
+
+        self.assertFalse(
+            ResponseEvaluationResult.objects.filter(response=unanswered_response).exists()
+        )
+        self.assertEqual(summary.evaluated_response_count, 1)
+        self.assertEqual(summary.total_response_count, 2)
+        self.assertEqual(summary.incomplete_response_count, 1)
+        self.assertEqual(summary.status, SessionEvaluationSummary.STATUS_PARTIALLY_EVALUATED)
+
     def test_critical_failure_preserves_raw_score_and_sets_flag(self):
         rule = self.rule_set.rules.get(question_code="HK-SAF-002")
         rule.critical_failure_indicators = ["clean spill"]

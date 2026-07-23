@@ -1095,6 +1095,52 @@ class AIProcessingOrchestrationService:
         return prepared
 
     @classmethod
+    def auto_process_response_ai(
+        cls,
+        *,
+        response,
+        actor=None,
+        target_override="",
+    ):
+        if settings.ENABLE_ASYNC_AI_PROCESSING and settings.AZURE_QUEUE_CONNECTION_STRING:
+            try:
+                _, updated = cls.queue_process_response_ai(
+                    response=response,
+                    actor=actor,
+                    force=False,
+                    target_override=target_override,
+                )
+                return updated
+            except Exception:
+                pass
+        if not cls._sync_auto_processing_is_configured(response=response, target_override=target_override):
+            return response
+        return cls.process_response_ai(
+            response=response,
+            actor=actor,
+            force=False,
+            target_override=target_override,
+        )
+
+    @classmethod
+    def _sync_auto_processing_is_configured(cls, *, response, target_override=""):
+        provider = (settings.AI_INTERPRETATION_PROVIDER or "").upper()
+        if provider == "OPENAI" and not settings.OPENAI_API_KEY:
+            return False
+        if provider == "GEMINI" and not settings.GEMINI_API_KEY:
+            return False
+
+        source_language = (
+            response.transcript_language or response.session.stt_language_code or response.session.candidate_language
+        )
+        target_language = target_override or response.session.translation_target or source_language
+        if source_language != target_language:
+            translation_provider = (settings.TRANSLATION_PROVIDER or "").upper()
+            if translation_provider == "GOOGLE" and not settings.GOOGLE_TRANSLATE_API_KEY:
+                return False
+        return True
+
+    @classmethod
     @transaction.atomic
     def queue_process_response_ai(
         cls,

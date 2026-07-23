@@ -273,6 +273,7 @@ class ScoringRuleSetSerializer(PublicIdModelSerializer):
             "name",
             "version",
             "description",
+            "company",
             "role_code",
             "role_name",
             "evaluation_tier",
@@ -283,11 +284,16 @@ class ScoringRuleSetSerializer(PublicIdModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "has_usage", "created_by", "created_at", "updated_at"]
+        read_only_fields = ["id", "company", "has_usage", "created_by", "created_at", "updated_at"]
 
     def create(self, validated_data):
         rules_data = validated_data.pop("rules", [])
-        validated_data["created_by"] = self.context["request"].user
+        user = self.context["request"].user
+        validated_data["created_by"] = user
+        if hasattr(user, "company_profile") and user.company_profile:
+            validated_data["company"] = user.company_profile.company
+        elif hasattr(user, "managed_company") and user.managed_company:
+            validated_data["company"] = user.managed_company
         rule_set = ScoringRuleSet.objects.create(**validated_data)
         for rule_data in rules_data:
             ScoringRule.objects.create(rule_set=rule_set, **rule_data)

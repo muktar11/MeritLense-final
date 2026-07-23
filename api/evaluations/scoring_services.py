@@ -86,6 +86,15 @@ class Week6ScoringService:
             evaluation_tier=evaluation.evaluation_tier,
             is_active=True,
         ).order_by("-created_at")
+        if evaluation.company_id:
+            company_queryset = queryset.filter(company=evaluation.company)
+            if session.role_code:
+                exact = company_queryset.filter(role_code=session.role_code).first()
+                if exact:
+                    return exact
+            fallback = company_queryset.filter(role_code="").first()
+            if fallback:
+                return fallback
         if session.role_code:
             exact = queryset.filter(role_code=session.role_code).first()
             if exact:
@@ -128,12 +137,13 @@ class Week6ScoringService:
             max_score=max_score,
         )
         passed_required = not missing_required and bool(expected or matched or observed)
-
         if missing_required:
             raw_score = cls.DECIMAL_ZERO
+
         critical_failure = bool(critical_hits)
+        effective_score = raw_score
         if critical_failure:
-            raw_score = cls.DECIMAL_ZERO
+            effective_score = cls.DECIMAL_ZERO
 
         if requires_human_review and artifact is None:
             passed_required = False
@@ -182,6 +192,8 @@ class Week6ScoringService:
                     "source_interpretation_status": getattr(artifact, "source_interpretation_status", ""),
                     "review_reason": getattr(artifact, "review_reason", ""),
                     "critical_failure_indicators": critical_failure_indicators,
+                    "raw_score": str(raw_score),
+                    "effective_score": str(effective_score),
                 },
                 "scored_at": timezone.now(),
             },
@@ -304,6 +316,8 @@ class Week6ScoringService:
                 "competency_code": result.competency_code,
                 "question_code": result.metadata.get("question_code", ""),
                 "topic": result.competency_name or result.question.skill,
+                "score": float(result.score),
+                "effective_score": float(result.metadata.get("effective_score", result.score)),
                 "explanation": result.explanation,
             }
             for result in response_results

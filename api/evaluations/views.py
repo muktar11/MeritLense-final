@@ -541,6 +541,16 @@ class ScoringRuleSetViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = ScoringRuleSet.objects.prefetch_related("rules").all()
+        user = self.request.user
+        if user.role not in [Roles.ADMIN, Roles.SUPERADMIN]:
+            if user.role == Roles.B2B and hasattr(user, "company_profile") and user.company_profile:
+                queryset = queryset.filter(company=user.company_profile.company)
+            elif user.role == Roles.B2B_TEAM_MEMBER and hasattr(user, "team_member_profile") and user.team_member_profile:
+                queryset = queryset.filter(company=user.team_member_profile.company)
+            elif user.role == Roles.B2C:
+                queryset = queryset.filter(created_by=user, company__isnull=True)
+            else:
+                queryset = queryset.none()
         role_code = self.request.query_params.get("role_code")
         if role_code:
             queryset = queryset.filter(role_code=role_code)

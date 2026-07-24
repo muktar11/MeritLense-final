@@ -47,14 +47,15 @@ class Week6ScoringService:
         if not responses:
             raise Week6ScoringError("No candidate responses are available for scoring")
 
-        results = [
-            cls._score_response(
+        results = []
+        for response in responses:
+            result = cls._score_response(
                 evaluation=evaluation,
                 response=response,
                 rule_set=selected_rule_set,
             )
-            for response in responses
-        ]
+            if result is not None:
+                results.append(result)
         competency_results = cls._aggregate_competencies(
             evaluation=evaluation,
             rule_set=selected_rule_set,
@@ -109,6 +110,8 @@ class Week6ScoringService:
         artifact = getattr(response, "evaluation_input_artifact", None)
         rule = cls._resolve_rule(rule_set=rule_set, response=response, artifact=artifact)
         if rule is None:
+            if artifact is None:
+                return None
             raise Week6ScoringError(f"No scoring rule found for response {response.public_id}")
 
         observed = cls._normalize_indicator_list(getattr(artifact, "observed_indicators", []))

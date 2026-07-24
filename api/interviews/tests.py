@@ -1570,6 +1570,7 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(status_response.data["async_job"]["idempotency_key"], "resp-queue-1")
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.AI_PROCESSING_QUEUED).exists())
 
+    @override_settings(ENABLE_ASYNC_AI_PROCESSING=True, AZURE_QUEUE_CONNECTION_STRING="UseDevelopmentStorage=true")
     def test_process_ai_job_command_processes_queued_job(self):
         session = self._create_and_start_session()
         question = self._mark_first_question_asked(session)

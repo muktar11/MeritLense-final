@@ -874,17 +874,23 @@ class TaskObservationService:
             )
             raise ValueError("Task does not belong to this session")
 
-        if session_task.status in {SessionObservedTaskStatus.COMPLETED, SessionObservedTaskStatus.REQUIRES_REVIEW}:
-            existing = getattr(session_task, "result", None)
-            if existing is not None:
-                return existing
+        if session_task.status in {
+            SessionObservedTaskStatus.COMPLETED,
+            SessionObservedTaskStatus.FAILED,
+            SessionObservedTaskStatus.REQUIRES_REVIEW,
+        }:
             cls._log_invalid_transition(
                 session=session,
                 session_task=session_task,
                 actor=actor,
-                reason="Task has already been completed",
+                reason=(
+                    "Duplicate task completion attempt rejected because the task "
+                    f"is already in terminal state {session_task.status}"
+                ),
             )
-            raise ValueError("Task has already been completed")
+            raise ValueError(
+                f"Task completion has already been finalized with status {session_task.status}"
+            )
 
         if session_task.status != SessionObservedTaskStatus.IN_PROGRESS:
             cls._log_invalid_transition(

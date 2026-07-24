@@ -814,6 +814,55 @@ class InterviewSessionApiTests(APITestCase):
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TASK_OBSERVATION_STARTED).exists())
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TASK_OBSERVATION_COMPLETED).exists())
 
+    def test_task_completion_rejects_duplicate_submission_after_completion(self):
+        session = self._create_task_enabled_session()
+        self.client.post(f"/api/v1/interviews/{session.public_id}/start/", {}, format="json")
+
+        start_task = self.client.post(f"/api/v1/interviews/{session.public_id}/tasks/start/", {}, format="json")
+        task_id = start_task.data["id"]
+        first_complete = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/tasks/{task_id}/complete/",
+            {
+                "execution_time_seconds": 10,
+                "observed_steps": ["picked_object", "showed_object", "returned_object"],
+            },
+            format="json",
+        )
+        self.assertEqual(first_complete.status_code, 200, first_complete.data)
+
+        replay_complete = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/tasks/{task_id}/complete/",
+            {
+                "execution_time_seconds": 10,
+                "observed_steps": ["picked_object", "showed_object", "returned_object"],
+            },
+            format="json",
+        )
+
+        self.assertEqual(replay_complete.status_code, 400)
+        self.assertIn("finalized", replay_complete.data["detail"].lower())
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TASK_OBSERVATION_INVALID_TRANSITION).exists())
+
+    def test_task_completion_rejects_duplicate_submission_for_failed_terminal_task(self):
+        session = self._create_task_enabled_session()
+        task = session.observed_tasks.first()
+        task.status = "FAILED"
+        task.save(update_fields=["status", "updated_at"])
+        self.client.post(f"/api/v1/interviews/{session.public_id}/start/", {}, format="json")
+
+        response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/tasks/{task.public_id}/complete/",
+            {
+                "execution_time_seconds": 6,
+                "observed_steps": ["picked_object"],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("failed", response.data["detail"].lower())
+        self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TASK_OBSERVATION_INVALID_TRANSITION).exists())
+
     def test_task_completion_requires_start_and_logs_invalid_transition(self):
         session = self._create_task_enabled_session()
 

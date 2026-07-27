@@ -1,7 +1,12 @@
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 
 import requests
 from django.conf import settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 
 from api.audit.services import AuditLogService
@@ -521,14 +526,25 @@ class InterviewSessionPrecheckService:
         metadata=None,
         actor=None,
     ):
+        verification_metadata, resolved_id_document_file, provider_id_document_file = cls._resolve_identity_reference_inputs(
+            session=session,
+            id_document_file=id_document_file,
+            selfie_file=selfie_file,
+            provider_result=provider_result,
+            face_match_score=face_match_score,
+            single_face_detected=single_face_detected,
+            liveness_passed=liveness_passed,
+            metadata=metadata,
+        )
+
         verification = DynamicIdentityVerificationProvider().verify(
             session=session,
             provider_result=provider_result,
             face_match_score=face_match_score,
             single_face_detected=single_face_detected,
             liveness_passed=liveness_passed,
-            metadata=metadata,
-            id_document_file=id_document_file,
+            metadata=verification_metadata,
+            id_document_file=provider_id_document_file,
             selfie_file=selfie_file,
         )
 
@@ -545,6 +561,11 @@ class InterviewSessionPrecheckService:
                     metadata=metadata,
                 )
             )
+        elif resolved_id_document_file is not None:
+            verification["metadata"] = {
+                **(verification.get("metadata") or {}),
+                "stored_reference_document_name": getattr(resolved_id_document_file, "name", ""),
+            }
         if selfie_file is not None:
             if hasattr(selfie_file, "seek"):
                 selfie_file.seek(0)
@@ -610,6 +631,150 @@ class InterviewSessionPrecheckService:
             )
         cls._mark_ready_if_complete(session, actor=actor)
         return verification, artifacts
+
+    @classmethod
+    def _resolve_identity_reference_inputs(
+        cls,
+        *,
+        session,
+        id_document_file=None,
+        selfie_file=None,
+        provider_result=None,
+        face_match_score=None,
+        single_face_detected=None,
+        liveness_passed=None,
+        metadata=None,
+    ):
+        metadata = dict(metadata or {})
+        resolved_id_document_file = id_document_file or getattr(session.candidate, "passport_document", None)
+        provider_id_document_file = resolved_id_document_file
+
+        if id_document_file is not None:
+            metadata.setdefault("reference_document_source", "uploaded_id_document")
+            metadata.setdefault("reused_candidate_passport", False)
+        elif resolved_id_document_file:
+            metadata.setdefault("reference_document_source", "candidate_passport_document")
+            metadata.setdefault("reused_candidate_passport", True)
+
+        should_prepare_provider_reference = (
+            provider_result in (None, {})
+            and (
+                selfie_file is not None
+                or resolved_id_document_file is not None
+                or face_match_score is None
+                or single_face_detected is None
+                or liveness_passed is None
+            )
+        )
+        if should_prepare_provider_reference and provider_id_document_file is not None and cls._is_pdf_reference_file(provider_id_document_file):
+            try:
+                provider_id_document_file = cls._convert_pdf_reference_to_image(provider_id_document_file)
+                metadata["provider_reference_source"] = "pdf_first_page_image"
+                metadata["provider_reference_fallback_reason"] = "pdf_reference_converted_to_image"
+            except IdentityVerificationError as conversion_error:
+                profile_photo = getattr(session.candidate, "profile_photo", None)
+                if profile_photo:
+                    provider_id_document_file = profile_photo
+                    metadata["provider_reference_source"] = "candidate_profile_photo"
+                    metadata["provider_reference_fallback_reason"] = "pdf_conversion_failed"
+                    metadata["pdf_conversion_error"] = str(conversion_error)
+                else:
+                    raise IdentityVerificationError(
+                        "Passport PDF could not be converted into a face-match image and no profile photo is available. Upload an image ID document or add a profile photo.",
+                        code="identity_verification_reference_image_required",
+                        metadata={"conversion_error": str(conversion_error)},
+                    ) from conversion_error
+        elif provider_id_document_file is not None:
+            metadata.setdefault("provider_reference_source", metadata.get("reference_document_source"))
+
+        for candidate_file in (provider_id_document_file, selfie_file):
+            if candidate_file is not None:
+                cls._rewind_file(candidate_file)
+
+        return metadata, resolved_id_document_file, provider_id_document_file
+
+    @staticmethod
+    def _is_pdf_reference_file(uploaded_file):
+        content_type = str(getattr(uploaded_file, "content_type", "") or "").lower()
+        if content_type == "application/pdf":
+            return True
+        suffix = Path(getattr(uploaded_file, "name", "") or "").suffix.lower()
+        return suffix == ".pdf"
+
+    @staticmethod
+    def _rewind_file(uploaded_file):
+        if uploaded_file is None:
+            return
+        if hasattr(uploaded_file, "open"):
+            try:
+                uploaded_file.open("rb")
+            except Exception:
+                pass
+        if hasattr(uploaded_file, "seek"):
+            try:
+                uploaded_file.seek(0)
+            except Exception:
+                pass
+
+    @classmethod
+    def _convert_pdf_reference_to_image(cls, uploaded_file):
+        cls._rewind_file(uploaded_file)
+        pdftoppm_path = shutil.which("pdftoppm")
+        if not pdftoppm_path:
+            raise IdentityVerificationError(
+                "PDF identity reference conversion is not available because pdftoppm is not installed.",
+                code="identity_verification_pdf_conversion_unavailable",
+            )
+
+        with tempfile.TemporaryDirectory(prefix="identity-pdf-") as tmpdir:
+            source_path = Path(tmpdir) / "reference.pdf"
+            output_prefix = str(Path(tmpdir) / "reference-page")
+            with open(source_path, "wb") as source_file:
+                if hasattr(uploaded_file, "chunks"):
+                    for chunk in uploaded_file.chunks():
+                        source_file.write(chunk)
+                else:
+                    source_file.write(uploaded_file.read())
+            cls._rewind_file(uploaded_file)
+
+            try:
+                subprocess.run(
+                    [
+                        pdftoppm_path,
+                        "-f",
+                        "1",
+                        "-l",
+                        "1",
+                        "-singlefile",
+                        "-png",
+                        str(source_path),
+                        output_prefix,
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                raise IdentityVerificationError(
+                    "Failed to convert passport PDF into an image reference.",
+                    code="identity_verification_pdf_conversion_failed",
+                    metadata={"stderr": exc.stderr[-500:] if exc.stderr else ""},
+                ) from exc
+
+            image_path = Path(f"{output_prefix}.png")
+            if not image_path.exists():
+                raise IdentityVerificationError(
+                    "Passport PDF conversion completed without producing an image.",
+                    code="identity_verification_pdf_conversion_missing_output",
+                )
+
+            image_bytes = image_path.read_bytes()
+            image_name = f"{Path(getattr(uploaded_file, 'name', 'passport')).stem}-page-1.png"
+            return SimpleUploadedFile(
+                image_name,
+                image_bytes,
+                content_type="image/png",
+            )
 
     @classmethod
     def ingest_integrity_event(

@@ -372,7 +372,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
     @action(detail=True, methods=["get"], url_path="report")
     def report(self, request, id=None):
         evaluation = self.get_object()
-        report = evaluation.reports.select_related("generated_by").first()
+        report = evaluation.reports.filter(report_status="ACTIVE").select_related("generated_by").first()
         if report is None:
             return Response(
                 {"detail": "No evaluation report has been generated yet."},

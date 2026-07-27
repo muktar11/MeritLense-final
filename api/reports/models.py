@@ -1,22 +1,34 @@
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import DatabaseError, models
 from django.utils import timezone
 
 from api.core.models import TimeStampedModel
 
 
+def report_pdf_upload_to(instance, filename):
+    return f"reports/evaluations/{instance.evaluation_id}/{instance.report_number}.pdf"
+
+
+class EvaluationReportQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise DatabaseError("Generated evaluation reports are immutable.")
+
+    def delete(self):
+        raise DatabaseError("Generated evaluation reports cannot be deleted.")
+
+
 class EvaluationReport(TimeStampedModel):
     STATUS_PENDING = "PENDING"
-    STATUS_GENERATED = "GENERATED"
-    STATUS_STALE = "STALE"
-    STATUS_ARCHIVED = "ARCHIVED"
+    STATUS_ACTIVE = "ACTIVE"
+    STATUS_SUPERSEDED = "SUPERSEDED"
+    STATUS_REVOKED = "REVOKED"
     STATUS_FAILED = "FAILED"
 
     STATUS_CHOICES = [
         (STATUS_PENDING, "Pending"),
-        (STATUS_GENERATED, "Generated"),
-        (STATUS_STALE, "Stale"),
-        (STATUS_ARCHIVED, "Archived"),
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_SUPERSEDED, "Superseded"),
+        (STATUS_REVOKED, "Revoked"),
         (STATUS_FAILED, "Failed"),
     ]
 
@@ -36,7 +48,7 @@ class EvaluationReport(TimeStampedModel):
         related_name="evaluation_reports",
     )
     report_number = models.CharField(max_length=80, unique=True, db_index=True)
-    report_version = models.CharField(max_length=40, default="week7-v1")
+    report_version = models.CharField(max_length=40, default="1.2")
     report_status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
@@ -53,6 +65,8 @@ class EvaluationReport(TimeStampedModel):
     requires_human_review = models.BooleanField(default=False)
     scoring_rule_set_name = models.CharField(max_length=150, blank=True)
     scoring_rule_version = models.CharField(max_length=40, blank=True)
+    employer_pdf = models.FileField(upload_to=report_pdf_upload_to, null=True, blank=True)
+    pdf_hash = models.CharField(max_length=64, blank=True)
     report_payload = models.JSONField(default=dict, blank=True)
     competency_breakdown = models.JSONField(default=list, blank=True)
     response_evidence_summary = models.JSONField(default=list, blank=True)
@@ -87,6 +101,8 @@ class EvaluationReport(TimeStampedModel):
         ]
         ordering = ["-generated_at", "-created_at"]
 
+    objects = EvaluationReportQuerySet.as_manager()
+
     def __str__(self):
         return f"{self.report_number} - {self.report_status}"
 
@@ -94,8 +110,8 @@ class EvaluationReport(TimeStampedModel):
         if self.pk and type(self).objects.filter(pk=self.pk).exists():
             existing = type(self).objects.get(pk=self.pk)
             allowed_stale_transition = (
-                existing.report_status == self.STATUS_GENERATED
-                and self.report_status == self.STATUS_STALE
+                existing.report_status == self.STATUS_ACTIVE
+                and self.report_status == self.STATUS_SUPERSEDED
                 and existing.report_number == self.report_number
                 and existing.report_version == self.report_version
                 and existing.evaluation_id == self.evaluation_id
@@ -112,6 +128,8 @@ class EvaluationReport(TimeStampedModel):
                 and existing.requires_human_review == self.requires_human_review
                 and existing.scoring_rule_set_name == self.scoring_rule_set_name
                 and existing.scoring_rule_version == self.scoring_rule_version
+                and existing.employer_pdf == self.employer_pdf
+                and existing.pdf_hash == self.pdf_hash
                 and existing.report_payload == self.report_payload
                 and existing.competency_breakdown == self.competency_breakdown
                 and existing.response_evidence_summary == self.response_evidence_summary

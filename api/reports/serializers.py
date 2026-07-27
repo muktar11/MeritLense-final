@@ -9,6 +9,7 @@ class EvaluationReportSerializer(PublicIdModelSerializer):
     session_id = serializers.UUIDField(source="session.public_id", read_only=True)
     candidate_id = serializers.UUIDField(source="candidate.public_id", read_only=True)
     generated_by_name = serializers.SerializerMethodField()
+    employer_pdf_url = serializers.SerializerMethodField()
 
     class Meta:
         model = EvaluationReport
@@ -31,6 +32,8 @@ class EvaluationReportSerializer(PublicIdModelSerializer):
             "requires_human_review",
             "scoring_rule_set_name",
             "scoring_rule_version",
+            "employer_pdf_url",
+            "pdf_hash",
             "report_payload",
             "competency_breakdown",
             "response_evidence_summary",
@@ -50,6 +53,14 @@ class EvaluationReportSerializer(PublicIdModelSerializer):
         if obj.generated_by is None:
             return ""
         return obj.generated_by.get_full_name()
+
+    def get_employer_pdf_url(self, obj):
+        if not obj.employer_pdf:
+            return ""
+        request = self.context.get("request")
+        if request is None:
+            return obj.employer_pdf.url
+        return request.build_absolute_uri(obj.employer_pdf.url)
 
 
 class EvaluationReportListSerializer(PublicIdModelSerializer):

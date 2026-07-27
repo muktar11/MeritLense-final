@@ -687,7 +687,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         if not request.user.is_authenticated or not session.can_manage(request.user):
             raise PermissionDenied("You do not have access to this interview report")
         evaluation = InterviewSessionService._ensure_linked_evaluation(session)
-        report = evaluation.reports.select_related("generated_by").first()
+        report = evaluation.reports.filter(report_status="ACTIVE").select_related("generated_by").first()
         if report is None:
             return Response({"detail": "No evaluation report has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
         return Response(EvaluationReportSerializer(report).data)

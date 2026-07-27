@@ -5,6 +5,7 @@ import tempfile
 from unittest.mock import patch
 
 from asgiref.testing import ApplicationCommunicator
+from django.core.files.base import ContentFile
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TransactionTestCase, override_settings
@@ -18,14 +19,28 @@ from api.core.constants import AuditLogAction, CoverageLevel, InterviewEvaluatio
 from api.interviews.models import InterviewConfiguration, InterviewRubric, PackageSessionConfig, RolePackageCoverage
 from api.interviews.voice_services import VoiceProviderError
 from api.questions.models import QuestionTemplate
-from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionObservedTask, TaskObservationResult
+from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionArtifact, SessionObservedTask, TaskObservationResult
 from api.translation.models import CandidateResponseInterpretation, CandidateResponseTranslation, EvaluationInputArtifact
 from api.evaluations.models import Evaluation
 from meritlense.asgi import application
 
 
-def make_file(name="passport.pdf", content=b"passport"):
+def make_file(name="passport.pdf", content=None):
+    if content is None:
+        content = (
+            b"%PDF-1.1\n"
+            b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+            b"2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n"
+            b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R>>endobj\n"
+            b"4 0 obj<</Length 44>>stream\nBT /F1 12 Tf 20 100 Td (Passport) Tj ET\nendstream\nendobj\n"
+            b"xref\n0 5\n0000000000 65535 f \n0000000010 00000 n \n0000000053 00000 n \n0000000104 00000 n \n0000000191 00000 n \n"
+            b"trailer<</Root 1 0 R/Size 5>>\nstartxref\n285\n%%EOF\n"
+        )
     return SimpleUploadedFile(name, content, content_type="application/pdf")
+
+
+def make_image(name="photo.jpg", content=b"fake-image"):
+    return SimpleUploadedFile(name, content, content_type="image/jpeg")
 
 
 class InterviewSessionApiTests(APITestCase):
@@ -363,6 +378,426 @@ class InterviewSessionApiTests(APITestCase):
         )
         self.assertEqual(complete_response.status_code, 200)
         self.assertEqual(complete_response.data["status"], "COMPLETED")
+
+    def test_candidate_precheck_flow_supports_token_start(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        consent = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/consent/",
+            {
+                "token": access_token,
+                "signatory_name": "Dawit Session",
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(consent.status_code, 200, consent.data)
+
+        privacy = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/privacy-acknowledgement/",
+            {
+                "token": access_token,
+                "metadata": {"screen": "candidate-start"},
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(privacy.status_code, 200, privacy.data)
+
+        device = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/device-check/",
+            {
+                "token": access_token,
+                "passed": True,
+                "metadata": {"camera": "ok", "microphone": "ok"},
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(device.status_code, 200, device.data)
+
+        verbal = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/verbal-confirmation/",
+            {
+                "token": access_token,
+                "recording_path": "candidate/verbal-confirmation.webm",
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(verbal.status_code, 200, verbal.data)
+
+        identity = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/identity-verify/",
+            {
+                "token": access_token,
+                "face_match_score": "93.50",
+                "single_face_detected": True,
+                "liveness_passed": True,
+                "metadata": {"source": "candidate-ui"},
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(identity.status_code, 200, identity.data)
+        self.assertTrue(identity.data["verification"]["identity_verified"])
+        self.assertEqual(identity.data["precheck_status"]["status"], "READY")
+
+        start_response = token_client.post(
+            f"/api/v1/interviews/{session_id}/start/",
+            {"token": access_token},
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(start_response.status_code, 200, start_response.data)
+        self.assertEqual(start_response.data["status"], "IN_PROGRESS")
+
+        session = InterviewSession.objects.get(public_id=session_id)
+        self.assertTrue(session.identity_verified)
+        self.assertEqual(str(session.face_match_score), "93.50")
+        self.assertTrue(session.candidate_prechecks_complete())
+        self.assertIsNotNone(session.candidate_consent_agreement_id)
+        self.assertIsNotNone(session.privacy_notice_acknowledged_at)
+        self.assertIsNotNone(session.device_check_completed_at)
+        self.assertIsNotNone(session.verbal_confirmation_recorded_at)
+
+    def test_identity_verification_accepts_provider_result_payload(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        response = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/identity-verify/",
+            {
+                "token": access_token,
+                "provider_result": {
+                    "provider": "AZURE_FACE",
+                    "verification_status": "VERIFIED",
+                    "face_match_score": 96.2,
+                    "single_face_detected": True,
+                    "liveness_passed": True,
+                    "reason": "Provider face match passed",
+                },
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["verification"]["provider"], "AZURE_FACE")
+        self.assertTrue(response.data["verification"]["identity_verified"])
+        session = InterviewSession.objects.get(public_id=session_id)
+        self.assertEqual(session.verification_status, "VERIFIED")
+        self.assertEqual(str(session.face_match_score), "96.20")
+
+    @override_settings(
+        IDENTITY_VERIFICATION_PROVIDER="AZURE_FACE",
+        IDENTITY_VERIFICATION_API_URL="https://identity-provider.example/verify",
+        IDENTITY_VERIFICATION_API_KEY="test-key",
+    )
+    def test_identity_verification_reuses_candidate_passport_when_no_fresh_id_uploaded(self):
+        self.candidate.passport_document.save("passport-reference.jpg", ContentFile(b"passport-image"), save=True)
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        captured = {}
+
+        def fake_provider_call(provider_self, *, session, metadata=None, id_document_file=None, selfie_file=None):
+            captured["id_document_name"] = getattr(id_document_file, "name", None)
+            captured["selfie_name"] = getattr(selfie_file, "name", None)
+            captured["metadata"] = metadata or {}
+            return provider_self._normalize_result(
+                {
+                    "provider": "AZURE_FACE",
+                    "face_match_score": 94.1,
+                    "single_face_detected": True,
+                    "liveness_passed": True,
+                },
+                metadata=metadata,
+            )
+
+        with patch(
+            "api.sessions.identity_services.DynamicIdentityVerificationProvider._call_remote_provider",
+            autospec=True,
+            side_effect=fake_provider_call,
+        ):
+            response = token_client.post(
+                f"/api/v1/interviews/{session_id}/prechecks/identity-verify/",
+                {
+                    "token": access_token,
+                    "selfie_image_file": make_image("live-selfie.jpg", b"selfie-bytes"),
+                },
+                format="multipart",
+                HTTP_X_SESSION_TOKEN=access_token,
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(response.data["verification"]["identity_verified"])
+        self.assertIn("passport-reference.jpg", captured["id_document_name"])
+        self.assertEqual(captured["selfie_name"], "live-selfie.jpg")
+        self.assertEqual(captured["metadata"]["reference_document_source"], "candidate_passport_document")
+        self.assertTrue(captured["metadata"]["reused_candidate_passport"])
+        self.assertEqual(captured["metadata"]["provider_reference_source"], "candidate_passport_document")
+        session = InterviewSession.objects.get(public_id=session_id)
+        self.assertTrue(session.identity_verified)
+        self.assertFalse(SessionArtifact.objects.filter(session=session, artifact_type="ID_DOCUMENT").exists())
+        self.assertTrue(SessionArtifact.objects.filter(session=session, artifact_type="SELFIE_IMAGE").exists())
+
+    @override_settings(
+        IDENTITY_VERIFICATION_PROVIDER="AZURE_FACE",
+        IDENTITY_VERIFICATION_API_URL="https://identity-provider.example/verify",
+        IDENTITY_VERIFICATION_API_KEY="test-key",
+    )
+    def test_identity_verification_converts_stored_pdf_passport_for_provider_flow(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        captured = {}
+
+        def fake_provider_call(provider_self, *, session, metadata=None, id_document_file=None, selfie_file=None):
+            captured["id_document_name"] = getattr(id_document_file, "name", None)
+            captured["id_document_type"] = getattr(id_document_file, "content_type", None)
+            captured["metadata"] = metadata or {}
+            return provider_self._normalize_result(
+                {
+                    "provider": "AZURE_FACE",
+                    "face_match_score": 96.0,
+                    "single_face_detected": True,
+                    "liveness_passed": True,
+                },
+                metadata=metadata,
+            )
+
+        with patch(
+            "api.sessions.identity_services.DynamicIdentityVerificationProvider._call_remote_provider",
+            autospec=True,
+            side_effect=fake_provider_call,
+        ):
+            response = token_client.post(
+                f"/api/v1/interviews/{session_id}/prechecks/identity-verify/",
+                {
+                    "token": access_token,
+                    "selfie_image_file": make_image("live-selfie.jpg", b"selfie-bytes"),
+                },
+                format="multipart",
+                HTTP_X_SESSION_TOKEN=access_token,
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(captured["id_document_name"].endswith(".png"))
+        self.assertEqual(captured["id_document_type"], "image/png")
+        self.assertEqual(captured["metadata"]["provider_reference_source"], "pdf_first_page_image")
+        self.assertEqual(captured["metadata"]["provider_reference_fallback_reason"], "pdf_reference_converted_to_image")
+
+    @override_settings(
+        IDENTITY_VERIFICATION_PROVIDER="AZURE_FACE",
+        IDENTITY_VERIFICATION_API_URL="https://identity-provider.example/verify",
+        IDENTITY_VERIFICATION_API_KEY="test-key",
+    )
+    def test_identity_verification_uses_profile_photo_when_pdf_conversion_fails(self):
+        self.candidate.profile_photo.save("candidate-profile.jpg", ContentFile(b"profile-image"), save=True)
+        self.candidate.passport_document.save("broken-passport.pdf", ContentFile(b"not-a-real-pdf"), save=True)
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        captured = {}
+
+        def fake_provider_call(provider_self, *, session, metadata=None, id_document_file=None, selfie_file=None):
+            captured["id_document_name"] = getattr(id_document_file, "name", None)
+            captured["metadata"] = metadata or {}
+            return provider_self._normalize_result(
+                {
+                    "provider": "AZURE_FACE",
+                    "face_match_score": 96.0,
+                    "single_face_detected": True,
+                    "liveness_passed": True,
+                },
+                metadata=metadata,
+            )
+
+        with patch(
+            "api.sessions.identity_services.DynamicIdentityVerificationProvider._call_remote_provider",
+            autospec=True,
+            side_effect=fake_provider_call,
+        ):
+            response = token_client.post(
+                f"/api/v1/interviews/{session_id}/prechecks/identity-verify/",
+                {
+                    "token": access_token,
+                    "selfie_image_file": make_image("live-selfie.jpg", b"selfie-bytes"),
+                },
+                format="multipart",
+                HTTP_X_SESSION_TOKEN=access_token,
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIn("candidate-profile.jpg", captured["id_document_name"])
+        self.assertEqual(captured["metadata"]["reference_document_source"], "candidate_passport_document")
+        self.assertEqual(captured["metadata"]["provider_reference_source"], "candidate_profile_photo")
+        self.assertEqual(captured["metadata"]["provider_reference_fallback_reason"], "pdf_conversion_failed")
+        self.assertIn("pdf_conversion_error", captured["metadata"])
+
+    @override_settings(
+        IDENTITY_VERIFICATION_PROVIDER="AZURE_FACE",
+        IDENTITY_VERIFICATION_API_URL="https://identity-provider.example/verify",
+        IDENTITY_VERIFICATION_API_KEY="test-key",
+    )
+    def test_identity_verification_rejects_pdf_passport_when_conversion_fails_and_no_fallback_exists(self):
+        self.candidate.passport_document.save("broken-passport.pdf", ContentFile(b"not-a-real-pdf"), save=True)
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        response = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/identity-verify/",
+            {
+                "token": access_token,
+                "selfie_image_file": make_image("live-selfie.jpg", b"selfie-bytes"),
+            },
+            format="multipart",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("Passport PDF could not be converted", str(response.data["detail"]))
+
+    def test_integrity_event_endpoint_records_webcam_frame_artifact(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        response = token_client.post(
+            f"/api/v1/interviews/{session_id}/integrity-events/",
+            {
+                "token": access_token,
+                "event_type": "MULTIPLE_FACES_DETECTED",
+                "severity": "WARNING",
+                "frame_file": make_image("frame.jpg", b"frame-bytes"),
+            },
+            format="multipart",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], "RECORDED")
+        self.assertEqual(response.data["integrity_event"]["event_type"], "MULTIPLE_FACES_DETECTED")
+
+        session = InterviewSession.objects.get(public_id=session_id)
+        latest_log = session.integrity_logs.first()
+        self.assertIsNotNone(latest_log)
+        self.assertEqual(latest_log.event_type, "MULTIPLE_FACES_DETECTED")
+
+        artifact = SessionArtifact.objects.get(session=session, artifact_type="WEBCAM_FRAME")
+        self.assertEqual(artifact.mime_type, "image/jpeg")
+        self.assertEqual(artifact.file_size_bytes, len(b"frame-bytes"))
+
+    def test_integrity_event_can_auto_classify_multiple_faces_from_provider_payload(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        response = token_client.post(
+            f"/api/v1/interviews/{session_id}/integrity-events/",
+            {
+                "token": access_token,
+                "auto_analyze": True,
+                "provider_result": {
+                    "provider": "AZURE_FACE",
+                    "face_count": 2,
+                    "liveness_passed": True,
+                },
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["analysis"]["event_type"], "MULTIPLE_FACES_DETECTED")
+        self.assertEqual(response.data["integrity_event"]["event_type"], "MULTIPLE_FACES_DETECTED")
+        session = InterviewSession.objects.get(public_id=session_id)
+        latest_log = session.integrity_logs.first()
+        self.assertEqual(latest_log.event_type, "MULTIPLE_FACES_DETECTED")
+        self.assertFalse(session.single_face_detected)
 
     @patch("api.translation.services.AIProcessingOrchestrationService.auto_process_response_ai")
     def test_submit_response_triggers_automatic_ai_processing_for_text_answers(self, auto_process_mock):

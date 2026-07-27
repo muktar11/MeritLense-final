@@ -15,6 +15,7 @@ from api.interviews.models import (
 )
 from api.questions.models import QuestionTemplate
 from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionObservedTask, TaskObservationResult
+from api.sessions.identity_services import IdentityVerificationError, InterviewSessionPrecheckService
 from api.sessions.services import InterviewSessionService, InterviewVoicePipelineService, TaskObservationService
 from api.translation.services import AIProcessingError, AIProcessingOrchestrationService
 from api.evaluations.scoring_services import Week6ScoringError, Week6ScoringService
@@ -34,10 +35,17 @@ from .serializers import (
     QuestionTemplateSerializer,
     RolePackageCoverageSerializer,
     ResponseAIActionSerializer,
+    SessionArtifactSerializer,
     SessionObservedTaskSerializer,
     ResponseAIProcessingStatusSerializer,
     SessionAIProcessingSummarySerializer,
     SessionAudioUploadSerializer,
+    SessionConsentCaptureSerializer,
+    SessionDeviceCheckSerializer,
+    SessionIdentityVerificationSerializer,
+    SessionIntegrityEventSerializer,
+    SessionPrecheckStatusSerializer,
+    SessionPrivacyAcknowledgementSerializer,
     SessionQuestionSerializer,
     SessionResponseSubmitSerializer,
     SessionStartSerializer,
@@ -45,6 +53,7 @@ from .serializers import (
     SessionTranscriptionSerializer,
     SessionTokenSerializer,
     TaskObservationResultSerializer,
+    SessionVerbalConfirmationSerializer,
 )
 
 
@@ -219,6 +228,20 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
     def get_serializer_class(self):
         if self.action == "create":
             return InterviewSessionCreateSerializer
+        if self.action == "capture_consent":
+            return SessionConsentCaptureSerializer
+        if self.action == "acknowledge_privacy":
+            return SessionPrivacyAcknowledgementSerializer
+        if self.action == "complete_device_check":
+            return SessionDeviceCheckSerializer
+        if self.action == "submit_verbal_confirmation":
+            return SessionVerbalConfirmationSerializer
+        if self.action == "submit_identity_verification":
+            return SessionIdentityVerificationSerializer
+        if self.action == "log_integrity_event":
+            return SessionIntegrityEventSerializer
+        if self.action == "precheck_status":
+            return SessionPrecheckStatusSerializer
         if self.action == "start_task":
             return SessionTokenSerializer
         if self.action == "complete_task":
@@ -398,6 +421,168 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         serializer = SessionAIProcessingSummarySerializer(payload)
         return Response(serializer.data)
 
+    @extend_schema(request=None, responses={200: SessionPrecheckStatusSerializer})
+    @action(detail=True, methods=["get"], url_path="prechecks/status")
+    def precheck_status(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        payload = InterviewSessionPrecheckService.get_precheck_status_payload(session)
+        return Response(SessionPrecheckStatusSerializer(payload).data)
+
+    @extend_schema(request=SessionConsentCaptureSerializer, responses={200: SessionPrecheckStatusSerializer})
+    @action(detail=True, methods=["post"], url_path="prechecks/consent")
+    def capture_consent(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        serializer = self.get_serializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        agreement = InterviewSessionPrecheckService.record_candidate_consent(
+            session,
+            signatory_name=serializer.validated_data["signatory_name"],
+            ip_address=self._client_ip(request),
+            user_agent=request.META.get("HTTP_USER_AGENT", ""),
+            actor=request.user if request.user.is_authenticated else None,
+        )
+        payload = InterviewSessionPrecheckService.get_precheck_status_payload(session)
+        payload["agreement_id"] = str(agreement.public_id)
+        return Response(SessionPrecheckStatusSerializer(payload).data)
+
+    @extend_schema(request=SessionPrivacyAcknowledgementSerializer, responses={200: SessionPrecheckStatusSerializer})
+    @action(detail=True, methods=["post"], url_path="prechecks/privacy-acknowledgement")
+    def acknowledge_privacy(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        serializer = self.get_serializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        InterviewSessionPrecheckService.record_privacy_acknowledgement(
+            session,
+            ip_address=self._client_ip(request),
+            actor=request.user if request.user.is_authenticated else None,
+            metadata=serializer.validated_data.get("metadata", {}),
+        )
+        payload = InterviewSessionPrecheckService.get_precheck_status_payload(session)
+        return Response(SessionPrecheckStatusSerializer(payload).data)
+
+    @extend_schema(request=SessionDeviceCheckSerializer, responses={200: SessionPrecheckStatusSerializer})
+    @action(detail=True, methods=["post"], url_path="prechecks/device-check")
+    def complete_device_check(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        serializer = self.get_serializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        try:
+            InterviewSessionPrecheckService.record_device_check(
+                session,
+                passed=serializer.validated_data["passed"],
+                actor=request.user if request.user.is_authenticated else None,
+                metadata=serializer.validated_data.get("metadata", {}),
+            )
+        except IdentityVerificationError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        payload = InterviewSessionPrecheckService.get_precheck_status_payload(session)
+        return Response(SessionPrecheckStatusSerializer(payload).data)
+
+    @extend_schema(request=SessionVerbalConfirmationSerializer, responses={200: SessionArtifactSerializer})
+    @action(detail=True, methods=["post"], url_path="prechecks/verbal-confirmation")
+    def submit_verbal_confirmation(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        serializer = self.get_serializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        try:
+            artifact, _session = InterviewSessionPrecheckService.record_verbal_confirmation(
+                session,
+                recording_file=serializer.validated_data.get("recording_file"),
+                recording_text=serializer.validated_data.get("recording_path", ""),
+                actor=request.user if request.user.is_authenticated else None,
+                metadata=serializer.validated_data.get("metadata", {}),
+            )
+        except IdentityVerificationError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        payload = {
+            "precheck_status": InterviewSessionPrecheckService.get_precheck_status_payload(session),
+            "artifact": SessionArtifactSerializer(artifact, context={"request": request}).data if artifact else None,
+        }
+        return Response(payload)
+
+    @extend_schema(request=SessionIdentityVerificationSerializer, responses={200: dict})
+    @action(detail=True, methods=["post"], url_path="prechecks/identity-verify")
+    def submit_identity_verification(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        serializer = self.get_serializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        try:
+            verification, artifacts = InterviewSessionPrecheckService.submit_identity_verification(
+                session,
+                id_document_file=serializer.validated_data.get("id_document_file"),
+                selfie_file=serializer.validated_data.get("selfie_image_file"),
+                provider_result=serializer.validated_data.get("provider_result"),
+                face_match_score=serializer.validated_data.get("face_match_score"),
+                single_face_detected=serializer.validated_data.get("single_face_detected"),
+                liveness_passed=serializer.validated_data.get("liveness_passed", True),
+                metadata=serializer.validated_data.get("metadata", {}),
+                actor=request.user if request.user.is_authenticated else None,
+            )
+        except IdentityVerificationError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        payload = {
+            "precheck_status": InterviewSessionPrecheckService.get_precheck_status_payload(session),
+            "verification": {
+                "provider": verification["provider"],
+                "verification_status": verification["verification_status"],
+                "identity_verified": verification["identity_verified"],
+                "face_match_score": str(verification["face_match_score"]) if verification["face_match_score"] is not None else None,
+                "single_face_detected": verification["single_face_detected"],
+                "liveness_passed": verification["liveness_passed"],
+                "reason": verification["reason"],
+            },
+            "artifacts": SessionArtifactSerializer(artifacts, many=True, context={"request": request}).data,
+        }
+        return Response(payload)
+
+    @extend_schema(request=SessionIntegrityEventSerializer, responses={200: dict})
+    @action(detail=True, methods=["post"], url_path="integrity-events")
+    def log_integrity_event(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        serializer = self.get_serializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        log, artifact, analysis = InterviewSessionPrecheckService.ingest_integrity_event(
+            session,
+            event_type=serializer.validated_data.get("event_type", ""),
+            severity=serializer.validated_data.get("severity", "INFO"),
+            details=serializer.validated_data.get("details", {}),
+            frame_file=serializer.validated_data.get("frame_file"),
+            provider_result=serializer.validated_data.get("provider_result"),
+            single_face_detected=serializer.validated_data.get("single_face_detected"),
+            face_count=serializer.validated_data.get("face_count"),
+            liveness_passed=serializer.validated_data.get("liveness_passed", True),
+            auto_analyze=serializer.validated_data.get("auto_analyze", False),
+            actor=request.user if request.user.is_authenticated else None,
+        )
+        return Response(
+            {
+                "status": "RECORDED",
+                "integrity_event": {
+                    "event_type": log.event_type,
+                    "severity": log.severity,
+                    "detected_at": log.detected_at,
+                    "details": log.details,
+                },
+                "analysis": {
+                    "provider": analysis["provider"],
+                    "event_type": analysis["event_type"],
+                    "severity": analysis["severity"],
+                    "single_face_detected": analysis["single_face_detected"],
+                    "face_count": analysis["face_count"],
+                    "liveness_passed": analysis["liveness_passed"],
+                    "reason": analysis["reason"],
+                } if analysis else None,
+                "artifact": SessionArtifactSerializer(artifact, context={"request": request}).data if artifact else None,
+            }
+        )
+
     @extend_schema(request=None, responses={200: SessionEvaluationSummarySerializer})
     @action(detail=True, methods=["post"], url_path="run-scoring")
     def run_scoring(self, request, id=None):
@@ -502,7 +687,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         if not request.user.is_authenticated or not session.can_manage(request.user):
             raise PermissionDenied("You do not have access to this interview report")
         evaluation = InterviewSessionService._ensure_linked_evaluation(session)
-        report = evaluation.reports.select_related("generated_by").first()
+        report = evaluation.reports.filter(report_status="ACTIVE").select_related("generated_by").first()
         if report is None:
             return Response({"detail": "No evaluation report has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
         return Response(EvaluationReportSerializer(report).data)
@@ -534,6 +719,12 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             or request.query_params.get("token")
             or request.data.get("token")
         )
+
+    def _client_ip(self, request):
+        forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.META.get("REMOTE_ADDR")
 
 
 class ResponseAIProcessingViewSet(viewsets.GenericViewSet):

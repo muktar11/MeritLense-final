@@ -1,6 +1,9 @@
+import shutil
+import tempfile
+
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -30,6 +33,19 @@ from api.translation.models import (
 
 
 class EvaluationReportApiTests(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._media_dir = tempfile.mkdtemp(prefix="report-tests-")
+        cls._override = override_settings(MEDIA_ROOT=cls._media_dir)
+        cls._override.enable()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._override.disable()
+        shutil.rmtree(cls._media_dir, ignore_errors=True)
+        super().tearDownClass()
+
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create_user(
@@ -94,6 +110,7 @@ class EvaluationReportApiTests(TestCase):
             ended_at=timezone.now(),
             expires_at=InterviewSession.build_expiry(30),
             created_by=self.user,
+            status="COMPLETED",
         )
         self.template = QuestionTemplate.objects.create(
             role_name="Housekeeper",
@@ -193,6 +210,8 @@ class EvaluationReportApiTests(TestCase):
             scheduled_date=timezone.now() + timezone.timedelta(days=1),
             duration_minutes=45,
             created_by=self.user,
+            status="COMPLETED",
+            completed_at=timezone.now(),
         )
         self.rule_set = ScoringRuleSet.objects.create(
             name="Week 7 Default",
@@ -235,36 +254,59 @@ class EvaluationReportApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["report_status"], EvaluationReport.STATUS_GENERATED)
+        self.assertEqual(response.data["report_status"], EvaluationReport.STATUS_ACTIVE)
+        self.assertEqual(response.data["report_version"], "1.3")
         self.assertEqual(response.data["scoring_rule_version"], "week6-v1")
         self.assertEqual(response.data["rule_engine_version"], "v1.0")
         self.assertFalse(response.data["override_triggered"])
-        self.assertEqual(response.data["readiness_indicator"], "متوسط")
+        self.assertEqual(response.data["readiness_indicator"], "جاهزية جزئية")
         self.assertTrue(response.data["requires_human_review"])
-        self.assertEqual(response.data["report_payload"]["overall_result"]["readiness_status"], "PENDING")
-        self.assertEqual(response.data["report_payload"]["overall_result"]["readiness_indicator"], "متوسط")
-        self.assertEqual(response.data["report_payload"]["traceability"]["rule_engine_version"], "v1.0")
+        self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_status"], "COMPLETED")
+        self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_quality"], "Limited")
+        self.assertEqual(response.data["report_payload"]["executive_summary"]["readiness_indicator"]["code"], "PARTIALLY_READY")
         self.assertEqual(
-            response.data["report_payload"]["traceability"]["readiness_legal_record_id"],
+            list(response.data["report_payload"]["executive_summary"].keys())[:2],
+            ["readiness_indicator", "overall_score"],
+        )
+        self.assertEqual(
+            response.data["report_payload"]["executive_summary"]["assessment_scope"],
+            "Pre-employment Workforce Readiness Only",
+        )
+        self.assertIn(
+            "Complete interview",
+            response.data["report_payload"]["executive_summary"]["reliability_factors"],
+        )
+        self.assertIn(
+            "Response consistency requires review",
+            response.data["report_payload"]["executive_summary"]["reliability_factors"],
+        )
+        self.assertEqual(response.data["report_payload"]["rule_engine_version"], "v1.0")
+        self.assertEqual(
+            response.data["report_payload"]["legal_record_id"],
             str(self.evaluation.readiness_legal_record.public_id),
         )
         self.assertEqual(
             response.data["report_payload"]["legal_disclaimer"],
-            "This evaluation report provides decision support only and does not constitute an employment decision. Final hiring decisions remain with the employer.",
+            "This report provides decision support only and does not constitute an employment decision. Final hiring decisions remain with the employer.",
         )
         self.assertEqual(
-            response.data["report_payload"]["traceability"]["evaluation_flow_reference"],
+            response.data["report_payload"]["evaluation_flow_reference"],
             "Interview Session -> Responses -> AI Processing -> Deterministic Scoring -> Rule Engine -> Evaluation Report",
         )
-        self.assertEqual(response.data["report_payload"]["interview_summary"]["package_code"], "premium")
+        self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_coverage"][0], "Safety")
+        self.assertEqual(response.data["report_payload"]["verification_status"], "Authentic")
+        self.assertTrue(response.data["report_payload"]["document_integrity"]["hash_value"])
         self.assertEqual(response.data["response_evidence_summary"][0]["traceability"]["translation_reference"]["status"], "COMPLETED")
 
-        report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status=EvaluationReport.STATUS_GENERATED)
-        self.assertEqual(report.report_payload["report_header"]["report_number"], report.report_number)
+        report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status=EvaluationReport.STATUS_ACTIVE)
+        self.assertEqual(report.report_payload["report_name"], "MeritLense Workforce Readiness Assessment Report")
+        self.assertEqual(report.report_version, "1.3")
         self.assertEqual(report.rule_engine_version, "v1.0")
-        self.assertEqual(report.readiness_indicator, "متوسط")
+        self.assertEqual(report.readiness_indicator, "جاهزية جزئية")
         self.assertFalse(report.override_triggered)
         self.assertEqual(report.readiness_legal_record, self.evaluation.readiness_legal_record)
+        self.assertTrue(report.employer_pdf.name.endswith(".pdf"))
+        self.assertTrue(report.pdf_hash)
 
         latest_report = self.client.get(f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/report")
         self.assertEqual(latest_report.status_code, 200)
@@ -276,7 +318,22 @@ class EvaluationReportApiTests(TestCase):
         export_payload = self.client.get(f"/api/v1/evaluations/reports/{report.public_id}/export-payload")
         self.assertEqual(export_payload.status_code, 200)
         self.assertIn("competency_breakdown", export_payload.data)
-        self.assertIn("traceability", export_payload.data)
+        self.assertIn("evaluation_flow_reference", export_payload.data)
+        self.assertIn("document_integrity", export_payload.data)
+
+        employer_payload = self.client.get(f"/api/v1/evaluations/reports/{report.public_id}/export-employer-payload")
+        self.assertEqual(employer_payload.status_code, 200)
+        self.assertNotIn("candidate_id", employer_payload.data)
+        self.assertNotIn("critical_failures", employer_payload.data)
+
+        export_pdf = self.client.get(f"/api/v1/evaluations/reports/{report.public_id}/export-pdf")
+        self.assertEqual(export_pdf.status_code, 200)
+        self.assertEqual(export_pdf["Content-Type"], "application/pdf")
+
+        verify_response = self.client.get(f"/api/v1/evaluations/reports/verify/{report.report_number}")
+        self.assertEqual(verify_response.status_code, 200)
+        self.assertEqual(verify_response.json()["verification_status"], "Authentic")
+        self.assertEqual(verify_response.json()["sha256_hash"], report.pdf_hash)
 
         interview_report = self.client.get(f"/api/v1/interviews/{self.session.public_id}/report/")
         self.assertEqual(interview_report.status_code, 200)
@@ -304,7 +361,7 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(regenerate.status_code, 200)
         self.assertNotEqual(regenerate.data["id"], first.data["id"])
         first_report.refresh_from_db()
-        self.assertEqual(first_report.report_status, EvaluationReport.STATUS_STALE)
+        self.assertEqual(first_report.report_status, EvaluationReport.STATUS_SUPERSEDED)
         self.assertEqual(EvaluationReport.objects.filter(evaluation=self.evaluation).count(), 2)
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.PREVIOUS_REPORT_MARKED_STALE).exists())
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.REPORT_REGENERATED).exists())
@@ -355,7 +412,12 @@ class EvaluationReportApiTests(TestCase):
             scheduled_date=timezone.now() + timezone.timedelta(days=2),
             duration_minutes=45,
             created_by=self.user,
+            status="COMPLETED",
+            completed_at=timezone.now(),
         )
+        new_session.status = "COMPLETED"
+        new_session.ended_at = timezone.now()
+        new_session.save(update_fields=["status", "ended_at", "updated_at"])
 
         response = self.client.post(
             f"/api/v1/evaluations/evaluations/{new_evaluation.public_id}/generate-report",

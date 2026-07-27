@@ -30,6 +30,12 @@ def question_audio_upload_to(instance, filename):
     return f"interviews/sessions/{instance.session_id}/questions/{instance.question_id}/tts/{instance.public_id}{extension}"
 
 
+def session_artifact_upload_to(instance, filename):
+    extension = Path(filename).suffix or ".bin"
+    artifact_type = (instance.artifact_type or "artifact").lower()
+    return f"interviews/sessions/{instance.session_id}/artifacts/{artifact_type}/{instance.public_id}{extension}"
+
+
 class InterviewSession(TimeStampedModel, SoftDeleteModel):
     candidate = models.ForeignKey(
         Candidate,
@@ -396,6 +402,45 @@ class IntegrityLog(TimeStampedModel):
 
     def __str__(self):
         return f"{self.session_id} - {self.event_type}"
+
+
+class SessionArtifact(TimeStampedModel):
+    session = models.ForeignKey(
+        InterviewSession,
+        on_delete=models.CASCADE,
+        related_name="artifacts",
+    )
+    candidate = models.ForeignKey(
+        Candidate,
+        on_delete=models.CASCADE,
+        related_name="session_artifacts",
+    )
+    artifact_type = models.CharField(max_length=50)
+    file = models.FileField(upload_to=session_artifact_upload_to)
+    mime_type = models.CharField(max_length=100, blank=True)
+    file_size_bytes = models.PositiveIntegerField(default=0)
+    metadata = models.JSONField(default=dict, blank=True)
+    uploaded_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_session_artifacts",
+    )
+    uploaded_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Session Artifact"
+        verbose_name_plural = "Session Artifacts"
+        indexes = [
+            models.Index(fields=["session", "artifact_type"]),
+            models.Index(fields=["candidate", "artifact_type"]),
+            models.Index(fields=["uploaded_at"]),
+        ]
+        ordering = ["-uploaded_at"]
+
+    def __str__(self):
+        return f"{self.session_id} - {self.artifact_type}"
 
 
 class ObservedTaskDefinition(TimeStampedModel):

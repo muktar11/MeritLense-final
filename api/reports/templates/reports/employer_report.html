@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 14mm 24mm 14mm;
+    }
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 11px;
+      color: #1f2937;
+      line-height: 1.45;
+    }
+    .footer {
+      position: fixed;
+      bottom: -12mm;
+      left: 0;
+      right: 0;
+      font-size: 9px;
+      color: #4b5563;
+      border-top: 1px solid #d1d5db;
+      padding-top: 6px;
+    }
+    .page {
+      page-break-after: always;
+    }
+    .page:last-child {
+      page-break-after: auto;
+    }
+    h1, h2, h3 {
+      margin: 0 0 8px 0;
+    }
+    h1 {
+      font-size: 20px;
+      color: #111827;
+    }
+    h2 {
+      font-size: 14px;
+      color: #111827;
+      border-bottom: 1px solid #e5e7eb;
+      padding-bottom: 4px;
+      margin-top: 14px;
+    }
+    .muted {
+      color: #6b7280;
+    }
+    .grid {
+      display: table;
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .row {
+      display: table-row;
+    }
+    .cell {
+      display: table-cell;
+      vertical-align: top;
+      padding: 6px 8px 6px 0;
+    }
+    .summary-box {
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+    }
+    .pill {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-weight: bold;
+      font-size: 10px;
+    }
+    .green { background: #dcfce7; color: #166534; }
+    .yellow { background: #fef3c7; color: #92400e; }
+    .red { background: #fee2e2; color: #991b1b; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+    th, td {
+      border: 1px solid #e5e7eb;
+      padding: 6px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f9fafb;
+    }
+    .coverage span {
+      display: inline-block;
+      margin-right: 10px;
+      margin-bottom: 4px;
+    }
+    .qr {
+      width: 90px;
+      height: 90px;
+    }
+    ul {
+      margin: 6px 0 0 18px;
+      padding: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="footer">
+    {{ report.classification }} | v{{ report.report_version }} | {{ report.generated_at|slice:":10" }} | Rule Engine {{ report.rule_engine_version }} | Legal Record: {{ report.legal_record_id }} | {{ report.legal_disclaimer }}
+  </div>
+
+  <div class="page">
+    <h1>{{ report.report_name }}</h1>
+    <div class="grid">
+      <div class="row">
+        <div class="cell" style="width: 72%;">
+          <div class="summary-box">
+            <strong>Candidate Reference:</strong> {{ report.assessment_context.candidate_reference }}<br />
+            <strong>Target Role:</strong> {{ report.assessment_context.target_role }}<br />
+            <strong>Assessment Date:</strong> {{ report.assessment_context.assessment_date }}<br />
+            <strong>Duration:</strong> {{ report.assessment_context.assessment_duration_minutes }} minutes
+          </div>
+          <div class="summary-box">
+            <strong>Overall Score:</strong> {{ report.executive_summary.overall_score }}<br />
+            <strong>Readiness Indicator:</strong>
+            {% if report.executive_summary.readiness_indicator.code == "READY" %}
+              <span class="pill green">🟢 {{ report.executive_summary.readiness_indicator.value }}</span>
+            {% elif report.executive_summary.readiness_indicator.code == "PARTIALLY_READY" %}
+              <span class="pill yellow">🟡 {{ report.executive_summary.readiness_indicator.value }}</span>
+            {% else %}
+              <span class="pill red">🔴 {{ report.executive_summary.readiness_indicator.value }}</span>
+            {% endif %}
+            <br />
+            <strong>Suggested Action:</strong> {{ report.executive_summary.suggested_action_display }}<br />
+            <strong>Assessment Reliability:</strong> {{ report.executive_summary.evaluation_reliability }}
+          </div>
+        </div>
+        <div class="cell" style="width: 28%; text-align: right;">
+          {% if qr_data_uri %}
+            <img class="qr" src="{{ qr_data_uri }}" alt="QR verification code" />
+          {% endif %}
+          <div class="muted" style="margin-top: 6px;">QR Verification</div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Top Strengths</h2>
+    <ul>
+      {% for item in report.executive_summary.top_strengths %}
+        <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+
+    <h2>Top Risks</h2>
+    <ul>
+      {% for item in report.executive_summary.top_risks %}
+        <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+
+    <h2>Assessment Coverage</h2>
+    <div class="coverage">
+      {% for item in report.assessment_context.assessment_coverage %}
+        <span>✓ {{ item }}</span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="page">
+    <h1>Assessment Context</h1>
+    <table>
+      <tr><th>Target Role</th><td>{{ report.assessment_context.target_role }}</td></tr>
+      <tr><th>Assessment Type</th><td>{{ report.assessment_context.assessment_type }}</td></tr>
+      <tr><th>Assessment Language</th><td>{{ report.assessment_context.assessment_language }}</td></tr>
+      <tr><th>Assessment Mode</th><td>{{ report.assessment_context.assessment_mode }}</td></tr>
+      <tr><th>Assessment Completeness</th><td>{{ report.assessment_context.assessment_completeness }}%</td></tr>
+      <tr><th>Framework Version</th><td>{{ report.assessment_framework_version }}</td></tr>
+      <tr><th>Role Profile Version</th><td>{{ report.assessment_context.role_profile_version }}</td></tr>
+    </table>
+
+    <h2>Assessment Methodology Summary</h2>
+    <table>
+      <tr><th>Domain</th><th>What Was Evaluated</th><th>Method</th></tr>
+      <tr><td>Safety Awareness</td><td>Emergency response, hazard identification, protocol knowledge</td><td>Scenario-based Q&A + Simulation</td></tr>
+      <tr><td>Hygiene & Standards</td><td>Cleanliness procedures, cross-contamination prevention</td><td>Scenario-based Q&A</td></tr>
+      <tr><td>Communication Ability</td><td>Language clarity, instruction following, response quality</td><td>AI voice analysis + Speech-to-Text</td></tr>
+      <tr><td>Practical Task Execution</td><td>Step sequence, completion rate, time management</td><td>Task Observation Module</td></tr>
+      <tr><td>Behavioral Indicators</td><td>Integrity, reliability, consistency under pressure</td><td>Behavioral Q&A + Rule Engine Consistency Layer</td></tr>
+    </table>
+  </div>
+
+  <div class="page">
+    <h1>Competency Breakdown</h1>
+    <table>
+      <tr>
+        <th>Competency</th>
+        <th>Score</th>
+        <th>Max</th>
+        <th>Percentage</th>
+        <th>Status</th>
+        <th>Explanation</th>
+      </tr>
+      {% for item in report.competency_breakdown %}
+      <tr>
+        <td>{{ item.competency_name|default:item.competency_code }}</td>
+        <td>{{ item.score }}</td>
+        <td>{{ item.max_score }}</td>
+        <td>{{ item.percentage }}%</td>
+        <td>{{ item.status }}</td>
+        <td>{{ item.explanation }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <div class="page">
+    <h1>Risk Indicators</h1>
+    <table>
+      <tr><th>Category</th><th>Level</th><th>Risk Score</th><th>Evidence</th></tr>
+      <tr><td>Safety Risk</td><td>{{ report.risk_indicators.safety_risk.level }}</td><td>{{ report.risk_indicators.safety_risk.risk_score }}</td><td>{{ report.risk_indicators.safety_risk.evidence|join:", " }}</td></tr>
+      <tr><td>Hygiene Risk</td><td>{{ report.risk_indicators.hygiene_risk.level }}</td><td>{{ report.risk_indicators.hygiene_risk.risk_score }}</td><td>{{ report.risk_indicators.hygiene_risk.evidence|join:", " }}</td></tr>
+      <tr><td>Communication Risk</td><td>{{ report.risk_indicators.communication_risk.level }}</td><td>{{ report.risk_indicators.communication_risk.risk_score }}</td><td>{{ report.risk_indicators.communication_risk.evidence|join:", " }}</td></tr>
+      <tr><td>Integrity Risk</td><td>{{ report.risk_indicators.integrity_risk.level }}</td><td>{{ report.risk_indicators.integrity_risk.risk_score }}</td><td>{{ report.risk_indicators.integrity_risk.evidence|join:", " }}</td></tr>
+    </table>
+
+    <h2>Evidence Summary</h2>
+    <table>
+      <tr><th>Category</th><th>Finding</th><th>Source</th><th>Severity</th></tr>
+      {% for item in report.evidence_summary %}
+      <tr>
+        <td>{{ item.category }}</td>
+        <td>{{ item.finding }}</td>
+        <td>{{ item.source }}</td>
+        <td>{{ item.severity }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  {% if report.improvement_plan %}
+  <div class="page">
+    <h1>Improvement Plan</h1>
+    <table>
+      <tr><th>Competency</th><th>Gap</th><th>Recommended Action</th><th>Priority</th></tr>
+      {% for item in report.improvement_plan %}
+      <tr>
+        <td>{{ item.competency }}</td>
+        <td>{{ item.gap }}</td>
+        <td>{{ item.recommended_action }}</td>
+        <td>{{ item.priority }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+</body>
+</html>

@@ -1,4 +1,6 @@
 from django.db.models import Q
+from django.http import FileResponse, JsonResponse
+from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -90,6 +92,59 @@ class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet
             request=request,
         )
         return Response(EvaluationReportService.export_payload(report))
+
+    @action(detail=True, methods=["get"], url_path="export-employer-payload")
+    def export_employer_payload(self, request, id=None):
+        report = self.get_object()
+        AuditLogService.log(
+            user=request.user,
+            action=AuditLogAction.REPORT_EXPORT_PAYLOAD_REQUESTED,
+            category=AuditLogCategory.EVALUATION,
+            description=f"Employer report payload requested for evaluation {report.evaluation.public_id}",
+            resource=report,
+            data={
+                "report_id": str(report.public_id),
+                "evaluation_id": str(report.evaluation.public_id),
+                "report_version": report.report_version,
+                "export_type": "employer_payload",
+            },
+            request=request,
+        )
+        return Response(EvaluationReportService.export_employer_payload(report))
+
+    @action(detail=True, methods=["get"], url_path="export-pdf")
+    def export_pdf(self, request, id=None):
+        report = self.get_object()
+        if not report.employer_pdf:
+            return Response({"detail": "No employer PDF has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
+        AuditLogService.log(
+            user=request.user,
+            action=AuditLogAction.REPORT_EXPORT_PAYLOAD_REQUESTED,
+            category=AuditLogCategory.EVALUATION,
+            description=f"Employer report PDF requested for evaluation {report.evaluation.public_id}",
+            resource=report,
+            data={
+                "report_id": str(report.public_id),
+                "evaluation_id": str(report.evaluation.public_id),
+                "report_version": report.report_version,
+                "export_type": "pdf",
+                "pdf_hash": report.pdf_hash,
+            },
+            request=request,
+        )
+        report.employer_pdf.open("rb")
+        return FileResponse(
+            report.employer_pdf,
+            content_type="application/pdf",
+            as_attachment=True,
+            filename=f"{report.report_number}.pdf",
+        )
+
+
+def verify_report(request, report_number):
+    report = get_object_or_404(EvaluationReport.objects.select_related("evaluation"), report_number=report_number)
+    payload = EvaluationReportService.build_public_verification_payload(report)
+    return JsonResponse(payload)
 
 
 def deny_report_access(*, user, evaluation=None, report=None, request=None, reason="Unauthorized report access"):

@@ -723,6 +723,125 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(response.status_code, 400, response.data)
         self.assertIn("Passport PDF could not be converted", str(response.data["detail"]))
 
+    def test_reference_image_endpoint_returns_image_passport_directly(self):
+        self.candidate.passport_document.save("passport-reference.jpg", ContentFile(b"passport-image-bytes"), save=True)
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        response = token_client.get(
+            f"/api/v1/interviews/{session_id}/prechecks/reference-image/",
+            {"token": access_token},
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/jpeg")
+        self.assertEqual(b"".join(response.streaming_content), b"passport-image-bytes")
+
+    def test_reference_image_endpoint_converts_pdf_passport_to_png(self):
+        self.candidate.passport_document.save("passport.pdf", make_file(), save=True)
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        response = token_client.get(
+            f"/api/v1/interviews/{session_id}/prechecks/reference-image/",
+            {"token": access_token},
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/png")
+
+    def test_reference_image_endpoint_falls_back_to_profile_photo_when_pdf_conversion_fails(self):
+        self.candidate.passport_document.save("broken-passport.pdf", ContentFile(b"not-a-real-pdf"), save=True)
+        self.candidate.profile_photo.save("candidate-profile.jpg", ContentFile(b"profile-image-bytes"), save=True)
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        response = token_client.get(
+            f"/api/v1/interviews/{session_id}/prechecks/reference-image/",
+            {"token": access_token},
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"profile-image-bytes")
+
+    def test_reference_image_endpoint_returns_404_when_conversion_fails_and_no_fallback(self):
+        self.candidate.passport_document.save("broken-passport.pdf", ContentFile(b"not-a-real-pdf"), save=True)
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        response = token_client.get(
+            f"/api/v1/interviews/{session_id}/prechecks/reference-image/",
+            {"token": access_token},
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("Passport PDF could not be converted", str(response.data["detail"]))
+
+    def test_reference_image_endpoint_rejects_missing_or_invalid_token(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        token_client = APIClient()
+
+        response = token_client.get(f"/api/v1/interviews/{session_id}/prechecks/reference-image/")
+
+        self.assertEqual(response.status_code, 403)
+
     def test_integrity_event_endpoint_records_webcam_frame_artifact(self):
         create_response = self.client.post(
             "/api/v1/interviews/",

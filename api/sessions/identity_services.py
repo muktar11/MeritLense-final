@@ -693,6 +693,41 @@ class InterviewSessionPrecheckService:
 
         return metadata, resolved_id_document_file, provider_id_document_file
 
+    @classmethod
+    def resolve_reference_image_file(cls, candidate):
+        """Resolve the candidate's own reference image for display/client-side comparison.
+
+        Reuses the same PDF-conversion and profile-photo-fallback logic as the
+        provider-facing verification flow above, but only ever looks at the
+        candidate's stored documents (no fresh upload involved), since this is
+        used to hand a usable reference image back to the candidate's own
+        browser for client-side face matching.
+        """
+        passport = getattr(candidate, "passport_document", None)
+        profile_photo = getattr(candidate, "profile_photo", None)
+
+        if not passport:
+            if profile_photo:
+                return profile_photo
+            raise IdentityVerificationError(
+                "No reference image is available for this candidate. Upload a passport or profile photo.",
+                code="identity_verification_reference_image_required",
+            )
+
+        if not cls._is_pdf_reference_file(passport):
+            return passport
+
+        try:
+            return cls._convert_pdf_reference_to_image(passport)
+        except IdentityVerificationError as conversion_error:
+            if profile_photo:
+                return profile_photo
+            raise IdentityVerificationError(
+                "Passport PDF could not be converted into a face-match image and no profile photo is available. Upload an image ID document or add a profile photo.",
+                code="identity_verification_reference_image_required",
+                metadata={"conversion_error": str(conversion_error)},
+            ) from conversion_error
+
     @staticmethod
     def _is_pdf_reference_file(uploaded_file):
         content_type = str(getattr(uploaded_file, "content_type", "") or "").lower()

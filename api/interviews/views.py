@@ -1,3 +1,6 @@
+import mimetypes
+
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
@@ -504,6 +507,22 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             "artifact": SessionArtifactSerializer(artifact, context={"request": request}).data if artifact else None,
         }
         return Response(payload)
+
+    @extend_schema(request=None, responses={200: bytes})
+    @action(detail=True, methods=["get"], url_path="prechecks/reference-image")
+    def identity_reference_image(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        try:
+            reference_file = InterviewSessionPrecheckService.resolve_reference_image_file(session.candidate)
+        except IdentityVerificationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
+        InterviewSessionPrecheckService._rewind_file(reference_file)
+        content_type = getattr(reference_file, "content_type", None)
+        if not content_type:
+            content_type, _ = mimetypes.guess_type(getattr(reference_file, "name", "") or "")
+            content_type = content_type or "application/octet-stream"
+        return FileResponse(reference_file, content_type=content_type)
 
     @extend_schema(request=SessionIdentityVerificationSerializer, responses={200: dict})
     @action(detail=True, methods=["post"], url_path="prechecks/identity-verify")

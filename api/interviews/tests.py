@@ -18,7 +18,7 @@ from api.core.constants import AuditLogAction, CoverageLevel, InterviewEvaluatio
 from api.interviews.models import InterviewConfiguration, InterviewRubric, PackageSessionConfig, RolePackageCoverage
 from api.interviews.voice_services import VoiceProviderError
 from api.questions.models import QuestionTemplate
-from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionObservedTask, TaskObservationResult
+from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionArtifact, SessionObservedTask, TaskObservationResult
 from api.translation.models import CandidateResponseInterpretation, CandidateResponseTranslation, EvaluationInputArtifact
 from api.evaluations.models import Evaluation
 from meritlense.asgi import application
@@ -26,6 +26,10 @@ from meritlense.asgi import application
 
 def make_file(name="passport.pdf", content=b"passport"):
     return SimpleUploadedFile(name, content, content_type="application/pdf")
+
+
+def make_image(name="photo.jpg", content=b"fake-image"):
+    return SimpleUploadedFile(name, content, content_type="image/jpeg")
 
 
 class InterviewSessionApiTests(APITestCase):
@@ -363,6 +367,213 @@ class InterviewSessionApiTests(APITestCase):
         )
         self.assertEqual(complete_response.status_code, 200)
         self.assertEqual(complete_response.data["status"], "COMPLETED")
+
+    def test_candidate_precheck_flow_supports_token_start(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        consent = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/consent/",
+            {
+                "token": access_token,
+                "signatory_name": "Dawit Session",
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(consent.status_code, 200, consent.data)
+
+        privacy = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/privacy-acknowledgement/",
+            {
+                "token": access_token,
+                "metadata": {"screen": "candidate-start"},
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(privacy.status_code, 200, privacy.data)
+
+        device = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/device-check/",
+            {
+                "token": access_token,
+                "passed": True,
+                "metadata": {"camera": "ok", "microphone": "ok"},
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(device.status_code, 200, device.data)
+
+        verbal = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/verbal-confirmation/",
+            {
+                "token": access_token,
+                "recording_path": "candidate/verbal-confirmation.webm",
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(verbal.status_code, 200, verbal.data)
+
+        identity = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/identity-verify/",
+            {
+                "token": access_token,
+                "face_match_score": "93.50",
+                "single_face_detected": True,
+                "liveness_passed": True,
+                "metadata": {"source": "candidate-ui"},
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(identity.status_code, 200, identity.data)
+        self.assertTrue(identity.data["verification"]["identity_verified"])
+        self.assertEqual(identity.data["precheck_status"]["status"], "READY")
+
+        start_response = token_client.post(
+            f"/api/v1/interviews/{session_id}/start/",
+            {"token": access_token},
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(start_response.status_code, 200, start_response.data)
+        self.assertEqual(start_response.data["status"], "IN_PROGRESS")
+
+        session = InterviewSession.objects.get(public_id=session_id)
+        self.assertTrue(session.identity_verified)
+        self.assertEqual(str(session.face_match_score), "93.50")
+        self.assertTrue(session.candidate_prechecks_complete())
+        self.assertIsNotNone(session.candidate_consent_agreement_id)
+        self.assertIsNotNone(session.privacy_notice_acknowledged_at)
+        self.assertIsNotNone(session.device_check_completed_at)
+        self.assertIsNotNone(session.verbal_confirmation_recorded_at)
+
+    def test_identity_verification_accepts_provider_result_payload(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        response = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/identity-verify/",
+            {
+                "token": access_token,
+                "provider_result": {
+                    "provider": "AZURE_FACE",
+                    "verification_status": "VERIFIED",
+                    "face_match_score": 96.2,
+                    "single_face_detected": True,
+                    "liveness_passed": True,
+                    "reason": "Provider face match passed",
+                },
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["verification"]["provider"], "AZURE_FACE")
+        self.assertTrue(response.data["verification"]["identity_verified"])
+        session = InterviewSession.objects.get(public_id=session_id)
+        self.assertEqual(session.verification_status, "VERIFIED")
+        self.assertEqual(str(session.face_match_score), "96.20")
+
+    def test_integrity_event_endpoint_records_webcam_frame_artifact(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        response = token_client.post(
+            f"/api/v1/interviews/{session_id}/integrity-events/",
+            {
+                "token": access_token,
+                "event_type": "MULTIPLE_FACES_DETECTED",
+                "severity": "WARNING",
+                "frame_file": make_image("frame.jpg", b"frame-bytes"),
+            },
+            format="multipart",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], "RECORDED")
+        self.assertEqual(response.data["integrity_event"]["event_type"], "MULTIPLE_FACES_DETECTED")
+
+        session = InterviewSession.objects.get(public_id=session_id)
+        latest_log = session.integrity_logs.first()
+        self.assertIsNotNone(latest_log)
+        self.assertEqual(latest_log.event_type, "MULTIPLE_FACES_DETECTED")
+
+        artifact = SessionArtifact.objects.get(session=session, artifact_type="WEBCAM_FRAME")
+        self.assertEqual(artifact.mime_type, "image/jpeg")
+        self.assertEqual(artifact.file_size_bytes, len(b"frame-bytes"))
+
+    def test_integrity_event_can_auto_classify_multiple_faces_from_provider_payload(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        response = token_client.post(
+            f"/api/v1/interviews/{session_id}/integrity-events/",
+            {
+                "token": access_token,
+                "auto_analyze": True,
+                "provider_result": {
+                    "provider": "AZURE_FACE",
+                    "face_count": 2,
+                    "liveness_passed": True,
+                },
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["analysis"]["event_type"], "MULTIPLE_FACES_DETECTED")
+        self.assertEqual(response.data["integrity_event"]["event_type"], "MULTIPLE_FACES_DETECTED")
+        session = InterviewSession.objects.get(public_id=session_id)
+        latest_log = session.integrity_logs.first()
+        self.assertEqual(latest_log.event_type, "MULTIPLE_FACES_DETECTED")
+        self.assertFalse(session.single_face_detected)
 
     @patch("api.translation.services.AIProcessingOrchestrationService.auto_process_response_ai")
     def test_submit_response_triggers_automatic_ai_processing_for_text_answers(self, auto_process_mock):

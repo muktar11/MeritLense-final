@@ -10,7 +10,7 @@ from api.interviews.models import (
     RolePackageCoverage,
 )
 from api.questions.models import QuestionTemplate
-from api.sessions.models import CandidateResponse, InterviewSession, QuestionAudioArtifact, SessionQuestion
+from api.sessions.models import CandidateResponse, InterviewSession, QuestionAudioArtifact, SessionArtifact, SessionQuestion
 from api.sessions.models import ObservedTaskDefinition, SessionObservedTask, TaskObservationResult
 
 
@@ -617,6 +617,121 @@ class SessionTranscriptionSerializer(serializers.Serializer):
             return get_by_identifier(session.responses.all(), value)
         except CandidateResponse.DoesNotExist:
             raise serializers.ValidationError("Response not found")
+
+
+class SessionConsentCaptureSerializer(serializers.Serializer):
+    token = serializers.CharField(required=False, allow_blank=True)
+    signatory_name = serializers.CharField()
+
+
+class SessionPrivacyAcknowledgementSerializer(serializers.Serializer):
+    token = serializers.CharField(required=False, allow_blank=True)
+    metadata = serializers.DictField(required=False, default=dict)
+
+
+class SessionDeviceCheckSerializer(serializers.Serializer):
+    token = serializers.CharField(required=False, allow_blank=True)
+    passed = serializers.BooleanField(default=True)
+    metadata = serializers.DictField(required=False, default=dict)
+
+
+class SessionVerbalConfirmationSerializer(serializers.Serializer):
+    token = serializers.CharField(required=False, allow_blank=True)
+    recording_file = serializers.FileField(required=False, allow_null=True)
+    recording_path = serializers.CharField(required=False, allow_blank=True, default="")
+    metadata = serializers.DictField(required=False, default=dict)
+
+    def validate(self, attrs):
+        if not attrs.get("recording_file") and not attrs.get("recording_path", "").strip():
+            raise serializers.ValidationError(
+                {"recording_file": "Provide either recording_file or recording_path."}
+            )
+        return attrs
+
+
+class SessionIdentityVerificationSerializer(serializers.Serializer):
+    token = serializers.CharField(required=False, allow_blank=True)
+    id_document_file = serializers.FileField(required=False, allow_null=True)
+    selfie_image_file = serializers.FileField(required=False, allow_null=True)
+    provider_result = serializers.JSONField(required=False)
+    face_match_score = serializers.DecimalField(
+        required=False,
+        max_digits=5,
+        decimal_places=2,
+        min_value=0,
+        max_value=100,
+    )
+    single_face_detected = serializers.BooleanField(required=False)
+    liveness_passed = serializers.BooleanField(required=False, default=True)
+    metadata = serializers.DictField(required=False, default=dict)
+
+
+class SessionIntegrityEventSerializer(serializers.Serializer):
+    token = serializers.CharField(required=False, allow_blank=True)
+    event_type = serializers.CharField(required=False, allow_blank=True)
+    severity = serializers.CharField(required=False, default="INFO")
+    frame_file = serializers.FileField(required=False, allow_null=True)
+    provider_result = serializers.JSONField(required=False)
+    single_face_detected = serializers.BooleanField(required=False)
+    face_count = serializers.IntegerField(required=False, min_value=0)
+    liveness_passed = serializers.BooleanField(required=False, default=True)
+    auto_analyze = serializers.BooleanField(required=False, default=False)
+    details = serializers.DictField(required=False, default=dict)
+
+    def validate(self, attrs):
+        if (
+            not attrs.get("event_type", "").strip()
+            and not attrs.get("auto_analyze")
+            and not attrs.get("provider_result")
+            and attrs.get("single_face_detected") is None
+            and attrs.get("face_count") is None
+            and attrs.get("liveness_passed") is True
+        ):
+            raise serializers.ValidationError(
+                {"event_type": "Provide event_type or enable automatic integrity analysis input."}
+            )
+        return attrs
+
+
+class SessionArtifactSerializer(PublicIdModelSerializer):
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SessionArtifact
+        fields = [
+            "id",
+            "artifact_type",
+            "file",
+            "file_url",
+            "mime_type",
+            "file_size_bytes",
+            "metadata",
+            "uploaded_at",
+        ]
+        read_only_fields = fields
+
+    def get_file_url(self, obj):
+        request = self.context.get("request")
+        if not obj.file:
+            return ""
+        if request is None:
+            return obj.file.url
+        return request.build_absolute_uri(obj.file.url)
+
+
+class SessionPrecheckStatusSerializer(serializers.Serializer):
+    session_id = serializers.CharField()
+    status = serializers.CharField()
+    candidate_prechecks_complete = serializers.BooleanField()
+    verification_status = serializers.CharField()
+    identity_verified = serializers.BooleanField()
+    face_match_score = serializers.CharField(allow_null=True)
+    single_face_detected = serializers.BooleanField()
+    candidate_consent_completed = serializers.BooleanField()
+    privacy_notice_acknowledged = serializers.BooleanField()
+    device_check_completed = serializers.BooleanField()
+    verbal_confirmation_completed = serializers.BooleanField()
+    latest_integrity_event = serializers.JSONField(allow_null=True)
 
 
 class ResponseAIActionSerializer(serializers.Serializer):

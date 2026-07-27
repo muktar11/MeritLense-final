@@ -22,8 +22,8 @@ class EvaluationReportError(Exception):
 
 
 class EvaluationReportService:
-    REPORT_VERSION = "1.2"
-    API_SCHEMA_VERSION = "1.2"
+    REPORT_VERSION = "1.3"
+    API_SCHEMA_VERSION = "1.3"
     ASSESSMENT_FRAMEWORK_VERSION = "ML-RI-1.0"
     LEGAL_DISCLAIMER = (
         "This report provides decision support only and does not constitute an employment decision. "
@@ -493,6 +493,12 @@ class EvaluationReportService:
             human_review_flags=human_review_flags,
             response_evidence_summary=response_evidence_summary,
         )
+        assessment_quality = cls._derive_assessment_quality(
+            session=session,
+            summary=summary,
+            human_review_flags=human_review_flags,
+            response_evidence_summary=response_evidence_summary,
+        )
         consent_summary = cls._build_consent_summary(session)
         identity_verification = cls._build_identity_verification_summary(session)
         audit_log = cls._build_audit_log_stub(evaluation=evaluation, generated_at=generated_at)
@@ -527,11 +533,12 @@ class EvaluationReportService:
                 "assessment_date": (session.ended_at or generated_at).date().isoformat(),
                 "assessment_duration_minutes": cls._derive_assessment_duration_minutes(session),
                 "assessment_completeness": cls._derive_assessment_completeness(summary),
+                "assessment_quality": assessment_quality,
                 "assessment_coverage": cls._derive_assessment_coverage(session),
             },
             "executive_summary": {
-                "overall_score": cls._rounded_whole(summary.overall_percentage),
                 "readiness_indicator": readiness_indicator,
+                "overall_score": cls._rounded_whole(summary.overall_percentage),
                 "readiness_reason": {
                     "employer_message": employer_message,
                     "internal_reason": readiness_reason,
@@ -547,6 +554,7 @@ class EvaluationReportService:
                 "top_source": "Rule Engine — competency score ranking",
                 "suggested_action": suggested_action,
                 "suggested_action_display": suggested_action_display,
+                "assessment_scope": "Pre-employment Workforce Readiness Only",
                 "evaluation_reliability": reliability,
                 "reliability_factors": reliability_factors,
             },
@@ -884,20 +892,54 @@ class EvaluationReportService:
     def _derive_evaluation_reliability(cls, *, session, summary, human_review_flags, response_evidence_summary):
         factors = []
         completeness = cls._derive_assessment_completeness(summary)
-        factors.append(f"Assessment completeness {completeness}%")
         stt_scores = [
             item.get("traceability", {}).get("transcript_reference", {}).get("confidence")
             for item in response_evidence_summary
             if item.get("traceability", {}).get("transcript_reference", {}).get("confidence") is not None
         ]
         avg_stt = sum(float(score) for score in stt_scores) / len(stt_scores) if stt_scores else 0.9
-        factors.append("Audio quality: Good" if avg_stt >= 0.8 else "Audio quality: Review Recommended")
-        factors.append("Response consistency: High" if not human_review_flags else "Response consistency: Review Recommended")
+        if completeness >= 90:
+            factors.append("Complete interview")
+        else:
+            factors.append(f"Interview completeness {completeness}%")
+        if session.task_observation_enabled:
+            factors.append("Practical observation included")
+        if avg_stt >= 0.8:
+            factors.append("Good audio quality")
+        else:
+            factors.append("Audio quality requires review")
+        if not human_review_flags:
+            factors.append("High response consistency")
+        else:
+            factors.append("Response consistency requires review")
         if human_review_flags:
             return "Medium", factors
         if completeness >= 90 and avg_stt >= 0.8:
             return "High", factors
         return "Low", factors
+
+    @classmethod
+    def _derive_assessment_quality(cls, *, session, summary, human_review_flags, response_evidence_summary):
+        completeness = cls._derive_assessment_completeness(summary)
+        duration_minutes = cls._derive_assessment_duration_minutes(session)
+        target_duration = (
+            getattr(getattr(session, "package_session_config", None), "duration_minutes", None)
+            or getattr(getattr(session, "config", None), "duration_minutes", None)
+            or 0
+        )
+        duration_ratio = (duration_minutes / target_duration) if target_duration else 1
+        stt_scores = [
+            item.get("traceability", {}).get("transcript_reference", {}).get("confidence")
+            for item in response_evidence_summary
+            if item.get("traceability", {}).get("transcript_reference", {}).get("confidence") is not None
+        ]
+        avg_stt = sum(float(score) for score in stt_scores) / len(stt_scores) if stt_scores else 0.9
+
+        if completeness >= 90 and avg_stt >= 0.85 and duration_ratio >= 0.5 and not human_review_flags:
+            return "Excellent"
+        if completeness >= 75 and avg_stt >= 0.7 and duration_ratio >= 0.35:
+            return "Good"
+        return "Limited"
 
     @classmethod
     def _build_consent_summary(cls, session):
@@ -1039,19 +1081,25 @@ class EvaluationReportService:
             f"Assessment Date: {context.get('assessment_date', '')}",
             f"Assessment Status: {context.get('assessment_status', '')}",
             f"Assessment Duration Minutes: {context.get('assessment_duration_minutes', '')}",
+            f"Assessment Quality: {context.get('assessment_quality', '')}",
             f"Candidate Reference: {context.get('candidate_reference', '')}",
             f"Interface Language: {context.get('interface_language', '')}",
             f"Response Language: {context.get('response_language', '')}",
             "",
             "Executive Summary",
             f"Readiness Indicator: {readiness.get('label', '')} ({readiness.get('code', '')})",
-            f"Readiness Reason: {summary.get('readiness_reason', '')}",
-            f"Overall Score: {summary.get('overall_score_percentage', '')}%",
+            f"Readiness Reason: {(summary.get('readiness_reason') or {}).get('employer_message', '')}",
+            f"Overall Score: {summary.get('overall_score', '')}%",
+            f"Assessment Scope: {summary.get('assessment_scope', '')}",
             f"Suggested Action: {summary.get('suggested_action', '')}",
             f"Evaluation Reliability: {summary.get('evaluation_reliability', '')}",
+        ]
+        for factor in summary.get("reliability_factors", []):
+            lines.append(f"  - {factor}")
+        lines.extend([
             "",
             "Risk Indicators",
-        ]
+        ])
 
         if risk_indicators:
             for risk_name, risk in risk_indicators.items():

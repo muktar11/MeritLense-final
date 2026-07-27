@@ -48,7 +48,7 @@ class EvaluationReport(TimeStampedModel):
         related_name="evaluation_reports",
     )
     report_number = models.CharField(max_length=80, unique=True, db_index=True)
-    report_version = models.CharField(max_length=40, default="1.2")
+    report_version = models.CharField(max_length=40, default="1.3")
     report_status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,

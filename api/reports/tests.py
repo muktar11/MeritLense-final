@@ -255,13 +255,31 @@ class EvaluationReportApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["report_status"], EvaluationReport.STATUS_ACTIVE)
+        self.assertEqual(response.data["report_version"], "1.3")
         self.assertEqual(response.data["scoring_rule_version"], "week6-v1")
         self.assertEqual(response.data["rule_engine_version"], "v1.0")
         self.assertFalse(response.data["override_triggered"])
         self.assertEqual(response.data["readiness_indicator"], "جاهزية جزئية")
         self.assertTrue(response.data["requires_human_review"])
         self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_status"], "COMPLETED")
+        self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_quality"], "Limited")
         self.assertEqual(response.data["report_payload"]["executive_summary"]["readiness_indicator"]["code"], "PARTIALLY_READY")
+        self.assertEqual(
+            list(response.data["report_payload"]["executive_summary"].keys())[:2],
+            ["readiness_indicator", "overall_score"],
+        )
+        self.assertEqual(
+            response.data["report_payload"]["executive_summary"]["assessment_scope"],
+            "Pre-employment Workforce Readiness Only",
+        )
+        self.assertIn(
+            "Complete interview",
+            response.data["report_payload"]["executive_summary"]["reliability_factors"],
+        )
+        self.assertIn(
+            "Response consistency requires review",
+            response.data["report_payload"]["executive_summary"]["reliability_factors"],
+        )
         self.assertEqual(response.data["report_payload"]["rule_engine_version"], "v1.0")
         self.assertEqual(
             response.data["report_payload"]["legal_record_id"],
@@ -282,6 +300,7 @@ class EvaluationReportApiTests(TestCase):
 
         report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status=EvaluationReport.STATUS_ACTIVE)
         self.assertEqual(report.report_payload["report_name"], "MeritLense Workforce Readiness Assessment Report")
+        self.assertEqual(report.report_version, "1.3")
         self.assertEqual(report.rule_engine_version, "v1.0")
         self.assertEqual(report.readiness_indicator, "جاهزية جزئية")
         self.assertFalse(report.override_triggered)

@@ -2,6 +2,7 @@ import asyncio
 import json
 import shutil
 import tempfile
+from decimal import Decimal
 from unittest.mock import patch
 
 from asgiref.testing import ApplicationCommunicator
@@ -688,6 +689,38 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(captured["metadata"]["provider_reference_source"], "candidate_profile_photo")
         self.assertEqual(captured["metadata"]["provider_reference_fallback_reason"], "pdf_conversion_failed")
         self.assertIn("pdf_conversion_error", captured["metadata"])
+
+    def test_identity_verification_preserves_zero_face_match_score(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        response = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/identity-verify/",
+            {
+                "token": access_token,
+                "selfie_image_file": make_image("live-selfie.jpg", b"selfie-bytes"),
+                "face_match_score": "0",
+                "single_face_detected": "false",
+            },
+            format="multipart",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["verification"]["face_match_score"], "0.00")
+        self.assertFalse(response.data["verification"]["identity_verified"])
+        session = InterviewSession.objects.get(public_id=session_id)
+        self.assertEqual(session.face_match_score, Decimal("0.00"))
 
     @override_settings(
         IDENTITY_VERIFICATION_PROVIDER="AZURE_FACE",

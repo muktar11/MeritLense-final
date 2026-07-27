@@ -263,11 +263,11 @@ class DynamicIdentityVerificationProvider:
 
     def _normalize_result(self, payload, *, metadata=None):
         metadata = metadata or {}
-        raw_score = (
-            payload.get("face_match_score")
-            or payload.get("similarity_score")
-            or payload.get("score")
-        )
+        raw_score = payload.get("face_match_score")
+        if raw_score is None:
+            raw_score = payload.get("similarity_score")
+        if raw_score is None:
+            raw_score = payload.get("score")
         face_match_score = _parse_decimal(raw_score)
         face_count = payload.get("face_count")
 

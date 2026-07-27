@@ -23,6 +23,8 @@ jobs:
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
             set -e
+            sudo -n apt-get update -qq
+            sudo -n apt-get install -y poppler-utils -qq
             cd /home/azureuser/meritlense
             git fetch origin main
             git reset --hard origin/main

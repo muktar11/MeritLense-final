@@ -125,6 +125,8 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
     privacy_notice_acknowledged_at = models.DateTimeField(null=True, blank=True)
     privacy_notice_ip_address = models.GenericIPAddressField(null=True, blank=True)
     device_check_completed_at = models.DateTimeField(null=True, blank=True)
+    integrity_violation_count = models.PositiveIntegerField(default=0)
+    paused_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Interview Session"
@@ -226,6 +228,21 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
         self.ended_at = timezone.now()
         self.last_activity_at = self.ended_at
         self.save(update_fields=["status", "ended_at", "last_activity_at", "updated_at"])
+
+    def pause_for_integrity(self):
+        self.status = InterviewSessionStatus.PAUSED
+        self.paused_at = timezone.now()
+        self.save(update_fields=["status", "paused_at", "updated_at"])
+
+    def resume_from_pause(self):
+        self.status = InterviewSessionStatus.IN_PROGRESS
+        self.paused_at = None
+        self.save(update_fields=["status", "paused_at", "updated_at"])
+
+    def terminate_for_integrity(self):
+        self.status = InterviewSessionStatus.FAILED
+        self.ended_at = timezone.now()
+        self.save(update_fields=["status", "ended_at", "updated_at"])
 
     @classmethod
     def build_expiry(cls, duration_minutes, buffer_hours=24):

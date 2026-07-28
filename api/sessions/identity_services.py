@@ -23,7 +23,7 @@ from api.core.constants import (
     InterviewSessionStatus,
 )
 
-from .models import SessionArtifact
+from .models import IntegrityLog, SessionArtifact
 
 
 class IdentityVerificationError(Exception):
@@ -890,7 +890,84 @@ class InterviewSessionPrecheckService:
             session.single_face_detected = analysis["single_face_detected"]
             session.save(update_fields=["single_face_detected", "updated_at"])
 
+        cls._apply_integrity_escalation(session=session, log=log, actor=actor)
+
         return log, artifact, analysis
+
+    MULTIPLE_FACES_TERMINATION_THRESHOLD = 3
+
+    @classmethod
+    def _apply_integrity_escalation(cls, *, session, log, actor=None):
+        # Ongoing in-interview monitoring only - a brief "no face" reading
+        # (candidate stepping out of frame momentarily) stays a soft, non-
+        # counted nudge. This escalation is specifically about a second
+        # person being detected, which is an unambiguous integrity problem.
+        from .services import InterviewSessionService, InterviewSessionSocketRegistry, session_event_payload
+
+        if log.event_type == "MULTIPLE_FACES_DETECTED":
+            previous = (
+                IntegrityLog.objects.filter(session=session)
+                .exclude(pk=log.pk)
+                .order_by("-detected_at")
+                .first()
+            )
+            is_new_onset = previous is None or previous.event_type != "MULTIPLE_FACES_DETECTED"
+            if not is_new_onset:
+                return
+
+            session.integrity_violation_count += 1
+            session.save(update_fields=["integrity_violation_count", "updated_at"])
+
+            if session.integrity_violation_count >= cls.MULTIPLE_FACES_TERMINATION_THRESHOLD:
+                session.terminate_for_integrity()
+                cls._log_event(
+                    session=session,
+                    actor=actor,
+                    action=AuditLogAction.SESSION_FAILED,
+                    description=f"Interview session terminated for {session.candidate.get_full_name()} after repeated integrity violations",
+                    severity=AuditLogSeverity.WARNING,
+                    data={"reason": "MULTIPLE_FACES_DETECTED", "violation_count": session.integrity_violation_count},
+                )
+                event_name = "SESSION_FAILED"
+            elif session.status == InterviewSessionStatus.IN_PROGRESS:
+                session.pause_for_integrity()
+                cls._log_event(
+                    session=session,
+                    actor=actor,
+                    action=AuditLogAction.SESSION_PAUSED,
+                    description=f"Interview session paused for {session.candidate.get_full_name()} - multiple faces detected",
+                    severity=AuditLogSeverity.WARNING,
+                    data={"reason": "MULTIPLE_FACES_DETECTED", "violation_count": session.integrity_violation_count},
+                )
+                event_name = "SESSION_PAUSED"
+            else:
+                return
+
+            InterviewSessionSocketRegistry.broadcast_sync(
+                str(session.public_id),
+                {"event": event_name, **session_event_payload(session)},
+            )
+            InterviewSessionService._broadcast_to_channel_layer(
+                str(session.public_id),
+                {"event": event_name, **session_event_payload(session)},
+            )
+        elif log.event_type == "SINGLE_FACE_CONFIRMED" and session.status == InterviewSessionStatus.PAUSED:
+            session.resume_from_pause()
+            cls._log_event(
+                session=session,
+                actor=actor,
+                action=AuditLogAction.SESSION_RESUMED,
+                description=f"Interview session resumed for {session.candidate.get_full_name()}",
+                data={"reason": "SINGLE_FACE_CONFIRMED"},
+            )
+            InterviewSessionSocketRegistry.broadcast_sync(
+                str(session.public_id),
+                {"event": "SESSION_RESUMED", **session_event_payload(session)},
+            )
+            InterviewSessionService._broadcast_to_channel_layer(
+                str(session.public_id),
+                {"event": "SESSION_RESUMED", **session_event_payload(session)},
+            )
 
     @classmethod
     def get_precheck_status_payload(cls, session):

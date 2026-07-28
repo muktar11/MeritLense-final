@@ -583,6 +583,8 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         return Response(
             {
                 "status": "RECORDED",
+                "session_status": session.status,
+                "integrity_violation_count": session.integrity_violation_count,
                 "integrity_event": {
                     "event_type": log.event_type,
                     "severity": log.severity,

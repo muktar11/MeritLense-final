@@ -710,6 +710,7 @@ class AuditLogAction:
     SESSION_READY = "SESSION_READY"
     SESSION_STARTED = "SESSION_STARTED"
     SESSION_PAUSED = "SESSION_PAUSED"
+    SESSION_RESUMED = "SESSION_RESUMED"
     SESSION_COMPLETED = "SESSION_COMPLETED"
     SESSION_FAILED = "SESSION_FAILED"
     SESSION_EXPIRED = "SESSION_EXPIRED"
@@ -897,6 +898,7 @@ class AuditLogAction:
         (SESSION_READY, "Session Ready"),
         (SESSION_STARTED, "Session Started"),
         (SESSION_PAUSED, "Session Paused"),
+        (SESSION_RESUMED, "Session Resumed"),
         (SESSION_COMPLETED, "Session Completed"),
         (SESSION_FAILED, "Session Failed"),
         (SESSION_EXPIRED, "Session Expired"),

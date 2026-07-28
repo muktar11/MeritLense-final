@@ -421,30 +421,18 @@ class InterviewSessionService:
                 session.save(update_fields=["status", "updated_at"])
                 events.append(("SESSION_READY", AuditLogAction.SESSION_READY))
             else:
-                # Preserve the current staff-start behavior for operations, but
-                # make it an explicit manual override instead of a silent bypass.
-                session.verification_status = IdentityVerificationStatus.VERIFIED
-                session.identity_verified = True
-                session.single_face_detected = True
+                # Staff still needs to be able to move a session to READY even
+                # though most of the precheck battery (consent, device check,
+                # verbal confirmation, privacy notice) has no candidate-facing
+                # UI yet - but identity verification now does (the webcam
+                # precheck screen on the candidate interview page), so unlike
+                # before, this no longer fakes identity_verified/
+                # verification_status/single_face_detected. The candidate
+                # goes through the real check themselves when they open their
+                # session link; leaving identity_verified at its default
+                # False is what makes that screen actually trigger.
                 session.status = InterviewSessionStatus.READY
-                session.save(
-                    update_fields=[
-                        "status",
-                        "verification_status",
-                        "identity_verified",
-                        "single_face_detected",
-                        "updated_at",
-                    ]
-                )
-                cls.log_integrity_event(
-                    session,
-                    event_type="MANUAL_VERIFICATION_OVERRIDE",
-                    severity="WARNING",
-                    details={
-                        "reason": "Session was started by staff before candidate prechecks were completed.",
-                        "started_by_user_id": actor.id if actor else None,
-                    },
-                )
+                session.save(update_fields=["status", "updated_at"])
                 events.append(("SESSION_READY", AuditLogAction.SESSION_READY))
         elif session.status == InterviewSessionStatus.CREATED and token_start:
             session.status = InterviewSessionStatus.READY

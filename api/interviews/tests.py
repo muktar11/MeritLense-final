@@ -380,6 +380,28 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(complete_response.status_code, 200)
         self.assertEqual(complete_response.data["status"], "COMPLETED")
 
+    def test_staff_starting_a_session_does_not_fake_identity_verification(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+
+        start_response = self.client.post(f"/api/v1/interviews/{session_id}/start/", {}, format="json")
+
+        self.assertEqual(start_response.status_code, 200, start_response.data)
+        self.assertEqual(start_response.data["status"], "IN_PROGRESS")
+        session = InterviewSession.objects.get(public_id=session_id)
+        self.assertFalse(session.identity_verified)
+        self.assertNotEqual(session.verification_status, "VERIFIED")
+        self.assertFalse(session.single_face_detected)
+        self.assertFalse(session.integrity_logs.filter(event_type="MANUAL_VERIFICATION_OVERRIDE").exists())
+
     def test_candidate_precheck_flow_supports_token_start(self):
         create_response = self.client.post(
             "/api/v1/interviews/",

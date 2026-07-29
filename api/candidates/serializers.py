@@ -15,7 +15,7 @@ class CandidateSerializer(PublicIdModelSerializer):
             'id', 'first_name', 'last_name', 'full_name', 'email',
             'passport_id', 'job_role', 'core_skills', 'skills_list',
             'preferred_language', 'status', 'passport_document',
-            'profile_photo', 'created_by', 'created_by_name',
+            'profile_photo', 'verification_photo', 'created_by', 'created_by_name',
             'company', 'company_name', 'shared_with',
             'created_at', 'updated_at'
         ]
@@ -65,13 +65,22 @@ class CandidateCreateSerializer(serializers.ModelSerializer):
         write_only=True,
         help_text="Upload profile photo (optional)"
     )
-    
+    verification_photo = serializers.ImageField(
+        required=False,
+        allow_null=True,
+        write_only=True,
+        help_text=(
+            "AI-cropped, user-confirmed close-up face photo used as the identity "
+            "verification reference instead of the full passport document (optional)"
+        )
+    )
+
     class Meta:
         model = Candidate
         fields = [
             'first_name', 'last_name', 'email', 'passport_id',
             'job_role', 'core_skills', 'preferred_language',
-            'passport_document', 'profile_photo'
+            'passport_document', 'profile_photo', 'verification_photo'
         ]
 
     def validate(self, attrs):
@@ -146,13 +155,21 @@ class CandidateUpdateSerializer(serializers.ModelSerializer):
         write_only=True,
         help_text="Upload new profile photo (optional)"
     )
-    
+    verification_photo = serializers.ImageField(
+        required=False,
+        write_only=True,
+        help_text=(
+            "AI-cropped, user-confirmed close-up face photo used as the identity "
+            "verification reference instead of the full passport document (optional)"
+        )
+    )
+
     class Meta:
         model = Candidate
         fields = [
             'first_name', 'last_name', 'email', 'passport_id',
             'job_role', 'core_skills', 'preferred_language',
-            'status', 'passport_document', 'profile_photo'
+            'status', 'passport_document', 'profile_photo', 'verification_photo'
         ]
 
     def validate(self, attrs):

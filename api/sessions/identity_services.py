@@ -646,11 +646,20 @@ class InterviewSessionPrecheckService:
         metadata=None,
     ):
         metadata = dict(metadata or {})
-        resolved_id_document_file = id_document_file or getattr(session.candidate, "passport_document", None)
+        candidate_verification_photo = getattr(session.candidate, "verification_photo", None)
+        candidate_passport_document = getattr(session.candidate, "passport_document", None)
+        resolved_id_document_file = id_document_file or candidate_verification_photo or candidate_passport_document
         provider_id_document_file = resolved_id_document_file
 
         if id_document_file is not None:
             metadata.setdefault("reference_document_source", "uploaded_id_document")
+            metadata.setdefault("reused_candidate_passport", False)
+        elif candidate_verification_photo and resolved_id_document_file is candidate_verification_photo:
+            # An AI-cropped, user-confirmed face photo derived from the passport
+            # at upload time - see Candidate.verification_photo. Not itself a
+            # fresh upload for this session, but distinct from the raw
+            # passport document for audit purposes.
+            metadata.setdefault("reference_document_source", "candidate_verification_photo")
             metadata.setdefault("reused_candidate_passport", False)
         elif resolved_id_document_file:
             metadata.setdefault("reference_document_source", "candidate_passport_document")
@@ -703,6 +712,14 @@ class InterviewSessionPrecheckService:
         used to hand a usable reference image back to the candidate's own
         browser for client-side face matching.
         """
+        verification_photo = getattr(candidate, "verification_photo", None)
+        if verification_photo:
+            # An AI-cropped, user-confirmed close-up of the face - produced at
+            # upload time specifically to be a reliable verification reference,
+            # so prefer it over the raw passport scan whenever it exists. Never
+            # needs PDF conversion (it's always saved as a JPEG crop).
+            return verification_photo
+
         passport = getattr(candidate, "passport_document", None)
         profile_photo = getattr(candidate, "profile_photo", None)
 

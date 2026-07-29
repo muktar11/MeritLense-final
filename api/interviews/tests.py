@@ -804,6 +804,32 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(response["Content-Type"], "image/jpeg")
         self.assertEqual(b"".join(response.streaming_content), b"passport-image-bytes")
 
+    def test_reference_image_endpoint_prefers_verification_photo_over_passport(self):
+        self.candidate.passport_document.save("passport-reference.jpg", ContentFile(b"passport-image-bytes"), save=True)
+        self.candidate.verification_photo.save("verification-crop.jpg", ContentFile(b"cropped-face-bytes"), save=True)
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        response = token_client.get(
+            f"/api/v1/interviews/{session_id}/prechecks/reference-image/",
+            {"token": access_token},
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"cropped-face-bytes")
+
     def test_reference_image_endpoint_converts_pdf_passport_to_png(self):
         self.candidate.passport_document.save("passport.pdf", make_file(), save=True)
 

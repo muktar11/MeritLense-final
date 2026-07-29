@@ -43,6 +43,7 @@ from api.accounts.models import User
                     "preferred_language": "EN",
                     "passport_document": "(binary file)",
                     "profile_photo": "(binary file, optional)",
+                    "verification_photo": "(binary file, optional)",
                 },
                 request_only=True,
             ),

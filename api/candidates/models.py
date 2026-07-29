@@ -39,6 +39,20 @@ class Candidate(TimeStampedModel, SoftDeleteModel):
         blank=True,
         help_text="Candidate profile photo"
     )
+
+    verification_photo = models.ImageField(
+        upload_to='candidates/photos/verification/',
+        validators=[FileExtensionValidator(['jpg', 'jpeg', 'png'])],
+        null=True,
+        blank=True,
+        help_text=(
+            "AI-cropped, candidate/staff-confirmed close-up of the face from the "
+            "passport document, used as the identity verification reference image "
+            "instead of the full document scan. Falls back to passport_document / "
+            "profile_photo when absent (e.g. candidates created before this field "
+            "existed, or uploads where a face crop couldn't be produced)."
+        )
+    )
     
     last_evaluation_date = models.DateTimeField(
         null=True,

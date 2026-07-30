@@ -43,6 +43,17 @@ ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", ["localhost", "127.0.0.1"])
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 STATIC_URL = "static/"
+
+# The frontend and backend are served from separate origins (e.g.
+# meritlense.com vs api.meritlense.com) - local FileSystemStorage's
+# default_storage.url() only returns a site-relative path ("/media/..."),
+# which resolves against whichever origin the *browser* is currently on,
+# not the API's. Any URL built by MediaStorageService.resolve_url() that
+# gets consumed directly by the frontend (e.g. <audio src>) needs to be
+# absolute. Empty by default (falls back to the old relative behavior) so
+# local dev - where frontend and backend commonly share an origin/proxy -
+# is unaffected without this being set.
+BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "").rstrip("/")
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 INSTALLED_APPS = [

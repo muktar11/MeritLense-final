@@ -1350,14 +1350,25 @@ class InterviewVoicePipelineService:
 
     @classmethod
     @transaction.atomic
-    def get_or_generate_question_audio(cls, *, session, actor=None):
+    def get_or_generate_question_audio(cls, *, session, actor=None, language_code=None):
         question, completed = InterviewSessionService.get_or_activate_current_question(session, actor=actor)
         if completed or question is None:
             raise ValueError("Session is already completed")
 
         tts_service = cls.tts_service_class()
-        language_code = session.tts_language_code or "en-US"
-        voice_name = (getattr(settings, "TTS_VOICE_MAP", {}) or {}).get(language_code) or "en-US-Standard-C"
+        # Candidate-selected read-aloud language, when given, overrides the
+        # session's default (set once at creation from candidate_language) -
+        # only for this playback; doesn't change the session's own record.
+        if language_code and language_code not in LANGUAGE_CODE_MAP.values():
+            raise ValueError(f"Unsupported read-aloud language: {language_code}")
+        language_code = language_code or session.tts_language_code or "en-US"
+        # No fallback to the English voice name here - a mismatched
+        # language/voice pair sent to the provider risks it reading the
+        # text with the wrong accent, or in the wrong language entirely.
+        # Omitting the name for a language we don't have a specific voice
+        # mapped for lets the provider pick an appropriate default voice
+        # for that language on its own.
+        voice_name = (getattr(settings, "TTS_VOICE_MAP", {}) or {}).get(language_code, "")
         existing = QuestionAudioArtifact.objects.filter(
             session=session,
             question=question,

@@ -129,13 +129,19 @@ class TextToSpeechService:
                 code="tts_not_configured",
             )
 
-        voice_name = self.voice_map.get(language_code) or self.voice_map.get("en-US") or "en-US-Standard-C"
+        # Only send a voice name when we actually have one mapped for this
+        # exact language - forcing the English voice name onto an unmapped
+        # language would send Google a mismatched language/voice pair
+        # (e.g. Arabic text with an English-named voice), which risks the
+        # wrong accent or pronunciation. Omitting it lets Google pick an
+        # appropriate default voice for the requested language on its own.
+        voice_name = self.voice_map.get(language_code, "")
+        voice_payload = {"languageCode": language_code}
+        if voice_name:
+            voice_payload["name"] = voice_name
         payload = {
             "input": {"text": text},
-            "voice": {
-                "languageCode": language_code,
-                "name": voice_name,
-            },
+            "voice": voice_payload,
             "audioConfig": {
                 "audioEncoding": self.audio_encoding,
             },

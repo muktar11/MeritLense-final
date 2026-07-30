@@ -574,6 +574,12 @@ class SessionTokenSerializer(serializers.Serializer):
     token = serializers.CharField(required=False, allow_blank=True)
 
 
+class QuestionAudioRequestSerializer(SessionTokenSerializer):
+    # Optional candidate-selected read-aloud language for this request only
+    # (e.g. "ar-SA") - falls back to the session's own default when omitted.
+    language_code = serializers.CharField(required=False, allow_blank=True)
+
+
 class SessionTaskCompletionSerializer(serializers.Serializer):
     token = serializers.CharField(required=False, allow_blank=True)
     event = serializers.CharField(required=False, allow_blank=True, default="TASK_COMPLETED")

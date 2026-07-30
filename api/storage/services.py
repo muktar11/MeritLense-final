@@ -82,10 +82,23 @@ class MediaStorageService:
         if not storage_key:
             return ""
         try:
-            return default_storage.url(storage_key)
+            url = default_storage.url(storage_key)
         except Exception:
             media_url = getattr(settings, "MEDIA_URL", "/media/")
-            return os.path.join(media_url.rstrip("/"), storage_key.lstrip("/"))
+            url = os.path.join(media_url.rstrip("/"), storage_key.lstrip("/"))
+        return cls._make_absolute(url)
+
+    @staticmethod
+    def _make_absolute(url):
+        # Local FileSystemStorage returns a site-relative URL ("/media/..."),
+        # which only resolves correctly if the browser is on the same origin
+        # that served it - not true here, where the frontend and backend are
+        # separate domains. See BACKEND_PUBLIC_URL for why this exists.
+        if url.startswith("/"):
+            backend_public_url = getattr(settings, "BACKEND_PUBLIC_URL", "")
+            if backend_public_url:
+                return f"{backend_public_url}{url}"
+        return url
 
     @classmethod
     def _build_file_details(cls, storage_key):

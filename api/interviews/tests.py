@@ -1006,7 +1006,7 @@ class InterviewSessionApiTests(APITestCase):
             {
                 "token": session.access_token,
                 "event_type": event_type,
-                "severity": "WARNING" if event_type in ("MULTIPLE_FACES_DETECTED", "CAMERA_UNAVAILABLE") else "INFO",
+                "severity": "WARNING" if event_type in ("MULTIPLE_FACES_DETECTED", "CAMERA_UNAVAILABLE", "NO_FACE_DETECTED") else "INFO",
             },
             format="json",
             HTTP_X_SESSION_TOKEN=session.access_token,
@@ -1147,6 +1147,41 @@ class InterviewSessionApiTests(APITestCase):
         session.refresh_from_db()
         self.assertEqual(session.integrity_violation_count, 2)
         self.assertEqual(session.status, "PAUSED")
+
+    def test_first_no_face_onset_pauses_session(self):
+        session = self._create_and_start_session()
+
+        response = self._post_integrity_event(session, "NO_FACE_DETECTED")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["session_status"], "PAUSED")
+        self.assertEqual(response.data["integrity_violation_count"], 1)
+        session.refresh_from_db()
+        self.assertEqual(session.status, "PAUSED")
+
+    def test_sustained_no_face_does_not_double_count(self):
+        session = self._create_and_start_session()
+
+        self._post_integrity_event(session, "NO_FACE_DETECTED")
+        second = self._post_integrity_event(session, "NO_FACE_DETECTED")
+
+        self.assertEqual(second.data["integrity_violation_count"], 1)
+        session.refresh_from_db()
+        self.assertEqual(session.integrity_violation_count, 1)
+
+    def test_third_no_face_onset_terminates_session(self):
+        session = self._create_and_start_session()
+
+        self._post_integrity_event(session, "NO_FACE_DETECTED")
+        self._post_integrity_event(session, "SINGLE_FACE_CONFIRMED")
+        self._post_integrity_event(session, "NO_FACE_DETECTED")
+        self._post_integrity_event(session, "SINGLE_FACE_CONFIRMED")
+        third = self._post_integrity_event(session, "NO_FACE_DETECTED")
+
+        self.assertEqual(third.data["session_status"], "FAILED")
+        self.assertEqual(third.data["integrity_violation_count"], 3)
+        session.refresh_from_db()
+        self.assertEqual(session.status, "FAILED")
 
     @patch("api.translation.services.AIProcessingOrchestrationService.auto_process_response_ai")
     def test_submit_response_triggers_automatic_ai_processing_for_text_answers(self, auto_process_mock):

@@ -913,14 +913,14 @@ class InterviewSessionPrecheckService:
 
     MULTIPLE_FACES_TERMINATION_THRESHOLD = 3
 
-    # Both are unambiguous integrity problems, distinct from a brief "no
-    # face" reading (candidate stepping out of frame momentarily, which
-    # stays a soft, non-counted nudge): a second person in frame, or the
-    # camera going off entirely (turned off, permission revoked, device
-    # disconnected) - the latter means nothing is being observed at all,
-    # which is at least as serious as a second person appearing. Both share
-    # the same violation counter and threshold.
-    ESCALATING_EVENT_TYPES = {"MULTIPLE_FACES_DETECTED", "CAMERA_UNAVAILABLE"}
+    # All three share the same violation counter and threshold. NO_FACE_DETECTED
+    # used to stay an uncounted soft nudge (candidate briefly stepping out of
+    # frame shouldn't be punished) - now that the frontend gives every one of
+    # these a real grace period (~10s) before ever reporting it at all, that
+    # protection lives there instead, so there's no longer a reason to also
+    # exempt a *sustained* "no face" reading from actually counting once it's
+    # been reported.
+    ESCALATING_EVENT_TYPES = {"MULTIPLE_FACES_DETECTED", "CAMERA_UNAVAILABLE", "NO_FACE_DETECTED"}
 
     @classmethod
     def _apply_integrity_escalation(cls, *, session, log, actor=None):

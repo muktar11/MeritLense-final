@@ -913,22 +913,32 @@ class InterviewSessionPrecheckService:
 
     MULTIPLE_FACES_TERMINATION_THRESHOLD = 3
 
+    # Both are unambiguous integrity problems, distinct from a brief "no
+    # face" reading (candidate stepping out of frame momentarily, which
+    # stays a soft, non-counted nudge): a second person in frame, or the
+    # camera going off entirely (turned off, permission revoked, device
+    # disconnected) - the latter means nothing is being observed at all,
+    # which is at least as serious as a second person appearing. Both share
+    # the same violation counter and threshold.
+    ESCALATING_EVENT_TYPES = {"MULTIPLE_FACES_DETECTED", "CAMERA_UNAVAILABLE"}
+
     @classmethod
     def _apply_integrity_escalation(cls, *, session, log, actor=None):
-        # Ongoing in-interview monitoring only - a brief "no face" reading
-        # (candidate stepping out of frame momentarily) stays a soft, non-
-        # counted nudge. This escalation is specifically about a second
-        # person being detected, which is an unambiguous integrity problem.
         from .services import InterviewSessionService, InterviewSessionSocketRegistry, session_event_payload
 
-        if log.event_type == "MULTIPLE_FACES_DETECTED":
+        if log.event_type in cls.ESCALATING_EVENT_TYPES:
             previous = (
                 IntegrityLog.objects.filter(session=session)
                 .exclude(pk=log.pk)
                 .order_by("-detected_at")
                 .first()
             )
-            is_new_onset = previous is None or previous.event_type != "MULTIPLE_FACES_DETECTED"
+            # A new onset is either the first violation ever, or a change
+            # from whatever the previous log entry was - including a switch
+            # between the two escalating types (e.g. camera comes back on
+            # but now shows a second person). A sustained instance of the
+            # *same* problem across repeated polls doesn't double-count.
+            is_new_onset = previous is None or previous.event_type != log.event_type
             if not is_new_onset:
                 return
 
@@ -943,7 +953,7 @@ class InterviewSessionPrecheckService:
                     action=AuditLogAction.SESSION_FAILED,
                     description=f"Interview session terminated for {session.candidate.get_full_name()} after repeated integrity violations",
                     severity=AuditLogSeverity.WARNING,
-                    data={"reason": "MULTIPLE_FACES_DETECTED", "violation_count": session.integrity_violation_count},
+                    data={"reason": log.event_type, "violation_count": session.integrity_violation_count},
                 )
                 event_name = "SESSION_FAILED"
             elif session.status == InterviewSessionStatus.IN_PROGRESS:
@@ -952,9 +962,9 @@ class InterviewSessionPrecheckService:
                     session=session,
                     actor=actor,
                     action=AuditLogAction.SESSION_PAUSED,
-                    description=f"Interview session paused for {session.candidate.get_full_name()} - multiple faces detected",
+                    description=f"Interview session paused for {session.candidate.get_full_name()} - {log.event_type.replace('_', ' ').lower()}",
                     severity=AuditLogSeverity.WARNING,
-                    data={"reason": "MULTIPLE_FACES_DETECTED", "violation_count": session.integrity_violation_count},
+                    data={"reason": log.event_type, "violation_count": session.integrity_violation_count},
                 )
                 event_name = "SESSION_PAUSED"
             else:

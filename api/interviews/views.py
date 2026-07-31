@@ -29,6 +29,7 @@ from api.reports.services import EvaluationReportService
 from .serializers import (
     CandidateResponseSerializer,
     InterviewConfigurationSerializer,
+    SessionCancelSerializer,
     InterviewSessionCreateSerializer,
     InterviewSessionSerializer,
     InterviewRubricSerializer,
@@ -50,6 +51,7 @@ from .serializers import (
     SessionPrecheckStatusSerializer,
     SessionPrivacyAcknowledgementSerializer,
     SessionQuestionSerializer,
+    SessionRescheduleSerializer,
     SessionResponseSubmitSerializer,
     SessionStartSerializer,
     SessionTaskCompletionSerializer,
@@ -260,6 +262,10 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             return SessionResponseSubmitSerializer
         if self.action == "start":
             return SessionStartSerializer
+        if self.action == "reschedule":
+            return SessionRescheduleSerializer
+        if self.action == "cancel":
+            return SessionCancelSerializer
         if self.action in {"retrieve", "list"}:
             return InterviewSessionSerializer
         return SessionTokenSerializer
@@ -276,6 +282,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             config=serializer.validated_data["config"],
             created_by=request.user,
             package_code=serializer.validated_data.get("package_code", ""),
+            scheduled_start_at=serializer.validated_data.get("scheduled_start_at"),
         )
         output = InterviewSessionSerializer(session, context={"request": request})
         return Response(output.data, status=status.HTTP_201_CREATED)
@@ -295,6 +302,44 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         serializer.is_valid(raise_exception=True)
         try:
             session = InterviewSessionService.start_session(session, actor=request.user if request.user.is_authenticated else None)
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        output = InterviewSessionSerializer(session, context={"request": request})
+        return Response(output.data)
+
+    @extend_schema(request=SessionRescheduleSerializer, responses={200: InterviewSessionSerializer})
+    @action(detail=True, methods=["post"], url_path="reschedule")
+    def reschedule(self, request, id=None):
+        session = self._get_session()
+        if not request.user.is_authenticated or not session.can_manage(request.user):
+            raise PermissionDenied("You do not have access to reschedule this interview session")
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            session = InterviewSessionService.reschedule_session(
+                session,
+                scheduled_start_at=serializer.validated_data["scheduled_start_at"],
+                actor=request.user if request.user.is_authenticated else None,
+            )
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        output = InterviewSessionSerializer(session, context={"request": request})
+        return Response(output.data)
+
+    @extend_schema(request=SessionCancelSerializer, responses={200: InterviewSessionSerializer})
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, id=None):
+        session = self._get_session()
+        if not request.user.is_authenticated or not session.can_manage(request.user):
+            raise PermissionDenied("You do not have access to cancel this interview session")
+        serializer = self.get_serializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        try:
+            session = InterviewSessionService.cancel_session(
+                session,
+                reason=serializer.validated_data.get("reason", ""),
+                actor=request.user if request.user.is_authenticated else None,
+            )
         except ValueError as exc:
             raise ValidationError({"detail": str(exc)}) from exc
         output = InterviewSessionSerializer(session, context={"request": request})

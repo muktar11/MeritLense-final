@@ -88,6 +88,7 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
     certificate_enabled = models.BooleanField(default=True)
     rubric_version = models.CharField(max_length=20, blank=True)
     question_set_version = models.CharField(max_length=20, blank=True)
+    scheduled_start_at = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     ended_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField()
@@ -127,6 +128,8 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
     device_check_completed_at = models.DateTimeField(null=True, blank=True)
     integrity_violation_count = models.PositiveIntegerField(default=0)
     paused_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason = models.TextField(blank=True)
 
     class Meta:
         verbose_name = "Interview Session"
@@ -215,6 +218,8 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
             raise ValueError("Cannot start expired session")
         if self.status == InterviewSessionStatus.COMPLETED:
             raise ValueError("Cannot restart completed session")
+        if self.scheduled_start_at and timezone.now() < self.scheduled_start_at:
+            raise ValueError("Cannot start session before its scheduled start time")
         if self.started_at is None:
             self.started_at = timezone.now()
         self.last_activity_at = timezone.now()
@@ -245,8 +250,9 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
         self.save(update_fields=["status", "ended_at", "updated_at"])
 
     @classmethod
-    def build_expiry(cls, duration_minutes, buffer_hours=24):
-        return timezone.now() + timedelta(minutes=duration_minutes, hours=buffer_hours)
+    def build_expiry(cls, duration_minutes, buffer_hours=24, anchor_time=None):
+        anchor = anchor_time or timezone.now()
+        return anchor + timedelta(minutes=duration_minutes, hours=buffer_hours)
 
 
 class SessionQuestion(TimeStampedModel):

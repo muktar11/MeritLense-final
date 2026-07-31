@@ -359,7 +359,7 @@ class QuestionGenerationService:
 class InterviewSessionService:
     @classmethod
     @transaction.atomic
-    def create_session(cls, *, candidate, config, created_by, package_code=""):
+    def create_session(cls, *, candidate, config, created_by, package_code="", scheduled_start_at=None):
         language = candidate.preferred_language or config.language or "EN"
         package_context = PackageArchitectureService.resolve_session_package_context(
             user=created_by,
@@ -388,6 +388,8 @@ class InterviewSessionService:
             certificate_enabled = package_context["certificate_enabled"]
             expiry_duration = package_session_config.duration_minutes or config.duration_minutes
 
+        expiry_anchor = scheduled_start_at or timezone.now()
+
         session = InterviewSession.objects.create(
             candidate=candidate,
             organization=candidate.company,
@@ -410,7 +412,8 @@ class InterviewSessionService:
             certificate_enabled=certificate_enabled,
             rubric_version=config.rubric_version,
             question_set_version=config.question_set_version,
-            expires_at=InterviewSession.build_expiry(expiry_duration),
+            scheduled_start_at=scheduled_start_at,
+            expires_at=InterviewSession.build_expiry(expiry_duration, anchor_time=expiry_anchor),
             created_by=created_by,
         )
         QuestionGenerationService.generate_questions(session)
@@ -431,6 +434,102 @@ class InterviewSessionService:
         cls._broadcast_to_channel_layer(
             str(session.public_id),
             {"event": "SESSION_CREATED", **session_event_payload(session)},
+        )
+        return session
+
+    @classmethod
+    @transaction.atomic
+    def reschedule_session(cls, session, *, scheduled_start_at, actor=None):
+        if session.status in {
+            InterviewSessionStatus.IN_PROGRESS,
+            InterviewSessionStatus.COMPLETED,
+            InterviewSessionStatus.FAILED,
+            InterviewSessionStatus.EXPIRED,
+            InterviewSessionStatus.CANCELLED,
+        }:
+            raise ValueError("Only pending interview sessions can be rescheduled")
+
+        duration_minutes = (
+            session.package_session_config.duration_minutes
+            if session.package_session_config and session.package_session_config.duration_minutes
+            else session.config.duration_minutes
+        )
+        session.scheduled_start_at = scheduled_start_at
+        session.expires_at = InterviewSession.build_expiry(duration_minutes, anchor_time=scheduled_start_at)
+        session.token_expires_at = session.expires_at
+        session.save(update_fields=["scheduled_start_at", "expires_at", "token_expires_at", "updated_at"])
+
+        cls._ensure_linked_evaluation(session, status=EvaluationStatus.SCHEDULED)
+
+        if actor:
+            AuditLogService.log(
+                user=actor,
+                action="SESSION_RESCHEDULED",
+                category=AuditLogCategory.SESSION,
+                description=f"Interview session rescheduled for {session.candidate.get_full_name()}",
+                resource=session,
+                data=session_event_payload(session, {"scheduled_start_at": session.scheduled_start_at.isoformat()}),
+            )
+        InterviewSessionSocketRegistry.broadcast_sync(
+            str(session.public_id),
+            {"event": "SESSION_RESCHEDULED", **session_event_payload(session, {"scheduled_start_at": session.scheduled_start_at.isoformat()})},
+        )
+        cls._broadcast_to_channel_layer(
+            str(session.public_id),
+            {"event": "SESSION_RESCHEDULED", **session_event_payload(session, {"scheduled_start_at": session.scheduled_start_at.isoformat()})},
+        )
+        return session
+
+    @classmethod
+    @transaction.atomic
+    def cancel_session(cls, session, *, reason="", actor=None):
+        if session.status in {
+            InterviewSessionStatus.COMPLETED,
+            InterviewSessionStatus.FAILED,
+            InterviewSessionStatus.EXPIRED,
+        }:
+            raise ValueError("Closed interview sessions cannot be cancelled")
+        if session.status == InterviewSessionStatus.CANCELLED:
+            raise ValueError("Interview session is already cancelled")
+
+        now = timezone.now()
+        session.status = InterviewSessionStatus.CANCELLED
+        session.cancelled_at = now
+        session.cancellation_reason = reason or ""
+        session.ended_at = session.ended_at or now
+        session.last_activity_at = now
+        session.save(
+            update_fields=[
+                "status",
+                "cancelled_at",
+                "cancellation_reason",
+                "ended_at",
+                "last_activity_at",
+                "updated_at",
+            ]
+        )
+
+        evaluation = cls._ensure_linked_evaluation(session, status=EvaluationStatus.CANCELLED)
+        evaluation.cancelled_at = now
+        evaluation.cancellation_reason = reason or ""
+        evaluation.save(update_fields=["cancelled_at", "cancellation_reason", "updated_at"])
+
+        if actor:
+            AuditLogService.log(
+                user=actor,
+                action=AuditLogAction.SESSION_CANCELLED,
+                category=AuditLogCategory.SESSION,
+                description=f"Interview session cancelled for {session.candidate.get_full_name()}",
+                resource=session,
+                data=session_event_payload(session, {"cancellation_reason": session.cancellation_reason}),
+            )
+        InterviewSessionSocketRegistry.broadcast_sync(
+            str(session.public_id),
+            {"event": "SESSION_CANCELLED", **session_event_payload(session, {"cancellation_reason": session.cancellation_reason})},
+        )
+        cls._broadcast_to_channel_layer(
+            str(session.public_id),
+            {"event": "SESSION_CANCELLED", **session_event_payload(session, {"cancellation_reason": session.cancellation_reason})},
         )
         return session
 
@@ -713,13 +812,14 @@ class InterviewSessionService:
 
     @classmethod
     def _ensure_linked_evaluation(cls, session, status=EvaluationStatus.SCHEDULED):
+        target_scheduled_date = session.scheduled_start_at or session.started_at or timezone.now()
         evaluation, created = Evaluation.objects.get_or_create(
             session=session,
             defaults={
                 "candidate": session.candidate,
                 "evaluation_type": EvaluationType.INTERVIEW,
                 "status": status,
-                "scheduled_date": session.started_at or timezone.now(),
+                "scheduled_date": target_scheduled_date,
                 "duration_minutes": session.package_session_config.duration_minutes if session.package_session_config else session.config.duration_minutes,
                 "created_by": session.created_by,
                 "company": session.organization,
@@ -734,6 +834,9 @@ class InterviewSessionService:
         if evaluation.status != status and evaluation.status != EvaluationStatus.COMPLETED:
             evaluation.status = status
             changed_fields.append("status")
+        if evaluation.scheduled_date != target_scheduled_date and evaluation.status != EvaluationStatus.COMPLETED:
+            evaluation.scheduled_date = target_scheduled_date
+            changed_fields.append("scheduled_date")
         if evaluation.evaluation_tier != session.evaluation_tier:
             evaluation.evaluation_tier = session.evaluation_tier
             changed_fields.append("evaluation_tier")

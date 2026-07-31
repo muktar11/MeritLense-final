@@ -380,6 +380,96 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(complete_response.status_code, 200)
         self.assertEqual(complete_response.data["status"], "COMPLETED")
 
+    def test_create_session_with_schedule_blocks_early_start_and_syncs_evaluation(self):
+        scheduled_start_at = timezone.now() + timezone.timedelta(days=2)
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+                "scheduled_start_at": scheduled_start_at.isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        self.assertEqual(create_response.data["status"], "CREATED")
+        self.assertIsNotNone(create_response.data["scheduled_start_at"])
+
+        session = InterviewSession.objects.get(public_id=create_response.data["id"])
+        self.assertEqual(session.scheduled_start_at.isoformat(), scheduled_start_at.isoformat())
+        self.assertGreater(session.expires_at, scheduled_start_at)
+
+        evaluation = session.linked_evaluation
+        self.assertEqual(evaluation.scheduled_date.isoformat(), scheduled_start_at.isoformat())
+        self.assertEqual(evaluation.status, "SCHEDULED")
+
+        start_response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/start/",
+            {},
+            format="json",
+        )
+        self.assertEqual(start_response.status_code, 400)
+        self.assertIn("scheduled start time", str(start_response.data["detail"]).lower())
+
+    def test_can_reschedule_pending_session(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        rescheduled_at = timezone.now() + timezone.timedelta(days=3)
+
+        response = self.client.post(
+            f"/api/v1/interviews/{session_id}/reschedule/",
+            {
+                "scheduled_start_at": rescheduled_at.isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIsNotNone(response.data["scheduled_start_at"])
+
+        session = InterviewSession.objects.get(public_id=session_id)
+        self.assertEqual(session.scheduled_start_at.isoformat(), rescheduled_at.isoformat())
+        self.assertEqual(session.linked_evaluation.scheduled_date.isoformat(), rescheduled_at.isoformat())
+
+    def test_can_cancel_pending_session_and_linked_evaluation(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+
+        response = self.client.post(
+            f"/api/v1/interviews/{session_id}/cancel/",
+            {
+                "reason": "Candidate requested another date",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], "CANCELLED")
+        self.assertEqual(response.data["cancellation_reason"], "Candidate requested another date")
+
+        session = InterviewSession.objects.get(public_id=session_id)
+        self.assertEqual(session.status, "CANCELLED")
+        self.assertIsNotNone(session.cancelled_at)
+        self.assertEqual(session.cancellation_reason, "Candidate requested another date")
+        self.assertEqual(session.linked_evaluation.status, "CANCELLED")
+        self.assertEqual(session.linked_evaluation.cancellation_reason, "Candidate requested another date")
+
     def test_staff_starting_a_session_does_not_fake_identity_verification(self):
         create_response = self.client.post(
             "/api/v1/interviews/",

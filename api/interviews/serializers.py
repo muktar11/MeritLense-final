@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.utils import timezone
 
 from api.candidates.models import Candidate
 from api.core.public_ids import get_by_identifier
@@ -440,6 +441,7 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
             "rubric_version",
             "question_set_version",
             "progress_percent",
+            "scheduled_start_at",
             "started_at",
             "ended_at",
             "expires_at",
@@ -460,6 +462,8 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
             "privacy_notice_acknowledged_at",
             "privacy_notice_ip_address",
             "device_check_completed_at",
+            "cancelled_at",
+            "cancellation_reason",
             "questions",
             "created_at",
             "updated_at",
@@ -528,6 +532,7 @@ class InterviewSessionCreateSerializer(serializers.Serializer):
     candidate_id = serializers.CharField()
     config_id = serializers.CharField()
     package_code = serializers.CharField(required=False, allow_blank=True)
+    scheduled_start_at = serializers.DateTimeField(required=False, allow_null=True)
 
     def validate(self, attrs):
         try:
@@ -547,7 +552,24 @@ class InterviewSessionCreateSerializer(serializers.Serializer):
         if attrs.get("package_code"):
             attrs["package_code"] = attrs["package_code"].strip().lower()
 
+        scheduled_start_at = attrs.get("scheduled_start_at")
+        if scheduled_start_at and scheduled_start_at <= timezone.now():
+            raise serializers.ValidationError({"scheduled_start_at": "Scheduled start time must be in the future"})
+
         return attrs
+
+
+class SessionRescheduleSerializer(serializers.Serializer):
+    scheduled_start_at = serializers.DateTimeField()
+
+    def validate_scheduled_start_at(self, value):
+        if value <= timezone.now():
+            raise serializers.ValidationError("Scheduled start time must be in the future")
+        return value
+
+
+class SessionCancelSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=False, allow_blank=True)
 
 
 class SessionStartSerializer(serializers.Serializer):

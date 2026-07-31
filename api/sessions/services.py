@@ -80,6 +80,21 @@ LANGUAGE_CODE_MAP = {
     "VI": "vi-VN",
     "KM": "km-KH",
     "MY": "my-MM",
+    # Second-tier GCC labor-source-country languages - Google TTS rejects
+    # all six outright (confirmed directly, HTTP 400 on every one), so none
+    # of these are ever offered for read-aloud (see READ_ALOUD_LANGUAGES,
+    # which filters on the `tts` flag). Google Translate supports all six
+    # (200), so text answers + translation work regardless. Somali and
+    # Malagasy are in Whisper's documented supported-language list, so
+    # audio answers work for those two (`stt: true` in the frontend
+    # LANGUAGES list); Tigrinya/Afar/Twi/Luganda aren't, so those four are
+    # forced text-only the same way Oromo is.
+    "TI": "ti-ET",
+    "SO": "so-SO",
+    "AA": "aa-DJ",
+    "AK": "ak-GH",
+    "LG": "lg-UG",
+    "MG": "mg-MG",
 }
 
 

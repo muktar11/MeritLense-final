@@ -294,6 +294,12 @@ class Languages:
     VIETNAMESE = "VI"
     KHMER = "KM"
     BURMESE = "MY"
+    TIGRINYA = "TI"
+    SOMALI = "SO"
+    AFAR = "AA"
+    AKAN = "AK"
+    LUGANDA = "LG"
+    MALAGASY = "MG"
 
     CHOICES = [
         (ENGLISH, "English"),
@@ -316,6 +322,12 @@ class Languages:
         (VIETNAMESE, "Vietnamese"),
         (KHMER, "Khmer"),
         (BURMESE, "Burmese"),
+        (TIGRINYA, "Tigrinya"),
+        (SOMALI, "Somali"),
+        (AFAR, "Afar"),
+        (AKAN, "Twi (Akan)"),
+        (LUGANDA, "Luganda"),
+        (MALAGASY, "Malagasy"),
     ]
 
 

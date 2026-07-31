@@ -49,10 +49,17 @@ from .realtime import InterviewSessionSocketRegistry
 
 LANGUAGE_CODE_MAP = {
     "EN": "en-US",
-    "ES": "es-ES",
-    "FR": "fr-FR",
     "AR": "ar-SA",
-    "DE": "de-DE",
+    "AM": "am-ET",
+    # Afaan Oromo has no working TTS/STT provider (confirmed directly
+    # against both - Google TTS rejects it outright, Whisper doesn't list
+    # it as a supported language). Mapped here for completeness/consistency
+    # (ui_language/translation_target still use this), but the frontend
+    # deliberately never offers it for read-aloud and forces text-only
+    # answers for Oromo sessions - see READ_ALOUD_LANGUAGES and the
+    # answer-mode gating in page.tsx.
+    "OM": "om-ET",
+    "FIL": "fil-PH",
     "ZH": "zh-CN",
 }
 

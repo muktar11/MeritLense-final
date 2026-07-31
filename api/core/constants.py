@@ -275,18 +275,18 @@ class CompanyTeamPermissions:
 
 class Languages:
     ENGLISH = "EN"
-    SPANISH = "ES"
-    FRENCH = "FR"
     ARABIC = "AR"
-    GERMAN = "DE"
+    AMHARIC = "AM"
+    OROMO = "OM"
+    FILIPINO = "FIL"
     CHINESE = "ZH"
 
     CHOICES = [
         (ENGLISH, "English"),
-        (SPANISH, "Spanish"),
-        (FRENCH, "French"),
         (ARABIC, "Arabic"),
-        (GERMAN, "German"),
+        (AMHARIC, "Amharic"),
+        (OROMO, "Afaan Oromo"),
+        (FILIPINO, "Filipino"),
         (CHINESE, "Chinese"),
     ]
 

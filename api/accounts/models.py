@@ -135,7 +135,7 @@ class IndividualEmployerProfile(TimeStampedModel, SoftDeleteModel):
     
     job_role = models.CharField(max_length=2, choices=JobRoles.CHOICES)
     nationality = models.CharField(max_length=2, choices=Nationalities.CHOICES)
-    preferred_language = models.CharField(max_length=2, choices=Languages.CHOICES, default=Languages.ENGLISH)
+    preferred_language = models.CharField(max_length=3, choices=Languages.CHOICES, default=Languages.ENGLISH)
     
     id_document = models.FileField(
         upload_to='b2c/documents/id/',
@@ -178,7 +178,7 @@ class CompanyEmployerProfile(TimeStampedModel, SoftDeleteModel):
     address = models.CharField(max_length=255, blank=True)
     website = models.URLField(blank=True)
     
-    preferred_language = models.CharField(max_length=2, choices=Languages.CHOICES, default=Languages.ENGLISH)
+    preferred_language = models.CharField(max_length=3, choices=Languages.CHOICES, default=Languages.ENGLISH)
     
     registration_certificate = models.FileField(
         upload_to='b2b/documents/registration/',

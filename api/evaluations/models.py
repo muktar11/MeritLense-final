@@ -64,7 +64,7 @@ class Evaluation(TimeStampedModel, SoftDeleteModel):
     candidate_passport_id = models.CharField(max_length=50)
     candidate_job_role = models.CharField(max_length=2, choices=JobRoles.CHOICES)
     candidate_preferred_language = models.CharField(
-        max_length=2, 
+        max_length=3,
         choices=Languages.CHOICES,
         default=Languages.ENGLISH
     )

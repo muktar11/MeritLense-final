@@ -15,8 +15,8 @@ class Candidate(TimeStampedModel, SoftDeleteModel):
     job_role = models.CharField(max_length=2, choices=candidateJobRoles.CHOICES)
     core_skills = models.TextField(help_text="Comma-separated skills")
     preferred_language = models.CharField(
-        max_length=2, 
-        choices=Languages.CHOICES, 
+        max_length=3,
+        choices=Languages.CHOICES,
         default=Languages.ENGLISH
     )
     

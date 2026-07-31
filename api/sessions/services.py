@@ -549,6 +549,7 @@ class InterviewSessionService:
         text_response="",
         duration_seconds=0,
         metadata=None,
+        language_code=None,
     ):
         if session.is_closed():
             raise ValueError("Cannot answer after session is closed")
@@ -560,6 +561,8 @@ class InterviewSessionService:
             if question.is_mandatory and question.status == SessionQuestionStatus.PENDING:
                 raise ValueError("Cannot skip mandatory question")
             raise ValueError("Question is not currently active")
+        if language_code and language_code not in LANGUAGE_CODE_MAP.values():
+            raise ValueError(f"Unsupported answer language: {language_code}")
 
         attempt_number = question.responses.count() + 1
         response = CandidateResponse.objects.create(
@@ -568,7 +571,12 @@ class InterviewSessionService:
             response_type=response_type,
             transcript=transcript,
             original_transcript=transcript,
-            transcript_language=session.candidate_language or session.stt_language_code,
+            # Candidate-selected language for this specific answer, when
+            # given, overrides the session's fixed default - this is also
+            # what the translation pipeline (translate_response) later
+            # reads as its source language, so an accurate per-answer value
+            # here matters beyond just display.
+            transcript_language=language_code or session.candidate_language or session.stt_language_code,
             text_response=text_response or transcript,
             duration_seconds=duration_seconds,
             attempt_number=attempt_number,
@@ -1221,7 +1229,7 @@ class InterviewVoicePipelineService:
 
     @classmethod
     @transaction.atomic
-    def transcribe_response(cls, *, session, response, actor=None):
+    def transcribe_response(cls, *, session, response, actor=None, language_code=None):
         if response.session_id != session.id:
             raise ValueError("Response does not belong to this session")
         if response.response_type != CandidateResponseType.VOICE:
@@ -1230,6 +1238,13 @@ class InterviewVoicePipelineService:
             raise ValueError("Response has no uploaded audio")
         if response.stt_status == "COMPLETED" and response.original_transcript:
             return response
+        if language_code and language_code not in LANGUAGE_CODE_MAP.values():
+            raise ValueError(f"Unsupported answer language: {language_code}")
+        # Candidate-selected language this specific audio answer was
+        # recorded in, when given, overrides the session's fixed default -
+        # used both as the speech-to-text hint below and (unless the
+        # provider's own detection disagrees) the stored transcript_language.
+        language_code = language_code or session.stt_language_code
 
         question = response.question
         access_context = "staff" if actor else "session_token"
@@ -1254,7 +1269,7 @@ class InterviewVoicePipelineService:
                     file_obj=audio_stream,
                     filename=response.audio_file.name.rsplit("/", 1)[-1],
                     mime_type=response.audio_mime_type or "application/octet-stream",
-                    language_code=session.stt_language_code,
+                    language_code=language_code,
                 )
         except (VoiceProviderError, VoiceProviderConfigurationError) as exc:
             response.stt_status = "FAILED"
@@ -1296,7 +1311,7 @@ class InterviewVoicePipelineService:
         response.transcript = transcript_result["transcript"]
         response.original_transcript = transcript_result["transcript"]
         response.text_response = response.text_response or transcript_result["transcript"]
-        response.transcript_language = transcript_result["detected_language"] or session.stt_language_code
+        response.transcript_language = transcript_result["detected_language"] or language_code
         response.stt_provider = transcript_result["provider"]
         response.stt_model = transcript_result["provider_model"]
         response.stt_request_id = transcript_result["request_id"]

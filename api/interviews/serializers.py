@@ -561,6 +561,12 @@ class SessionResponseSubmitSerializer(serializers.Serializer):
     response_type = serializers.ChoiceField(choices=[("TEXT", "Text")], default="TEXT")
     text_response = serializers.CharField(required=False, allow_blank=True)
     duration_seconds = serializers.IntegerField(required=False, min_value=0, default=0)
+    # Candidate-selected language for this specific answer (e.g. "ar-SA") -
+    # overrides the session's fixed default so a candidate isn't locked to
+    # whatever language they were assigned at session creation. Stored as
+    # transcript_language, which is also what the translation pipeline uses
+    # as its source language.
+    language_code = serializers.CharField(required=False, allow_blank=True)
 
     def validate_question_id(self, value):
         session = self.context["session"]
@@ -616,6 +622,10 @@ class SessionAudioUploadSerializer(serializers.Serializer):
 class SessionTranscriptionSerializer(serializers.Serializer):
     token = serializers.CharField(required=False, allow_blank=True)
     response_id = serializers.CharField()
+    # Candidate-selected language this specific audio answer was recorded
+    # in - used as the speech-to-text hint instead of the session's fixed
+    # default, and stored as transcript_language.
+    language_code = serializers.CharField(required=False, allow_blank=True)
 
     def validate_response_id(self, value):
         session = self.context["session"]

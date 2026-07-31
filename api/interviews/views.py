@@ -372,6 +372,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
                 session=session,
                 response=serializer.validated_data["response_id"],
                 actor=request.user if request.user.is_authenticated else None,
+                language_code=serializer.validated_data.get("language_code") or None,
             )
         except ValueError as exc:
             raise ValidationError({"detail": str(exc)}) from exc
@@ -394,6 +395,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
                 transcript=serializer.validated_data["transcript"],
                 text_response=serializer.validated_data.get("text_response", ""),
                 duration_seconds=serializer.validated_data.get("duration_seconds", 0),
+                language_code=serializer.validated_data.get("language_code") or None,
             )
         except ValueError as exc:
             raise ValidationError({"detail": str(exc)}) from exc

@@ -1218,6 +1218,42 @@ class InterviewSessionApiTests(APITestCase):
         auto_process_mock.assert_called_once()
         self.assertEqual(auto_process_mock.call_args.kwargs["response"].id, stored.id)
 
+    def test_submit_response_stores_candidate_selected_answer_language(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+
+        answer_response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/submit-response/",
+            {
+                "question_id": str(question.public_id),
+                "transcript": "Sadarka koo jira.",
+                "text_response": "Sadarka koo jira.",
+                "language_code": "ar-SA",
+            },
+            format="json",
+        )
+
+        self.assertEqual(answer_response.status_code, 200, answer_response.data)
+        stored = CandidateResponse.objects.get(public_id=answer_response.data["response_id"])
+        self.assertEqual(stored.transcript_language, "ar-SA")
+
+    def test_submit_response_rejects_unsupported_answer_language(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+
+        answer_response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/submit-response/",
+            {
+                "question_id": str(question.public_id),
+                "transcript": "hello",
+                "language_code": "fr-FR",
+            },
+            format="json",
+        )
+
+        self.assertEqual(answer_response.status_code, 400, answer_response.data)
+        self.assertFalse(CandidateResponse.objects.filter(question=question).exists())
+
     def test_create_session_applies_package_architecture_context(self):
         package = PackageSessionConfig.objects.create(
             package_code="basic",
@@ -1932,6 +1968,76 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(stored.stt_status, "COMPLETED")
         self.assertEqual(stored.stt_provider, "OPENAI")
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TRANSCRIPTION_COMPLETED).exists())
+
+    def test_transcribe_response_passes_candidate_selected_language_as_stt_hint(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+        upload_response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/upload-response-audio/",
+            {
+                "question_id": str(question.public_id),
+                "duration_seconds": 9,
+                "audio_file": SimpleUploadedFile("answer.webm", b"voice-bytes", content_type="audio/webm"),
+            },
+            format="multipart",
+        )
+        response_id = upload_response.data["id"]
+
+        received_kwargs = {}
+
+        class FakeSttService:
+            provider = "OPENAI"
+
+            def transcribe(self, **kwargs):
+                received_kwargs.update(kwargs)
+                return {
+                    "provider": "OPENAI",
+                    "provider_model": "whisper-1",
+                    "request_id": "req_123",
+                    # Simulate the provider not returning a detected language,
+                    # so the stored value must fall back to the requested hint.
+                    "detected_language": "",
+                    "confidence": None,
+                    "processing_status": "COMPLETED",
+                    "transcript": "Marhaba, ismi ana.",
+                    "metadata": {"segments": []},
+                }
+
+        with patch("api.sessions.services.InterviewVoicePipelineService.stt_service_class", FakeSttService):
+            response = self.client.post(
+                f"/api/v1/interviews/{session.public_id}/transcribe-response/",
+                {"response_id": response_id, "language_code": "ar-SA"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(received_kwargs["language_code"], "ar-SA")
+        stored = CandidateResponse.objects.get(public_id=response_id)
+        self.assertEqual(stored.transcript_language, "ar-SA")
+
+    def test_transcribe_response_rejects_unsupported_answer_language(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+        upload_response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/upload-response-audio/",
+            {
+                "question_id": str(question.public_id),
+                "duration_seconds": 9,
+                "audio_file": SimpleUploadedFile("answer.webm", b"voice-bytes", content_type="audio/webm"),
+            },
+            format="multipart",
+        )
+        response_id = upload_response.data["id"]
+
+        response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/transcribe-response/",
+            {"response_id": response_id, "language_code": "de-DE"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        stored = CandidateResponse.objects.get(public_id=response_id)
+        self.assertEqual(stored.stt_status, "PENDING")
 
     @patch("api.translation.services.AIProcessingOrchestrationService.auto_process_response_ai")
     def test_transcribe_response_triggers_automatic_ai_processing(self, auto_process_mock):

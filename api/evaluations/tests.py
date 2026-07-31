@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.db import DatabaseError
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -7,9 +7,10 @@ from rest_framework.test import APIClient
 from api.accounts.models import Company, CompanyEmployerProfile, User
 from api.audit.models import AuditLog
 from api.candidates.models import Candidate
-from api.core.constants import AuditLogAction, CandidateResponseType, CoverageLevel, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles
+from api.core.constants import AuditLogAction, CandidateResponseType, CoverageLevel, EvaluationStatus, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles, SubscriptionStatus, BillingInterval
 from api.evaluations.models import Evaluation, EvaluationReadinessDecisionRecord, ResponseEvaluationResult, ScoringRule, ScoringRuleSet, SessionEvaluationSummary
 from api.evaluations.scoring_services import Week6ScoringService
+from api.payments.models import Customer, Price, Subscription
 from api.questions.models import QuestionTemplate
 from api.scores.models import CandidateScore, ScoreSet
 from api.sessions.models import CandidateResponse, InterviewSession, SessionQuestion
@@ -180,6 +181,187 @@ class EvaluationRuleEngineTests(TestCase):
 
         self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.PENDING)
         self.assertFalse(self.evaluation.readiness_override_applied)
+
+
+@override_settings(
+    FRONTEND_URL="https://frontend.example.com",
+    INTERVIEW_FRONTEND_PATH_TEMPLATE="/interview/{session_id}",
+)
+class EvaluationInterviewSchedulingApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="b2c-eval@example.com",
+            password="testpass123",
+            first_name="B2C",
+            last_name="Evaluator",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.client.force_authenticate(self.user)
+        customer = Customer.objects.create(
+            user=self.user,
+            stripe_customer_id="cus_eval_link_tests",
+            email=self.user.email,
+            name=self.user.get_full_name(),
+        )
+        price = Price.objects.create(
+            name="B2C Test Plan",
+            stripe_price_id="price_eval_link_tests",
+            stripe_product_id="prod_eval_link_tests",
+            target_user_type="B2C",
+            unit_amount="99.00",
+            currency="usd",
+            interval=BillingInterval.MONTHLY,
+            billing_type="RECURRING",
+            feature_limits={"evaluation_limit": 10},
+            is_active=True,
+        )
+        Subscription.objects.create(
+            user=self.user,
+            customer=customer,
+            stripe_subscription_id="sub_eval_link_tests",
+            stripe_price=price,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=timezone.now(),
+            current_period_end=timezone.now() + timezone.timedelta(days=30),
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Wondwosen",
+            last_name="Beketu",
+            email="candidate-link@example.com",
+            passport_id="LINK-001",
+            job_role="NA",
+            core_skills="care,safety",
+            preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf",
+            created_by=self.user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=30,
+            total_questions=2,
+            allow_retries=True,
+            max_retries=1,
+            rubric_version="v1",
+            question_set_version="v1",
+            is_active=True,
+        )
+        QuestionTemplate.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            question_code="NAN-LINK-001",
+            question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE,
+            domain="Safety",
+            skill_tag="Safety",
+            skill="Safety",
+            sequence_number=1,
+            difficulty=QuestionDifficulty.MEDIUM,
+            question_text="How do you keep a child safe?",
+            question_type="knowledge",
+            question_format="TEXT",
+            language="EN",
+            scoring_type="0/3/5",
+            difficulty_score=2,
+            estimated_time_seconds=45,
+            expected_answer_type="structured",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v1",
+            question_set_version="v1",
+            is_active=True,
+        )
+        QuestionTemplate.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            question_code="NAN-LINK-002",
+            question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE,
+            domain="Care",
+            skill_tag="Care",
+            skill="Care",
+            sequence_number=2,
+            difficulty=QuestionDifficulty.MEDIUM,
+            question_text="How do you calm a child?",
+            question_type="behavioral",
+            question_format="TEXT",
+            language="EN",
+            scoring_type="0/3/5",
+            difficulty_score=2,
+            estimated_time_seconds=45,
+            expected_answer_type="structured",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v1",
+            question_set_version="v1",
+            is_active=True,
+        )
+
+    def test_create_interview_evaluation_auto_generates_ai_interview_link(self):
+        scheduled_date = timezone.now() + timezone.timedelta(days=1)
+        response = self.client.post(
+            "/api/v1/evaluations/evaluations",
+            {
+                "candidate": str(self.candidate.public_id),
+                "evaluation_type": EvaluationType.INTERVIEW,
+                "scheduled_date": scheduled_date.isoformat(),
+                "duration_minutes": 60,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        evaluation = Evaluation.objects.get(public_id=response.data["id"])
+        self.assertIsNotNone(evaluation.session_id)
+        self.assertTrue(evaluation.meeting_link.startswith("https://frontend.example.com/interview/"))
+        self.assertIn("token=", evaluation.meeting_link)
+        self.assertEqual(evaluation.meeting_id, str(evaluation.session.public_id))
+        self.assertEqual(evaluation.session.scheduled_start_at.isoformat(), scheduled_date.isoformat())
+        self.assertEqual(evaluation.scheduled_date.isoformat(), scheduled_date.isoformat())
+        self.assertEqual(evaluation.duration_minutes, 60)
+
+    def test_reschedule_and_cancel_interview_evaluation_sync_the_ai_session(self):
+        scheduled_date = timezone.now() + timezone.timedelta(days=1)
+        create_response = self.client.post(
+            "/api/v1/evaluations/evaluations",
+            {
+                "candidate": str(self.candidate.public_id),
+                "evaluation_type": EvaluationType.INTERVIEW,
+                "scheduled_date": scheduled_date.isoformat(),
+                "duration_minutes": 45,
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        evaluation = Evaluation.objects.get(public_id=create_response.data["id"])
+
+        new_date = timezone.now() + timezone.timedelta(days=2)
+        reschedule_response = self.client.post(
+            f"/api/v1/evaluations/evaluations/{evaluation.public_id}/reschedule",
+            {"new_date": new_date.isoformat(), "reason": "Candidate requested new time"},
+            format="json",
+        )
+        self.assertEqual(reschedule_response.status_code, 200, reschedule_response.data)
+        evaluation.refresh_from_db()
+        evaluation.session.refresh_from_db()
+        self.assertEqual(evaluation.status, EvaluationStatus.RESCHEDULED)
+        self.assertEqual(evaluation.scheduled_date.isoformat(), new_date.isoformat())
+        self.assertEqual(evaluation.session.scheduled_start_at.isoformat(), new_date.isoformat())
+
+        cancel_response = self.client.post(
+            f"/api/v1/evaluations/evaluations/{evaluation.public_id}/cancel",
+            {"reason": "Position closed"},
+            format="json",
+        )
+        self.assertEqual(cancel_response.status_code, 200, cancel_response.data)
+        evaluation.refresh_from_db()
+        evaluation.session.refresh_from_db()
+        self.assertEqual(evaluation.status, EvaluationStatus.CANCELLED)
+        self.assertEqual(evaluation.cancellation_reason, "Position closed")
+        self.assertEqual(evaluation.session.status, "CANCELLED")
+        self.assertEqual(evaluation.session.cancellation_reason, "Position closed")
 
 
 class Week6ScoringServiceTests(TestCase):

@@ -260,6 +260,32 @@ class Evaluation(TimeStampedModel, SoftDeleteModel):
         
         self.save()
 
+    def cancel(self, reason=None):
+        self.status = EvaluationStatus.CANCELLED
+        self.cancelled_at = timezone.now()
+        if reason:
+            self.cancellation_reason = reason
+        self.save()
+
+    def reschedule(self, new_date):
+        old_date = self.scheduled_date
+        self.status = EvaluationStatus.RESCHEDULED
+        self.scheduled_date = new_date
+        self.save()
+        return old_date
+
+    def can_access(self, user):
+        if user == self.created_by:
+            return True
+
+        if hasattr(user, 'managed_company') and user.managed_company == self.company:
+            return True
+
+        if user.role == 'B2B_TEAM_MEMBER' and user in self.candidate.shared_with.all():
+            return True
+
+        return False
+
 
 class EvaluationReadinessDecisionRecord(TimeStampedModel):
     evaluation = models.OneToOneField(

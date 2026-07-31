@@ -1,5 +1,7 @@
 from rest_framework import serializers
 from django.utils import timezone
+from django.conf import settings
+from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from .models import (
     CompetencyEvaluationResult,
     Evaluation,
@@ -12,6 +14,10 @@ from .models import (
 from api.core.constants import CertificateStatus
 from api.core.serializers import PublicIdModelSerializer
 from api.candidates.serializers import CandidateSerializer
+from api.core.constants import EvaluationType
+from api.interviews.models import InterviewConfiguration
+from api.sessions.models import InterviewSession
+from api.sessions.services import InterviewSessionService
 
 
 class EvaluationSerializer(PublicIdModelSerializer):
@@ -117,8 +123,70 @@ class EvaluationCreateSerializer(PublicIdModelSerializer):
         candidate = validated_data.get('candidate')
         if candidate.company:
             validated_data['company'] = candidate.company
-        
+
+        if validated_data.get("evaluation_type") == EvaluationType.INTERVIEW:
+            scheduled_date = validated_data["scheduled_date"]
+            duration_minutes = validated_data.get("duration_minutes") or 60
+            session = InterviewSessionService.create_session(
+                candidate=candidate,
+                config=self._resolve_interview_config(candidate),
+                created_by=request.user,
+                scheduled_start_at=scheduled_date,
+            )
+            session.expires_at = InterviewSession.build_expiry(duration_minutes, anchor_time=scheduled_date)
+            session.token_expires_at = session.expires_at
+            session.save(update_fields=["expires_at", "token_expires_at", "updated_at"])
+
+            evaluation = session.linked_evaluation
+            evaluation.scheduled_date = scheduled_date
+            evaluation.duration_minutes = duration_minutes
+            evaluation.meeting_link = self._build_interview_link(session, request)
+            evaluation.meeting_id = str(session.public_id)
+            evaluation.meeting_password = ""
+            evaluation.location = ""
+            evaluation.save(
+                update_fields=[
+                    "scheduled_date",
+                    "duration_minutes",
+                    "meeting_link",
+                    "meeting_id",
+                    "meeting_password",
+                    "location",
+                    "updated_at",
+                ]
+            )
+            return evaluation
+
         return super().create(validated_data)
+
+    def _resolve_interview_config(self, candidate):
+        role_name = candidate.get_job_role_display()
+        preferred_language = candidate.preferred_language or "EN"
+        queryset = InterviewConfiguration.objects.filter(is_active=True)
+
+        config = queryset.filter(
+            role_name__iexact=role_name,
+            language__iexact=preferred_language,
+        ).order_by("evaluation_tier", "id").first()
+        if config is None:
+            config = queryset.filter(role_name__iexact=role_name).order_by("language", "evaluation_tier", "id").first()
+        if config is None:
+            raise serializers.ValidationError(
+                {"candidate": f"No active AI interview configuration found for role '{role_name}'."}
+            )
+        return config
+
+    def _build_interview_link(self, session, request):
+        base_url = (settings.FRONTEND_URL or request.build_absolute_uri("/")).rstrip("/")
+        path_template = getattr(settings, "INTERVIEW_FRONTEND_PATH_TEMPLATE", "/interview/{session_id}")
+        path = path_template.format(session_id=session.public_id)
+        if not path.startswith("/"):
+            path = f"/{path}"
+
+        split = urlsplit(f"{base_url}{path}")
+        query = dict(parse_qsl(split.query, keep_blank_values=True))
+        query["token"] = session.access_token
+        return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))
 
 
 class EvaluationUpdateSerializer(serializers.ModelSerializer):

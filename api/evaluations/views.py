@@ -29,13 +29,15 @@ from .serializers import (
     SessionEvaluationSummarySerializer,
 )
 from .permissions import CanManageEvaluation, CanViewEvaluation
-from api.core.constants import Roles, EvaluationStatus
+from api.core.constants import Roles, EvaluationStatus, EvaluationType
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
 from .models import EvaluationReadinessDecisionRecord, ScoringRuleSet
 from .scoring_services import Week6ScoringError, Week6ScoringService
 from api.reports.serializers import EvaluationReportSerializer
 from api.reports.services import EvaluationReportError, EvaluationReportService
+from api.sessions.models import InterviewSession
+from api.sessions.services import InterviewSessionService
 
 
 class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.ModelViewSet):
@@ -106,6 +108,15 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             self.permission_classes = [IsAuthenticated, CanManageEvaluation]
         
         return super().get_permissions()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        evaluation = serializer.instance
+        output = EvaluationSerializer(evaluation, context={"request": request})
+        headers = self.get_success_headers(output.data)
+        return Response(output.data, status=status.HTTP_201_CREATED, headers=headers)
     
     def perform_create(self, serializer):
         if not self.check_subscription_limit(self.request.user, 'evaluation_limit'):
@@ -145,6 +156,12 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         }
         
         evaluation = serializer.save()
+        self._sync_interview_session_after_update(
+            evaluation=evaluation,
+            old_scheduled_date=old_data["scheduled_date"],
+            old_duration_minutes=old_data["duration_minutes"],
+            actor=self.request.user,
+        )
         
         changes = {}
         new_data = {
@@ -461,8 +478,25 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             old_date = evaluation.scheduled_date
             new_date = serializer.validated_data['new_date']
             reason = serializer.validated_data.get('reason', '')
-            
-            evaluation.reschedule(new_date)
+
+            if evaluation.evaluation_type == EvaluationType.INTERVIEW and evaluation.session_id:
+                InterviewSessionService.reschedule_session(
+                    evaluation.session,
+                    scheduled_start_at=new_date,
+                    actor=request.user,
+                )
+                evaluation.refresh_from_db()
+                evaluation.session.expires_at = InterviewSession.build_expiry(
+                    evaluation.duration_minutes,
+                    anchor_time=new_date,
+                )
+                evaluation.session.token_expires_at = evaluation.session.expires_at
+                evaluation.session.save(update_fields=["expires_at", "token_expires_at", "updated_at"])
+                evaluation.status = EvaluationStatus.RESCHEDULED
+                evaluation.scheduled_date = new_date
+                evaluation.save(update_fields=["status", "scheduled_date", "updated_at"])
+            else:
+                evaluation.reschedule(new_date)
             
             AuditLogService.log(
                 user=request.user,
@@ -505,8 +539,16 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         if serializer.is_valid():
             old_status = evaluation.status
             reason = serializer.validated_data.get('reason', '')
-            
-            evaluation.cancel(reason=reason)
+
+            if evaluation.evaluation_type == EvaluationType.INTERVIEW and evaluation.session_id:
+                InterviewSessionService.cancel_session(
+                    evaluation.session,
+                    reason=reason,
+                    actor=request.user,
+                )
+                evaluation.refresh_from_db()
+            else:
+                evaluation.cancel(reason=reason)
             
             AuditLogService.log(
                 user=request.user,
@@ -533,6 +575,34 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             })
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def _sync_interview_session_after_update(self, *, evaluation, old_scheduled_date, old_duration_minutes, actor):
+        if evaluation.evaluation_type != EvaluationType.INTERVIEW or not evaluation.session_id:
+            return
+
+        scheduled_changed = old_scheduled_date != evaluation.scheduled_date
+        duration_changed = old_duration_minutes != evaluation.duration_minutes
+        session = evaluation.session
+
+        if scheduled_changed:
+            InterviewSessionService.reschedule_session(
+                session,
+                scheduled_start_at=evaluation.scheduled_date,
+                actor=actor,
+            )
+            evaluation.refresh_from_db()
+            evaluation.status = EvaluationStatus.RESCHEDULED
+
+        if scheduled_changed or duration_changed:
+            session.expires_at = InterviewSession.build_expiry(
+                evaluation.duration_minutes,
+                anchor_time=evaluation.scheduled_date,
+            )
+            session.token_expires_at = session.expires_at
+            session.save(update_fields=["expires_at", "token_expires_at", "updated_at"])
+
+        if scheduled_changed or duration_changed:
+            evaluation.save(update_fields=["status", "scheduled_date", "duration_minutes", "updated_at"])
 
 
 class ScoringRuleSetViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):

@@ -280,6 +280,20 @@ class Languages:
     OROMO = "OM"
     FILIPINO = "FIL"
     CHINESE = "ZH"
+    HINDI = "HI"
+    URDU = "UR"
+    BENGALI = "BN"
+    TAMIL = "TA"
+    TELUGU = "TE"
+    MALAYALAM = "ML"
+    PUNJABI = "PA"
+    SINHALA = "SI"
+    INDONESIAN = "ID"
+    NEPALI = "NE"
+    SWAHILI = "SW"
+    VIETNAMESE = "VI"
+    KHMER = "KM"
+    BURMESE = "MY"
 
     CHOICES = [
         (ENGLISH, "English"),
@@ -288,6 +302,20 @@ class Languages:
         (OROMO, "Afaan Oromo"),
         (FILIPINO, "Filipino"),
         (CHINESE, "Chinese"),
+        (HINDI, "Hindi"),
+        (URDU, "Urdu"),
+        (BENGALI, "Bengali"),
+        (TAMIL, "Tamil"),
+        (TELUGU, "Telugu"),
+        (MALAYALAM, "Malayalam"),
+        (PUNJABI, "Punjabi"),
+        (SINHALA, "Sinhala"),
+        (INDONESIAN, "Indonesian"),
+        (NEPALI, "Nepali"),
+        (SWAHILI, "Swahili"),
+        (VIETNAMESE, "Vietnamese"),
+        (KHMER, "Khmer"),
+        (BURMESE, "Burmese"),
     ]
 
 

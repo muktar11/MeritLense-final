@@ -62,6 +62,24 @@ LANGUAGE_CODE_MAP = {
     "OM": "om-ET",
     "FIL": "fil-PH",
     "ZH": "zh-CN",
+    # GCC top labor-source-country languages - all confirmed directly
+    # against Google TTS (200) and Google Translate (200) before being
+    # added here; Whisper's documented supported-language list also covers
+    # all of these, unlike Oromo/Tigrinya/Afar/Twi/Luganda/Malagasy.
+    "HI": "hi-IN",
+    "UR": "ur-PK",
+    "BN": "bn-BD",
+    "TA": "ta-IN",
+    "TE": "te-IN",
+    "ML": "ml-IN",
+    "PA": "pa-IN",
+    "SI": "si-LK",
+    "ID": "id-ID",
+    "NE": "ne-NP",
+    "SW": "sw-KE",
+    "VI": "vi-VN",
+    "KM": "km-KH",
+    "MY": "my-MM",
 }
 
 

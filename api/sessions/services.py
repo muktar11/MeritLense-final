@@ -31,6 +31,7 @@ from api.interviews.voice_services import (
     VoiceProviderConfigurationError,
     VoiceProviderError,
 )
+from api.translation.services import AIProcessingError, TranslationService
 from api.questions.models import QuestionTemplate
 from api.storage.services import MediaStorageService
 
@@ -1385,8 +1386,31 @@ class InterviewVoicePipelineService:
         if existing and existing.audio_file:
             return existing
 
+        # question.question_text is always authored in English - previously
+        # this got sent straight to the TTS provider under whatever
+        # language_code was requested, which doesn't translate anything: the
+        # provider just reads the English words using that language's voice/
+        # phoneme model, producing English content in a foreign accent
+        # rather than actual speech in that language. Translate first for
+        # any non-English target.
+        text_to_speak = question.question_text
+        if not language_code.startswith("en"):
+            try:
+                translation = TranslationService.translate(
+                    text=question.question_text,
+                    source_language="en",
+                    target_language=language_code.split("-")[0],
+                )
+                text_to_speak = translation["translated_text"] or question.question_text
+            except AIProcessingError:
+                # Fall back to the original English text rather than failing
+                # the whole request - reading it in English is still more
+                # useful than no audio at all, and the candidate can read
+                # the on-screen text either way.
+                text_to_speak = question.question_text
+
         try:
-            synthesis = tts_service.synthesize(text=question.question_text, language_code=language_code)
+            synthesis = tts_service.synthesize(text=text_to_speak, language_code=language_code)
         except (VoiceProviderError, VoiceProviderConfigurationError) as exc:
             InterviewSessionService._log_voice_or_session_event(
                 actor=actor,

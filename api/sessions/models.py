@@ -130,6 +130,15 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
     paused_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
     cancellation_reason = models.TextField(blank=True)
+    # Only set for scheduled sessions (see InterviewSessionService.create_session) -
+    # a short numeric code emailed to the candidate alongside the interview
+    # link, letting them prove they're the intended recipient without the
+    # camera-based identity check, which isn't practical for a link opened
+    # ahead of a scheduled time. Hashed like a real password; the plaintext
+    # only ever exists transiently on the just-created session instance (see
+    # generate_access_password) for the calling code to put in the email.
+    access_password_hash = models.CharField(max_length=128, blank=True)
+    access_password_attempts = models.PositiveIntegerField(default=0)
 
     class Meta:
         verbose_name = "Interview Session"
@@ -191,6 +200,35 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
         if self.token_expires_at and timezone.now() > self.token_expires_at:
             return False
         return True
+
+    ACCESS_PASSWORD_MAX_ATTEMPTS = 5
+
+    def generate_access_password(self):
+        """Generate and store a fresh 6-digit access password, returning the
+        plaintext. Only the hash is persisted - the caller (session creation)
+        is responsible for using the plaintext immediately (putting it in the
+        scheduling email) since it can't be recovered afterward."""
+        from django.contrib.auth.hashers import make_password
+
+        plaintext = f"{secrets.randbelow(1_000_000):06d}"
+        self.access_password_hash = make_password(plaintext)
+        self.access_password_attempts = 0
+        return plaintext
+
+    def check_access_password(self, raw_password):
+        """Returns True/False and increments the attempt counter on
+        failure. Does not save - callers are expected to persist whichever
+        fields actually changed as part of their own atomic update."""
+        from django.contrib.auth.hashers import check_password
+
+        if not self.access_password_hash:
+            return False
+        if self.access_password_attempts >= self.ACCESS_PASSWORD_MAX_ATTEMPTS:
+            return False
+        if check_password(raw_password, self.access_password_hash):
+            return True
+        self.access_password_attempts += 1
+        return False
 
     def mark_verification_pending(self):
         self.status = InterviewSessionStatus.VERIFICATION_PENDING

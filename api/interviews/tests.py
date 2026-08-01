@@ -489,6 +489,106 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(session.linked_evaluation.status, "CANCELLED")
         self.assertEqual(session.linked_evaluation.cancellation_reason, "Candidate requested another date")
 
+    def test_scheduled_session_generates_access_password_non_scheduled_does_not(self):
+        scheduled_session = InterviewSessionService.create_session(
+            candidate=self.candidate,
+            config=self.config,
+            created_by=self.user,
+            scheduled_start_at=timezone.now() + timezone.timedelta(days=1),
+        )
+        self.assertTrue(scheduled_session.access_password_hash)
+        self.assertTrue(hasattr(scheduled_session, "plaintext_access_password"))
+        self.assertRegex(scheduled_session.plaintext_access_password, r"^\d{6}$")
+
+        immediate_session = InterviewSessionService.create_session(
+            candidate=self.candidate,
+            config=self.config,
+            created_by=self.user,
+        )
+        self.assertFalse(immediate_session.access_password_hash)
+
+    def test_verify_access_password_marks_identity_verified_without_camera_check(self):
+        session = InterviewSessionService.create_session(
+            candidate=self.candidate,
+            config=self.config,
+            created_by=self.user,
+            scheduled_start_at=timezone.now() + timezone.timedelta(days=1),
+        )
+        password = session.plaintext_access_password
+
+        response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/prechecks/verify-access-password/",
+            {"password": password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        session.refresh_from_db()
+        self.assertTrue(session.identity_verified)
+        self.assertEqual(session.verification_status, "VERIFIED")
+        self.assertEqual(float(session.face_match_score), 100.0)
+        self.assertEqual(session.access_password_attempts, 0)
+
+    def test_verify_access_password_rejects_wrong_password(self):
+        session = InterviewSessionService.create_session(
+            candidate=self.candidate,
+            config=self.config,
+            created_by=self.user,
+            scheduled_start_at=timezone.now() + timezone.timedelta(days=1),
+        )
+
+        response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/prechecks/verify-access-password/",
+            {"password": "000000"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        session.refresh_from_db()
+        self.assertFalse(session.identity_verified)
+        self.assertEqual(session.access_password_attempts, 1)
+
+    def test_verify_access_password_locks_out_after_max_attempts(self):
+        session = InterviewSessionService.create_session(
+            candidate=self.candidate,
+            config=self.config,
+            created_by=self.user,
+            scheduled_start_at=timezone.now() + timezone.timedelta(days=1),
+        )
+        password = session.plaintext_access_password
+
+        for _ in range(session.ACCESS_PASSWORD_MAX_ATTEMPTS):
+            self.client.post(
+                f"/api/v1/interviews/{session.public_id}/prechecks/verify-access-password/",
+                {"password": "000000"},
+                format="json",
+            )
+
+        # Even the correct password is rejected once locked out.
+        response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/prechecks/verify-access-password/",
+            {"password": password},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        session.refresh_from_db()
+        self.assertFalse(session.identity_verified)
+
+    def test_verify_access_password_rejected_for_non_scheduled_session(self):
+        session = InterviewSessionService.create_session(
+            candidate=self.candidate,
+            config=self.config,
+            created_by=self.user,
+        )
+
+        response = self.client.post(
+            f"/api/v1/interviews/{session.public_id}/prechecks/verify-access-password/",
+            {"password": "123456"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+
     def test_staff_starting_a_session_does_not_fake_identity_verification(self):
         create_response = self.client.post(
             "/api/v1/interviews/",

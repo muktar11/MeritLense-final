@@ -147,7 +147,12 @@ class EvaluationCreateSerializer(PublicIdModelSerializer):
             evaluation.duration_minutes = duration_minutes
             evaluation.meeting_link = self._build_interview_link(session, request)
             evaluation.meeting_id = str(session.public_id)
-            evaluation.meeting_password = ""
+            # create_session only sets this transient attribute for
+            # scheduled sessions (see InterviewSession.generate_access_password) -
+            # reusing the existing meeting_password field/email section
+            # rather than adding a new one, since it's already plumbed
+            # through to the candidate email.
+            evaluation.meeting_password = getattr(session, "plaintext_access_password", "")
             evaluation.location = ""
             evaluation.save(
                 update_fields=[

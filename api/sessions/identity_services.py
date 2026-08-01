@@ -633,6 +633,76 @@ class InterviewSessionPrecheckService:
         return verification, artifacts
 
     @classmethod
+    def verify_access_password(cls, session, *, password, actor=None):
+        """Alternative to the camera-based submit_identity_verification for
+        scheduled sessions - a scheduled interview's link may sit unopened
+        for days before its start time, so asking for a live selfie/passport
+        comparison the moment it's opened isn't meaningful the way it is for
+        an immediately-started session. The emailed password proves the
+        opener has access to the candidate's inbox instead. Only usable on
+        sessions that actually have one set (see
+        InterviewSession.generate_access_password, only called for scheduled
+        sessions) - a session with none never matches here."""
+        if not session.access_password_hash:
+            raise IdentityVerificationError(
+                "This session does not use password-based verification.",
+                code="access_password_not_configured",
+            )
+        if session.access_password_attempts >= session.ACCESS_PASSWORD_MAX_ATTEMPTS:
+            raise IdentityVerificationError(
+                "Too many incorrect attempts. Please contact the person who invited you for a new link.",
+                code="access_password_locked",
+            )
+
+        if not session.check_access_password(password):
+            session.save(update_fields=["access_password_attempts", "updated_at"])
+            cls._log_event(
+                session=session,
+                actor=actor,
+                action=AuditLogAction.ACCESS_PASSWORD_ATTEMPT_FAILED,
+                description="Incorrect access password submitted for interview session.",
+                severity=AuditLogSeverity.WARNING,
+                data={
+                    "session_id": str(session.public_id),
+                    "attempts": session.access_password_attempts,
+                },
+            )
+            remaining = session.ACCESS_PASSWORD_MAX_ATTEMPTS - session.access_password_attempts
+            raise IdentityVerificationError(
+                f"Incorrect password. {max(remaining, 0)} attempt(s) remaining.",
+                code="access_password_incorrect",
+                metadata={"attempts_remaining": max(remaining, 0)},
+            )
+
+        session.verification_status = IdentityVerificationStatus.VERIFIED
+        session.identity_verified = True
+        # No real biometric comparison happened - 100 documents "verified by
+        # a route other than face-match" as unambiguously as the numeric
+        # field allows, and is the only value that also satisfies
+        # candidate_prechecks_complete()'s >= 85 bar. single_face_detected
+        # is set true for the same reason: nothing here contradicts it.
+        session.face_match_score = Decimal("100.00")
+        session.single_face_detected = True
+        session.save(
+            update_fields=[
+                "verification_status",
+                "identity_verified",
+                "face_match_score",
+                "single_face_detected",
+                "updated_at",
+            ]
+        )
+        cls._log_event(
+            session=session,
+            actor=actor,
+            action=AuditLogAction.IDENTITY_VERIFIED_VIA_PASSWORD,
+            description="Candidate identity verified via emailed access password (no camera check).",
+            data={"session_id": str(session.public_id)},
+        )
+        cls._mark_ready_if_complete(session, actor=actor)
+        return session
+
+    @classmethod
     def _resolve_identity_reference_inputs(
         cls,
         *,

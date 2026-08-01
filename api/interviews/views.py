@@ -31,6 +31,7 @@ from api.reports.services import EvaluationReportService
 from .serializers import (
     CandidateResponseSerializer,
     InterviewConfigurationSerializer,
+    SessionAccessPasswordVerifySerializer,
     SessionCancelSerializer,
     InterviewSessionCreateSerializer,
     InterviewSessionSerializer,
@@ -256,6 +257,8 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             return SessionVerbalConfirmationSerializer
         if self.action == "submit_identity_verification":
             return SessionIdentityVerificationSerializer
+        if self.action == "verify_access_password":
+            return SessionAccessPasswordVerifySerializer
         if self.action == "log_integrity_event":
             return SessionIntegrityEventSerializer
         if self.action == "precheck_status":
@@ -620,6 +623,26 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
                 "reason": verification["reason"],
             },
             "artifacts": SessionArtifactSerializer(artifacts, many=True, context={"request": request}).data,
+        }
+        return Response(payload)
+
+    @extend_schema(request=SessionAccessPasswordVerifySerializer, responses={200: dict})
+    @action(detail=True, methods=["post"], url_path="prechecks/verify-access-password")
+    def verify_access_password(self, request, id=None):
+        session = self._get_session()
+        self._ensure_access(session, request)
+        serializer = self.get_serializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        try:
+            InterviewSessionPrecheckService.verify_access_password(
+                session,
+                password=serializer.validated_data["password"],
+                actor=request.user if request.user.is_authenticated else None,
+            )
+        except IdentityVerificationError as exc:
+            raise ValidationError({"detail": str(exc), "code": exc.code, **exc.metadata}) from exc
+        payload = {
+            "precheck_status": InterviewSessionPrecheckService.get_precheck_status_payload(session),
         }
         return Response(payload)
 

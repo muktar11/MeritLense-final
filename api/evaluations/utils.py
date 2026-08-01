@@ -4,6 +4,8 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
 
+from api.core.constants import EvaluationType
+
 # All scheduled_date/completed_at values are stored as UTC instants
 # (TIME_ZONE="UTC" in settings) - emails were previously formatting them
 # with raw strftime(), which silently printed UTC as if it were the
@@ -45,7 +47,12 @@ Meeting Link: {evaluation.meeting_link}"""
             location_details += f"""
 Meeting ID: {evaluation.meeting_id}"""
         if evaluation.meeting_password:
-            location_details += f"""
+            if evaluation.evaluation_type == EvaluationType.INTERVIEW:
+                location_details += f"""
+Access Password: {evaluation.meeting_password}
+(You'll be asked to enter this when you open the link, to verify it's really you.)"""
+            else:
+                location_details += f"""
 Meeting Password: {evaluation.meeting_password}"""
     elif evaluation.location:
         location_details = f"""

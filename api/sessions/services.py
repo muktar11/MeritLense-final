@@ -416,6 +416,12 @@ class InterviewSessionService:
             expires_at=InterviewSession.build_expiry(expiry_duration, anchor_time=expiry_anchor),
             created_by=created_by,
         )
+        if scheduled_start_at:
+            # Transient attribute, not a model field - only exists on this
+            # in-memory instance for the caller (the evaluation-scheduling
+            # email) to read immediately. Only the hash is ever persisted.
+            session.plaintext_access_password = session.generate_access_password()
+            session.save(update_fields=["access_password_hash", "access_password_attempts", "updated_at"])
         QuestionGenerationService.generate_questions(session)
         TaskObservationService.assign_tasks(session)
         cls._ensure_linked_evaluation(session, status=EvaluationStatus.SCHEDULED)

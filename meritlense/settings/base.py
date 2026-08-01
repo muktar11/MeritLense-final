@@ -219,7 +219,7 @@ DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "")
 INTERVIEW_FRONTEND_PATH_TEMPLATE = os.getenv(
     "INTERVIEW_FRONTEND_PATH_TEMPLATE",
-    "/interview/{session_id}",
+    "/{locale}/interview",
 )
 
 AZURE_QUEUE_CONNECTION_STRING = os.getenv("AZURE_QUEUE_CONNECTION_STRING", "")

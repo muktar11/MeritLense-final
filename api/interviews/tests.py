@@ -439,6 +439,24 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(session.scheduled_start_at.isoformat(), rescheduled_at.isoformat())
         self.assertEqual(session.linked_evaluation.scheduled_date.isoformat(), rescheduled_at.isoformat())
 
+    def test_upcoming_filter_returns_only_future_scheduled_sessions(self):
+        future = InterviewSessionService.create_session(
+            candidate=self.candidate,
+            config=self.config,
+            created_by=self.user,
+            scheduled_start_at=timezone.now() + timezone.timedelta(days=2),
+        )
+        InterviewSessionService.create_session(
+            candidate=self.candidate,
+            config=self.config,
+            created_by=self.user,
+        )
+
+        response = self.client.get("/api/v1/interviews/?upcoming=true")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.data], [str(future.public_id)])
+
     def test_can_cancel_pending_session_and_linked_evaluation(self):
         create_response = self.client.post(
             "/api/v1/interviews/",

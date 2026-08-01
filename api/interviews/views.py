@@ -1,5 +1,6 @@
 import mimetypes
 
+from django.utils import timezone
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
@@ -10,6 +11,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from api.core.public_ids import PUBLIC_ID_OR_PK_REGEX, build_object_identifier_filter
+from api.core.constants import InterviewSessionStatus
 from api.interviews.models import (
     InterviewConfiguration,
     InterviewRubric,
@@ -219,6 +221,16 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             "config",
             "created_by",
         ).prefetch_related("questions")
+
+        if self.request.query_params.get("upcoming", "").lower() in {"1", "true", "yes"}:
+            queryset = queryset.filter(scheduled_start_at__gte=timezone.now()).exclude(
+                status__in={
+                    InterviewSessionStatus.COMPLETED,
+                    InterviewSessionStatus.FAILED,
+                    InterviewSessionStatus.EXPIRED,
+                    InterviewSessionStatus.CANCELLED,
+                }
+            )
 
         user = getattr(self.request, "user", None)
         if not user or not user.is_authenticated:

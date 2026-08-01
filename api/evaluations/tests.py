@@ -3,6 +3,7 @@ from django.db import DatabaseError
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from rest_framework.test import APIClient
+from urllib.parse import parse_qs, urlsplit
 
 from api.accounts.models import Company, CompanyEmployerProfile, User
 from api.audit.models import AuditLog
@@ -185,7 +186,7 @@ class EvaluationRuleEngineTests(TestCase):
 
 @override_settings(
     FRONTEND_URL="https://frontend.example.com",
-    INTERVIEW_FRONTEND_PATH_TEMPLATE="/interview/{session_id}",
+    INTERVIEW_FRONTEND_PATH_TEMPLATE="/{locale}/interview",
 )
 class EvaluationInterviewSchedulingApiTests(TestCase):
     def setUp(self):
@@ -315,8 +316,11 @@ class EvaluationInterviewSchedulingApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         evaluation = Evaluation.objects.get(public_id=response.data["id"])
         self.assertIsNotNone(evaluation.session_id)
-        self.assertTrue(evaluation.meeting_link.startswith("https://frontend.example.com/interview/"))
-        self.assertIn("token=", evaluation.meeting_link)
+        link = urlsplit(evaluation.meeting_link)
+        query = parse_qs(link.query)
+        self.assertEqual(link.path, "/en/interview")
+        self.assertEqual(query["sessionId"], [str(evaluation.session.public_id)])
+        self.assertEqual(query["token"], [evaluation.session.access_token])
         self.assertEqual(evaluation.meeting_id, str(evaluation.session.public_id))
         self.assertEqual(evaluation.session.scheduled_start_at.isoformat(), scheduled_date.isoformat())
         self.assertEqual(evaluation.scheduled_date.isoformat(), scheduled_date.isoformat())
@@ -362,6 +366,99 @@ class EvaluationInterviewSchedulingApiTests(TestCase):
         self.assertEqual(evaluation.cancellation_reason, "Position closed")
         self.assertEqual(evaluation.session.status, "CANCELLED")
         self.assertEqual(evaluation.session.cancellation_reason, "Position closed")
+
+    def test_missing_config_error_names_candidate_role(self):
+        self.config.delete()
+        response = self.client.post(
+            "/api/v1/evaluations/evaluations",
+            {
+                "candidate": str(self.candidate.public_id),
+                "evaluation_type": EvaluationType.INTERVIEW,
+                "scheduled_date": (timezone.now() + timezone.timedelta(days=1)).isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Nanny", str(response.data["candidate"]))
+
+    def test_create_rejects_past_scheduled_date_at_api_layer(self):
+        response = self.client.post(
+            "/api/v1/evaluations/evaluations",
+            {
+                "candidate": str(self.candidate.public_id),
+                "evaluation_type": EvaluationType.INTERVIEW,
+                "scheduled_date": (timezone.now() - timezone.timedelta(minutes=1)).isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("scheduled_date", response.data)
+
+    def test_in_progress_and_completed_interviews_cannot_be_rescheduled_or_cancelled(self):
+        for evaluation_status, session_status in (
+            (EvaluationStatus.IN_PROGRESS, "IN_PROGRESS"),
+            (EvaluationStatus.COMPLETED, "COMPLETED"),
+        ):
+            with self.subTest(status=evaluation_status):
+                evaluation = self._create_interview_evaluation()
+                Evaluation.objects.filter(pk=evaluation.pk).update(status=evaluation_status)
+                InterviewSession.objects.filter(pk=evaluation.session_id).update(status=session_status)
+
+                reschedule = self.client.post(
+                    f"/api/v1/evaluations/evaluations/{evaluation.public_id}/reschedule",
+                    {"new_date": (timezone.now() + timezone.timedelta(days=2)).isoformat()},
+                    format="json",
+                )
+                cancel = self.client.post(
+                    f"/api/v1/evaluations/evaluations/{evaluation.public_id}/cancel",
+                    {},
+                    format="json",
+                )
+
+                self.assertEqual(reschedule.status_code, 400)
+                self.assertEqual(cancel.status_code, 400)
+
+    def test_double_cancel_is_rejected(self):
+        evaluation = self._create_interview_evaluation()
+        url = f"/api/v1/evaluations/evaluations/{evaluation.public_id}/cancel"
+        self.assertEqual(self.client.post(url, {}, format="json").status_code, 200)
+        self.assertEqual(self.client.post(url, {}, format="json").status_code, 400)
+
+    def test_non_owner_cannot_reschedule_or_cancel(self):
+        evaluation = self._create_interview_evaluation()
+        other_user = User.objects.create_user(
+            email="other-eval@example.com",
+            password="testpass123",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.client.force_authenticate(other_user)
+        base_url = f"/api/v1/evaluations/evaluations/{evaluation.public_id}"
+
+        reschedule = self.client.post(
+            f"{base_url}/reschedule",
+            {"new_date": (timezone.now() + timezone.timedelta(days=2)).isoformat()},
+            format="json",
+        )
+        cancel = self.client.post(f"{base_url}/cancel", {}, format="json")
+
+        self.assertIn(reschedule.status_code, {403, 404})
+        self.assertIn(cancel.status_code, {403, 404})
+
+    def _create_interview_evaluation(self):
+        response = self.client.post(
+            "/api/v1/evaluations/evaluations",
+            {
+                "candidate": str(self.candidate.public_id),
+                "evaluation_type": EvaluationType.INTERVIEW,
+                "scheduled_date": (timezone.now() + timezone.timedelta(days=1)).isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        return Evaluation.objects.get(public_id=response.data["id"])
 
 
 class Week6ScoringServiceTests(TestCase):

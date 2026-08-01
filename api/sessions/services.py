@@ -484,6 +484,7 @@ class InterviewSessionService:
     @transaction.atomic
     def cancel_session(cls, session, *, reason="", actor=None):
         if session.status in {
+            InterviewSessionStatus.IN_PROGRESS,
             InterviewSessionStatus.COMPLETED,
             InterviewSessionStatus.FAILED,
             InterviewSessionStatus.EXPIRED,

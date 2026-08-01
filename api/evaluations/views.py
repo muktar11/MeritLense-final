@@ -529,7 +529,11 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
     def cancel(self, request, id=None):
         evaluation = self.get_object()
         
-        if evaluation.status in [EvaluationStatus.COMPLETED, EvaluationStatus.CANCELLED]:
+        if evaluation.status in [
+            EvaluationStatus.IN_PROGRESS,
+            EvaluationStatus.COMPLETED,
+            EvaluationStatus.CANCELLED,
+        ]:
             return Response(
                 {'error': f'Cannot cancel evaluation with status {evaluation.status}'},
                 status=status.HTTP_400_BAD_REQUEST

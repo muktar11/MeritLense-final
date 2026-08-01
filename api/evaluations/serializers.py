@@ -115,6 +115,11 @@ class EvaluationCreateSerializer(PublicIdModelSerializer):
             raise serializers.ValidationError("You don't have permission to schedule evaluations for this candidate")
         
         return value
+
+    def validate_scheduled_date(self, value):
+        if value <= timezone.now():
+            raise serializers.ValidationError("Scheduled date must be in the future")
+        return value
     
     def create(self, validated_data):
         request = self.context.get('request')
@@ -178,13 +183,15 @@ class EvaluationCreateSerializer(PublicIdModelSerializer):
 
     def _build_interview_link(self, session, request):
         base_url = (settings.FRONTEND_URL or request.build_absolute_uri("/")).rstrip("/")
-        path_template = getattr(settings, "INTERVIEW_FRONTEND_PATH_TEMPLATE", "/interview/{session_id}")
-        path = path_template.format(session_id=session.public_id)
+        locale = (request.query_params.get("locale") or session.ui_language or "en").lower()
+        path_template = getattr(settings, "INTERVIEW_FRONTEND_PATH_TEMPLATE", "/{locale}/interview")
+        path = path_template.format(locale=locale, session_id=session.public_id)
         if not path.startswith("/"):
             path = f"/{path}"
 
         split = urlsplit(f"{base_url}{path}")
         query = dict(parse_qsl(split.query, keep_blank_values=True))
+        query["sessionId"] = str(session.public_id)
         query["token"] = session.access_token
         return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))
 

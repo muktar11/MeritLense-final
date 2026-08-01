@@ -21,6 +21,7 @@ from api.interviews.models import InterviewConfiguration, InterviewRubric, Packa
 from api.interviews.voice_services import VoiceProviderError
 from api.questions.models import QuestionTemplate
 from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionArtifact, SessionObservedTask, TaskObservationResult
+from api.sessions.services import InterviewSessionService
 from api.translation.models import CandidateResponseInterpretation, CandidateResponseTranslation, EvaluationInputArtifact
 from api.evaluations.models import Evaluation
 from meritlense.asgi import application

@@ -1,12 +1,36 @@
+from zoneinfo import ZoneInfo
+
 from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
 
+# All scheduled_date/completed_at values are stored as UTC instants
+# (TIME_ZONE="UTC" in settings) - emails were previously formatting them
+# with raw strftime(), which silently printed UTC as if it were the
+# recipient's local time. Display everything in Arabian Standard Time
+# (UTC+3, no DST) instead, matching the GCC market this platform serves,
+# and label it explicitly so recipients never have to guess which zone
+# a time is in.
+DISPLAY_TZ = ZoneInfo("Asia/Riyadh")
+DISPLAY_TZ_LABEL = "AST"
+
+
+def _format_date(value):
+    return timezone.localtime(value, DISPLAY_TZ).strftime("%A, %B %d, %Y")
+
+
+def _format_time(value):
+    return f"{timezone.localtime(value, DISPLAY_TZ).strftime('%I:%M %p')} {DISPLAY_TZ_LABEL}"
+
+
+def _format_datetime(value):
+    return f"{timezone.localtime(value, DISPLAY_TZ).strftime('%A, %B %d, %Y at %I:%M %p')} {DISPLAY_TZ_LABEL}"
+
 
 def send_evaluation_scheduled_email(evaluation, request=None):
-        
-    scheduled_date = evaluation.scheduled_date.strftime("%A, %B %d, %Y")
-    scheduled_time = evaluation.scheduled_date.strftime("%I:%M %p")
+
+    scheduled_date = _format_date(evaluation.scheduled_date)
+    scheduled_time = _format_time(evaluation.scheduled_date)
     duration = evaluation.duration_minutes
     
     evaluation_type_display = evaluation.get_evaluation_type_display()
@@ -70,9 +94,9 @@ Meritlense Team
     )
 
 def send_evaluation_rescheduled_email(evaluation, old_date, request=None):
-        
-    old_date_str = old_date.strftime("%A, %B %d, %Y at %I:%M %p")
-    new_date_str = evaluation.scheduled_date.strftime("%A, %B %d, %Y at %I:%M %p")
+
+    old_date_str = _format_datetime(old_date)
+    new_date_str = _format_datetime(evaluation.scheduled_date)
     
     evaluation_type_display = evaluation.get_evaluation_type_display()
     
@@ -111,8 +135,8 @@ Meritlense Team
     
 
 def send_evaluation_cancelled_email(evaluation, request=None):
-    
-    scheduled_date = evaluation.scheduled_date.strftime("%A, %B %d, %Y at %I:%M %p")
+
+    scheduled_date = _format_datetime(evaluation.scheduled_date)
     evaluation_type_display = evaluation.get_evaluation_type_display()
     
     reason_text = ""
@@ -145,9 +169,9 @@ Meritlense Team
     )
 
 def send_evaluation_completed_email(evaluation, request=None):
-    
+
     evaluation_type_display = evaluation.get_evaluation_type_display()
-    completed_date = evaluation.completed_at.strftime("%A, %B %d, %Y at %I:%M %p") if evaluation.completed_at else "Recently"
+    completed_date = _format_datetime(evaluation.completed_at) if evaluation.completed_at else "Recently"
     
     certificate_info = ""
     if evaluation.certificate_status == 'ISSUED' and evaluation.certificate_url:

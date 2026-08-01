@@ -704,11 +704,6 @@ class SessionIdentityVerificationSerializer(serializers.Serializer):
     metadata = serializers.DictField(required=False, default=dict)
 
 
-class SessionAccessPasswordVerifySerializer(serializers.Serializer):
-    token = serializers.CharField(required=False, allow_blank=True)
-    password = serializers.CharField()
-
-
 class SessionIntegrityEventSerializer(serializers.Serializer):
     token = serializers.CharField(required=False, allow_blank=True)
     event_type = serializers.CharField(required=False, allow_blank=True)

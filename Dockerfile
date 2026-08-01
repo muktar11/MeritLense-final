@@ -40,7 +40,8 @@ RUN chmod +x /app/entrypoint.sh
 EXPOSE 8000 2222
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["gunicorn", "meritlense.wsgi:application", \
+CMD ["gunicorn", "meritlense.asgi:application", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--bind", "0.0.0.0:8000", \
      "--workers", "2", \
      "--timeout", "120", \

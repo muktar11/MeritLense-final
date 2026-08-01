@@ -18,6 +18,21 @@ services:
       - "6379:6379"
     restart: unless-stopped
 
+  turn:
+    image: coturn/coturn:4.6.3-r2
+    container_name: meritlense_turn
+    network_mode: host
+    command:
+      - --no-cli
+      - --fingerprint
+      - --lt-cred-mech
+      - --realm=${TURN_REALM:-localhost}
+      - --user=${TURN_USERNAME:-meritlense}:${TURN_PASSWORD:-change-me}
+      - --min-port=49160
+      - --max-port=49200
+      - --no-multicast-peers
+    restart: unless-stopped
+
   db:
     image: postgres:16-alpine
     container_name: meritlense_db
@@ -77,6 +92,14 @@ services:
       - AZURE_QUEUE_POISON_NAME=meritlense-jobs-poison
       - ENABLE_ASYNC_AI_PROCESSING=True
       - REDIS_URL=redis://redis:6379/0
+      - USE_REDIS_CHANNEL_LAYER=True
+      - WEBRTC_STUN_URLS=${WEBRTC_STUN_URLS:-stun:stun.l.google.com:19302}
+      - WEBRTC_TURN_URLS=${WEBRTC_TURN_URLS:-turn:localhost:3478?transport=udp,turn:localhost:3478?transport=tcp}
+      - WEBRTC_TURN_USERNAME=${TURN_USERNAME:-meritlense}
+      - WEBRTC_TURN_CREDENTIAL=${TURN_PASSWORD:-change-me}
+      - WEBRTC_TURN_SECRET=${TURN_SECRET:-}
+      - AZURE_SPEECH_KEY=${AZURE_SPEECH_KEY:-}
+      - AZURE_SPEECH_REGION=${AZURE_SPEECH_REGION:-}
     depends_on:
       db:
         condition: service_healthy

@@ -87,6 +87,7 @@ INSTALLED_APPS = [
     "api.translation",
     "api.monitoring",
     "api.storage",
+    "api.live_calls",
 ]
 
 MIDDLEWARE = [
@@ -221,6 +222,20 @@ INTERVIEW_FRONTEND_PATH_TEMPLATE = os.getenv(
     "INTERVIEW_FRONTEND_PATH_TEMPLATE",
     "/{locale}/interview",
 )
+
+# Live interpreted calls. TURN credentials should be injected from Azure Key
+# Vault in production; never expose the coturn static auth secret here.
+WEBRTC_STUN_URLS = env_list("WEBRTC_STUN_URLS", ["stun:stun.l.google.com:19302"])
+WEBRTC_TURN_URLS = env_list("WEBRTC_TURN_URLS")
+WEBRTC_TURN_USERNAME = os.getenv("WEBRTC_TURN_USERNAME", "")
+WEBRTC_TURN_CREDENTIAL = os.getenv("WEBRTC_TURN_CREDENTIAL", "")
+WEBRTC_TURN_SECRET = os.getenv("WEBRTC_TURN_SECRET", "")
+WEBRTC_TURN_CREDENTIAL_TTL_SECONDS = int(os.getenv("WEBRTC_TURN_CREDENTIAL_TTL_SECONDS", "3600"))
+LIVE_CALL_EARLY_JOIN_MINUTES = int(os.getenv("LIVE_CALL_EARLY_JOIN_MINUTES", "15"))
+LIVE_CALL_TICKET_TTL_SECONDS = int(os.getenv("LIVE_CALL_TICKET_TTL_SECONDS", "21600"))
+LIVE_CALL_MAX_AUDIO_FRAME_BYTES = int(os.getenv("LIVE_CALL_MAX_AUDIO_FRAME_BYTES", "65536"))
+AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "")
+AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "")
 
 AZURE_QUEUE_CONNECTION_STRING = os.getenv("AZURE_QUEUE_CONNECTION_STRING", "")
 AZURE_DEFAULT_QUEUE_NAME = os.getenv("AZURE_DEFAULT_QUEUE_NAME", "meritlense-jobs")

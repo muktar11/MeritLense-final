@@ -22,6 +22,7 @@ api_v1_patterns = [
     path('dashboard/', include('api.dashboard.urls')),
     path('audit/', include('api.audit.urls')),
     path('agreements/', include('api.contracts.urls')),
+    path('live-calls/', include('api.live_calls.urls')),
     path('schema', SpectacularAPIView.as_view(), name='api-v1-schema'),
     path('docs', SpectacularSwaggerView.as_view(url_name='api-v1-schema'), name='api-v1-swagger-ui'),
 ]

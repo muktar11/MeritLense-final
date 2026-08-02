@@ -43,6 +43,24 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
             "type": "peer.presence", "sender": self.channel_name, "role": self.role, "connected": True
         })
         await self.send_json({"event": "ready", "role": self.role})
+        peer_status = await self._peer_status()
+        if peer_status is not None:
+            # peer.presence broadcasts only fire reactively, at the moment
+            # the OTHER side connects/disconnects - a client joining after
+            # the peer is already connected would otherwise never learn
+            # that, and get stuck showing "waiting for the other
+            # participant" indefinitely (and, for the evaluator, never
+            # trigger the offer-on-peer-connect rule below in
+            # peer_presence()) even though the peer has been there the
+            # whole time. Tell the newly-connecting client the peer's
+            # actual current state directly, instead of only ever hearing
+            # about *future* changes to it.
+            peer_role, peer_connected = peer_status
+            # Frontend's existing peer_presence handler (useLiveCall.ts)
+            # already creates the offer on this exact event shape when
+            # role == CANDIDATE/connected and the local role is EVALUATOR -
+            # no separate signal needed here.
+            await self.send_json({"event": "peer_presence", "role": peer_role, "connected": peer_connected})
         self.pipeline = None
         try:
             preferences = await self._translation_preferences()
@@ -156,6 +174,13 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def _participant(self):
         return LiveCallParticipant.objects.filter(call__public_id=self.call_id, role=self.role).first()
+
+    @database_sync_to_async
+    def _peer_status(self):
+        peer = LiveCallParticipant.objects.filter(call_id=self.participant.call_id).exclude(role=self.role).first()
+        if not peer:
+            return None
+        return (peer.role, peer.connected)
 
     @database_sync_to_async
     def _translation_preferences(self):

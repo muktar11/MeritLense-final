@@ -145,7 +145,19 @@ if USE_REDIS_CHANNEL_LAYER:
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
-                "hosts": [REDIS_URL],
+                # A dict host (vs. a bare URL string) forwards extra kwargs to
+                # redis-py's ConnectionPool.from_url() - socket_keepalive plus
+                # a health check catches a half-dead connection instead of
+                # hanging on it, and retry_on_timeout absorbs a one-off
+                # transient timeout instead of surfacing it as a hard failure
+                # (which, mid-connect(), can otherwise kill the whole
+                # WebSocket - see api/live_calls/consumers.py).
+                "hosts": [{
+                    "address": REDIS_URL,
+                    "socket_keepalive": True,
+                    "health_check_interval": 30,
+                    "retry_on_timeout": True,
+                }],
             },
         }
     }

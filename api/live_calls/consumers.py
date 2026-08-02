@@ -51,7 +51,14 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
                     self.channel_layer, self.group_name, self.role,
                     preferences["input_language"], preferences["target_language"],
                 )
-        except RuntimeError as exc:
+        except Exception as exc:
+            # Anything here (missing Azure Speech config, a Redis/DB blip on
+            # the preferences lookup, ...) must not escape connect() - once
+            # accept()/_set_connected(True) have already run, an unhandled
+            # exception kills the socket without ever calling disconnect(),
+            # which both drops the call and leaves the participant stuck
+            # showing "connected" in the DB forever. Degrade to no
+            # translation instead of taking the whole call down with it.
             await self.send_json({"event": "translation_unavailable", "detail": str(exc)})
 
     async def disconnect(self, close_code):
@@ -106,7 +113,11 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
                             self.channel_layer, self.group_name, self.role,
                             preferences["input_language"], preferences["target_language"],
                         )
-                except RuntimeError as exc:
+                except Exception as exc:
+                    # Same reasoning as connect(): this runs inside a
+                    # group-broadcast handler, so an uncaught exception here
+                    # kills THIS participant's own socket in reaction to the
+                    # peer joining - not just theirs.
                     await self.send_json({"event": "translation_unavailable", "detail": str(exc)})
 
     async def translation_audio(self, event):
@@ -136,7 +147,7 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
                     preferences["input_language"], preferences["target_language"],
                 )
                 await self.send_json({"event": "translation_reconfigured"})
-            except RuntimeError as exc:
+            except Exception as exc:
                 await self.send_json({"event": "translation_unavailable", "detail": str(exc)})
 
     async def send_json(self, payload):

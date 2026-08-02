@@ -49,6 +49,11 @@ class LiveCallParticipant(TimeStampedModel):
     output_language = models.CharField(max_length=20, default="en-US")
     connected = models.BooleanField(default=False)
     last_seen_at = models.DateTimeField(null=True, blank=True)
+    # Only meaningful for CANDIDATE - the evaluator is never gated. A
+    # candidate connecting for the first time waits in a "knocking" state
+    # until the evaluator (who must already be in the room) admits them;
+    # this persists so a reconnect after being admitted doesn't re-knock.
+    admitted = models.BooleanField(default=False)
 
     class Meta:
         constraints = [

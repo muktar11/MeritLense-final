@@ -38,11 +38,30 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
             return
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
+        self.pipeline = None
+        await self.send_json({"event": "ready", "role": self.role})
+
+        if self.role == LiveCallParticipant.ROLE_CANDIDATE and not self.participant.admitted:
+            # The evaluator must already be in the room (per product
+            # decision - no notifying them outside it) and explicitly
+            # admit each candidate the first time they connect. Don't mark
+            # connected/broadcast presence/start translation yet - none of
+            # that should happen until admitted. This persists on the
+            # participant row, so a reconnect after being admitted skips
+            # straight to _finish_connect() below instead of re-knocking.
+            await self.send_json({"event": "waiting_for_admission"})
+            await self.channel_layer.group_send(self.group_name, {
+                "type": "join.requested", "sender": self.channel_name,
+            })
+            return
+
+        await self._finish_connect()
+
+    async def _finish_connect(self):
         await self._set_connected(True)
         await self.channel_layer.group_send(self.group_name, {
             "type": "peer.presence", "sender": self.channel_name, "role": self.role, "connected": True
         })
-        await self.send_json({"event": "ready", "role": self.role})
         peer_status = await self._peer_status()
         if peer_status is not None:
             # peer.presence broadcasts only fire reactively, at the moment
@@ -61,7 +80,6 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
             # role == CANDIDATE/connected and the local role is EVALUATOR -
             # no separate signal needed here.
             await self.send_json({"event": "peer_presence", "role": peer_role, "connected": peer_connected})
-        self.pipeline = None
         try:
             preferences = await self._translation_preferences()
             if preferences:
@@ -113,6 +131,19 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
         elif action == "end_call":
             await self._end_call()
             await self.channel_layer.group_send(self.group_name, {"type": "call.ended"})
+        elif action == "admit":
+            if self.role == LiveCallParticipant.ROLE_EVALUATOR:
+                await self._admit_candidate()
+                await self.channel_layer.group_send(self.group_name, {
+                    "type": "candidate.admitted", "sender": self.channel_name,
+                })
+        elif action == "deny":
+            # No persisted state change - the candidate is left exactly as
+            # they were (still waiting, per product decision there's no
+            # distinct "denied" state shown to them). This only tells the
+            # evaluator's own UI it can drop the prompt for this knock.
+            if self.role == LiveCallParticipant.ROLE_EVALUATOR:
+                await self.send_json({"event": "join_request_dismissed"})
         else:
             await self.send_json({"event": "error", "detail": "Unsupported action"})
 
@@ -137,6 +168,15 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
                     # kills THIS participant's own socket in reaction to the
                     # peer joining - not just theirs.
                     await self.send_json({"event": "translation_unavailable", "detail": str(exc)})
+
+    async def join_requested(self, event):
+        if event["sender"] != self.channel_name and self.role == LiveCallParticipant.ROLE_EVALUATOR:
+            await self.send_json({"event": "join_request"})
+
+    async def candidate_admitted(self, event):
+        if self.role == LiveCallParticipant.ROLE_CANDIDATE:
+            await self.send_json({"event": "admitted"})
+            await self._finish_connect()
 
     async def translation_audio(self, event):
         if event["sender_role"] != self.role:
@@ -181,6 +221,12 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
         if not peer:
             return None
         return (peer.role, peer.connected)
+
+    @database_sync_to_async
+    def _admit_candidate(self):
+        LiveCallParticipant.objects.filter(
+            call_id=self.participant.call_id, role=LiveCallParticipant.ROLE_CANDIDATE
+        ).update(admitted=True)
 
     @database_sync_to_async
     def _translation_preferences(self):

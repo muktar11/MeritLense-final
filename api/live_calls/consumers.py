@@ -1,5 +1,6 @@
 import base64
 import json
+from urllib.parse import parse_qs
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
@@ -16,9 +17,11 @@ from .services import update_participant_presence
 class LiveCallConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.call_id = self.scope["url_route"]["kwargs"]["call_id"]
-        params = dict(
-            item.split("=", 1) for item in self.scope["query_string"].decode().split("&") if "=" in item
-        )
+        # scope["query_string"] is the raw, still-percent-encoded query
+        # string per the ASGI spec - a naive split("=") leaves the ticket's
+        # signing.dumps() colons as literal "%3A", which never matches the
+        # real signed value and made every connection fail auth.
+        params = {k: v[0] for k, v in parse_qs(self.scope["query_string"].decode()).items()}
         try:
             claims = read_socket_ticket(params.get("ticket", ""), settings.LIVE_CALL_TICKET_TTL_SECONDS)
         except Exception:

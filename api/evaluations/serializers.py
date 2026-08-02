@@ -243,17 +243,27 @@ class EvaluationListSerializer(PublicIdModelSerializer):
     latest_session_summary = serializers.SerializerMethodField()
     readiness_legal_record = serializers.SerializerMethodField()
     latest_report = serializers.SerializerMethodField()
-    
+    # The detail/edit view (EvaluationSerializer) already exposes these -
+    # the list view didn't, which is why the table's "Copy Meeting Link"
+    # action had nothing to copy and there was no way to link a "Join Live
+    # Interview" action to the right call room without an extra request.
+    session_id = serializers.SerializerMethodField()
+
     class Meta:
         model = Evaluation
         fields = [
             'id', 'candidate_name', 'evaluation_type', 'evaluation_type_display',
             'status', 'status_display', 'scheduled_date', 'duration_minutes',
-            'score', 'latest_session_summary', 'readiness_legal_record', 'latest_report', 'readiness_status', 'readiness_override_applied', 'created_by', 'created_at'
+            'score', 'latest_session_summary', 'readiness_legal_record', 'latest_report',
+            'readiness_status', 'readiness_override_applied', 'created_by', 'created_at',
+            'meeting_link', 'session_id',
         ]
-    
+
     def get_candidate_name(self, obj):
         return f"{obj.candidate_first_name} {obj.candidate_last_name}"
+
+    def get_session_id(self, obj):
+        return str(obj.session.public_id) if obj.session_id else None
 
     def get_latest_session_summary(self, obj):
         summary = obj.session_summaries.select_related("rule_set").first()

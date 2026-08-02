@@ -17,7 +17,7 @@ from rest_framework.generics import GenericAPIView
 from api.core.public_ids import build_object_identifier_filter
 from api.sessions.models import InterviewSession
 
-from .auth import issue_socket_ticket
+from .auth import OptionalJWTAuthentication, issue_socket_ticket
 from .models import LiveCallParticipant, LiveCallSession
 from .serializers import LanguagePreferencesSerializer, LiveCallJoinSerializer, LiveCallSerializer
 
@@ -66,6 +66,7 @@ def _ice_servers(call):
 
 class LiveCallJoinView(GenericAPIView):
     permission_classes = [AllowAny]
+    authentication_classes = [OptionalJWTAuthentication]
     serializer_class = LiveCallJoinSerializer
 
     def post(self, request, session_id):
@@ -109,6 +110,7 @@ class LiveCallJoinView(GenericAPIView):
 
 class LiveCallPreferencesView(GenericAPIView):
     permission_classes = [AllowAny]
+    authentication_classes = [OptionalJWTAuthentication]
     serializer_class = LanguagePreferencesSerializer
 
     def _objects(self, request, session_id):

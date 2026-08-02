@@ -146,14 +146,22 @@ if USE_REDIS_CHANNEL_LAYER:
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
                 # A dict host (vs. a bare URL string) forwards extra kwargs to
-                # redis-py's ConnectionPool.from_url() - socket_keepalive plus
-                # a health check catches a half-dead connection instead of
-                # hanging on it, and retry_on_timeout absorbs a one-off
-                # transient timeout instead of surfacing it as a hard failure
-                # (which, mid-connect(), can otherwise kill the whole
-                # WebSocket - see api/live_calls/consumers.py).
+                # redis-py's ConnectionPool.from_url(). channels_redis polls
+                # for messages via BRPOP with a 5s timeout (its own
+                # brpop_timeout, expected to return an empty reply after 5s
+                # with nothing to deliver) - but redis-py's own client-side
+                # socket_timeout ALSO defaults to exactly 5s. Those two timers
+                # race on every poll cycle: any small scheduling jitter (this
+                # VM is a modest 2-vCPU box shared with nginx/coturn/another
+                # unrelated app) can make the client's read give up a moment
+                # before Redis's own BRPOP would have replied cleanly,
+                # surfacing as a raw redis.exceptions.TimeoutError that kills
+                # the WebSocket. socket_timeout must stay comfortably above
+                # brpop_timeout so the client never loses that race.
                 "hosts": [{
                     "address": REDIS_URL,
+                    "socket_timeout": 20,
+                    "socket_connect_timeout": 10,
                     "socket_keepalive": True,
                     "health_check_interval": 30,
                     "retry_on_timeout": True,

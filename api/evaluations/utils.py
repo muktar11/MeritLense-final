@@ -27,6 +27,16 @@ def _format_datetime(value):
     return f"{timezone.localtime(value, DISPLAY_TZ).strftime('%A, %B %d, %Y at %I:%M %p')} {DISPLAY_TZ_LABEL}"
 
 
+def _account_owner_email(evaluation):
+    """The login email for the account this evaluation belongs to - the
+    company's admin_user for B2B (not necessarily whoever on the team
+    actually scheduled it), or the scheduler themselves for B2C, where
+    there's no separate company/owner distinction."""
+    if evaluation.company_id and evaluation.company.admin_user_id:
+        return evaluation.company.admin_user.email
+    return evaluation.created_by.email
+
+
 def send_evaluation_scheduled_email(evaluation, request=None):
 
     scheduled_date = _format_date(evaluation.scheduled_date)
@@ -84,12 +94,43 @@ If you need to reschedule or have any questions, please contact your evaluator.
 Best regards,
 Meritlense Team
 """
-    
+
     send_mail(
         subject,
         message,
         settings.DEFAULT_FROM_EMAIL,
         [evaluation.candidate_email],
+        fail_silently=False,
+    )
+
+    owner_email = _account_owner_email(evaluation)
+    owner_subject = f"Interview scheduled: {evaluation.candidate_first_name} {evaluation.candidate_last_name} - {scheduled_date}"
+    owner_message = f"""
+Hello {evaluation.created_by.get_full_name()},
+
+An interview has been scheduled on your MeritLense account.
+
+Evaluation Details:
+- Candidate: {evaluation.candidate_first_name} {evaluation.candidate_last_name}
+- Candidate Email: {evaluation.candidate_email}
+- Type: {evaluation_type_display}
+- Date: {scheduled_date}
+- Time: {scheduled_time}
+- Duration: {duration} minutes
+- Scheduled by: {creator_name}
+
+The candidate has been emailed their own link to join at the scheduled time.
+You can join from your MeritLense dashboard once the interview starts.
+
+Best regards,
+Meritlense Team
+"""
+
+    send_mail(
+        owner_subject,
+        owner_message,
+        settings.DEFAULT_FROM_EMAIL,
+        [owner_email],
         fail_silently=False,
     )
 

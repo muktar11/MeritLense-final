@@ -3,6 +3,7 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.exceptions import PermissionDenied
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
@@ -410,6 +411,23 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
             return Subscription.objects.filter(company=company)
         
         return Subscription.objects.none()
+
+    def _assert_can_manage_subscription(self, subscription):
+        user = self.request.user
+
+        if user.role in [Roles.SUPERADMIN, Roles.ADMIN]:
+            return
+
+        if subscription.company_id:
+            company_profile = getattr(user, "company_profile", None)
+            owned_company_id = getattr(company_profile, "company_id", None)
+
+            if user.role != Roles.B2B or owned_company_id != subscription.company_id:
+                raise PermissionDenied("Only the company owner can manage this subscription.")
+            return
+
+        if subscription.user_id != user.id:
+            raise PermissionDenied("You do not have permission to manage this subscription.")
     
     def list(self, request):
         subscriptions = self.get_queryset()
@@ -533,6 +551,7 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
     @action(detail=True, methods=['post'])
     def change_plan(self, request, id=None):
         subscription = self.get_object()
+        self._assert_can_manage_subscription(subscription)
         old_plan = subscription.stripe_price.name if subscription.stripe_price else 'Unknown'
         
         serializer = ChangePlanSerializer(
@@ -601,6 +620,7 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
     @action(detail=True, methods=['post'])
     def update_quantity(self, request, id=None):
         subscription = self.get_object()
+        self._assert_can_manage_subscription(subscription)
         old_quantity = subscription.quantity
         
         serializer = UpdateQuantitySerializer(data=request.data)
@@ -651,6 +671,7 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
     @action(detail=True, methods=['post'])
     def cancel(self, request, id=None):
         subscription = self.get_object()
+        self._assert_can_manage_subscription(subscription)
         serializer = CancelSubscriptionSerializer(data=request.data)
         
         if serializer.is_valid():
@@ -694,6 +715,7 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
     @action(detail=True, methods=['post'])
     def reactivate(self, request, id=None):
         subscription = self.get_object()
+        self._assert_can_manage_subscription(subscription)
         
         if subscription.status != SubscriptionStatus.CANCELED:
             return Response(
@@ -738,6 +760,7 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
     @action(detail=True, methods=['get'])
     def upcoming_invoice(self, request, id=None):
         subscription = self.get_object()
+        self._assert_can_manage_subscription(subscription)
         price_id = request.query_params.get('price_id')
         quantity = request.query_params.get('quantity')
         

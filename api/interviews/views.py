@@ -11,7 +11,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from api.core.public_ids import PUBLIC_ID_OR_PK_REGEX, build_object_identifier_filter
-from api.core.constants import InterviewSessionStatus
+from api.core.constants import InterviewSessionStatus, Roles
 from api.interviews.models import (
     InterviewConfiguration,
     InterviewRubric,
@@ -66,7 +66,7 @@ from .serializers import (
 
 
 class CanManageInterviewSetupMixin:
-    setup_roles = {"ADMIN", "SUPERADMIN", "B2B", "B2C"}
+    setup_roles = {Roles.ADMIN, Roles.SUPERADMIN}
 
     def get_permissions(self):
         return [IsAuthenticated()]

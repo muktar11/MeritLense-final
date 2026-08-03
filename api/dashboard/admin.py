@@ -1,3 +1,7 @@
 from django.contrib import admin
+from api.dashboard.models import AdminAlertConfiguration
 
-# Register your models here.
+
+@admin.register(AdminAlertConfiguration)
+class AdminAlertConfigurationAdmin(admin.ModelAdmin):
+    list_display = ("singleton_key", "updated_at")

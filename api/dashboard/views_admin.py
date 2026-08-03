@@ -11,8 +11,31 @@ from api.core.constants import AuditLogCategory, Roles, EvaluationStatus
 from api.accounts.models import User, Company
 from api.candidates.models import Candidate
 from api.core.permisssions import IsAdminOrSuperAdmin
+from api.dashboard.models import AdminAlertConfiguration
+from api.dashboard.serializers import AdminAlertConfigurationSerializer
 from api.evaluations.models import Evaluation
 from api.payments.models import Subscription, Payment
+
+
+class AdminAlertConfigurationView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def get_object(self):
+        config, _ = AdminAlertConfiguration.objects.get_or_create(singleton_key="default")
+        return config
+
+    def get(self, request):
+        config = self.get_object()
+        serializer = AdminAlertConfigurationSerializer(config)
+        return Response(serializer.data)
+
+    def patch(self, request):
+        config = self.get_object()
+        settings_payload = request.data.get("settings", request.data)
+        config.settings = settings_payload
+        config.save(update_fields=["settings", "updated_at"])
+        serializer = AdminAlertConfigurationSerializer(config)
+        return Response(serializer.data)
 
 class AdminDashboardStatsView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]

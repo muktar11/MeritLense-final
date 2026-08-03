@@ -35,4 +35,5 @@ urlpatterns = [
     path('admin/top-candidates', views_admin.AdminTopPerformingCandidatesView.as_view(), name='admin-top-candidates'),
     path('admin/recent-activity', views_admin.AdminRecentActivityView.as_view(), name='admin-recent-activity'),
     path('admin/geographic-distribution', views_admin.AdminGeographicDistributionView.as_view(), name='admin-geographic-distribution'),
+    path('admin/alert-configuration', views_admin.AdminAlertConfigurationView.as_view(), name='admin-alert-configuration'),
 ]

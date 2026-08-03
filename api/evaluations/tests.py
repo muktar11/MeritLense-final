@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from rest_framework.test import APIClient
 from urllib.parse import parse_qs, urlsplit
+from unittest.mock import patch
 
 from api.accounts.models import Company, CompanyEmployerProfile, User
 from api.audit.models import AuditLog
@@ -759,6 +760,65 @@ class Week6ScoringServiceTests(TestCase):
         )
         self.assertEqual(legal_record_response.status_code, 200)
         self.assertEqual(legal_record_response.data["readiness_indicator"], "جاهز")
+
+    def test_run_scoring_repairs_text_response_and_backfills_ai_processing(self):
+        self.response.interpretation_status = "NOT_STARTED"
+        self.response.processing_status = "NOT_STARTED"
+        self.response.stt_status = "PENDING"
+        self.response.original_transcript = ""
+        self.response.save(
+            update_fields=[
+                "interpretation_status",
+                "processing_status",
+                "stt_status",
+                "original_transcript",
+                "updated_at",
+            ]
+        )
+        EvaluationInputArtifact.objects.filter(response=self.response).delete()
+
+        def fake_process_response_ai(*, response, actor=None, force=False, target_override="", idempotency_key=""):
+            response.interpretation_status = "COMPLETED"
+            response.processing_status = "PROCESSING_COMPLETED"
+            response.save(update_fields=["interpretation_status", "processing_status", "updated_at"])
+            EvaluationInputArtifact.objects.update_or_create(
+                response=response,
+                defaults={
+                    "session": response.session,
+                    "question": response.question,
+                    "competency_code": "safety_awareness",
+                    "expected_indicators": ["identify hazard", "clean spill", "prevent recurrence"],
+                    "observed_indicators": ["identify hazard", "clean spill"],
+                    "missing_indicators": ["prevent recurrence"],
+                    "risk_flags": [],
+                    "source_interpretation_status": "COMPLETED",
+                    "requires_human_review": False,
+                    "metadata": {"source": "test-backfill"},
+                },
+            )
+            return response
+
+        with patch(
+            "api.evaluations.scoring_services.AIProcessingOrchestrationService.process_response_ai",
+            side_effect=fake_process_response_ai,
+        ) as process_mock:
+            summary = Week6ScoringService.run_for_evaluation(
+                evaluation=self.evaluation,
+                actor=self.user,
+                rule_set=self.rule_set,
+            )
+
+        self.response.refresh_from_db()
+        response_result = ResponseEvaluationResult.objects.get(evaluation=self.evaluation, response=self.response)
+
+        self.assertEqual(process_mock.call_count, 1)
+        self.assertEqual(self.response.stt_status, "COMPLETED")
+        self.assertEqual(
+            self.response.original_transcript,
+            "I would identify the hazard and clean the spill.",
+        )
+        self.assertEqual(float(response_result.score), 7.0)
+        self.assertEqual(summary.status, SessionEvaluationSummary.STATUS_EVALUATED)
 
     def test_screening_evaluation_skips_readiness_override(self):
         self.session.evaluation_tier = InterviewEvaluationTier.SCREENING

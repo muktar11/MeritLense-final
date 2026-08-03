@@ -4,9 +4,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from api.audit.services import AuditLogService
-from api.core.constants import AuditLogAction, AuditLogCategory, ReadinessStatus
+from api.core.constants import AuditLogAction, AuditLogCategory, CandidateResponseType, ReadinessStatus
 from api.sessions.models import CandidateResponse
 from api.translation.models import EvaluationInputArtifact
+from api.translation.services import AIProcessingError, AIProcessingOrchestrationService
 
 from .readiness_record_services import EvaluationReadinessRecordService
 from .models import (
@@ -49,6 +50,7 @@ class Week6ScoringService:
 
         results = []
         for response in responses:
+            response = cls._prepare_response_for_scoring(response=response, actor=actor)
             result = cls._score_response(
                 evaluation=evaluation,
                 response=response,
@@ -104,6 +106,49 @@ class Week6ScoringService:
         if fallback:
             return fallback
         raise Week6ScoringError("No active scoring rule set matches this evaluation")
+
+    @classmethod
+    def _prepare_response_for_scoring(cls, *, response, actor=None):
+        updated_fields = []
+        if response.response_type == CandidateResponseType.TEXT:
+            transcript = (response.original_transcript or response.transcript or response.text_response or "").strip()
+            if transcript:
+                if response.transcript != transcript:
+                    response.transcript = transcript
+                    updated_fields.append("transcript")
+                if response.original_transcript != transcript:
+                    response.original_transcript = transcript
+                    updated_fields.append("original_transcript")
+                if not response.text_response:
+                    response.text_response = transcript
+                    updated_fields.append("text_response")
+                if response.stt_status != "COMPLETED":
+                    response.stt_status = "COMPLETED"
+                    updated_fields.append("stt_status")
+                if response.processing_status == "NOT_STARTED":
+                    response.processing_status = "TRANSCRIPT_READY"
+                    updated_fields.append("processing_status")
+
+        if updated_fields:
+            response.save(update_fields=[*updated_fields, "updated_at"])
+
+        if hasattr(response, "evaluation_input_artifact"):
+            return response
+
+        transcript = (response.original_transcript or response.transcript or "").strip()
+        if not transcript or response.processing_status == "FAILED" or response.interpretation_status == "FAILED":
+            return response
+
+        try:
+            response = AIProcessingOrchestrationService.process_response_ai(
+                response=response,
+                actor=actor,
+                force=False,
+                target_override=response.session.translation_target,
+            )
+        except AIProcessingError:
+            return response
+        return response
 
     @classmethod
     def _score_response(cls, *, evaluation, response, rule_set):

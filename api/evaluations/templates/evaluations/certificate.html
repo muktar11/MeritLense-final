@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  @page { size: A4; margin: 2cm; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 10.5pt; color: #1a1a1a; line-height: 1.5; }
+
+  .header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #6d28d9; padding-bottom: 10px; margin-bottom: 4px; }
+  .wordmark { font-size: 17pt; font-weight: 700; }
+  .wordmark-accent { color: #6d28d9; }
+  .doc-title { font-size: 9.5pt; color: #555; }
+  .cert-id { font-size: 9.5pt; color: #6d28d9; font-weight: 600; text-align: right; }
+
+  h2 { font-size: 11.5pt; color: #4c1d95; margin: 1.3em 0 0.5em; border-bottom: 1px solid #e5e0f5; padding-bottom: 3px; }
+  table.fields { width: 100%; border-collapse: collapse; }
+  table.fields td { padding: 2px 0; vertical-align: top; }
+  table.fields td.label { color: #666; width: 34%; }
+  table.fields td.value { font-weight: 600; }
+
+  .na { color: #999; font-weight: 400; font-style: italic; }
+
+  .score-hero { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 10px; }
+  .score-hero .score { font-size: 26pt; font-weight: 700; color: #6d28d9; }
+  .score-hero .score-max { font-size: 12pt; color: #999; }
+  .recommendation { background: #f5f3ff; border-radius: 6px; padding: 8px 12px; font-size: 10pt; }
+
+  .layer-bars { margin-top: 6px; }
+  .layer-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+  .layer-name { width: 130px; font-size: 9.5pt; color: #444; }
+  .layer-bar-track { flex: 1; background: #eee; border-radius: 4px; height: 8px; overflow: hidden; }
+  .layer-bar-fill { background: #6d28d9; height: 8px; }
+  .layer-pct { width: 42px; text-align: right; font-size: 9.5pt; font-weight: 600; }
+  .layer-note { font-size: 8.5pt; color: #999; margin-top: 4px; }
+
+  .competency-list { font-size: 9.5pt; }
+  .competency-list li { margin-bottom: 2px; }
+
+  .two-col { display: flex; gap: 24px; }
+  .two-col > div { flex: 1; }
+
+  .compliance { font-size: 8.7pt; color: #555; background: #fafafa; border: 1px solid #eee; border-radius: 6px; padding: 10px 12px; margin-top: 1.4em; }
+  .compliance p { margin: 0 0 6px; }
+
+  .footer-seal { margin-top: 1.6em; padding: 12px 16px; border: 1.5px solid #6d28d9; border-radius: 8px; background: #faf9ff; page-break-inside: avoid; position: relative; }
+  .footer-seal-table { font-size: 8.5pt; color: #333; border-collapse: collapse; }
+  .footer-seal-table td { padding: 1px 6px 1px 0; }
+  .footer-seal-table td:first-child { color: #777; white-space: nowrap; }
+  .footer-seal-qr { width: 68px; height: 68px; position: absolute; right: 16px; top: 12px; }
+</style>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <div class="wordmark">Merit<span class="wordmark-accent">Lense</span></div>
+      <div class="doc-title">AI Evaluation Certificate &mdash; Official Document</div>
+    </div>
+    <div class="cert-id">Certificate ID<br />{{ certificate_id }}</div>
+  </div>
+
+  <h2>Candidate Information</h2>
+  <table class="fields">
+    <tr><td class="label">Full Name</td><td class="value">{{ candidate_name }}</td></tr>
+    <tr><td class="label">Candidate ID</td><td class="value">{{ candidate_public_id }}</td></tr>
+    <tr><td class="label">Passport No.</td><td class="value">{{ candidate_passport_masked|default:"N/A" }}</td></tr>
+    <tr><td class="label">Role</td><td class="value">{{ role_name }}</td></tr>
+  </table>
+
+  <h2>Evaluation Summary</h2>
+  <div class="score-hero">
+    <span class="score">{{ final_score|floatformat:1 }}</span>
+    <span class="score-max">/ 100</span>
+  </div>
+  <div class="recommendation">{{ recommendation }}</div>
+  <table class="fields" style="margin-top: 8px;">
+    <tr>
+      <td class="label">Processing Confidence</td>
+      <td class="value">{% if processing_confidence %}{{ processing_confidence }} (Audio &amp; Transcription Quality){% else %}<span class="na">N/A</span>{% endif %}</td>
+    </tr>
+    <tr><td class="label">Work Readiness</td><td class="value">{{ work_readiness }}</td></tr>
+  </table>
+
+  <h2>Evaluation Breakdown</h2>
+  {% if has_layer_breakdown %}
+  <div class="layer-bars">
+    {% for layer, pct in layer_breakdown.items %}
+    <div class="layer-row">
+      <div class="layer-name">{{ layer|title }}</div>
+      <div class="layer-bar-track"><div class="layer-bar-fill" style="width: {{ pct|floatformat:0 }}%;"></div></div>
+      <div class="layer-pct">{{ pct|floatformat:0 }}%</div>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="layer-note">Structured indicators &mdash; no Pass/Fail classification.</p>
+  {% else %}
+  <ul class="competency-list">
+    {% for c in competencies_summary %}
+    <li>{{ c.competency_name|default:c.competency_code }}: {{ c.percentage|floatformat:0 }}%</li>
+    {% empty %}
+    <li class="na">No competency breakdown available.</li>
+    {% endfor %}
+  </ul>
+  <p class="layer-note">This rule set hasn't been categorized into Cognitive/Behavioral/Task Execution layers yet &mdash; showing the real per-competency breakdown instead.</p>
+  {% endif %}
+
+  <div class="two-col">
+    <div>
+      <h2>Top Skill</h2>
+      <p>{{ top_skill|default:"N/A" }}</p>
+    </div>
+    <div>
+      <h2>Improvement Area</h2>
+      <p>{{ improvement_area|default:"N/A" }}</p>
+    </div>
+  </div>
+
+  <h2>Role Fit Engine</h2>
+  {% if role_fit %}
+    <p>{{ role_fit }}</p>
+  {% else %}
+    <p class="na">N/A &mdash; requires a completed live/scheduled interview evaluation, not yet available for this candidate.</p>
+  {% endif %}
+
+  <h2>Certificate Details</h2>
+  <table class="fields">
+    <tr><td class="label">Issue Date</td><td class="value">{{ issue_date }}</td></tr>
+    <tr><td class="label">Expiry Date</td><td class="value">{{ expiry_date }}</td></tr>
+    <tr><td class="label">Verification</td><td class="value">Scan the QR code below or visit {{ verification_url }}</td></tr>
+  </table>
+
+  <h2>Traceability</h2>
+  <table class="fields">
+    <tr><td class="label">Session ID</td><td class="value">{{ session_id }}</td></tr>
+    <tr><td class="label">Evaluation Timestamp</td><td class="value">{{ evaluation_timestamp }}</td></tr>
+    <tr><td class="label">System Version</td><td class="value">MeritLense AI {{ system_version }}</td></tr>
+  </table>
+
+  <div class="compliance">
+    <p><strong>Compliance Statement.</strong> This certificate is issued by the MeritLense AI Evaluation System. Evaluation is strictly based on observable actions, responses, and task execution. The system does not assess identity, physical condition, health status, or personal attributes. No biometric storage, medical analysis, or predictive profiling is performed.</p>
+    <p><strong>Human Review Layer.</strong> Authorized reviewers may view evaluation outputs, integrity flags, and observational notes; add annotations; make independent hiring decisions outside the system; or request a new evaluation session. Reviewers cannot modify scores, indicators, or system-generated recommendations &mdash; the AI evaluation remains the single source of truth. Final hiring decisions remain fully human-controlled and external to the evaluation system.</p>
+  </div>
+
+  <div class="footer-seal">
+    <table class="footer-seal-table">
+      <tr><td>Certificate ID</td><td>{{ certificate_id }}</td></tr>
+      <tr><td>Generated</td><td>{{ generated_at }}</td></tr>
+      <tr><td>Verify at</td><td>{{ verification_url }}</td></tr>
+    </table>
+    <img class="footer-seal-qr" src="{{ qr_data_uri }}" alt="Verification QR code" />
+  </div>
+
+</body>
+</html>

@@ -11,8 +11,9 @@ from api.accounts.models import Company, CompanyEmployerProfile, User
 from api.audit.models import AuditLog
 from api.candidates.models import Candidate
 from api.core.constants import AuditLogAction, CandidateResponseType, CoverageLevel, EvaluationLayer, EvaluationStatus, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles, SubscriptionStatus, BillingInterval
-from api.evaluations.models import CompetencyEvaluationResult, Evaluation, EvaluationReadinessDecisionRecord, ResponseEvaluationResult, ScoringRule, ScoringRuleSet, SessionEvaluationSummary
+from api.evaluations.models import Certificate, CompetencyEvaluationResult, Evaluation, EvaluationReadinessDecisionRecord, ResponseEvaluationResult, ScoringRule, ScoringRuleSet, SessionEvaluationSummary
 from api.evaluations.scoring_services import Week6ScoringService
+from api.evaluations.certificate_services import generate_certificate
 from api.payments.models import Customer, Price, Subscription
 from api.questions.models import QuestionTemplate
 from api.scores.models import CandidateScore, ScoreSet
@@ -1320,3 +1321,295 @@ class AutomaticScoringOnCompletionTests(TestCase):
 
         summary = SessionEvaluationSummary.objects.get(session=self.session)
         self.assertEqual(float(summary.overall_percentage), 100.0)
+
+    def test_completion_auto_generates_a_certificate_when_certificate_enabled(self):
+        from api.sessions.services import InterviewSessionService
+
+        template = QuestionTemplate.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            question_code="HK-CERT-001",
+            question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE,
+            domain="Safety & Hygiene",
+            skill_tag="safety_awareness",
+            skill="Safety Awareness",
+            sequence_number=1,
+            difficulty=QuestionDifficulty.MEDIUM,
+            question_text="What do you do when you see a spill?",
+            question_type="safety",
+            question_format="SCENARIO",
+            language="EN",
+            scoring_type="0/3/5",
+            difficulty_score=2,
+            estimated_time_seconds=60,
+            expected_answer_type="multi_step",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            critical_question=False,
+            is_active=True,
+        )
+        session_question = SessionQuestion.objects.create(
+            session=self.session,
+            question_template=template,
+            question_text=template.question_text,
+            domain=template.domain,
+            skill=template.skill_tag,
+            difficulty=template.difficulty,
+            question_order=1,
+            status="ANSWERED",
+            is_mandatory=True,
+            asked_at=timezone.now(),
+            answered_at=timezone.now(),
+        )
+        response = CandidateResponse.objects.create(
+            session=self.session,
+            question=session_question,
+            response_type=CandidateResponseType.TEXT,
+            transcript="I would identify the hazard and clean the spill.",
+            text_response="I would identify the hazard and clean the spill.",
+            interpretation_status="COMPLETED",
+            processing_status="RULE_INPUT_PREPARED",
+            stt_confidence=Decimal("0.92"),
+        )
+        EvaluationInputArtifact.objects.create(
+            response=response,
+            session=self.session,
+            question=session_question,
+            competency_code="safety_awareness",
+            expected_indicators=["identify hazard"],
+            observed_indicators=["identify hazard"],
+            missing_indicators=[],
+            risk_flags=[],
+            source_interpretation_status="COMPLETED",
+            requires_human_review=False,
+            metadata={"source": "test"},
+        )
+        rule_set = ScoringRuleSet.objects.create(
+            name="Cert Test Rules",
+            version="v1",
+            role_code="domestic_worker",
+            role_name="Housekeeper",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            is_active=True,
+            created_by=self.user,
+            company=self.candidate.company,
+        )
+        ScoringRule.objects.create(
+            rule_set=rule_set,
+            competency_code="safety_awareness",
+            competency_name="Safety Awareness",
+            evaluation_layer=EvaluationLayer.COGNITIVE,
+            question_template=template,
+            question_code="HK-CERT-001",
+            expected_indicators=["identify hazard"],
+            required_indicators=["identify hazard"],
+            weighted_indicators={"identify hazard": "10"},
+            max_score="10.00",
+            pass_threshold="7.00",
+            scoring_method=ScoringRule.SCORING_METHOD_WEIGHTED_MATCH,
+            is_active=True,
+        )
+
+        InterviewSessionService.complete_session(self.session, actor=self.user)
+
+        evaluation = Evaluation.objects.get(session=self.session)
+        self.assertTrue(evaluation.certificate_enabled)
+        certificate = Certificate.objects.get(evaluation=evaluation)
+        self.assertTrue(certificate.certificate_id.startswith("ML-"))
+        self.assertTrue(certificate.pdf_file.name)
+        self.assertTrue(certificate.pdf_hash)
+        self.assertIsNotNone(certificate.issued_at)
+        self.assertEqual((certificate.expires_at - certificate.issued_at).days, 90)
+
+
+class CertificateGenerationTests(TestCase):
+    """generate_certificate() directly, isolated from the completion flow -
+    checks that every field either reflects real scoring data or is
+    honestly None/N/A, matching Certificate's own docstring contract."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="cert-gen@example.com",
+            password="testpass123",
+            first_name="Cert",
+            last_name="Gen",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Cert",
+            last_name="Candidate",
+            email="cert-gen-candidate@example.com",
+            passport_id="CERTGEN0001",
+            job_role="NA",
+            core_skills="safety",
+            preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf",
+            created_by=self.user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=45,
+            total_questions=1,
+            allow_retries=True,
+            max_retries=1,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+        )
+        self.session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            role_code=self.config.role_code,
+            ui_language="EN",
+            candidate_language="EN",
+            tts_language_code="en-US",
+            stt_language_code="en-US",
+            total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+        )
+        self.evaluation = Evaluation.objects.create(
+            session=self.session,
+            candidate=self.candidate,
+            evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now() + timezone.timedelta(days=1),
+            duration_minutes=45,
+            created_by=self.user,
+        )
+
+    def test_generate_certificate_uses_real_data_and_marks_missing_data_honestly(self):
+        summary = SessionEvaluationSummary.objects.create(
+            evaluation=self.evaluation,
+            session=self.session,
+            candidate=self.candidate,
+            rule_set=ScoringRuleSet.objects.create(
+                name="Cert Gen Rules", version="v1", role_code="domestic_worker", role_name="Housekeeper",
+                evaluation_tier=InterviewEvaluationTier.FULL, is_active=True, created_by=self.user,
+            ),
+            total_score=Decimal("70"),
+            max_score=Decimal("100"),
+            overall_percentage=Decimal("70.00"),
+            layer_breakdown={},
+            competencies_summary=[
+                {"competency_code": "safety_awareness", "competency_name": "Safety Awareness", "percentage": 70.0, "response_count": 1},
+            ],
+            status=SessionEvaluationSummary.STATUS_EVALUATED,
+        )
+
+        certificate = generate_certificate(self.evaluation, summary)
+
+        self.assertTrue(certificate.certificate_id.startswith(f"ML-{timezone.now().year}-"))
+        self.assertTrue(certificate.pdf_file.name)
+        pdf_bytes = certificate.pdf_file.read()
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual((certificate.expires_at - certificate.issued_at).days, 90)
+
+    def test_regenerating_keeps_the_same_certificate_id(self):
+        summary = SessionEvaluationSummary.objects.create(
+            evaluation=self.evaluation,
+            session=self.session,
+            candidate=self.candidate,
+            rule_set=ScoringRuleSet.objects.create(
+                name="Cert Regen Rules", version="v1", role_code="domestic_worker", role_name="Housekeeper",
+                evaluation_tier=InterviewEvaluationTier.FULL, is_active=True, created_by=self.user,
+            ),
+            total_score=Decimal("70"), max_score=Decimal("100"), overall_percentage=Decimal("70.00"),
+            competencies_summary=[], status=SessionEvaluationSummary.STATUS_EVALUATED,
+        )
+
+        first = generate_certificate(self.evaluation, summary)
+        second = generate_certificate(self.evaluation, summary)
+
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(first.certificate_id, second.certificate_id)
+        self.assertEqual(first.issued_at, second.issued_at)
+
+
+class CertificateHelperTests(TestCase):
+    """Unit tests for the honesty-preserving pieces of
+    certificate_services.py - values that must come back as None/N/A
+    rather than a fabricated guess when the underlying data doesn't exist."""
+
+    def test_band_confidence_is_none_with_no_recorded_stt_confidence(self):
+        from api.evaluations.certificate_services import _band_confidence
+
+        user = User.objects.create_user(
+            email="conf-none@example.com", password="testpass123", first_name="No", last_name="Confidence",
+            role=Roles.B2C, is_verified=True,
+        )
+        candidate = Candidate.objects.create(
+            first_name="No", last_name="Confidence", email="conf-none-candidate@example.com",
+            passport_id="CONFNONE01", job_role="NA", core_skills="safety", preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf", created_by=user,
+        )
+        config = InterviewConfiguration.objects.create(
+            role_name="Housekeeper", role_code="domestic_worker", language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL, duration_minutes=45, total_questions=1,
+            allow_retries=True, max_retries=1, rubric_version="v2.0", question_set_version="v1.2",
+        )
+        session = InterviewSession.objects.create(
+            candidate=candidate, organization=candidate.company, config=config,
+            role_name=config.role_name, role_code=config.role_code, ui_language="EN", candidate_language="EN",
+            tts_language_code="en-US", stt_language_code="en-US", total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL, rubric_version="v2.0", question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30), created_by=user,
+        )
+
+        self.assertIsNone(_band_confidence(session))
+
+    def test_band_confidence_reflects_real_average(self):
+        from api.evaluations.certificate_services import _band_confidence
+
+        user = User.objects.create_user(
+            email="conf-real@example.com", password="testpass123", first_name="Real", last_name="Confidence",
+            role=Roles.B2C, is_verified=True,
+        )
+        candidate = Candidate.objects.create(
+            first_name="Real", last_name="Confidence", email="conf-real-candidate@example.com",
+            passport_id="CONFREAL01", job_role="NA", core_skills="safety", preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf", created_by=user,
+        )
+        config = InterviewConfiguration.objects.create(
+            role_name="Housekeeper", role_code="domestic_worker", language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL, duration_minutes=45, total_questions=1,
+            allow_retries=True, max_retries=1, rubric_version="v2.0", question_set_version="v1.2",
+        )
+        session = InterviewSession.objects.create(
+            candidate=candidate, organization=candidate.company, config=config,
+            role_name=config.role_name, role_code=config.role_code, ui_language="EN", candidate_language="EN",
+            tts_language_code="en-US", stt_language_code="en-US", total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL, rubric_version="v2.0", question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30), created_by=user,
+        )
+        template = QuestionTemplate.objects.create(
+            role_name="Housekeeper", role_code="domestic_worker", question_code="HK-CONF-001",
+            question_version="1.0", question_status=QuestionLifecycleStatus.ACTIVE, domain="Safety",
+            skill_tag="safety_awareness", skill="Safety Awareness", sequence_number=1,
+            difficulty=QuestionDifficulty.MEDIUM, question_text="Q", question_type="safety",
+            question_format="SCENARIO", language="EN", scoring_type="0/3/5", difficulty_score=2,
+            estimated_time_seconds=60, expected_answer_type="multi_step",
+            evaluation_tier=InterviewEvaluationTier.FULL, rubric_version="v2.0", question_set_version="v1.2",
+            critical_question=False, is_active=True,
+        )
+        session_question = SessionQuestion.objects.create(
+            session=session, question_template=template, question_text=template.question_text,
+            domain=template.domain, skill=template.skill_tag, difficulty=template.difficulty,
+            question_order=1, status="ANSWERED", is_mandatory=True,
+            asked_at=timezone.now(), answered_at=timezone.now(),
+        )
+        CandidateResponse.objects.create(
+            session=session, question=session_question, response_type=CandidateResponseType.TEXT,
+            transcript="answer", text_response="answer", stt_confidence=Decimal("0.9"),
+        )
+
+        self.assertEqual(_band_confidence(session), "High")

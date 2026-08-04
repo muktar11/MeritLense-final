@@ -25,6 +25,7 @@ from api.core.constants import (
 )
 from api.evaluations.models import Evaluation
 from api.evaluations.scoring_services import Week6ScoringError, Week6ScoringService
+from api.evaluations.certificate_services import generate_certificate
 from api.interviews.package_services import PackageArchitectureService
 from api.interviews.voice_services import (
     SpeechToTextService,
@@ -801,10 +802,11 @@ class InterviewSessionService:
             # still shouldn't roll back session completion, so it's caught
             # too, just distinguished in the audit log.
             try:
-                Week6ScoringService.run_for_evaluation(evaluation=evaluation, actor=actor)
+                summary = Week6ScoringService.run_for_evaluation(evaluation=evaluation, actor=actor)
             except Week6ScoringError:
-                pass
+                summary = None
             except Exception:
+                summary = None
                 if actor:
                     AuditLogService.log(
                         user=actor,
@@ -815,6 +817,27 @@ class InterviewSessionService:
                         data=session_event_payload(session),
                         severity=AuditLogSeverity.ERROR,
                     )
+            # Certificate issuance follows the same "score + report +
+            # certificate" bundle as scoring itself - real scoring output
+            # is a prerequisite (can't put real numbers on a certificate
+            # that doesn't exist), and certificate_enabled respects the
+            # existing per-tier flag the system already uses to gate
+            # issuance. Same non-blocking contract as scoring above - a
+            # PDF-generation failure must not roll back completion.
+            if summary is not None and evaluation.certificate_enabled:
+                try:
+                    generate_certificate(evaluation, summary)
+                except Exception:
+                    if actor:
+                        AuditLogService.log(
+                            user=actor,
+                            action=AuditLogAction.SESSION_COMPLETED,
+                            category=AuditLogCategory.SESSION,
+                            description=f"Automatic certificate generation failed for {session.candidate.get_full_name()}",
+                            resource=session,
+                            data=session_event_payload(session),
+                            severity=AuditLogSeverity.ERROR,
+                        )
         if actor:
             AuditLogService.log(
                 user=actor,

@@ -666,3 +666,36 @@ class SessionEvaluationSummary(TimeStampedModel):
             models.Index(fields=["session", "generated_at"]),
         ]
         ordering = ["-generated_at", "-created_at"]
+
+
+class Certificate(TimeStampedModel):
+    """One PDF certificate per evaluation, auto-generated right after
+    Week6ScoringService produces a SessionEvaluationSummary for it (see
+    complete_session() in api/sessions/services.py). Every field rendered
+    onto the PDF is sourced from real scoring data (or explicitly N/A) -
+    see certificate_services.py for exactly what's real vs. not yet
+    computed anywhere (e.g. Role Fit Engine, which needs a live-interview
+    rating mechanism that doesn't exist yet)."""
+
+    evaluation = models.OneToOneField(
+        Evaluation, on_delete=models.CASCADE, related_name="certificate"
+    )
+    candidate = models.ForeignKey(
+        Candidate, on_delete=models.CASCADE, related_name="certificates"
+    )
+    # null (not just blank) so Postgres's unique constraint doesn't treat
+    # two freshly get_or_create()'d rows (both still unset before their
+    # real ID gets assigned a moment later) as colliding on the same value.
+    certificate_id = models.CharField(max_length=50, unique=True, blank=True, null=True, default=None)
+    pdf_file = models.FileField(upload_to="certificates/", null=True, blank=True)
+    pdf_hash = models.CharField(max_length=64, blank=True, help_text="SHA-256 hex digest of the generated PDF binary.")
+    issued_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Certificate"
+        verbose_name_plural = "Certificates"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.certificate_id or f"Certificate for {self.candidate.get_full_name()}"

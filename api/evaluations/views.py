@@ -2,7 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
 from django.db.models import Q
 from django.utils import timezone
@@ -33,7 +33,7 @@ from .permissions import CanManageEvaluation, CanViewEvaluation
 from api.core.constants import Roles, EvaluationStatus, EvaluationType
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
-from .models import EvaluationReadinessDecisionRecord, ScoringRuleSet, SessionEvaluationSummary
+from .models import Certificate, EvaluationReadinessDecisionRecord, ScoringRuleSet, SessionEvaluationSummary
 from .scoring_services import Week6ScoringError, Week6ScoringService
 from api.reports.serializers import EvaluationReportSerializer
 from api.reports.services import EvaluationReportError, EvaluationReportService
@@ -348,6 +348,19 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         if summary is None:
             return Response({"detail": "No scoring summary has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
         return Response(SessionEvaluationSummarySerializer(summary).data)
+
+    @action(detail=True, methods=['get'], url_path='certificate')
+    def certificate(self, request, id=None):
+        evaluation = self.get_object()
+        cert = getattr(evaluation, "certificate", None)
+        if cert is None or not cert.pdf_file:
+            return Response({"detail": "No certificate has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "certificate_id": cert.certificate_id,
+            "pdf_url": request.build_absolute_uri(cert.pdf_file.url),
+            "issued_at": cert.issued_at,
+            "expires_at": cert.expires_at,
+        })
 
     @action(detail=True, methods=['get'], url_path='response-results')
     def response_results(self, request, id=None):
@@ -675,6 +688,31 @@ class CandidateScoreSummaryView(APIView):
             })
 
         return Response(results)
+
+
+class CertificateVerifyView(APIView):
+    """GET /evaluations/certificates/verify/{certificate_id} - public QR
+    verification, mirroring api/contracts/views.py's agreement_verify.
+    No auth, and only the fields already printed on the certificate
+    itself - this lets a holder confirm a PDF/printed copy is genuine,
+    not a general-purpose evaluation lookup."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request, certificate_id):
+        certificate = Certificate.objects.filter(certificate_id=certificate_id).select_related("evaluation").first()
+        if certificate is None or not certificate.pdf_file:
+            return Response({"detail": "No certificate found for this ID."}, status=status.HTTP_404_NOT_FOUND)
+
+        is_expired = bool(certificate.expires_at and certificate.expires_at < timezone.now())
+        return Response({
+            "certificate_id": certificate.certificate_id,
+            "candidate_name": certificate.candidate.get_full_name(),
+            "issued_at": certificate.issued_at,
+            "expires_at": certificate.expires_at,
+            "status": "EXPIRED" if is_expired else "VALID",
+            "pdf_hash": certificate.pdf_hash,
+        })
 
 
 class ScoringRuleSetViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):

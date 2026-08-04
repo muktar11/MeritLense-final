@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
 from django.db.models import Q
 from django.utils import timezone
 from api.audit.services import AuditLogService
@@ -32,7 +33,7 @@ from .permissions import CanManageEvaluation, CanViewEvaluation
 from api.core.constants import Roles, EvaluationStatus, EvaluationType
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
-from .models import EvaluationReadinessDecisionRecord, ScoringRuleSet
+from .models import EvaluationReadinessDecisionRecord, ScoringRuleSet, SessionEvaluationSummary
 from .scoring_services import Week6ScoringError, Week6ScoringService
 from api.reports.serializers import EvaluationReportSerializer
 from api.reports.services import EvaluationReportError, EvaluationReportService
@@ -607,6 +608,73 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
 
         if scheduled_changed or duration_changed:
             evaluation.save(update_fields=["status", "scheduled_date", "duration_minutes", "updated_at"])
+
+
+class CandidateScoreSummaryView(APIView):
+    """GET /evaluations/candidate-scores - each accessible candidate's most
+    recently scored evaluation, with its real per-competency breakdown.
+
+    Score Management (the frontend page) used to read from ScoreSet/
+    CandidateScore (api/scores/) - a separate model nothing in the actual
+    scoring pipeline ever wrote to, and whose fixed area vocabulary
+    (SAFE_DRIVING, CLEANING, ...) doesn't correspond to any real
+    ScoringRule.competency_code in use. This reads the real output of
+    Week6ScoringService directly instead, so competency columns reflect
+    whatever competencies an evaluation's rule set actually scored, for
+    any role, with no per-role mapping to maintain.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        summaries = SessionEvaluationSummary.objects.select_related(
+            "candidate", "session", "evaluation"
+        ).order_by("candidate_id", "-generated_at", "-created_at")
+
+        if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
+            pass
+        elif user.role == Roles.B2C:
+            summaries = summaries.filter(evaluation__created_by=user)
+        elif user.role == Roles.B2B:
+            if hasattr(user, "company_profile") and user.company_profile:
+                summaries = summaries.filter(evaluation__company=user.company_profile.company)
+            else:
+                summaries = summaries.none()
+        elif user.role == Roles.B2B_TEAM_MEMBER:
+            summaries = summaries.filter(
+                Q(evaluation__created_by=user) | Q(evaluation__candidate__shared_with=user)
+            ).distinct()
+        else:
+            summaries = summaries.none()
+
+        # One row per candidate - their most recent scored evaluation,
+        # picked in Python (not DISTINCT ON) to stay portable and to keep
+        # the access-control filtering above as plain ORM Q objects.
+        latest_by_candidate = {}
+        for summary in summaries:
+            latest_by_candidate.setdefault(summary.candidate_id, summary)
+
+        results = []
+        for summary in latest_by_candidate.values():
+            results.append({
+                "candidate_id": str(summary.candidate.public_id),
+                "evaluation_id": str(summary.evaluation.public_id) if summary.evaluation_id else None,
+                "role_code": summary.session.role_code if summary.session_id else summary.candidate.job_role,
+                "overall_percentage": float(summary.overall_percentage),
+                "status": summary.status,
+                "generated_at": summary.generated_at,
+                "competencies": [
+                    {
+                        "code": item.get("competency_code"),
+                        "name": item.get("competency_name") or item.get("competency_code"),
+                        "percentage": item.get("percentage"),
+                    }
+                    for item in summary.competencies_summary
+                ],
+            })
+
+        return Response(results)
 
 
 class ScoringRuleSetViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):

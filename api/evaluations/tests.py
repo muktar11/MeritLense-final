@@ -899,3 +899,196 @@ class ScoringRuleSetTenantScopingTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         created = ScoringRuleSet.objects.get(public_id=response.data["id"])
         self.assertEqual(created.company, self.company)
+
+
+class CandidateScoreSummaryApiTests(TestCase):
+    """GET /evaluations/candidate-scores - reads real Week6ScoringService
+    output (SessionEvaluationSummary.competencies_summary) directly,
+    replacing the old ScoreSet/CandidateScore models that nothing in the
+    actual scoring pipeline ever populated."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="scores-owner@example.com",
+            password="testpass123",
+            first_name="Scores",
+            last_name="Owner",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.other_user = User.objects.create_user(
+            email="scores-other@example.com",
+            password="testpass123",
+            first_name="Other",
+            last_name="User",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Score",
+            last_name="Candidate",
+            email="score-summary@example.com",
+            passport_id="SCORE-SUMMARY-001",
+            job_role="NA",
+            core_skills="safety",
+            preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf",
+            created_by=self.user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=45,
+            total_questions=1,
+            allow_retries=True,
+            max_retries=1,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+        )
+        self.session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            role_code=self.config.role_code,
+            ui_language="EN",
+            candidate_language="EN",
+            tts_language_code="en-US",
+            stt_language_code="en-US",
+            total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+        )
+        self.template = QuestionTemplate.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            question_code="HK-SAF-SUMMARY",
+            question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE,
+            domain="Safety & Hygiene",
+            skill_tag="safety_awareness",
+            skill="Safety Awareness",
+            sequence_number=1,
+            difficulty=QuestionDifficulty.MEDIUM,
+            question_text="What do you do when you see a spill?",
+            question_type="safety",
+            question_format="SCENARIO",
+            language="EN",
+            scoring_type="0/3/5",
+            difficulty_score=2,
+            estimated_time_seconds=60,
+            expected_answer_type="multi_step",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            critical_question=False,
+            is_active=True,
+        )
+        self.session_question = SessionQuestion.objects.create(
+            session=self.session,
+            question_template=self.template,
+            question_text=self.template.question_text,
+            domain=self.template.domain,
+            skill=self.template.skill_tag,
+            difficulty=self.template.difficulty,
+            question_order=1,
+            status="ANSWERED",
+            is_mandatory=True,
+            asked_at=timezone.now(),
+            answered_at=timezone.now(),
+        )
+        self.response = CandidateResponse.objects.create(
+            session=self.session,
+            question=self.session_question,
+            response_type=CandidateResponseType.TEXT,
+            transcript="I would identify the hazard and clean the spill.",
+            text_response="I would identify the hazard and clean the spill.",
+            interpretation_status="COMPLETED",
+            processing_status="RULE_INPUT_PREPARED",
+        )
+        EvaluationInputArtifact.objects.create(
+            response=self.response,
+            session=self.session,
+            question=self.session_question,
+            competency_code="safety_awareness",
+            expected_indicators=["identify hazard", "clean spill", "prevent recurrence"],
+            observed_indicators=["identify hazard", "clean spill"],
+            missing_indicators=["prevent recurrence"],
+            risk_flags=[],
+            source_interpretation_status="COMPLETED",
+            requires_human_review=False,
+            metadata={"source": "test"},
+        )
+        self.evaluation = Evaluation.objects.create(
+            session=self.session,
+            candidate=self.candidate,
+            evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now() + timezone.timedelta(days=1),
+            duration_minutes=45,
+            created_by=self.user,
+        )
+        self.rule_set = ScoringRuleSet.objects.create(
+            name="Score Summary Rules",
+            version="v1",
+            role_code="domestic_worker",
+            role_name="Housekeeper",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            is_active=True,
+            created_by=self.user,
+            company=self.candidate.company,
+        )
+        ScoringRule.objects.create(
+            rule_set=self.rule_set,
+            competency_code="safety_awareness",
+            competency_name="Safety Awareness",
+            question_template=self.template,
+            question_code="HK-SAF-SUMMARY",
+            expected_indicators=["identify hazard", "clean spill", "prevent recurrence"],
+            required_indicators=["identify hazard"],
+            weighted_indicators={
+                "identify hazard": "4",
+                "clean spill": "3",
+                "prevent recurrence": "3",
+            },
+            max_score="10.00",
+            pass_threshold="7.00",
+            scoring_method=ScoringRule.SCORING_METHOD_WEIGHTED_MATCH,
+            is_active=True,
+        )
+        Week6ScoringService.run_for_evaluation(
+            evaluation=self.evaluation,
+            actor=self.user,
+            rule_set=self.rule_set,
+        )
+
+    def test_owner_sees_candidate_with_real_competency_breakdown(self):
+        self.client.force_authenticate(self.user)
+        response = self.client.get("/api/v1/evaluations/candidate-scores")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data), 1)
+        entry = response.data[0]
+        self.assertEqual(entry["candidate_id"], str(self.candidate.public_id))
+        self.assertEqual(entry["role_code"], "domestic_worker")
+        self.assertEqual(float(entry["overall_percentage"]), 70.0)
+        self.assertEqual(len(entry["competencies"]), 1)
+        self.assertEqual(entry["competencies"][0]["code"], "safety_awareness")
+        self.assertEqual(entry["competencies"][0]["name"], "Safety Awareness")
+        self.assertEqual(float(entry["competencies"][0]["percentage"]), 70.0)
+
+    def test_other_user_does_not_see_this_candidate(self):
+        self.client.force_authenticate(self.other_user)
+        response = self.client.get("/api/v1/evaluations/candidate-scores")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data, [])
+
+    def test_unauthenticated_request_is_rejected(self):
+        response = self.client.get("/api/v1/evaluations/candidate-scores")
+        self.assertEqual(response.status_code, 401)

@@ -1488,12 +1488,32 @@ class CertificateGenerationTests(TestCase):
         )
 
     def test_generate_certificate_uses_real_data_and_marks_missing_data_honestly(self):
+        import base64
+        from django.core.files.uploadedfile import SimpleUploadedFile
         from api.core.constants import IdentityVerificationStatus
+        from api.sessions.models import SessionArtifact
+        tiny_jpeg = base64.b64decode(
+            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a"
+            "HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIy"
+            "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEB"
+            "AxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAA"
+            "AAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k="
+        )
         self.session.identity_verified = True
         self.session.face_match_score = Decimal("96.40")
         self.session.single_face_detected = True
         self.session.verification_status = IdentityVerificationStatus.VERIFIED
         self.session.save()
+        SessionArtifact.objects.create(
+            session=self.session, candidate=self.candidate, artifact_type="SELFIE_IMAGE",
+            file=SimpleUploadedFile("selfie.jpg", tiny_jpeg, content_type="image/jpeg"),
+            mime_type="image/jpeg", file_size_bytes=len(tiny_jpeg),
+        )
+        SessionArtifact.objects.create(
+            session=self.session, candidate=self.candidate, artifact_type="ID_DOCUMENT",
+            file=SimpleUploadedFile("id.jpg", tiny_jpeg, content_type="image/jpeg"),
+            mime_type="image/jpeg", file_size_bytes=len(tiny_jpeg),
+        )
         summary = SessionEvaluationSummary.objects.create(
             evaluation=self.evaluation,
             session=self.session,
@@ -1523,6 +1543,23 @@ class CertificateGenerationTests(TestCase):
         pdf_bytes = certificate.pdf_file.read()
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
         self.assertEqual((certificate.expires_at - certificate.issued_at).days, 90)
+
+        from api.evaluations.certificate_services import _identity_verification_context
+        identity = _identity_verification_context(self.session)
+        self.assertTrue(identity["selfie_data_uri"].startswith("data:image/jpeg;base64,"))
+        self.assertTrue(identity["id_document_data_uri"].startswith("data:image/jpeg;base64,"))
+
+    def test_identity_context_omits_photos_that_were_never_uploaded(self):
+        from api.core.constants import IdentityVerificationStatus
+        from api.evaluations.certificate_services import _identity_verification_context
+        self.session.verification_status = IdentityVerificationStatus.VERIFIED
+        self.session.face_match_score = Decimal("91.0")
+        self.session.save()
+
+        identity = _identity_verification_context(self.session)
+
+        self.assertIsNone(identity["selfie_data_uri"])
+        self.assertIsNone(identity["id_document_data_uri"])
 
     def test_regenerating_keeps_the_same_certificate_id(self):
         summary = SessionEvaluationSummary.objects.create(
@@ -1667,4 +1704,5 @@ class CertificateHelperTests(TestCase):
         result = _identity_verification_context(verified)
         self.assertEqual(result, {
             "attempted": True, "status": "VERIFIED", "face_match_score": 96.4, "single_face_detected": True,
+            "selfie_data_uri": None, "id_document_data_uri": None,
         })

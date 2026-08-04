@@ -54,6 +54,12 @@
   .id-meta-row b { color: #1e1b2e; }
   .na-box { background: #fafafa; border: 1px dashed #ddd; border-radius: 8px; padding: 10px; font-size: 8pt; color: #999; font-style: italic; }
 
+  .photo-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .photo-cell { flex: 1; text-align: center; }
+  .photo-cell img { width: 100%; max-height: 78px; object-fit: cover; border-radius: 6px; border: 1px solid #e5e0f5; }
+  .photo-cell-label { font-size: 6.5pt; color: #999; text-transform: uppercase; letter-spacing: 0.03em; margin-top: 2px; }
+  .photo-match-icon { width: 20px; height: 20px; border-radius: 50%; background: #16a34a; color: #fff; font-size: 11pt; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
   /* ---------- Evaluation engine bars ---------- */
   .bar-row { margin-bottom: 8px; }
   .bar-row-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; }
@@ -158,6 +164,19 @@
       <div class="panel-head"><div class="panel-num">1</div><div class="panel-title">Identity Verification</div></div>
       <div class="panel-sub">AI-powered face match for secure identity verification.</div>
       {% if identity.attempted %}
+        {% if identity.selfie_data_uri or identity.id_document_data_uri %}
+        <div class="photo-row">
+          <div class="photo-cell">
+            {% if identity.selfie_data_uri %}<img src="{{ identity.selfie_data_uri }}" alt="Captured image" />{% endif %}
+            <div class="photo-cell-label">Captured Image</div>
+          </div>
+          <div class="photo-match-icon">&#10003;</div>
+          <div class="photo-cell">
+            {% if identity.id_document_data_uri %}<img src="{{ identity.id_document_data_uri }}" alt="Verified ID photo" />{% endif %}
+            <div class="photo-cell-label">Verified Photo (ID)</div>
+          </div>
+        </div>
+        {% endif %}
         <div class="id-status-row {% if identity.status == 'VERIFIED' %}{% elif identity.status == 'FAILED' %}warn{% else %}pending{% endif %}">
           <span class="id-badge {% if identity.status == 'VERIFIED' %}{% elif identity.status == 'FAILED' %}warn{% else %}pending{% endif %}">{{ identity.status }}</span>
           <span>Identity check {{ identity.status|lower }}</span>
@@ -228,7 +247,7 @@
       <div class="privacy-item">
         <div><div class="privacy-item-title">User Consent &amp; Control</div><div class="privacy-item-desc">Candidates retain control over their data and permissions.</div></div>
       </div>
-      <div class="privacy-compliance">No identity, health, or personal-attribute data is included in this evaluation.</div>
+      <div class="privacy-compliance">{% if identity.attempted %}Identity verification imagery on this certificate was captured with the candidate's consent, solely to confirm they are the person evaluated.{% else %}No identity, health, or personal-attribute data is included in this evaluation.{% endif %}</div>
     </div>
 
     <!-- Panel 4: Role Fit Engine -->
@@ -297,7 +316,8 @@
   </div>
 
   <div class="compliance-footer">
-    <strong>Compliance Statement.</strong> This certificate is issued by the MeritLense AI Evaluation System. Evaluation is strictly based on observable actions, responses, and task execution. The system does not assess identity, physical condition, health status, or personal attributes. No biometric storage, medical analysis, or predictive profiling is performed.
+    <strong>Compliance Statement.</strong> This certificate is issued by the MeritLense AI Evaluation System. Evaluation is strictly based on observable actions, responses, and task execution. The system does not assess physical condition, health status, or personal attributes, and performs no medical analysis or predictive profiling.
+    {% if identity.attempted %}The identity verification images above were captured during the candidate's own pre-interview identity check, solely to confirm they are the person evaluated, and are shown here with their knowledge.{% else %}No identity verification imagery is included on this certificate; this evaluation's tier did not require it.{% endif %}
     Authorized reviewers may view evaluation outputs and add annotations but cannot modify scores, indicators, or system-generated recommendations &mdash; the AI evaluation remains the single source of truth, and final hiring decisions remain fully human-controlled and external to the evaluation system.
   </div>
 

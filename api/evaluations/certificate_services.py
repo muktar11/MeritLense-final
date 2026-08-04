@@ -10,7 +10,7 @@ from django.template.loader import render_to_string
 from django.utils import timezone
 
 from api.core.constants import EvaluationLayer
-from api.sessions.models import CandidateResponse
+from api.sessions.models import CandidateResponse, SessionArtifact
 
 from .models import Certificate
 
@@ -95,11 +95,36 @@ def _recommendation_badge(overall_percentage):
     return "Development Needed", "Not Yet Recommended"
 
 
+def _artifact_data_uri(session, artifact_type):
+    artifact = (
+        SessionArtifact.objects.filter(session=session, artifact_type=artifact_type)
+        .order_by("-uploaded_at")
+        .first()
+    )
+    if artifact is None or not artifact.file:
+        return None
+    try:
+        artifact.file.open("rb")
+        content = artifact.file.read()
+    finally:
+        artifact.file.close()
+    mime = artifact.mime_type or "image/jpeg"
+    encoded = base64.b64encode(content).decode()
+    return f"data:{mime};base64,{encoded}"
+
+
 def _identity_verification_context(session):
     """Real face-match/liveness data already captured during the
     candidate's pre-interview identity check (api/sessions/identity_services.py)
     - not re-derived or estimated. None fields where verification never
-    ran (e.g. this evaluation's tier doesn't require it)."""
+    ran (e.g. this evaluation's tier doesn't require it).
+
+    Includes the actual captured selfie and ID document images (explicit
+    product decision - the certificate's compliance language is written
+    to match: it no longer claims "no biometric storage" once these are
+    embedded). Either image individually falls back to None if that
+    specific SessionArtifact is missing, without failing the whole
+    certificate."""
     if session is None:
         return {"attempted": False}
     if session.verification_status in ("NOT_STARTED", ""):
@@ -109,6 +134,8 @@ def _identity_verification_context(session):
         "status": session.verification_status,
         "face_match_score": float(session.face_match_score) if session.face_match_score is not None else None,
         "single_face_detected": session.single_face_detected,
+        "selfie_data_uri": _artifact_data_uri(session, "SELFIE_IMAGE"),
+        "id_document_data_uri": _artifact_data_uri(session, "ID_DOCUMENT"),
     }
 
 

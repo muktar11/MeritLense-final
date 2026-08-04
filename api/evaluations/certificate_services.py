@@ -9,9 +9,21 @@ from django.core.files.base import ContentFile
 from django.template.loader import render_to_string
 from django.utils import timezone
 
+from api.core.constants import EvaluationLayer
 from api.sessions.models import CandidateResponse
 
 from .models import Certificate
+
+LAYER_LABELS = dict(EvaluationLayer.CHOICES)
+LAYER_CSS_CLASS = {
+    EvaluationLayer.COGNITIVE: "cognitive",
+    EvaluationLayer.BEHAVIORAL: "behavioral",
+    EvaluationLayer.TASK_EXECUTION: "task",
+}
+# Fixed display order regardless of dict iteration order - matches the
+# 50/30/20 weighting order used everywhere else (Cognitive, Behavioral,
+# Task Execution).
+LAYER_DISPLAY_ORDER = [EvaluationLayer.COGNITIVE, EvaluationLayer.BEHAVIORAL, EvaluationLayer.TASK_EXECUTION]
 
 # Matches the AI Evaluation Framework spec's Step 8 threshold exactly -
 # this is a display/recommendation label only, not a pass/fail gate (a
@@ -71,6 +83,33 @@ def _recommendation(overall_percentage):
     if overall_percentage >= READY_THRESHOLD:
         return "Suitable for task execution under standard working conditions with minimal supervision"
     return "Requires additional training before task execution"
+
+
+def _recommendation_badge(overall_percentage):
+    """Short badge label, same threshold as _recommendation() - not a
+    separate judgment, just a shorter rendering of it for the score card."""
+    if overall_percentage >= Decimal("80"):
+        return "High Potential", "Recommended"
+    if overall_percentage >= READY_THRESHOLD:
+        return "Suitable", "Recommended"
+    return "Development Needed", "Not Yet Recommended"
+
+
+def _identity_verification_context(session):
+    """Real face-match/liveness data already captured during the
+    candidate's pre-interview identity check (api/sessions/identity_services.py)
+    - not re-derived or estimated. None fields where verification never
+    ran (e.g. this evaluation's tier doesn't require it)."""
+    if session is None:
+        return {"attempted": False}
+    if session.verification_status in ("NOT_STARTED", ""):
+        return {"attempted": False}
+    return {
+        "attempted": True,
+        "status": session.verification_status,
+        "face_match_score": float(session.face_match_score) if session.face_match_score is not None else None,
+        "single_face_detected": session.single_face_detected,
+    }
 
 
 def _work_readiness_label(evaluation):
@@ -146,6 +185,8 @@ def generate_certificate(evaluation, summary):
     passport = evaluation.candidate.passport_id or ""
     masked_passport = f"P****{passport[-4:]}" if len(passport) >= 4 else passport
 
+    badge_title, badge_subtitle = _recommendation_badge(summary.overall_percentage)
+
     context = {
         "certificate_id": certificate.certificate_id,
         "candidate_name": evaluation.candidate.get_full_name(),
@@ -154,16 +195,24 @@ def generate_certificate(evaluation, summary):
         "role_name": session.role_name if session else evaluation.candidate.job_role,
         "final_score": float(summary.overall_percentage),
         "recommendation": _recommendation(summary.overall_percentage),
+        "badge_title": badge_title,
+        "badge_subtitle": badge_subtitle,
         "processing_confidence": _band_confidence(session) if session else None,
         "work_readiness": _work_readiness_label(evaluation),
-        "layer_breakdown": {
-            layer: data.get("percentage")
-            for layer, data in layer_breakdown.items()
-        },
+        "layer_bars": [
+            {
+                "label": LAYER_LABELS.get(layer, layer),
+                "css_class": LAYER_CSS_CLASS.get(layer, "flat"),
+                "percentage": layer_breakdown[layer].get("percentage"),
+            }
+            for layer in LAYER_DISPLAY_ORDER
+            if layer in layer_breakdown
+        ],
         "has_layer_breakdown": bool(layer_breakdown),
         "competencies_summary": summary.competencies_summary,
         "top_skill": top_skill,
         "improvement_area": improvement_area,
+        "identity": _identity_verification_context(session),
         # Role Fit Engine needs a post-live-interview evaluator rating that
         # doesn't exist anywhere in the codebase yet - deliberately None,
         # not fabricated, until that feature is built.

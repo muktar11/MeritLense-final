@@ -3,142 +3,288 @@
 <head>
 <meta charset="utf-8" />
 <style>
-  @page { size: A4; margin: 2cm; }
-  body { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 10.5pt; color: #1a1a1a; line-height: 1.5; }
+  @page { size: A4; margin: 1.3cm 1.4cm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 9pt; color: #1e1b2e; line-height: 1.45; background: #f7f6fb; }
 
-  .header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #6d28d9; padding-bottom: 10px; margin-bottom: 4px; }
-  .wordmark { font-size: 17pt; font-weight: 700; }
-  .wordmark-accent { color: #6d28d9; }
-  .doc-title { font-size: 9.5pt; color: #555; }
-  .cert-id { font-size: 9.5pt; color: #6d28d9; font-weight: 600; text-align: right; }
+  /* ---------- Header ---------- */
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand svg { width: 40px; height: 40px; }
+  .wordmark { font-size: 19pt; font-weight: 800; color: #1e1b2e; }
+  .wordmark-accent { color: #7c3aed; }
+  .brand-sub { font-size: 8pt; color: #555; margin-top: 1px; }
+  .brand-tagline { font-size: 7.5pt; margin-top: 2px; }
+  .brand-tagline .dot { color: #999; }
+  .brand-tagline .g1 { color: #7c3aed; font-weight: 600; }
+  .brand-tagline .g2 { color: #db2777; font-weight: 600; }
+  .brand-tagline .g3 { color: #2563eb; font-weight: 600; }
 
-  h2 { font-size: 11.5pt; color: #4c1d95; margin: 1.3em 0 0.5em; border-bottom: 1px solid #e5e0f5; padding-bottom: 3px; }
-  table.fields { width: 100%; border-collapse: collapse; }
-  table.fields td { padding: 2px 0; vertical-align: top; }
-  table.fields td.label { color: #666; width: 34%; }
-  table.fields td.value { font-weight: 600; }
+  .trust-badge { text-align: right; }
+  .trust-badge-box { display: inline-flex; align-items: center; gap: 6px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 6px 10px; }
+  .trust-badge-text { font-size: 7.8pt; font-weight: 600; color: #3730a3; line-height: 1.25; text-align: left; }
+  .trust-badge-sub { font-size: 6.8pt; color: #6366f1; margin-top: 3px; }
+  .cert-id-line { font-size: 7.5pt; color: #7c3aed; font-weight: 700; margin-top: 6px; }
 
-  .na { color: #999; font-weight: 400; font-style: italic; }
+  /* ---------- Candidate strip ---------- */
+  .strip { background: #fff; border: 1px solid #ece9f7; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; display: flex; justify-content: space-between; }
+  .strip-field { flex: 1; }
+  .strip-label { font-size: 6.8pt; text-transform: uppercase; letter-spacing: 0.04em; color: #999; }
+  .strip-value { font-size: 9.5pt; font-weight: 700; color: #1e1b2e; margin-top: 1px; }
 
-  .score-hero { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 10px; }
-  .score-hero .score { font-size: 26pt; font-weight: 700; color: #6d28d9; }
-  .score-hero .score-max { font-size: 12pt; color: #999; }
-  .recommendation { background: #f5f3ff; border-radius: 6px; padding: 8px 12px; font-size: 10pt; }
+  /* ---------- Panel grid ---------- */
+  .grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+  .panel { background: #fff; border: 1px solid #ece9f7; border-radius: 12px; padding: 12px 14px; width: calc(50% - 5px); page-break-inside: avoid; }
+  .panel-full { width: 100%; }
+  .panel-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .panel-num { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, #7c3aed, #a855f7); color: #fff; font-size: 9.5pt; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .panel-title { font-size: 9.8pt; font-weight: 700; color: #1e1b2e; }
+  .panel-sub { font-size: 7pt; color: #888; margin-top: -6px; margin-bottom: 8px; margin-left: 26px; }
 
-  .layer-bars { margin-top: 6px; }
-  .layer-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
-  .layer-name { width: 130px; font-size: 9.5pt; color: #444; }
-  .layer-bar-track { flex: 1; background: #eee; border-radius: 4px; height: 8px; overflow: hidden; }
-  .layer-bar-fill { background: #6d28d9; height: 8px; }
-  .layer-pct { width: 42px; text-align: right; font-size: 9.5pt; font-weight: 600; }
-  .layer-note { font-size: 8.5pt; color: #999; margin-top: 4px; }
+  /* ---------- Identity verification ---------- */
+  .id-status-row { display: flex; align-items: center; gap: 8px; background: #f0fdf4; border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; }
+  .id-status-row.warn { background: #fff7ed; }
+  .id-status-row.pending { background: #f5f5f5; }
+  .id-badge { font-size: 6.8pt; font-weight: 700; padding: 2px 7px; border-radius: 100px; color: #fff; background: #16a34a; }
+  .id-badge.warn { background: #ea580c; }
+  .id-badge.pending { background: #999; }
+  .id-score { font-size: 13pt; font-weight: 800; color: #16a34a; margin-left: auto; }
+  .id-score.warn { color: #ea580c; }
+  .id-meta-row { display: flex; gap: 16px; font-size: 7.5pt; color: #555; margin-top: 6px; }
+  .id-meta-row b { color: #1e1b2e; }
+  .na-box { background: #fafafa; border: 1px dashed #ddd; border-radius: 8px; padding: 10px; font-size: 8pt; color: #999; font-style: italic; }
 
-  .competency-list { font-size: 9.5pt; }
-  .competency-list li { margin-bottom: 2px; }
+  /* ---------- Evaluation engine bars ---------- */
+  .bar-row { margin-bottom: 8px; }
+  .bar-row-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; }
+  .bar-label { font-size: 8.3pt; font-weight: 600; color: #1e1b2e; }
+  .bar-desc { font-size: 6.8pt; color: #999; }
+  .bar-score { font-size: 8.8pt; font-weight: 700; }
+  .bar-track { background: #eee; border-radius: 5px; height: 6px; overflow: hidden; }
+  .bar-fill { height: 6px; border-radius: 5px; }
+  .bar-fill.cognitive { background: linear-gradient(90deg, #7c3aed, #ec4899); }
+  .bar-fill.behavioral { background: linear-gradient(90deg, #2563eb, #38bdf8); }
+  .bar-fill.task { background: linear-gradient(90deg, #0891b2, #22d3ee); }
+  .bar-fill.flat { background: linear-gradient(90deg, #7c3aed, #a855f7); }
 
-  .two-col { display: flex; gap: 24px; }
-  .two-col > div { flex: 1; }
+  .overall-row { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #f0eefa; margin-top: 8px; padding-top: 8px; }
+  .overall-label { font-size: 7.3pt; color: #888; }
+  .overall-score { font-size: 13pt; font-weight: 800; color: #7c3aed; }
+  .rec-badge { text-align: right; }
+  .rec-badge-title { font-size: 7.8pt; font-weight: 700; color: #16a34a; }
+  .rec-badge-sub { font-size: 6.6pt; color: #16a34a; }
+  .rec-badge.needs .rec-badge-title, .rec-badge.needs .rec-badge-sub { color: #ea580c; }
 
-  .compliance { font-size: 8.7pt; color: #555; background: #fafafa; border: 1px solid #eee; border-radius: 6px; padding: 10px 12px; margin-top: 1.4em; }
-  .compliance p { margin: 0 0 6px; }
+  /* ---------- Privacy panel ---------- */
+  .privacy-item { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 0; border-bottom: 1px solid #f5f4fa; }
+  .privacy-item:last-child { border-bottom: none; }
+  .privacy-item-title { font-size: 8pt; font-weight: 600; }
+  .privacy-item-desc { font-size: 6.8pt; color: #999; }
+  .privacy-compliance { margin-top: 8px; background: #f0fdf4; border-radius: 6px; padding: 6px 9px; font-size: 6.8pt; color: #166534; }
 
-  .footer-seal { margin-top: 1.6em; padding: 12px 16px; border: 1.5px solid #6d28d9; border-radius: 8px; background: #faf9ff; page-break-inside: avoid; position: relative; }
-  .footer-seal-table { font-size: 8.5pt; color: #333; border-collapse: collapse; }
+  /* ---------- Role fit ---------- */
+  .role-fit-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; }
+  .match-badge { font-size: 6.8pt; font-weight: 700; padding: 2px 8px; border-radius: 100px; background: #eef2ff; color: #4338ca; }
+
+  /* ---------- Two-col small cards ---------- */
+  .two-col { display: flex; gap: 10px; margin-bottom: 10px; }
+  .mini-card { flex: 1; background: #fff; border: 1px solid #ece9f7; border-radius: 10px; padding: 9px 12px; }
+  .mini-card-label { font-size: 7pt; text-transform: uppercase; letter-spacing: 0.04em; color: #999; margin-bottom: 3px; }
+  .mini-card-value { font-size: 8.7pt; font-weight: 600; color: #1e1b2e; }
+
+  /* ---------- Footer seal ---------- */
+  .footer-seal { margin-top: 4px; padding: 10px 14px; border: 1.5px solid #7c3aed; border-radius: 10px; background: #faf9ff; page-break-inside: avoid; position: relative; }
+  .footer-seal-table { font-size: 7.5pt; color: #333; border-collapse: collapse; }
   .footer-seal-table td { padding: 1px 6px 1px 0; }
   .footer-seal-table td:first-child { color: #777; white-space: nowrap; }
-  .footer-seal-qr { width: 68px; height: 68px; position: absolute; right: 16px; top: 12px; }
+  .footer-seal-qr { width: 60px; height: 60px; position: absolute; right: 14px; top: 10px; }
+
+  .compliance-footer { font-size: 6.8pt; color: #888; margin-top: 8px; line-height: 1.5; }
 </style>
 </head>
 <body>
 
   <div class="header">
-    <div>
-      <div class="wordmark">Merit<span class="wordmark-accent">Lense</span></div>
-      <div class="doc-title">AI Evaluation Certificate &mdash; Official Document</div>
+    <div class="brand">
+      <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="hexGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#7c3aed" />
+            <stop offset="100%" stop-color="#db2777" />
+          </linearGradient>
+        </defs>
+        <polygon points="50,3 93,26 93,74 50,97 7,74 7,26" fill="none" stroke="url(#hexGrad)" stroke-width="6" />
+        <text x="50" y="66" font-size="46" font-weight="800" text-anchor="middle" fill="url(#hexGrad)">M</text>
+      </svg>
+      <div>
+        <div class="wordmark">Merit<span class="wordmark-accent">Lense</span></div>
+        <div class="brand-sub">Advanced AI Evaluation Framework</div>
+        <div class="brand-tagline"><span class="g1">AI-Powered.</span> <span class="g2">Fair Evaluation.</span> <span class="g3">Trusted Decisions.</span></div>
+      </div>
     </div>
-    <div class="cert-id">Certificate ID<br />{{ certificate_id }}</div>
-  </div>
-
-  <h2>Candidate Information</h2>
-  <table class="fields">
-    <tr><td class="label">Full Name</td><td class="value">{{ candidate_name }}</td></tr>
-    <tr><td class="label">Candidate ID</td><td class="value">{{ candidate_public_id }}</td></tr>
-    <tr><td class="label">Passport No.</td><td class="value">{{ candidate_passport_masked|default:"N/A" }}</td></tr>
-    <tr><td class="label">Role</td><td class="value">{{ role_name }}</td></tr>
-  </table>
-
-  <h2>Evaluation Summary</h2>
-  <div class="score-hero">
-    <span class="score">{{ final_score|floatformat:1 }}</span>
-    <span class="score-max">/ 100</span>
-  </div>
-  <div class="recommendation">{{ recommendation }}</div>
-  <table class="fields" style="margin-top: 8px;">
-    <tr>
-      <td class="label">Processing Confidence</td>
-      <td class="value">{% if processing_confidence %}{{ processing_confidence }} (Audio &amp; Transcription Quality){% else %}<span class="na">N/A</span>{% endif %}</td>
-    </tr>
-    <tr><td class="label">Work Readiness</td><td class="value">{{ work_readiness }}</td></tr>
-  </table>
-
-  <h2>Evaluation Breakdown</h2>
-  {% if has_layer_breakdown %}
-  <div class="layer-bars">
-    {% for layer, pct in layer_breakdown.items %}
-    <div class="layer-row">
-      <div class="layer-name">{{ layer|title }}</div>
-      <div class="layer-bar-track"><div class="layer-bar-fill" style="width: {{ pct|floatformat:0 }}%;"></div></div>
-      <div class="layer-pct">{{ pct|floatformat:0 }}%</div>
+    <div class="trust-badge">
+      <div class="trust-badge-box">
+        <div class="trust-badge-text">Trusted by Employers.<br />Built for Compliance.
+          <div class="trust-badge-sub">Secure &middot; Transparent &middot; Reliable</div>
+        </div>
+      </div>
+      <div class="cert-id-line">Certificate {{ certificate_id }}</div>
     </div>
-    {% endfor %}
   </div>
-  <p class="layer-note">Structured indicators &mdash; no Pass/Fail classification.</p>
-  {% else %}
-  <ul class="competency-list">
-    {% for c in competencies_summary %}
-    <li>{{ c.competency_name|default:c.competency_code }}: {{ c.percentage|floatformat:0 }}%</li>
-    {% empty %}
-    <li class="na">No competency breakdown available.</li>
-    {% endfor %}
-  </ul>
-  <p class="layer-note">This rule set hasn't been categorized into Cognitive/Behavioral/Task Execution layers yet &mdash; showing the real per-competency breakdown instead.</p>
-  {% endif %}
+
+  <div class="strip">
+    <div class="strip-field">
+      <div class="strip-label">Candidate</div>
+      <div class="strip-value">{{ candidate_name }}</div>
+    </div>
+    <div class="strip-field">
+      <div class="strip-label">Candidate ID</div>
+      <div class="strip-value">{{ candidate_public_id }}</div>
+    </div>
+    <div class="strip-field">
+      <div class="strip-label">Passport No.</div>
+      <div class="strip-value">{{ candidate_passport_masked|default:"N/A" }}</div>
+    </div>
+    <div class="strip-field">
+      <div class="strip-label">Role</div>
+      <div class="strip-value">{{ role_name }}</div>
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <!-- Panel 1: Identity Verification -->
+    <div class="panel">
+      <div class="panel-head"><div class="panel-num">1</div><div class="panel-title">Identity Verification</div></div>
+      <div class="panel-sub">AI-powered face match for secure identity verification.</div>
+      {% if identity.attempted %}
+        <div class="id-status-row {% if identity.status == 'VERIFIED' %}{% elif identity.status == 'FAILED' %}warn{% else %}pending{% endif %}">
+          <span class="id-badge {% if identity.status == 'VERIFIED' %}{% elif identity.status == 'FAILED' %}warn{% else %}pending{% endif %}">{{ identity.status }}</span>
+          <span>Identity check {{ identity.status|lower }}</span>
+          {% if identity.face_match_score is not None %}
+          <span class="id-score {% if identity.status == 'FAILED' %}warn{% endif %}">{{ identity.face_match_score|floatformat:1 }}%</span>
+          {% endif %}
+        </div>
+        <div class="id-meta-row">
+          <span>Single person detected: <b>{{ identity.single_face_detected|yesno:"Yes,No" }}</b></span>
+        </div>
+      {% else %}
+        <div class="na-box">Identity verification was not required for this evaluation tier.</div>
+      {% endif %}
+    </div>
+
+    <!-- Panel 2: Evaluation Engine -->
+    <div class="panel">
+      <div class="panel-head"><div class="panel-num">2</div><div class="panel-title">Evaluation Engine</div></div>
+      <div class="panel-sub">Multi-dimensional AI assessment and scoring.</div>
+      {% if has_layer_breakdown %}
+        {% for bar in layer_bars %}
+        <div class="bar-row">
+          <div class="bar-row-head">
+            <span class="bar-label">{{ bar.label }}</span>
+            <span class="bar-score">{{ bar.percentage|floatformat:0 }}<span style="font-weight:400;color:#999;">/100</span></span>
+          </div>
+          <div class="bar-track"><div class="bar-fill {{ bar.css_class }}" style="width: {{ bar.percentage|floatformat:0 }}%;"></div></div>
+        </div>
+        {% endfor %}
+      {% else %}
+        {% for c in competencies_summary %}
+        <div class="bar-row">
+          <div class="bar-row-head">
+            <span class="bar-label">{{ c.competency_name|default:c.competency_code }}</span>
+            <span class="bar-score">{{ c.percentage|floatformat:0 }}<span style="font-weight:400;color:#999;">/100</span></span>
+          </div>
+          <div class="bar-track"><div class="bar-fill flat" style="width: {{ c.percentage|floatformat:0 }}%;"></div></div>
+        </div>
+        {% empty %}
+        <div class="na-box">No competency breakdown available.</div>
+        {% endfor %}
+      {% endif %}
+      <div class="overall-row">
+        <div>
+          <div class="overall-label">Overall Evaluation Score</div>
+          <div class="overall-score">{{ final_score|floatformat:1 }}<span style="font-size:8pt;color:#999;">/100</span></div>
+        </div>
+        <div class="rec-badge {% if badge_subtitle == 'Not Yet Recommended' %}needs{% endif %}">
+          <div class="rec-badge-title">{{ badge_title }}</div>
+          <div class="rec-badge-sub">{{ badge_subtitle }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel 3: Data Privacy Policy -->
+    <div class="panel">
+      <div class="panel-head"><div class="panel-num">3</div><div class="panel-title">Data Privacy Policy</div></div>
+      <div class="panel-sub">Your data is protected. Always.</div>
+      <div class="privacy-item">
+        <div><div class="privacy-item-title">End-to-End Encryption</div><div class="privacy-item-desc">All data is encrypted in transit and at rest.</div></div>
+      </div>
+      <div class="privacy-item">
+        <div><div class="privacy-item-title">Purpose Limitation</div><div class="privacy-item-desc">Data used strictly for evaluation and hiring purposes.</div></div>
+      </div>
+      <div class="privacy-item">
+        <div><div class="privacy-item-title">Minimal Data Retention</div><div class="privacy-item-desc">Only essential data is retained, for a limited time.</div></div>
+      </div>
+      <div class="privacy-item">
+        <div><div class="privacy-item-title">User Consent &amp; Control</div><div class="privacy-item-desc">Candidates retain control over their data and permissions.</div></div>
+      </div>
+      <div class="privacy-compliance">No identity, health, or personal-attribute data is included in this evaluation.</div>
+    </div>
+
+    <!-- Panel 4: Role Fit Engine -->
+    <div class="panel">
+      <div class="panel-head"><div class="panel-num">4</div><div class="panel-title">Role Fit Engine</div></div>
+      <div class="panel-sub">AI matches candidates to the right roles.</div>
+      {% if role_fit %}
+        {% for item in role_fit %}
+        <div class="role-fit-row">
+          <span>{{ item.role }}</span>
+          <span class="match-badge">{{ item.score }}% Match</span>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="na-box">Not yet available &mdash; requires a completed live/scheduled interview evaluation for this candidate.</div>
+      {% endif %}
+    </div>
+
+  </div>
 
   <div class="two-col">
-    <div>
-      <h2>Top Skill</h2>
-      <p>{{ top_skill|default:"N/A" }}</p>
+    <div class="mini-card">
+      <div class="mini-card-label">Top Skill</div>
+      <div class="mini-card-value">{{ top_skill|default:"N/A" }}</div>
     </div>
-    <div>
-      <h2>Improvement Area</h2>
-      <p>{{ improvement_area|default:"N/A" }}</p>
+    <div class="mini-card">
+      <div class="mini-card-label">Improvement Area</div>
+      <div class="mini-card-value">{{ improvement_area|default:"N/A" }}</div>
+    </div>
+    <div class="mini-card">
+      <div class="mini-card-label">Processing Confidence</div>
+      <div class="mini-card-value">{% if processing_confidence %}{{ processing_confidence }}{% else %}N/A{% endif %}</div>
+    </div>
+    <div class="mini-card">
+      <div class="mini-card-label">Work Readiness</div>
+      <div class="mini-card-value">{{ work_readiness }}</div>
     </div>
   </div>
 
-  <h2>Role Fit Engine</h2>
-  {% if role_fit %}
-    <p>{{ role_fit }}</p>
-  {% else %}
-    <p class="na">N/A &mdash; requires a completed live/scheduled interview evaluation, not yet available for this candidate.</p>
-  {% endif %}
-
-  <h2>Certificate Details</h2>
-  <table class="fields">
-    <tr><td class="label">Issue Date</td><td class="value">{{ issue_date }}</td></tr>
-    <tr><td class="label">Expiry Date</td><td class="value">{{ expiry_date }}</td></tr>
-    <tr><td class="label">Verification</td><td class="value">Scan the QR code below or visit {{ verification_url }}</td></tr>
-  </table>
-
-  <h2>Traceability</h2>
-  <table class="fields">
-    <tr><td class="label">Session ID</td><td class="value">{{ session_id }}</td></tr>
-    <tr><td class="label">Evaluation Timestamp</td><td class="value">{{ evaluation_timestamp }}</td></tr>
-    <tr><td class="label">System Version</td><td class="value">MeritLense AI {{ system_version }}</td></tr>
-  </table>
-
-  <div class="compliance">
-    <p><strong>Compliance Statement.</strong> This certificate is issued by the MeritLense AI Evaluation System. Evaluation is strictly based on observable actions, responses, and task execution. The system does not assess identity, physical condition, health status, or personal attributes. No biometric storage, medical analysis, or predictive profiling is performed.</p>
-    <p><strong>Human Review Layer.</strong> Authorized reviewers may view evaluation outputs, integrity flags, and observational notes; add annotations; make independent hiring decisions outside the system; or request a new evaluation session. Reviewers cannot modify scores, indicators, or system-generated recommendations &mdash; the AI evaluation remains the single source of truth. Final hiring decisions remain fully human-controlled and external to the evaluation system.</p>
+  <div class="two-col">
+    <div class="mini-card">
+      <div class="mini-card-label">Issue Date</div>
+      <div class="mini-card-value">{{ issue_date }}</div>
+    </div>
+    <div class="mini-card">
+      <div class="mini-card-label">Expiry Date</div>
+      <div class="mini-card-value">{{ expiry_date }}</div>
+    </div>
+    <div class="mini-card">
+      <div class="mini-card-label">Session ID</div>
+      <div class="mini-card-value" style="font-size:7.3pt;">{{ session_id }}</div>
+    </div>
+    <div class="mini-card">
+      <div class="mini-card-label">System Version</div>
+      <div class="mini-card-value">MeritLense AI {{ system_version }}</div>
+    </div>
   </div>
 
   <div class="footer-seal">
@@ -148,6 +294,11 @@
       <tr><td>Verify at</td><td>{{ verification_url }}</td></tr>
     </table>
     <img class="footer-seal-qr" src="{{ qr_data_uri }}" alt="Verification QR code" />
+  </div>
+
+  <div class="compliance-footer">
+    <strong>Compliance Statement.</strong> This certificate is issued by the MeritLense AI Evaluation System. Evaluation is strictly based on observable actions, responses, and task execution. The system does not assess identity, physical condition, health status, or personal attributes. No biometric storage, medical analysis, or predictive profiling is performed.
+    Authorized reviewers may view evaluation outputs and add annotations but cannot modify scores, indicators, or system-generated recommendations &mdash; the AI evaluation remains the single source of truth, and final hiring decisions remain fully human-controlled and external to the evaluation system.
   </div>
 
 </body>

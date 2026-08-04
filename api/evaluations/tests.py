@@ -1488,6 +1488,12 @@ class CertificateGenerationTests(TestCase):
         )
 
     def test_generate_certificate_uses_real_data_and_marks_missing_data_honestly(self):
+        from api.core.constants import IdentityVerificationStatus
+        self.session.identity_verified = True
+        self.session.face_match_score = Decimal("96.40")
+        self.session.single_face_detected = True
+        self.session.verification_status = IdentityVerificationStatus.VERIFIED
+        self.session.save()
         summary = SessionEvaluationSummary.objects.create(
             evaluation=self.evaluation,
             session=self.session,
@@ -1496,10 +1502,14 @@ class CertificateGenerationTests(TestCase):
                 name="Cert Gen Rules", version="v1", role_code="domestic_worker", role_name="Housekeeper",
                 evaluation_tier=InterviewEvaluationTier.FULL, is_active=True, created_by=self.user,
             ),
-            total_score=Decimal("70"),
+            total_score=Decimal("83"),
             max_score=Decimal("100"),
-            overall_percentage=Decimal("70.00"),
-            layer_breakdown={},
+            overall_percentage=Decimal("83.00"),
+            layer_breakdown={
+                "COGNITIVE": {"percentage": 87.0, "weight": 50},
+                "BEHAVIORAL": {"percentage": 82.0, "weight": 30},
+                "TASK_EXECUTION": {"percentage": 90.0, "weight": 20},
+            },
             competencies_summary=[
                 {"competency_code": "safety_awareness", "competency_name": "Safety Awareness", "percentage": 70.0, "response_count": 1},
             ],
@@ -1613,3 +1623,48 @@ class CertificateHelperTests(TestCase):
         )
 
         self.assertEqual(_band_confidence(session), "High")
+
+    def test_identity_verification_context_reflects_real_state_not_a_guess(self):
+        from api.evaluations.certificate_services import _identity_verification_context
+        from api.core.constants import IdentityVerificationStatus
+
+        user = User.objects.create_user(
+            email="ident-ctx@example.com", password="testpass123", first_name="Ident", last_name="Ctx",
+            role=Roles.B2C, is_verified=True,
+        )
+        candidate = Candidate.objects.create(
+            first_name="Ident", last_name="Ctx", email="ident-ctx-candidate@example.com",
+            passport_id="IDENTCTX01", job_role="NA", core_skills="safety", preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf", created_by=user,
+        )
+        config = InterviewConfiguration.objects.create(
+            role_name="Housekeeper", role_code="domestic_worker", language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL, duration_minutes=45, total_questions=1,
+            allow_retries=True, max_retries=1, rubric_version="v2.0", question_set_version="v1.2",
+        )
+
+        # Never attempted (default NOT_STARTED) - must not claim any status.
+        never_attempted = InterviewSession.objects.create(
+            candidate=candidate, organization=candidate.company, config=config,
+            role_name=config.role_name, role_code=config.role_code, ui_language="EN", candidate_language="EN",
+            tts_language_code="en-US", stt_language_code="en-US", total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL, rubric_version="v2.0", question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30), created_by=user,
+        )
+        self.assertEqual(_identity_verification_context(never_attempted), {"attempted": False})
+        self.assertEqual(_identity_verification_context(None), {"attempted": False})
+
+        # Actually verified - real face_match_score/single_face_detected values come through untouched.
+        verified = InterviewSession.objects.create(
+            candidate=candidate, organization=candidate.company, config=config,
+            role_name=config.role_name, role_code=config.role_code, ui_language="EN", candidate_language="EN",
+            tts_language_code="en-US", stt_language_code="en-US", total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL, rubric_version="v2.0", question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30), created_by=user,
+            verification_status=IdentityVerificationStatus.VERIFIED,
+            face_match_score=Decimal("96.40"), single_face_detected=True,
+        )
+        result = _identity_verification_context(verified)
+        self.assertEqual(result, {
+            "attempted": True, "status": "VERIFIED", "face_match_score": 96.4, "single_face_detected": True,
+        })

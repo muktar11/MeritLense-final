@@ -24,6 +24,7 @@ from api.core.constants import (
     EvaluationType,
 )
 from api.evaluations.models import Evaluation
+from api.evaluations.scoring_services import Week6ScoringError, Week6ScoringService
 from api.interviews.package_services import PackageArchitectureService
 from api.interviews.voice_services import (
     SpeechToTextService,
@@ -792,6 +793,28 @@ class InterviewSessionService:
                 evaluation.readiness_override_applied = False
                 evaluation.readiness_override_reason = ""
             evaluation.save()
+            # Best-effort: most roles don't have an active scoring rule set
+            # configured yet (Week6ScoringError), and that must not block
+            # the candidate's interview from completing - it just stays
+            # unscored, same as it silently did before this ran automatically
+            # at all. A real, unexpected failure here (not "no rule set")
+            # still shouldn't roll back session completion, so it's caught
+            # too, just distinguished in the audit log.
+            try:
+                Week6ScoringService.run_for_evaluation(evaluation=evaluation, actor=actor)
+            except Week6ScoringError:
+                pass
+            except Exception:
+                if actor:
+                    AuditLogService.log(
+                        user=actor,
+                        action=AuditLogAction.SESSION_COMPLETED,
+                        category=AuditLogCategory.SESSION,
+                        description=f"Automatic scoring failed for {session.candidate.get_full_name()} - session completed unscored",
+                        resource=session,
+                        data=session_event_payload(session),
+                        severity=AuditLogSeverity.ERROR,
+                    )
         if actor:
             AuditLogService.log(
                 user=actor,

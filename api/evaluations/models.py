@@ -7,6 +7,7 @@ from api.core.models import TimeStampedModel, SoftDeleteModel
 from api.core.constants import (
     CertificateStatus,
     CoverageLevel,
+    EvaluationLayer,
     EvaluationStatus,
     EvaluationType,
     InterviewEvaluationTier,
@@ -403,6 +404,15 @@ class ScoringRule(TimeStampedModel):
     )
     competency_code = models.CharField(max_length=150)
     competency_name = models.CharField(max_length=150, blank=True)
+    evaluation_layer = models.CharField(
+        max_length=20,
+        choices=EvaluationLayer.CHOICES,
+        blank=True,
+        help_text="Cognitive/Behavioral/Task Execution bucket this competency counts "
+                   "toward for the layer-weighted final score. Blank on rule sets "
+                   "that haven't been categorized yet - Week6ScoringService falls "
+                   "back to a flat score/max_score final score in that case.",
+    )
     question_template = models.ForeignKey(
         "questions.QuestionTemplate",
         on_delete=models.PROTECT,
@@ -554,6 +564,12 @@ class CompetencyEvaluationResult(TimeStampedModel):
     )
     competency_code = models.CharField(max_length=150)
     competency_name = models.CharField(max_length=150, blank=True)
+    evaluation_layer = models.CharField(
+        max_length=20,
+        choices=EvaluationLayer.CHOICES,
+        blank=True,
+        help_text="Copied from the ScoringRule at aggregation time - see ScoringRule.evaluation_layer.",
+    )
     total_score = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     max_score = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     percentage = models.DecimalField(max_digits=6, decimal_places=2, default=0)
@@ -622,6 +638,14 @@ class SessionEvaluationSummary(TimeStampedModel):
     total_response_count = models.PositiveIntegerField(default=0)
     incomplete_response_count = models.PositiveIntegerField(default=0)
     competencies_summary = models.JSONField(default=list, blank=True)
+    layer_breakdown = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="{'COGNITIVE': {'percentage': .., 'weight': 50}, ...} for whichever "
+                   "of the three layers this rule set's competencies are categorized "
+                   "into - empty if none are categorized yet (overall_percentage is "
+                   "then the flat score/max_score fallback, not layer-weighted).",
+    )
     critical_failures = models.JSONField(default=list, blank=True)
     below_threshold_competencies = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default=STATUS_PENDING)

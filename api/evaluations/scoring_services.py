@@ -29,7 +29,6 @@ class Week6ScoringService:
     DECIMAL_HUNDRED = Decimal("100.00")
 
     @classmethod
-    @transaction.atomic
     def run_for_evaluation(cls, *, evaluation, actor=None, rule_set=None):
         session = getattr(evaluation, "session", None)
         if session is None:
@@ -48,25 +47,47 @@ class Week6ScoringService:
         if not responses:
             raise Week6ScoringError("No candidate responses are available for scoring")
 
+        # Deliberately outside the atomic block below: repairing a broken
+        # response can involve real external AI calls (translate/interpret/
+        # prepare), which are slow enough to risk this request's timeout
+        # budget on a session with several broken responses. Each repair
+        # commits as soon as it succeeds - a later timeout or failure
+        # (this request or a retry) then only has to redo whichever
+        # responses are still actually broken, instead of an atomic
+        # rollback discarding AI work that already completed.
+        responses = [
+            cls._prepare_response_for_scoring(response=response, actor=actor)
+            for response in responses
+        ]
+
+        return cls._score_and_persist(
+            evaluation=evaluation,
+            responses=responses,
+            rule_set=selected_rule_set,
+            actor=actor,
+        )
+
+    @classmethod
+    @transaction.atomic
+    def _score_and_persist(cls, *, evaluation, responses, rule_set, actor):
         results = []
         for response in responses:
-            response = cls._prepare_response_for_scoring(response=response, actor=actor)
             result = cls._score_response(
                 evaluation=evaluation,
                 response=response,
-                rule_set=selected_rule_set,
+                rule_set=rule_set,
             )
             if result is not None:
                 results.append(result)
         competency_results = cls._aggregate_competencies(
             evaluation=evaluation,
-            rule_set=selected_rule_set,
+            rule_set=rule_set,
             responses=responses,
             response_results=results,
         )
         summary = cls._build_session_summary(
             evaluation=evaluation,
-            rule_set=selected_rule_set,
+            rule_set=rule_set,
             responses=responses,
             response_results=results,
             competency_results=competency_results,
@@ -75,7 +96,7 @@ class Week6ScoringService:
         cls._log_scoring_events(
             actor=actor,
             evaluation=evaluation,
-            rule_set=selected_rule_set,
+            rule_set=rule_set,
             response_results=results,
             competency_results=competency_results,
             summary=summary,

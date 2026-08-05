@@ -2,33 +2,13 @@ import base64
 import hashlib
 import io
 
-from decimal import Decimal
-
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.template.loader import render_to_string
 from django.utils import timezone
 
-from api.core.constants import EvaluationLayer
-from api.sessions.models import CandidateResponse, SessionArtifact
-
 from .models import Certificate
-
-LAYER_LABELS = dict(EvaluationLayer.CHOICES)
-LAYER_CSS_CLASS = {
-    EvaluationLayer.COGNITIVE: "cognitive",
-    EvaluationLayer.BEHAVIORAL: "behavioral",
-    EvaluationLayer.TASK_EXECUTION: "task",
-}
-# Fixed display order regardless of dict iteration order - matches the
-# 50/30/20 weighting order used everywhere else (Cognitive, Behavioral,
-# Task Execution).
-LAYER_DISPLAY_ORDER = [EvaluationLayer.COGNITIVE, EvaluationLayer.BEHAVIORAL, EvaluationLayer.TASK_EXECUTION]
-
-# Matches the AI Evaluation Framework spec's Step 8 threshold exactly -
-# this is a display/recommendation label only, not a pass/fail gate (a
-# certificate is issued either way; see complete_session()).
-READY_THRESHOLD = Decimal("60")
+from .readiness_record_services import EvaluationReadinessRecordService
 
 MERITLENSE_AI_VERSION = "v1.0"
 
@@ -36,6 +16,17 @@ MERITLENSE_AI_VERSION = "v1.0"
 # handles the (currently negligible, single-digit-per-day volume) race
 # between the count() read and the unique constraint on save.
 _MAX_ID_ATTEMPTS = 5
+
+# Mirrors EvaluationReportService._resolve_readiness_indicator's own three
+# levels - the same real, already-computed readiness classification used
+# in the internal evaluation report, not a second judgment re-derived from
+# the raw score. "position" is left-to-right placement on the certificate's
+# three-segment gauge (1 = Not Ready, 3 = Ready).
+READINESS_GAUGE = {
+    "NOT_READY": {"label": "Not Ready", "position": 1},
+    "PARTIALLY_READY": {"label": "Developing", "position": 2},
+    "READY": {"label": "Ready", "position": 3},
+}
 
 
 class CertificateGenerationError(Exception):
@@ -59,131 +50,44 @@ def _build_qr_data_uri(verification_url):
     return f"data:image/png;base64,{encoded}"
 
 
-def _band_confidence(session):
-    """High/Medium/Low, from the real stt_confidence recorded per response
-    - not a computed-and-forgotten field, this is the actual speech
-    clarity/transcription confidence the STT provider returned. None (not
-    a fabricated 'High') if no response in this session has a confidence
-    value at all."""
-    values = list(
-        CandidateResponse.objects.filter(session=session, stt_confidence__isnull=False)
-        .values_list("stt_confidence", flat=True)
-    )
-    if not values:
-        return None
-    average = sum(values) / len(values)
-    if average >= Decimal("0.85"):
-        return "High"
-    if average >= Decimal("0.6"):
-        return "Medium"
-    return "Low"
-
-
-def _recommendation(overall_percentage):
-    if overall_percentage >= READY_THRESHOLD:
-        return "Suitable for task execution under standard working conditions with minimal supervision"
-    return "Requires additional training before task execution"
-
-
-def _recommendation_badge(overall_percentage):
-    """Short badge label, same threshold as _recommendation() - not a
-    separate judgment, just a shorter rendering of it for the score card."""
-    if overall_percentage >= Decimal("80"):
-        return "High Potential", "Recommended"
-    if overall_percentage >= READY_THRESHOLD:
-        return "Suitable", "Recommended"
-    return "Development Needed", "Not Yet Recommended"
-
-
-def _artifact_data_uri(session, artifact_type):
-    artifact = (
-        SessionArtifact.objects.filter(session=session, artifact_type=artifact_type)
-        .order_by("-uploaded_at")
-        .first()
-    )
-    if artifact is None or not artifact.file:
+def _candidate_photo_data_uri(candidate):
+    """A plain portrait for the certificate - the candidate's own uploaded
+    photo (see the registration flow's photo-upload + passport-match
+    check), not a face-match crop or verification artifact. None if the
+    candidate never uploaded one, rather than substituting some other image
+    and implying it's the same thing."""
+    if not candidate.profile_photo:
         return None
     try:
-        artifact.file.open("rb")
-        content = artifact.file.read()
+        candidate.profile_photo.open("rb")
+        content = candidate.profile_photo.read()
     finally:
-        artifact.file.close()
-    mime = artifact.mime_type or "image/jpeg"
+        candidate.profile_photo.close()
     encoded = base64.b64encode(content).decode()
-    return f"data:{mime};base64,{encoded}"
+    return f"data:image/jpeg;base64,{encoded}"
 
 
-def _identity_verification_context(session):
-    """Real face-match/liveness data already captured during the
-    candidate's pre-interview identity check (api/sessions/identity_services.py)
-    - not re-derived or estimated. None fields where verification never
-    ran (e.g. this evaluation's tier doesn't require it).
+def _readiness_gauge_context(evaluation):
+    """Reuses EvaluationReportService's own readiness classification (the
+    same READY/PARTIALLY_READY/NOT_READY judgment already computed for the
+    internal evaluation report - see api/reports/services.py) rather than
+    re-deriving a second, possibly-inconsistent judgment from the score."""
+    from api.reports.services import EvaluationReportService
 
-    Includes the actual captured selfie and ID document images (explicit
-    product decision - the certificate's compliance language is written
-    to match: it no longer claims "no biometric storage" once these are
-    embedded). Either image individually falls back to None if that
-    specific SessionArtifact is missing, without failing the whole
-    certificate."""
-    if session is None:
-        return {"attempted": False}
-    if session.verification_status in ("NOT_STARTED", ""):
-        return {"attempted": False}
-    return {
-        "attempted": True,
-        "status": session.verification_status,
-        "face_match_score": float(session.face_match_score) if session.face_match_score is not None else None,
-        "single_face_detected": session.single_face_detected,
-        "selfie_data_uri": _artifact_data_uri(session, "SELFIE_IMAGE"),
-        "id_document_data_uri": _artifact_data_uri(session, "ID_DOCUMENT"),
-    }
-
-
-def _work_readiness_label(evaluation):
-    # Reuses the existing readiness engine's own real output
-    # (EvaluationRuleEngine, api/evaluations/rule_engine.py) rather than
-    # re-deriving a second, possibly-inconsistent "job ready" judgment
-    # from the score alone.
-    mapping = {
-        "READY": "Job Ready",
-        "NOT_READY": "Not Ready",
-        "PENDING": "Pending Review",
-    }
-    return mapping.get(evaluation.readiness_status, "Pending Review")
-
-
-def _top_skill_and_improvement_area(competencies_summary):
-    scored = [c for c in competencies_summary if c.get("response_count", 0) or c.get("percentage") is not None]
-    if not scored:
-        return None, None
-    ranked = sorted(scored, key=lambda c: c.get("percentage") or 0, reverse=True)
-    top = ranked[0]
-    bottom = ranked[-1]
-    top_label = f"{top.get('competency_name') or top.get('competency_code')}: {_qualitative_band(top.get('percentage'))}"
-    if bottom is top and len(ranked) == 1:
-        return top_label, None
-    improvement = f"Requires improvement in {bottom.get('competency_name') or bottom.get('competency_code')}"
-    return top_label, improvement
-
-
-def _qualitative_band(percentage):
-    if percentage is None:
-        return "N/A"
-    percentage = float(percentage)
-    if percentage >= 85:
-        return "Strong"
-    if percentage >= 70:
-        return "Good"
-    if percentage >= 50:
-        return "Fair"
-    return "Needs Improvement"
+    readiness_record = EvaluationReadinessRecordService.get_existing(evaluation)
+    indicator = EvaluationReportService._resolve_readiness_indicator(evaluation, readiness_record)
+    gauge = READINESS_GAUGE.get(indicator["code"], READINESS_GAUGE["PARTIALLY_READY"])
+    return {"label": gauge["label"], "position": gauge["position"]}
 
 
 def generate_certificate(evaluation, summary):
     """Builds (or regenerates) the Certificate + PDF for `evaluation`,
-    given its just-computed SessionEvaluationSummary. Every field is
-    either real data or an explicit N/A - see the module docstring on
-    Certificate for what's intentionally not fabricated yet."""
+    given its just-computed SessionEvaluationSummary. This is a
+    presentable completion certificate, not the internal evaluation
+    report - it states the final score and a real readiness classification
+    (from the same rule engine as the internal report), but none of the
+    per-competency/per-layer breakdown or raw identity-check data that
+    belongs in that separate, more detailed report instead."""
     from weasyprint import HTML
 
     certificate, created = Certificate.objects.get_or_create(
@@ -204,50 +108,19 @@ def generate_certificate(evaluation, summary):
     certificate.expires_at = certificate.issued_at + timezone.timedelta(days=90)
 
     session = evaluation.session
-    layer_breakdown = summary.layer_breakdown or {}
-    top_skill, improvement_area = _top_skill_and_improvement_area(summary.competencies_summary)
-
     verification_url = f"{settings.FRONTEND_URL}/en/verify-certificate?id={certificate.certificate_id}"
-
-    passport = evaluation.candidate.passport_id or ""
-    masked_passport = f"P****{passport[-4:]}" if len(passport) >= 4 else passport
-
-    badge_title, badge_subtitle = _recommendation_badge(summary.overall_percentage)
+    readiness = _readiness_gauge_context(evaluation)
 
     context = {
         "certificate_id": certificate.certificate_id,
         "candidate_name": evaluation.candidate.get_full_name(),
-        "candidate_public_id": str(evaluation.candidate.public_id),
-        "candidate_passport_masked": masked_passport,
         "role_name": session.role_name if session else evaluation.candidate.job_role,
+        "candidate_photo_data_uri": _candidate_photo_data_uri(evaluation.candidate),
         "final_score": float(summary.overall_percentage),
-        "recommendation": _recommendation(summary.overall_percentage),
-        "badge_title": badge_title,
-        "badge_subtitle": badge_subtitle,
-        "processing_confidence": _band_confidence(session) if session else None,
-        "work_readiness": _work_readiness_label(evaluation),
-        "layer_bars": [
-            {
-                "label": LAYER_LABELS.get(layer, layer),
-                "css_class": LAYER_CSS_CLASS.get(layer, "flat"),
-                "percentage": layer_breakdown[layer].get("percentage"),
-            }
-            for layer in LAYER_DISPLAY_ORDER
-            if layer in layer_breakdown
-        ],
-        "has_layer_breakdown": bool(layer_breakdown),
-        "competencies_summary": summary.competencies_summary,
-        "top_skill": top_skill,
-        "improvement_area": improvement_area,
-        "identity": _identity_verification_context(session),
-        # Role Fit Engine needs a post-live-interview evaluator rating that
-        # doesn't exist anywhere in the codebase yet - deliberately None,
-        # not fabricated, until that feature is built.
-        "role_fit": None,
+        "readiness_label": readiness["label"],
+        "readiness_position": readiness["position"],
         "issue_date": certificate.issued_at.strftime("%Y-%m-%d"),
         "expiry_date": certificate.expires_at.strftime("%Y-%m-%d"),
-        "session_id": str(session.public_id) if session else "",
-        "evaluation_timestamp": (evaluation.completed_at or now).strftime("%Y-%m-%d %H:%M UTC"),
         "system_version": MERITLENSE_AI_VERSION,
         "verification_url": verification_url,
         "qr_data_uri": _build_qr_data_uri(verification_url),

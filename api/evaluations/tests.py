@@ -1505,11 +1505,9 @@ class CertificateGenerationTests(TestCase):
             created_by=self.user,
         )
 
-    def test_generate_certificate_uses_real_data_and_marks_missing_data_honestly(self):
+    def test_generate_certificate_uses_real_data(self):
         import base64
         from django.core.files.uploadedfile import SimpleUploadedFile
-        from api.core.constants import IdentityVerificationStatus
-        from api.sessions.models import SessionArtifact
         tiny_jpeg = base64.b64decode(
             "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a"
             "HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIy"
@@ -1517,21 +1515,11 @@ class CertificateGenerationTests(TestCase):
             "AxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAA"
             "AAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k="
         )
-        self.session.identity_verified = True
-        self.session.face_match_score = Decimal("96.40")
-        self.session.single_face_detected = True
-        self.session.verification_status = IdentityVerificationStatus.VERIFIED
-        self.session.save()
-        SessionArtifact.objects.create(
-            session=self.session, candidate=self.candidate, artifact_type="SELFIE_IMAGE",
-            file=SimpleUploadedFile("selfie.jpg", tiny_jpeg, content_type="image/jpeg"),
-            mime_type="image/jpeg", file_size_bytes=len(tiny_jpeg),
-        )
-        SessionArtifact.objects.create(
-            session=self.session, candidate=self.candidate, artifact_type="ID_DOCUMENT",
-            file=SimpleUploadedFile("id.jpg", tiny_jpeg, content_type="image/jpeg"),
-            mime_type="image/jpeg", file_size_bytes=len(tiny_jpeg),
-        )
+        self.candidate.profile_photo = SimpleUploadedFile("photo.jpg", tiny_jpeg, content_type="image/jpeg")
+        self.candidate.save()
+        from api.core.constants import ReadinessStatus
+        self.evaluation.readiness_status = ReadinessStatus.READY
+        self.evaluation.save(update_fields=["readiness_status"])
         summary = SessionEvaluationSummary.objects.create(
             evaluation=self.evaluation,
             session=self.session,
@@ -1562,22 +1550,34 @@ class CertificateGenerationTests(TestCase):
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
         self.assertEqual((certificate.expires_at - certificate.issued_at).days, 90)
 
-        from api.evaluations.certificate_services import _identity_verification_context
-        identity = _identity_verification_context(self.session)
-        self.assertTrue(identity["selfie_data_uri"].startswith("data:image/jpeg;base64,"))
-        self.assertTrue(identity["id_document_data_uri"].startswith("data:image/jpeg;base64,"))
+        from api.evaluations.certificate_services import _candidate_photo_data_uri, _readiness_gauge_context
+        self.assertTrue(_candidate_photo_data_uri(self.candidate).startswith("data:image/jpeg;base64,"))
+        readiness = _readiness_gauge_context(self.evaluation)
+        self.assertEqual(readiness["label"], "Ready")
+        self.assertEqual(readiness["position"], 3)
 
-    def test_identity_context_omits_photos_that_were_never_uploaded(self):
-        from api.core.constants import IdentityVerificationStatus
-        from api.evaluations.certificate_services import _identity_verification_context
-        self.session.verification_status = IdentityVerificationStatus.VERIFIED
-        self.session.face_match_score = Decimal("91.0")
-        self.session.save()
+    def test_candidate_photo_is_none_when_never_uploaded(self):
+        from api.evaluations.certificate_services import _candidate_photo_data_uri
 
-        identity = _identity_verification_context(self.session)
+        self.assertIsNone(_candidate_photo_data_uri(self.candidate))
 
-        self.assertIsNone(identity["selfie_data_uri"])
-        self.assertIsNone(identity["id_document_data_uri"])
+    def test_readiness_gauge_reflects_real_evaluation_status(self):
+        from api.core.constants import ReadinessStatus
+        from api.evaluations.certificate_services import _readiness_gauge_context
+
+        self.evaluation.readiness_status = ReadinessStatus.NOT_READY
+        self.evaluation.save(update_fields=["readiness_status"])
+        not_ready = _readiness_gauge_context(self.evaluation)
+        self.assertEqual(not_ready, {"label": "Not Ready", "position": 1})
+
+        # PENDING (the default before scoring rolls it up to READY/NOT_READY)
+        # maps to the rule engine's own PARTIALLY_READY/"Developing" middle
+        # ground - not a guess, the same mapping EvaluationReportService
+        # uses for the internal report.
+        self.evaluation.readiness_status = ReadinessStatus.PENDING
+        self.evaluation.save(update_fields=["readiness_status"])
+        pending = _readiness_gauge_context(self.evaluation)
+        self.assertEqual(pending, {"label": "Developing", "position": 2})
 
     def test_regenerating_keeps_the_same_certificate_id(self):
         summary = SessionEvaluationSummary.objects.create(
@@ -1598,129 +1598,3 @@ class CertificateGenerationTests(TestCase):
         self.assertEqual(first.pk, second.pk)
         self.assertEqual(first.certificate_id, second.certificate_id)
         self.assertEqual(first.issued_at, second.issued_at)
-
-
-class CertificateHelperTests(TestCase):
-    """Unit tests for the honesty-preserving pieces of
-    certificate_services.py - values that must come back as None/N/A
-    rather than a fabricated guess when the underlying data doesn't exist."""
-
-    def test_band_confidence_is_none_with_no_recorded_stt_confidence(self):
-        from api.evaluations.certificate_services import _band_confidence
-
-        user = User.objects.create_user(
-            email="conf-none@example.com", password="testpass123", first_name="No", last_name="Confidence",
-            role=Roles.B2C, is_verified=True,
-        )
-        candidate = Candidate.objects.create(
-            first_name="No", last_name="Confidence", email="conf-none-candidate@example.com",
-            passport_id="CONFNONE01", job_role="NA", core_skills="safety", preferred_language="EN",
-            passport_document="candidates/documents/passport/test.pdf", created_by=user,
-        )
-        config = InterviewConfiguration.objects.create(
-            role_name="Housekeeper", role_code="domestic_worker", language="EN",
-            evaluation_tier=InterviewEvaluationTier.FULL, duration_minutes=45, total_questions=1,
-            allow_retries=True, max_retries=1, rubric_version="v2.0", question_set_version="v1.2",
-        )
-        session = InterviewSession.objects.create(
-            candidate=candidate, organization=candidate.company, config=config,
-            role_name=config.role_name, role_code=config.role_code, ui_language="EN", candidate_language="EN",
-            tts_language_code="en-US", stt_language_code="en-US", total_questions=1,
-            evaluation_tier=InterviewEvaluationTier.FULL, rubric_version="v2.0", question_set_version="v1.2",
-            expires_at=InterviewSession.build_expiry(30), created_by=user,
-        )
-
-        self.assertIsNone(_band_confidence(session))
-
-    def test_band_confidence_reflects_real_average(self):
-        from api.evaluations.certificate_services import _band_confidence
-
-        user = User.objects.create_user(
-            email="conf-real@example.com", password="testpass123", first_name="Real", last_name="Confidence",
-            role=Roles.B2C, is_verified=True,
-        )
-        candidate = Candidate.objects.create(
-            first_name="Real", last_name="Confidence", email="conf-real-candidate@example.com",
-            passport_id="CONFREAL01", job_role="NA", core_skills="safety", preferred_language="EN",
-            passport_document="candidates/documents/passport/test.pdf", created_by=user,
-        )
-        config = InterviewConfiguration.objects.create(
-            role_name="Housekeeper", role_code="domestic_worker", language="EN",
-            evaluation_tier=InterviewEvaluationTier.FULL, duration_minutes=45, total_questions=1,
-            allow_retries=True, max_retries=1, rubric_version="v2.0", question_set_version="v1.2",
-        )
-        session = InterviewSession.objects.create(
-            candidate=candidate, organization=candidate.company, config=config,
-            role_name=config.role_name, role_code=config.role_code, ui_language="EN", candidate_language="EN",
-            tts_language_code="en-US", stt_language_code="en-US", total_questions=1,
-            evaluation_tier=InterviewEvaluationTier.FULL, rubric_version="v2.0", question_set_version="v1.2",
-            expires_at=InterviewSession.build_expiry(30), created_by=user,
-        )
-        template = QuestionTemplate.objects.create(
-            role_name="Housekeeper", role_code="domestic_worker", question_code="HK-CONF-001",
-            question_version="1.0", question_status=QuestionLifecycleStatus.ACTIVE, domain="Safety",
-            skill_tag="safety_awareness", skill="Safety Awareness", sequence_number=1,
-            difficulty=QuestionDifficulty.MEDIUM, question_text="Q", question_type="safety",
-            question_format="SCENARIO", language="EN", scoring_type="0/3/5", difficulty_score=2,
-            estimated_time_seconds=60, expected_answer_type="multi_step",
-            evaluation_tier=InterviewEvaluationTier.FULL, rubric_version="v2.0", question_set_version="v1.2",
-            critical_question=False, is_active=True,
-        )
-        session_question = SessionQuestion.objects.create(
-            session=session, question_template=template, question_text=template.question_text,
-            domain=template.domain, skill=template.skill_tag, difficulty=template.difficulty,
-            question_order=1, status="ANSWERED", is_mandatory=True,
-            asked_at=timezone.now(), answered_at=timezone.now(),
-        )
-        CandidateResponse.objects.create(
-            session=session, question=session_question, response_type=CandidateResponseType.TEXT,
-            transcript="answer", text_response="answer", stt_confidence=Decimal("0.9"),
-        )
-
-        self.assertEqual(_band_confidence(session), "High")
-
-    def test_identity_verification_context_reflects_real_state_not_a_guess(self):
-        from api.evaluations.certificate_services import _identity_verification_context
-        from api.core.constants import IdentityVerificationStatus
-
-        user = User.objects.create_user(
-            email="ident-ctx@example.com", password="testpass123", first_name="Ident", last_name="Ctx",
-            role=Roles.B2C, is_verified=True,
-        )
-        candidate = Candidate.objects.create(
-            first_name="Ident", last_name="Ctx", email="ident-ctx-candidate@example.com",
-            passport_id="IDENTCTX01", job_role="NA", core_skills="safety", preferred_language="EN",
-            passport_document="candidates/documents/passport/test.pdf", created_by=user,
-        )
-        config = InterviewConfiguration.objects.create(
-            role_name="Housekeeper", role_code="domestic_worker", language="EN",
-            evaluation_tier=InterviewEvaluationTier.FULL, duration_minutes=45, total_questions=1,
-            allow_retries=True, max_retries=1, rubric_version="v2.0", question_set_version="v1.2",
-        )
-
-        # Never attempted (default NOT_STARTED) - must not claim any status.
-        never_attempted = InterviewSession.objects.create(
-            candidate=candidate, organization=candidate.company, config=config,
-            role_name=config.role_name, role_code=config.role_code, ui_language="EN", candidate_language="EN",
-            tts_language_code="en-US", stt_language_code="en-US", total_questions=1,
-            evaluation_tier=InterviewEvaluationTier.FULL, rubric_version="v2.0", question_set_version="v1.2",
-            expires_at=InterviewSession.build_expiry(30), created_by=user,
-        )
-        self.assertEqual(_identity_verification_context(never_attempted), {"attempted": False})
-        self.assertEqual(_identity_verification_context(None), {"attempted": False})
-
-        # Actually verified - real face_match_score/single_face_detected values come through untouched.
-        verified = InterviewSession.objects.create(
-            candidate=candidate, organization=candidate.company, config=config,
-            role_name=config.role_name, role_code=config.role_code, ui_language="EN", candidate_language="EN",
-            tts_language_code="en-US", stt_language_code="en-US", total_questions=1,
-            evaluation_tier=InterviewEvaluationTier.FULL, rubric_version="v2.0", question_set_version="v1.2",
-            expires_at=InterviewSession.build_expiry(30), created_by=user,
-            verification_status=IdentityVerificationStatus.VERIFIED,
-            face_match_score=Decimal("96.40"), single_face_detected=True,
-        )
-        result = _identity_verification_context(verified)
-        self.assertEqual(result, {
-            "attempted": True, "status": "VERIFIED", "face_match_score": 96.4, "single_face_detected": True,
-            "selfie_data_uri": None, "id_document_data_uri": None,
-        })

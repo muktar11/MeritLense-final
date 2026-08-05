@@ -1545,6 +1545,11 @@ class CertificateGenerationTests(TestCase):
         certificate = generate_certificate(self.evaluation, summary)
 
         self.assertTrue(certificate.certificate_id.startswith(f"ML-{timezone.now().year}-"))
+        # Two independent identifiers on two independent counters - the
+        # certificate document vs. the underlying assessment record - never
+        # the same value or derived from one another.
+        self.assertTrue(certificate.assessment_id.startswith(f"ASM-{timezone.now().year}-"))
+        self.assertNotEqual(certificate.certificate_id, certificate.assessment_id)
         self.assertTrue(certificate.pdf_file.name)
         pdf_bytes = certificate.pdf_file.read()
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
@@ -1597,4 +1602,5 @@ class CertificateGenerationTests(TestCase):
 
         self.assertEqual(first.pk, second.pk)
         self.assertEqual(first.certificate_id, second.certificate_id)
+        self.assertEqual(first.assessment_id, second.assessment_id)
         self.assertEqual(first.issued_at, second.issued_at)

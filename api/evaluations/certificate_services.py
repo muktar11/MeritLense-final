@@ -26,9 +26,13 @@ def _logo_data_uri():
         _logo_data_uri_cache = f"data:image/png;base64,{encoded}"
     return _logo_data_uri_cache
 
-# Certificate ID format ML-YYYY-NNNNNN. A get_or_create-style retry loop
-# handles the (currently negligible, single-digit-per-day volume) race
-# between the count() read and the unique constraint on save.
+# certificate_id (ML-YYYY-NNNNNN) and assessment_id (ASM-YYYY-NNNNNN) are
+# deliberately two separate counters on two separate fields - the
+# certificate identifies the issued document, the assessment ID identifies
+# the underlying completed assessment record, and neither is derived from
+# the other. A get_or_create-style retry loop handles the (currently
+# negligible, single-digit-per-day volume) race between the count() read
+# and the unique constraint on save.
 _MAX_ID_ATTEMPTS = 5
 
 # Mirrors EvaluationReportService._resolve_readiness_indicator's own three
@@ -47,11 +51,22 @@ class CertificateGenerationError(Exception):
     pass
 
 
-def _generate_certificate_id():
+def _generate_sequential_id(field_name, prefix):
     year = timezone.now().year
-    prefix = f"ML-{year}-"
-    existing = Certificate.objects.filter(certificate_id__startswith=prefix).count()
-    return f"{prefix}{existing + 1:06d}"
+    full_prefix = f"{prefix}-{year}-"
+    existing = Certificate.objects.filter(**{f"{field_name}__startswith": full_prefix}).count()
+    return f"{full_prefix}{existing + 1:06d}"
+
+
+def _assign_unique_id(certificate, field_name, prefix):
+    if getattr(certificate, field_name):
+        return
+    for _ in range(_MAX_ID_ATTEMPTS):
+        value = _generate_sequential_id(field_name, prefix)
+        if not Certificate.objects.filter(**{field_name: value}).exclude(pk=certificate.pk).exists():
+            setattr(certificate, field_name, value)
+            return
+    raise CertificateGenerationError(f"Could not allocate a unique {field_name}")
 
 
 def _build_qr_data_uri(verification_url):
@@ -118,14 +133,8 @@ def generate_certificate(evaluation, summary):
         evaluation=evaluation,
         defaults={"candidate": evaluation.candidate},
     )
-    if not certificate.certificate_id:
-        for _ in range(_MAX_ID_ATTEMPTS):
-            candidate_id = _generate_certificate_id()
-            if not Certificate.objects.filter(certificate_id=candidate_id).exclude(pk=certificate.pk).exists():
-                certificate.certificate_id = candidate_id
-                break
-        else:
-            raise CertificateGenerationError("Could not allocate a unique certificate ID")
+    _assign_unique_id(certificate, "certificate_id", "ML")
+    _assign_unique_id(certificate, "assessment_id", "ASM")
 
     now = timezone.now()
     certificate.issued_at = certificate.issued_at or now
@@ -149,7 +158,7 @@ def generate_certificate(evaluation, summary):
         "readiness_position": readiness["position"],
         "issue_date": certificate.issued_at.strftime("%Y-%m-%d"),
         "assessment_date": (evaluation.completed_at or now).strftime("%Y-%m-%d"),
-        "assessment_id": str(evaluation.public_id),
+        "assessment_id": certificate.assessment_id,
         "system_version": READINESS_FRAMEWORK_VERSION,
         "verification_url": verification_url,
         "qr_data_uri": _build_qr_data_uri(verification_url),

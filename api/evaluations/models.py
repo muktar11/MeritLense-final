@@ -687,6 +687,12 @@ class Certificate(TimeStampedModel):
     # two freshly get_or_create()'d rows (both still unset before their
     # real ID gets assigned a moment later) as colliding on the same value.
     certificate_id = models.CharField(max_length=50, unique=True, blank=True, null=True, default=None)
+    # A separate identifier from certificate_id, on its own independent
+    # counter (see _generate_assessment_id) - certificate_id identifies the
+    # issued certificate document, assessment_id identifies the underlying
+    # completed assessment record. They must never be derived from each
+    # other or from a shared source.
+    assessment_id = models.CharField(max_length=50, unique=True, blank=True, null=True, default=None)
     pdf_file = models.FileField(upload_to="certificates/", null=True, blank=True)
     pdf_hash = models.CharField(max_length=64, blank=True, help_text="SHA-256 hex digest of the generated PDF binary.")
     issued_at = models.DateTimeField(null=True, blank=True)

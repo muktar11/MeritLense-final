@@ -642,7 +642,7 @@ class CandidateScoreSummaryView(APIView):
     def get(self, request):
         user = request.user
         summaries = SessionEvaluationSummary.objects.select_related(
-            "candidate", "session", "evaluation"
+            "candidate", "session", "evaluation", "evaluation__certificate"
         ).order_by("candidate_id", "-generated_at", "-created_at")
 
         if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
@@ -670,6 +670,7 @@ class CandidateScoreSummaryView(APIView):
 
         results = []
         for summary in latest_by_candidate.values():
+            cert = getattr(summary.evaluation, "certificate", None) if summary.evaluation_id else None
             results.append({
                 "candidate_id": str(summary.candidate.public_id),
                 "evaluation_id": str(summary.evaluation.public_id) if summary.evaluation_id else None,
@@ -685,6 +686,14 @@ class CandidateScoreSummaryView(APIView):
                     }
                     for item in summary.competencies_summary
                 ],
+                # None when this evaluation's tier doesn't issue certificates,
+                # or generation genuinely hasn't happened yet - the frontend
+                # shows an honest "not available" rather than a broken link.
+                "certificate": {
+                    "certificate_id": cert.certificate_id,
+                    "pdf_url": request.build_absolute_uri(cert.pdf_file.url),
+                    "issued_at": cert.issued_at,
+                } if cert and cert.pdf_file else None,
             })
 
         return Response(results)

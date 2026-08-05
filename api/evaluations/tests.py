@@ -1084,6 +1084,24 @@ class CandidateScoreSummaryApiTests(TestCase):
         self.assertEqual(entry["competencies"][0]["code"], "safety_awareness")
         self.assertEqual(entry["competencies"][0]["name"], "Safety Awareness")
         self.assertEqual(float(entry["competencies"][0]["percentage"]), 70.0)
+        # No Certificate row exists for this evaluation - the response says
+        # so honestly rather than omitting the key or fabricating a link.
+        self.assertIsNone(entry["certificate"])
+
+    def test_certificate_is_included_once_generated(self):
+        from api.evaluations.certificate_services import generate_certificate
+
+        summary = SessionEvaluationSummary.objects.get(evaluation=self.evaluation)
+        generate_certificate(self.evaluation, summary)
+
+        self.client.force_authenticate(self.user)
+        response = self.client.get("/api/v1/evaluations/candidate-scores")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        entry = response.data[0]
+        self.assertIsNotNone(entry["certificate"])
+        self.assertEqual(entry["certificate"]["certificate_id"], self.evaluation.certificate.certificate_id)
+        self.assertIn(".pdf", entry["certificate"]["pdf_url"])
 
     def test_other_user_does_not_see_this_candidate(self):
         self.client.force_authenticate(self.other_user)

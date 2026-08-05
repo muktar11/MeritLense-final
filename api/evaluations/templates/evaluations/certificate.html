@@ -40,10 +40,10 @@
   .stats-row { display: flex; gap: 14px; margin-top: 18px; }
   .stats-card { flex: 1; background: #f6f8fd; border: 1px solid #e3e9f7; border-radius: 12px; padding: 12px 16px; }
 
-  .info-item { display: flex; justify-content: space-between; font-size: 8.3pt; padding: 4px 0; border-bottom: 1px solid #e7ecf9; }
+  .info-item { display: flex; justify-content: space-between; gap: 10px; font-size: 8.3pt; padding: 4px 0; border-bottom: 1px solid #e7ecf9; }
   .info-item:last-child { border-bottom: none; }
-  .info-item span:first-child { color: #888; }
-  .info-item span:last-child { font-weight: 700; color: #1e2a3a; }
+  .info-item span:first-child { color: #888; white-space: nowrap; flex-shrink: 0; }
+  .info-item span:last-child { font-weight: 700; color: #1e2a3a; text-align: right; }
 
   .readiness-card { text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; }
   .readiness-label { font-size: 7.8pt; text-transform: uppercase; letter-spacing: 0.05em; color: #888; margin-bottom: 8px; }

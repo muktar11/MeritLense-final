@@ -20,11 +20,11 @@ _MAX_ID_ATTEMPTS = 5
 # Mirrors EvaluationReportService._resolve_readiness_indicator's own three
 # levels - the same real, already-computed readiness classification used
 # in the internal evaluation report, not a second judgment re-derived from
-# the raw score. "position" is left-to-right placement on the certificate's
-# three-segment gauge (1 = Not Ready, 3 = Ready).
+# the raw score. "position" drives the readiness badge's color (1 = red,
+# 3 = green).
 READINESS_GAUGE = {
-    "NOT_READY": {"label": "Not Ready", "position": 1},
-    "PARTIALLY_READY": {"label": "Developing", "position": 2},
+    "NOT_READY": {"label": "Readiness Gaps Identified", "position": 1},
+    "PARTIALLY_READY": {"label": "Partially Ready", "position": 2},
     "READY": {"label": "Ready", "position": 3},
 }
 
@@ -80,13 +80,23 @@ def _readiness_gauge_context(evaluation):
     return {"label": gauge["label"], "position": gauge["position"]}
 
 
+def _role_profile_version(session):
+    """Same version string the internal evaluation report uses (role code
+    + question set version) - see EvaluationReportService._derive_role_profile_version."""
+    from api.reports.services import EvaluationReportService
+
+    if session is None:
+        return "N/A"
+    return EvaluationReportService._derive_role_profile_version(session)
+
+
 def generate_certificate(evaluation, summary):
     """Builds (or regenerates) the Certificate + PDF for `evaluation`,
     given its just-computed SessionEvaluationSummary. This is a
     presentable completion certificate, not the internal evaluation
-    report - it states the final score and a real readiness classification
-    (from the same rule engine as the internal report), but none of the
-    per-competency/per-layer breakdown or raw identity-check data that
+    report - it states a real readiness classification (from the same
+    rule engine as the internal report), but none of the raw score,
+    per-competency/per-layer breakdown, or identity-check data that
     belongs in that separate, more detailed report instead."""
     from weasyprint import HTML
 
@@ -105,7 +115,10 @@ def generate_certificate(evaluation, summary):
 
     now = timezone.now()
     certificate.issued_at = certificate.issued_at or now
-    certificate.expires_at = certificate.issued_at + timezone.timedelta(days=90)
+    # This certificate does not expire - cleared explicitly so regenerating
+    # an older certificate (created before this policy) drops any
+    # previously-set expiry rather than leaving it stale.
+    certificate.expires_at = None
 
     session = evaluation.session
     verification_url = f"{settings.FRONTEND_URL}/en/verify-certificate?id={certificate.certificate_id}"
@@ -115,12 +128,13 @@ def generate_certificate(evaluation, summary):
         "certificate_id": certificate.certificate_id,
         "candidate_name": evaluation.candidate.get_full_name(),
         "role_name": session.role_name if session else evaluation.candidate.job_role,
+        "role_profile_version": _role_profile_version(session),
         "candidate_photo_data_uri": _candidate_photo_data_uri(evaluation.candidate),
-        "final_score": float(summary.overall_percentage),
         "readiness_label": readiness["label"],
         "readiness_position": readiness["position"],
         "issue_date": certificate.issued_at.strftime("%Y-%m-%d"),
-        "expiry_date": certificate.expires_at.strftime("%Y-%m-%d"),
+        "assessment_date": (evaluation.completed_at or now).strftime("%Y-%m-%d"),
+        "assessment_id": str(evaluation.public_id),
         "system_version": MERITLENSE_AI_VERSION,
         "verification_url": verification_url,
         "qr_data_uri": _build_qr_data_uri(verification_url),

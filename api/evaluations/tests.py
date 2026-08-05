@@ -1439,7 +1439,7 @@ class AutomaticScoringOnCompletionTests(TestCase):
         self.assertTrue(certificate.pdf_file.name)
         self.assertTrue(certificate.pdf_hash)
         self.assertIsNotNone(certificate.issued_at)
-        self.assertEqual((certificate.expires_at - certificate.issued_at).days, 90)
+        self.assertIsNone(certificate.expires_at)
 
 
 class CertificateGenerationTests(TestCase):
@@ -1548,7 +1548,7 @@ class CertificateGenerationTests(TestCase):
         self.assertTrue(certificate.pdf_file.name)
         pdf_bytes = certificate.pdf_file.read()
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
-        self.assertEqual((certificate.expires_at - certificate.issued_at).days, 90)
+        self.assertIsNone(certificate.expires_at)
 
         from api.evaluations.certificate_services import _candidate_photo_data_uri, _readiness_gauge_context
         self.assertTrue(_candidate_photo_data_uri(self.candidate).startswith("data:image/jpeg;base64,"))
@@ -1568,16 +1568,16 @@ class CertificateGenerationTests(TestCase):
         self.evaluation.readiness_status = ReadinessStatus.NOT_READY
         self.evaluation.save(update_fields=["readiness_status"])
         not_ready = _readiness_gauge_context(self.evaluation)
-        self.assertEqual(not_ready, {"label": "Not Ready", "position": 1})
+        self.assertEqual(not_ready, {"label": "Readiness Gaps Identified", "position": 1})
 
         # PENDING (the default before scoring rolls it up to READY/NOT_READY)
-        # maps to the rule engine's own PARTIALLY_READY/"Developing" middle
-        # ground - not a guess, the same mapping EvaluationReportService
+        # maps to the rule engine's own PARTIALLY_READY/"Partially Ready"
+        # middle ground - not a guess, the same mapping EvaluationReportService
         # uses for the internal report.
         self.evaluation.readiness_status = ReadinessStatus.PENDING
         self.evaluation.save(update_fields=["readiness_status"])
         pending = _readiness_gauge_context(self.evaluation)
-        self.assertEqual(pending, {"label": "Developing", "position": 2})
+        self.assertEqual(pending, {"label": "Partially Ready", "position": 2})
 
     def test_regenerating_keeps_the_same_certificate_id(self):
         summary = SessionEvaluationSummary.objects.create(

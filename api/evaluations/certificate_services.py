@@ -11,7 +11,7 @@ from django.utils import timezone
 from .models import Certificate
 from .readiness_record_services import EvaluationReadinessRecordService
 
-MERITLENSE_AI_VERSION = "v1.0"
+READINESS_FRAMEWORK_VERSION = "v1.0"
 
 _LOGO_PATH = Path(__file__).resolve().parent / "assets" / "meritlense-logo.png"
 _logo_data_uri_cache = None
@@ -141,7 +141,7 @@ def generate_certificate(evaluation, summary):
     context = {
         "logo_data_uri": _logo_data_uri(),
         "certificate_id": certificate.certificate_id,
-        "candidate_name": evaluation.candidate.get_full_name(),
+        "candidate_name": evaluation.candidate.get_full_name().title(),
         "role_name": session.role_name if session else evaluation.candidate.job_role,
         "role_profile_version": _role_profile_version(session),
         "candidate_photo_data_uri": _candidate_photo_data_uri(evaluation.candidate),
@@ -150,7 +150,7 @@ def generate_certificate(evaluation, summary):
         "issue_date": certificate.issued_at.strftime("%Y-%m-%d"),
         "assessment_date": (evaluation.completed_at or now).strftime("%Y-%m-%d"),
         "assessment_id": str(evaluation.public_id),
-        "system_version": MERITLENSE_AI_VERSION,
+        "system_version": READINESS_FRAMEWORK_VERSION,
         "verification_url": verification_url,
         "qr_data_uri": _build_qr_data_uri(verification_url),
         "generated_at": now.strftime("%Y-%m-%d %H:%M UTC"),

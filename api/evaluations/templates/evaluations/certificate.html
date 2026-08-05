@@ -12,7 +12,7 @@
   /* ---------- Header ---------- */
   .header { display: flex; justify-content: space-between; align-items: flex-start; }
   .brand { display: flex; align-items: center; gap: 10px; }
-  .brand svg { width: 34px; height: 34px; }
+  .brand img { width: 40px; height: auto; }
   .wordmark { font-size: 15pt; font-weight: 800; color: #1e2a3a; }
   .wordmark-accent { color: #2563eb; }
   .brand-tagline { font-size: 7.5pt; color: #888; margin-top: 1px; }
@@ -77,16 +77,7 @@
 
     <div class="header">
       <div class="brand">
-        <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="hexGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#2563eb" />
-              <stop offset="100%" stop-color="#1e3a8a" />
-            </linearGradient>
-          </defs>
-          <polygon points="50,3 93,26 93,74 50,97 7,74 7,26" fill="none" stroke="url(#hexGrad)" stroke-width="6" />
-          <text x="50" y="66" font-size="46" font-weight="800" text-anchor="middle" fill="url(#hexGrad)">M</text>
-        </svg>
+        <img src="{{ logo_data_uri }}" alt="MeritLense" />
         <div>
           <div class="wordmark">Merit<span class="wordmark-accent">Lense</span></div>
           <div class="brand-tagline">AI-Powered Hiring. Trusted Outcomes.</div>

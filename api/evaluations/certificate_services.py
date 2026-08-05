@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import io
+from pathlib import Path
 
 from django.conf import settings
 from django.core.files.base import ContentFile
@@ -11,6 +12,19 @@ from .models import Certificate
 from .readiness_record_services import EvaluationReadinessRecordService
 
 MERITLENSE_AI_VERSION = "v1.0"
+
+_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "meritlense-logo.png"
+_logo_data_uri_cache = None
+
+
+def _logo_data_uri():
+    """The real MeritLense logo (not a hand-drawn approximation), read once
+    per process and cached - it's a fixed asset, not per-certificate data."""
+    global _logo_data_uri_cache
+    if _logo_data_uri_cache is None:
+        encoded = base64.b64encode(_LOGO_PATH.read_bytes()).decode()
+        _logo_data_uri_cache = f"data:image/png;base64,{encoded}"
+    return _logo_data_uri_cache
 
 # Certificate ID format ML-YYYY-NNNNNN. A get_or_create-style retry loop
 # handles the (currently negligible, single-digit-per-day volume) race
@@ -125,6 +139,7 @@ def generate_certificate(evaluation, summary):
     readiness = _readiness_gauge_context(evaluation)
 
     context = {
+        "logo_data_uri": _logo_data_uri(),
         "certificate_id": certificate.certificate_id,
         "candidate_name": evaluation.candidate.get_full_name(),
         "role_name": session.role_name if session else evaluation.candidate.job_role,

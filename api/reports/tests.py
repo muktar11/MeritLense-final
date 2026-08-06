@@ -305,6 +305,11 @@ class EvaluationReportApiTests(TestCase):
             response.data["report_payload"]["evaluation_flow_reference"],
             "Interview Session -> Responses -> AI Processing -> Deterministic Scoring -> Rule Engine -> Evaluation Report",
         )
+        self.assertTrue(
+            response.data["report_payload"]["qr_verification_url"].startswith(
+                "https://www.meritlense.com/en/verify-report?id="
+            )
+        )
         self.assertEqual(
             response.data["report_payload"]["candidate_snapshot"]["full_name"],
             self.candidate.get_full_name(),
@@ -352,6 +357,19 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(employer_payload.status_code, 200)
         self.assertNotIn("candidate_id", employer_payload.data)
         self.assertNotIn("critical_failures", employer_payload.data)
+        self.assertNotIn("api_schema_version", employer_payload.data)
+        self.assertNotIn("legal_record_id", employer_payload.data)
+        self.assertNotIn("assessment_framework_version", employer_payload.data)
+        self.assertNotIn("role_profile_version", employer_payload.data)
+        self.assertNotIn("rule_engine_version", employer_payload.data)
+        self.assertNotIn("candidate_email", employer_payload.data["assessment_context"])
+        self.assertNotIn("candidate_passport_id", employer_payload.data["assessment_context"])
+        self.assertNotIn("assessment_session_id", employer_payload.data["assessment_context"])
+        self.assertNotIn("role_profile_version", employer_payload.data["assessment_context"])
+        self.assertNotIn("email", employer_payload.data["candidate_snapshot"])
+        self.assertNotIn("passport_id", employer_payload.data["candidate_snapshot"])
+        self.assertNotIn("internal_reason", employer_payload.data["executive_summary"]["readiness_reason"])
+        self.assertNotIn("top_source", employer_payload.data["executive_summary"])
 
         export_pdf = self.client.get(f"/api/v1/evaluations/reports/{report.public_id}/export-pdf")
         self.assertEqual(export_pdf.status_code, 200)
@@ -360,7 +378,9 @@ class EvaluationReportApiTests(TestCase):
         verify_response = self.client.get(f"/api/v1/evaluations/reports/verify/{report.report_number}")
         self.assertEqual(verify_response.status_code, 200)
         self.assertEqual(verify_response.json()["verification_status"], "Authentic")
+        self.assertEqual(verify_response.json()["public_report_status"], "Active")
         self.assertEqual(verify_response.json()["sha256_hash"], report.pdf_hash)
+        self.assertNotIn("rule_engine_version", verify_response.json())
 
         interview_report = self.client.get(f"/api/v1/interviews/{self.session.public_id}/report/")
         self.assertEqual(interview_report.status_code, 200)
@@ -415,6 +435,31 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(response["Content-Type"], "application/pdf")
         self.assertIn(f'{report.report_number}.pdf', response["Content-Disposition"])
         self.assertTrue(b"".join(response.streaming_content).startswith(b"%PDF"))
+
+    def test_transcript_issue_text_is_normalized_for_employer_outputs(self):
+        interpretation = CandidateResponseInterpretation.objects.get(response=self.response)
+        interpretation.structured_output = {
+            "transcript_issues": "T,h,e, ,r,e,s,p,o,n,s,e, ,n,e,e,d,s, ,r,e,v,i,e,w,.",
+        }
+        interpretation.save(update_fields=["structured_output"])
+
+        self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+        report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status=EvaluationReport.STATUS_ACTIVE)
+
+        transcript_flags = [
+            flag["message"]
+            for flag in report.human_review_flags
+            if flag["flag_type"] == "transcript_issue"
+        ]
+        self.assertEqual(transcript_flags[0], "The response needs review.")
+        self.assertIn(
+            "The response needs review.",
+            report.report_payload["risk_indicators"]["integrity_risk"]["evidence"],
+        )
 
     def test_regenerate_report_marks_previous_one_stale_and_keeps_history(self):
         first = self.client.post(

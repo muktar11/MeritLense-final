@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.test import TestCase, override_settings
 from django.db import DatabaseError
 from django.core.exceptions import ValidationError
@@ -8,9 +10,10 @@ from urllib.parse import parse_qs, urlsplit
 from api.accounts.models import Company, CompanyEmployerProfile, User
 from api.audit.models import AuditLog
 from api.candidates.models import Candidate
-from api.core.constants import AuditLogAction, CandidateResponseType, CoverageLevel, EvaluationStatus, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles, SubscriptionStatus, BillingInterval
-from api.evaluations.models import Evaluation, EvaluationReadinessDecisionRecord, ResponseEvaluationResult, ScoringRule, ScoringRuleSet, SessionEvaluationSummary
+from api.core.constants import AuditLogAction, CandidateResponseType, CoverageLevel, EvaluationLayer, EvaluationStatus, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles, SubscriptionStatus, BillingInterval
+from api.evaluations.models import Certificate, CompetencyEvaluationResult, Evaluation, EvaluationReadinessDecisionRecord, ResponseEvaluationResult, ScoringRule, ScoringRuleSet, SessionEvaluationSummary
 from api.evaluations.scoring_services import Week6ScoringService
+from api.evaluations.certificate_services import generate_certificate
 from api.payments.models import Customer, Price, Subscription
 from api.questions.models import QuestionTemplate
 from api.scores.models import CandidateScore, ScoreSet
@@ -899,3 +902,705 @@ class ScoringRuleSetTenantScopingTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         created = ScoringRuleSet.objects.get(public_id=response.data["id"])
         self.assertEqual(created.company, self.company)
+
+
+class CandidateScoreSummaryApiTests(TestCase):
+    """GET /evaluations/candidate-scores - reads real Week6ScoringService
+    output (SessionEvaluationSummary.competencies_summary) directly,
+    replacing the old ScoreSet/CandidateScore models that nothing in the
+    actual scoring pipeline ever populated."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="scores-owner@example.com",
+            password="testpass123",
+            first_name="Scores",
+            last_name="Owner",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.other_user = User.objects.create_user(
+            email="scores-other@example.com",
+            password="testpass123",
+            first_name="Other",
+            last_name="User",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Score",
+            last_name="Candidate",
+            email="score-summary@example.com",
+            passport_id="SCORE-SUMMARY-001",
+            job_role="NA",
+            core_skills="safety",
+            preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf",
+            created_by=self.user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=45,
+            total_questions=1,
+            allow_retries=True,
+            max_retries=1,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+        )
+        self.session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            role_code=self.config.role_code,
+            ui_language="EN",
+            candidate_language="EN",
+            tts_language_code="en-US",
+            stt_language_code="en-US",
+            total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+        )
+        self.template = QuestionTemplate.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            question_code="HK-SAF-SUMMARY",
+            question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE,
+            domain="Safety & Hygiene",
+            skill_tag="safety_awareness",
+            skill="Safety Awareness",
+            sequence_number=1,
+            difficulty=QuestionDifficulty.MEDIUM,
+            question_text="What do you do when you see a spill?",
+            question_type="safety",
+            question_format="SCENARIO",
+            language="EN",
+            scoring_type="0/3/5",
+            difficulty_score=2,
+            estimated_time_seconds=60,
+            expected_answer_type="multi_step",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            critical_question=False,
+            is_active=True,
+        )
+        self.session_question = SessionQuestion.objects.create(
+            session=self.session,
+            question_template=self.template,
+            question_text=self.template.question_text,
+            domain=self.template.domain,
+            skill=self.template.skill_tag,
+            difficulty=self.template.difficulty,
+            question_order=1,
+            status="ANSWERED",
+            is_mandatory=True,
+            asked_at=timezone.now(),
+            answered_at=timezone.now(),
+        )
+        self.response = CandidateResponse.objects.create(
+            session=self.session,
+            question=self.session_question,
+            response_type=CandidateResponseType.TEXT,
+            transcript="I would identify the hazard and clean the spill.",
+            text_response="I would identify the hazard and clean the spill.",
+            interpretation_status="COMPLETED",
+            processing_status="RULE_INPUT_PREPARED",
+        )
+        EvaluationInputArtifact.objects.create(
+            response=self.response,
+            session=self.session,
+            question=self.session_question,
+            competency_code="safety_awareness",
+            expected_indicators=["identify hazard", "clean spill", "prevent recurrence"],
+            observed_indicators=["identify hazard", "clean spill"],
+            missing_indicators=["prevent recurrence"],
+            risk_flags=[],
+            source_interpretation_status="COMPLETED",
+            requires_human_review=False,
+            metadata={"source": "test"},
+        )
+        self.evaluation = Evaluation.objects.create(
+            session=self.session,
+            candidate=self.candidate,
+            evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now() + timezone.timedelta(days=1),
+            duration_minutes=45,
+            created_by=self.user,
+        )
+        self.rule_set = ScoringRuleSet.objects.create(
+            name="Score Summary Rules",
+            version="v1",
+            role_code="domestic_worker",
+            role_name="Housekeeper",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            is_active=True,
+            created_by=self.user,
+            company=self.candidate.company,
+        )
+        ScoringRule.objects.create(
+            rule_set=self.rule_set,
+            competency_code="safety_awareness",
+            competency_name="Safety Awareness",
+            question_template=self.template,
+            question_code="HK-SAF-SUMMARY",
+            expected_indicators=["identify hazard", "clean spill", "prevent recurrence"],
+            required_indicators=["identify hazard"],
+            weighted_indicators={
+                "identify hazard": "4",
+                "clean spill": "3",
+                "prevent recurrence": "3",
+            },
+            max_score="10.00",
+            pass_threshold="7.00",
+            scoring_method=ScoringRule.SCORING_METHOD_WEIGHTED_MATCH,
+            is_active=True,
+        )
+        Week6ScoringService.run_for_evaluation(
+            evaluation=self.evaluation,
+            actor=self.user,
+            rule_set=self.rule_set,
+        )
+
+    def test_owner_sees_candidate_with_real_competency_breakdown(self):
+        self.client.force_authenticate(self.user)
+        response = self.client.get("/api/v1/evaluations/candidate-scores")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data), 1)
+        entry = response.data[0]
+        self.assertEqual(entry["candidate_id"], str(self.candidate.public_id))
+        self.assertEqual(entry["role_code"], "domestic_worker")
+        self.assertEqual(float(entry["overall_percentage"]), 70.0)
+        self.assertEqual(len(entry["competencies"]), 1)
+        self.assertEqual(entry["competencies"][0]["code"], "safety_awareness")
+        self.assertEqual(entry["competencies"][0]["name"], "Safety Awareness")
+        self.assertEqual(float(entry["competencies"][0]["percentage"]), 70.0)
+        # No Certificate row exists for this evaluation - the response says
+        # so honestly rather than omitting the key or fabricating a link.
+        self.assertIsNone(entry["certificate"])
+
+    def test_certificate_is_included_once_generated(self):
+        from api.evaluations.certificate_services import generate_certificate
+
+        summary = SessionEvaluationSummary.objects.get(evaluation=self.evaluation)
+        generate_certificate(self.evaluation, summary)
+
+        self.client.force_authenticate(self.user)
+        response = self.client.get("/api/v1/evaluations/candidate-scores")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        entry = response.data[0]
+        self.assertIsNotNone(entry["certificate"])
+        self.assertEqual(entry["certificate"]["certificate_id"], self.evaluation.certificate.certificate_id)
+        self.assertIn(".pdf", entry["certificate"]["pdf_url"])
+
+    def test_other_user_does_not_see_this_candidate(self):
+        self.client.force_authenticate(self.other_user)
+        response = self.client.get("/api/v1/evaluations/candidate-scores")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data, [])
+
+    def test_unauthenticated_request_is_rejected(self):
+        response = self.client.get("/api/v1/evaluations/candidate-scores")
+        self.assertEqual(response.status_code, 401)
+
+
+class LayerBreakdownCalculationTests(TestCase):
+    """Unit tests against Week6ScoringService._compute_layer_breakdown
+    directly (unsaved CompetencyEvaluationResult instances - the formula
+    only reads evaluation_layer/total_score/max_score off them), rather
+    than reverse-engineering indicator weights through the full response
+    pipeline to hit exact target percentages."""
+
+    def test_weighted_final_score_across_all_three_layers(self):
+        results = [
+            CompetencyEvaluationResult(
+                evaluation_layer=EvaluationLayer.COGNITIVE, total_score=Decimal("8"), max_score=Decimal("10")
+            ),
+            CompetencyEvaluationResult(
+                evaluation_layer=EvaluationLayer.BEHAVIORAL, total_score=Decimal("6"), max_score=Decimal("10")
+            ),
+            CompetencyEvaluationResult(
+                evaluation_layer=EvaluationLayer.TASK_EXECUTION, total_score=Decimal("10"), max_score=Decimal("10")
+            ),
+        ]
+        breakdown, final = Week6ScoringService._compute_layer_breakdown(results)
+
+        self.assertEqual(breakdown[EvaluationLayer.COGNITIVE], {"percentage": 80.0, "weight": 50})
+        self.assertEqual(breakdown[EvaluationLayer.BEHAVIORAL], {"percentage": 60.0, "weight": 30})
+        self.assertEqual(breakdown[EvaluationLayer.TASK_EXECUTION], {"percentage": 100.0, "weight": 20})
+        # 0.5*80 + 0.3*60 + 0.2*100 = 40 + 18 + 20 = 78.0
+        self.assertEqual(float(final), 78.0)
+
+    def test_missing_layer_weight_redistributes_among_present_layers(self):
+        results = [
+            CompetencyEvaluationResult(
+                evaluation_layer=EvaluationLayer.COGNITIVE, total_score=Decimal("10"), max_score=Decimal("10")
+            ),
+            CompetencyEvaluationResult(
+                evaluation_layer=EvaluationLayer.BEHAVIORAL, total_score=Decimal("5"), max_score=Decimal("10")
+            ),
+            # No Task Execution competency at all in this rule set.
+        ]
+        breakdown, final = Week6ScoringService._compute_layer_breakdown(results)
+
+        self.assertNotIn(EvaluationLayer.TASK_EXECUTION, breakdown)
+        # weight_sum = 50+30 = 80; (100*50 + 50*30) / 80 = 6500/80 = 81.25
+        self.assertEqual(float(final), 81.25)
+
+    def test_uncategorized_competencies_are_excluded_and_return_none(self):
+        results = [
+            CompetencyEvaluationResult(evaluation_layer="", total_score=Decimal("5"), max_score=Decimal("10")),
+        ]
+        breakdown, final = Week6ScoringService._compute_layer_breakdown(results)
+
+        self.assertEqual(breakdown, {})
+        self.assertIsNone(final)
+
+    def test_mix_of_categorized_and_uncategorized_ignores_uncategorized(self):
+        results = [
+            CompetencyEvaluationResult(
+                evaluation_layer=EvaluationLayer.COGNITIVE, total_score=Decimal("10"), max_score=Decimal("10")
+            ),
+            CompetencyEvaluationResult(evaluation_layer="", total_score=Decimal("0"), max_score=Decimal("10")),
+        ]
+        breakdown, final = Week6ScoringService._compute_layer_breakdown(results)
+
+        self.assertEqual(list(breakdown.keys()), [EvaluationLayer.COGNITIVE])
+        self.assertEqual(float(final), 100.0)
+
+
+class AutomaticScoringOnCompletionTests(TestCase):
+    """complete_session() (api/sessions/services.py) now calls
+    Week6ScoringService.run_for_evaluation automatically instead of
+    requiring a separate manual run-scoring call."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="auto-score@example.com",
+            password="testpass123",
+            first_name="Auto",
+            last_name="Score",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Auto",
+            last_name="Candidate",
+            email="auto-score-candidate@example.com",
+            passport_id="AUTO-SCORE-001",
+            job_role="NA",
+            core_skills="safety",
+            preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf",
+            created_by=self.user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=45,
+            total_questions=1,
+            allow_retries=True,
+            max_retries=1,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+        )
+        self.session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            role_code=self.config.role_code,
+            ui_language="EN",
+            candidate_language="EN",
+            tts_language_code="en-US",
+            stt_language_code="en-US",
+            total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+        )
+
+    def test_completion_without_any_matching_rule_set_still_completes(self):
+        from api.sessions.services import InterviewSessionService
+
+        # No ScoringRuleSet exists for "domestic_worker" - this is the
+        # normal state for 6 of 7 roles today. Completion must still
+        # succeed, just unscored, exactly like before auto-scoring existed.
+        InterviewSessionService.complete_session(self.session, actor=self.user)
+
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.status, "COMPLETED")
+        self.assertFalse(SessionEvaluationSummary.objects.filter(session=self.session).exists())
+
+    def test_completion_with_a_matching_rule_set_scores_automatically(self):
+        from api.sessions.services import InterviewSessionService
+
+        template = QuestionTemplate.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            question_code="HK-AUTO-001",
+            question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE,
+            domain="Safety & Hygiene",
+            skill_tag="safety_awareness",
+            skill="Safety Awareness",
+            sequence_number=1,
+            difficulty=QuestionDifficulty.MEDIUM,
+            question_text="What do you do when you see a spill?",
+            question_type="safety",
+            question_format="SCENARIO",
+            language="EN",
+            scoring_type="0/3/5",
+            difficulty_score=2,
+            estimated_time_seconds=60,
+            expected_answer_type="multi_step",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            critical_question=False,
+            is_active=True,
+        )
+        session_question = SessionQuestion.objects.create(
+            session=self.session,
+            question_template=template,
+            question_text=template.question_text,
+            domain=template.domain,
+            skill=template.skill_tag,
+            difficulty=template.difficulty,
+            question_order=1,
+            status="ANSWERED",
+            is_mandatory=True,
+            asked_at=timezone.now(),
+            answered_at=timezone.now(),
+        )
+        response = CandidateResponse.objects.create(
+            session=self.session,
+            question=session_question,
+            response_type=CandidateResponseType.TEXT,
+            transcript="I would identify the hazard and clean the spill.",
+            text_response="I would identify the hazard and clean the spill.",
+            interpretation_status="COMPLETED",
+            processing_status="RULE_INPUT_PREPARED",
+        )
+        EvaluationInputArtifact.objects.create(
+            response=response,
+            session=self.session,
+            question=session_question,
+            competency_code="safety_awareness",
+            expected_indicators=["identify hazard"],
+            observed_indicators=["identify hazard"],
+            missing_indicators=[],
+            risk_flags=[],
+            source_interpretation_status="COMPLETED",
+            requires_human_review=False,
+            metadata={"source": "test"},
+        )
+        rule_set = ScoringRuleSet.objects.create(
+            name="Auto Score Rules",
+            version="v1",
+            role_code="domestic_worker",
+            role_name="Housekeeper",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            is_active=True,
+            created_by=self.user,
+            company=self.candidate.company,
+        )
+        ScoringRule.objects.create(
+            rule_set=rule_set,
+            competency_code="safety_awareness",
+            competency_name="Safety Awareness",
+            question_template=template,
+            question_code="HK-AUTO-001",
+            expected_indicators=["identify hazard"],
+            required_indicators=["identify hazard"],
+            weighted_indicators={"identify hazard": "10"},
+            max_score="10.00",
+            pass_threshold="7.00",
+            scoring_method=ScoringRule.SCORING_METHOD_WEIGHTED_MATCH,
+            is_active=True,
+        )
+
+        InterviewSessionService.complete_session(self.session, actor=self.user)
+
+        summary = SessionEvaluationSummary.objects.get(session=self.session)
+        self.assertEqual(float(summary.overall_percentage), 100.0)
+
+    def test_completion_auto_generates_a_certificate_when_certificate_enabled(self):
+        from api.sessions.services import InterviewSessionService
+
+        template = QuestionTemplate.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            question_code="HK-CERT-001",
+            question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE,
+            domain="Safety & Hygiene",
+            skill_tag="safety_awareness",
+            skill="Safety Awareness",
+            sequence_number=1,
+            difficulty=QuestionDifficulty.MEDIUM,
+            question_text="What do you do when you see a spill?",
+            question_type="safety",
+            question_format="SCENARIO",
+            language="EN",
+            scoring_type="0/3/5",
+            difficulty_score=2,
+            estimated_time_seconds=60,
+            expected_answer_type="multi_step",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            critical_question=False,
+            is_active=True,
+        )
+        session_question = SessionQuestion.objects.create(
+            session=self.session,
+            question_template=template,
+            question_text=template.question_text,
+            domain=template.domain,
+            skill=template.skill_tag,
+            difficulty=template.difficulty,
+            question_order=1,
+            status="ANSWERED",
+            is_mandatory=True,
+            asked_at=timezone.now(),
+            answered_at=timezone.now(),
+        )
+        response = CandidateResponse.objects.create(
+            session=self.session,
+            question=session_question,
+            response_type=CandidateResponseType.TEXT,
+            transcript="I would identify the hazard and clean the spill.",
+            text_response="I would identify the hazard and clean the spill.",
+            interpretation_status="COMPLETED",
+            processing_status="RULE_INPUT_PREPARED",
+            stt_confidence=Decimal("0.92"),
+        )
+        EvaluationInputArtifact.objects.create(
+            response=response,
+            session=self.session,
+            question=session_question,
+            competency_code="safety_awareness",
+            expected_indicators=["identify hazard"],
+            observed_indicators=["identify hazard"],
+            missing_indicators=[],
+            risk_flags=[],
+            source_interpretation_status="COMPLETED",
+            requires_human_review=False,
+            metadata={"source": "test"},
+        )
+        rule_set = ScoringRuleSet.objects.create(
+            name="Cert Test Rules",
+            version="v1",
+            role_code="domestic_worker",
+            role_name="Housekeeper",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            is_active=True,
+            created_by=self.user,
+            company=self.candidate.company,
+        )
+        ScoringRule.objects.create(
+            rule_set=rule_set,
+            competency_code="safety_awareness",
+            competency_name="Safety Awareness",
+            evaluation_layer=EvaluationLayer.COGNITIVE,
+            question_template=template,
+            question_code="HK-CERT-001",
+            expected_indicators=["identify hazard"],
+            required_indicators=["identify hazard"],
+            weighted_indicators={"identify hazard": "10"},
+            max_score="10.00",
+            pass_threshold="7.00",
+            scoring_method=ScoringRule.SCORING_METHOD_WEIGHTED_MATCH,
+            is_active=True,
+        )
+
+        InterviewSessionService.complete_session(self.session, actor=self.user)
+
+        evaluation = Evaluation.objects.get(session=self.session)
+        self.assertTrue(evaluation.certificate_enabled)
+        certificate = Certificate.objects.get(evaluation=evaluation)
+        self.assertTrue(certificate.certificate_id.startswith("ML-"))
+        self.assertTrue(certificate.pdf_file.name)
+        self.assertTrue(certificate.pdf_hash)
+        self.assertIsNotNone(certificate.issued_at)
+        self.assertIsNone(certificate.expires_at)
+
+
+class CertificateGenerationTests(TestCase):
+    """generate_certificate() directly, isolated from the completion flow -
+    checks that every field either reflects real scoring data or is
+    honestly None/N/A, matching Certificate's own docstring contract."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="cert-gen@example.com",
+            password="testpass123",
+            first_name="Cert",
+            last_name="Gen",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Cert",
+            last_name="Candidate",
+            email="cert-gen-candidate@example.com",
+            passport_id="CERTGEN0001",
+            job_role="NA",
+            core_skills="safety",
+            preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf",
+            created_by=self.user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=45,
+            total_questions=1,
+            allow_retries=True,
+            max_retries=1,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+        )
+        self.session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            role_code=self.config.role_code,
+            ui_language="EN",
+            candidate_language="EN",
+            tts_language_code="en-US",
+            stt_language_code="en-US",
+            total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+        )
+        self.evaluation = Evaluation.objects.create(
+            session=self.session,
+            candidate=self.candidate,
+            evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now() + timezone.timedelta(days=1),
+            duration_minutes=45,
+            created_by=self.user,
+        )
+
+    def test_generate_certificate_uses_real_data(self):
+        import base64
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        tiny_jpeg = base64.b64decode(
+            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a"
+            "HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIy"
+            "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEB"
+            "AxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAA"
+            "AAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k="
+        )
+        self.candidate.profile_photo = SimpleUploadedFile("photo.jpg", tiny_jpeg, content_type="image/jpeg")
+        self.candidate.save()
+        from api.core.constants import ReadinessStatus
+        self.evaluation.readiness_status = ReadinessStatus.READY
+        self.evaluation.save(update_fields=["readiness_status"])
+        summary = SessionEvaluationSummary.objects.create(
+            evaluation=self.evaluation,
+            session=self.session,
+            candidate=self.candidate,
+            rule_set=ScoringRuleSet.objects.create(
+                name="Cert Gen Rules", version="v1", role_code="domestic_worker", role_name="Housekeeper",
+                evaluation_tier=InterviewEvaluationTier.FULL, is_active=True, created_by=self.user,
+            ),
+            total_score=Decimal("83"),
+            max_score=Decimal("100"),
+            overall_percentage=Decimal("83.00"),
+            layer_breakdown={
+                "COGNITIVE": {"percentage": 87.0, "weight": 50},
+                "BEHAVIORAL": {"percentage": 82.0, "weight": 30},
+                "TASK_EXECUTION": {"percentage": 90.0, "weight": 20},
+            },
+            competencies_summary=[
+                {"competency_code": "safety_awareness", "competency_name": "Safety Awareness", "percentage": 70.0, "response_count": 1},
+            ],
+            status=SessionEvaluationSummary.STATUS_EVALUATED,
+        )
+
+        certificate = generate_certificate(self.evaluation, summary)
+
+        self.assertTrue(certificate.certificate_id.startswith(f"ML-{timezone.now().year}-"))
+        # Two independent identifiers on two independent counters - the
+        # certificate document vs. the underlying assessment record - never
+        # the same value or derived from one another.
+        self.assertTrue(certificate.assessment_id.startswith(f"ASM-{timezone.now().year}-"))
+        self.assertNotEqual(certificate.certificate_id, certificate.assessment_id)
+        self.assertTrue(certificate.pdf_file.name)
+        pdf_bytes = certificate.pdf_file.read()
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertIsNone(certificate.expires_at)
+
+        from api.evaluations.certificate_services import _candidate_photo_data_uri, _readiness_gauge_context
+        self.assertTrue(_candidate_photo_data_uri(self.candidate).startswith("data:image/jpeg;base64,"))
+        readiness = _readiness_gauge_context(self.evaluation)
+        self.assertEqual(readiness["label"], "Ready")
+        self.assertEqual(readiness["position"], 3)
+
+    def test_candidate_photo_is_none_when_never_uploaded(self):
+        from api.evaluations.certificate_services import _candidate_photo_data_uri
+
+        self.assertIsNone(_candidate_photo_data_uri(self.candidate))
+
+    def test_readiness_gauge_reflects_real_evaluation_status(self):
+        from api.core.constants import ReadinessStatus
+        from api.evaluations.certificate_services import _readiness_gauge_context
+
+        self.evaluation.readiness_status = ReadinessStatus.NOT_READY
+        self.evaluation.save(update_fields=["readiness_status"])
+        not_ready = _readiness_gauge_context(self.evaluation)
+        self.assertEqual(not_ready, {"label": "Readiness Gaps Identified", "position": 1})
+
+        # PENDING (the default before scoring rolls it up to READY/NOT_READY)
+        # maps to the rule engine's own PARTIALLY_READY/"Partially Ready"
+        # middle ground - not a guess, the same mapping EvaluationReportService
+        # uses for the internal report.
+        self.evaluation.readiness_status = ReadinessStatus.PENDING
+        self.evaluation.save(update_fields=["readiness_status"])
+        pending = _readiness_gauge_context(self.evaluation)
+        self.assertEqual(pending, {"label": "Partially Ready", "position": 2})
+
+    def test_regenerating_keeps_the_same_certificate_id(self):
+        summary = SessionEvaluationSummary.objects.create(
+            evaluation=self.evaluation,
+            session=self.session,
+            candidate=self.candidate,
+            rule_set=ScoringRuleSet.objects.create(
+                name="Cert Regen Rules", version="v1", role_code="domestic_worker", role_name="Housekeeper",
+                evaluation_tier=InterviewEvaluationTier.FULL, is_active=True, created_by=self.user,
+            ),
+            total_score=Decimal("70"), max_score=Decimal("100"), overall_percentage=Decimal("70.00"),
+            competencies_summary=[], status=SessionEvaluationSummary.STATUS_EVALUATED,
+        )
+
+        first = generate_certificate(self.evaluation, summary)
+        second = generate_certificate(self.evaluation, summary)
+
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(first.certificate_id, second.certificate_id)
+        self.assertEqual(first.assessment_id, second.assessment_id)
+        self.assertEqual(first.issued_at, second.issued_at)

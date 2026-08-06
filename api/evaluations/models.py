@@ -7,6 +7,7 @@ from api.core.models import TimeStampedModel, SoftDeleteModel
 from api.core.constants import (
     CertificateStatus,
     CoverageLevel,
+    EvaluationLayer,
     EvaluationStatus,
     EvaluationType,
     InterviewEvaluationTier,
@@ -403,6 +404,15 @@ class ScoringRule(TimeStampedModel):
     )
     competency_code = models.CharField(max_length=150)
     competency_name = models.CharField(max_length=150, blank=True)
+    evaluation_layer = models.CharField(
+        max_length=20,
+        choices=EvaluationLayer.CHOICES,
+        blank=True,
+        help_text="Cognitive/Behavioral/Task Execution bucket this competency counts "
+                   "toward for the layer-weighted final score. Blank on rule sets "
+                   "that haven't been categorized yet - Week6ScoringService falls "
+                   "back to a flat score/max_score final score in that case.",
+    )
     question_template = models.ForeignKey(
         "questions.QuestionTemplate",
         on_delete=models.PROTECT,
@@ -554,6 +564,12 @@ class CompetencyEvaluationResult(TimeStampedModel):
     )
     competency_code = models.CharField(max_length=150)
     competency_name = models.CharField(max_length=150, blank=True)
+    evaluation_layer = models.CharField(
+        max_length=20,
+        choices=EvaluationLayer.CHOICES,
+        blank=True,
+        help_text="Copied from the ScoringRule at aggregation time - see ScoringRule.evaluation_layer.",
+    )
     total_score = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     max_score = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     percentage = models.DecimalField(max_digits=6, decimal_places=2, default=0)
@@ -622,6 +638,14 @@ class SessionEvaluationSummary(TimeStampedModel):
     total_response_count = models.PositiveIntegerField(default=0)
     incomplete_response_count = models.PositiveIntegerField(default=0)
     competencies_summary = models.JSONField(default=list, blank=True)
+    layer_breakdown = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="{'COGNITIVE': {'percentage': .., 'weight': 50}, ...} for whichever "
+                   "of the three layers this rule set's competencies are categorized "
+                   "into - empty if none are categorized yet (overall_percentage is "
+                   "then the flat score/max_score fallback, not layer-weighted).",
+    )
     critical_failures = models.JSONField(default=list, blank=True)
     below_threshold_competencies = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default=STATUS_PENDING)
@@ -642,3 +666,42 @@ class SessionEvaluationSummary(TimeStampedModel):
             models.Index(fields=["session", "generated_at"]),
         ]
         ordering = ["-generated_at", "-created_at"]
+
+
+class Certificate(TimeStampedModel):
+    """One PDF certificate per evaluation, auto-generated right after
+    Week6ScoringService produces a SessionEvaluationSummary for it (see
+    complete_session() in api/sessions/services.py). Every field rendered
+    onto the PDF is sourced from real scoring data (or explicitly N/A) -
+    see certificate_services.py for exactly what's real vs. not yet
+    computed anywhere (e.g. Role Fit Engine, which needs a live-interview
+    rating mechanism that doesn't exist yet)."""
+
+    evaluation = models.OneToOneField(
+        Evaluation, on_delete=models.CASCADE, related_name="certificate"
+    )
+    candidate = models.ForeignKey(
+        Candidate, on_delete=models.CASCADE, related_name="certificates"
+    )
+    # null (not just blank) so Postgres's unique constraint doesn't treat
+    # two freshly get_or_create()'d rows (both still unset before their
+    # real ID gets assigned a moment later) as colliding on the same value.
+    certificate_id = models.CharField(max_length=50, unique=True, blank=True, null=True, default=None)
+    # A separate identifier from certificate_id, on its own independent
+    # counter (see _generate_assessment_id) - certificate_id identifies the
+    # issued certificate document, assessment_id identifies the underlying
+    # completed assessment record. They must never be derived from each
+    # other or from a shared source.
+    assessment_id = models.CharField(max_length=50, unique=True, blank=True, null=True, default=None)
+    pdf_file = models.FileField(upload_to="certificates/", null=True, blank=True)
+    pdf_hash = models.CharField(max_length=64, blank=True, help_text="SHA-256 hex digest of the generated PDF binary.")
+    issued_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Certificate"
+        verbose_name_plural = "Certificates"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.certificate_id or f"Certificate for {self.candidate.get_full_name()}"

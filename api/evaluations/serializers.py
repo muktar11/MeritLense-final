@@ -359,6 +359,7 @@ class ScoringRuleSerializer(PublicIdModelSerializer):
             "rule_set",
             "competency_code",
             "competency_name",
+            "evaluation_layer",
             "question_template",
             "question_code",
             "question_type",

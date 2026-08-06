@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  @page { size: 297mm 195mm; margin: 0; }
+  * { box-sizing: border-box; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 10pt; color: #1e2a3a; margin: 0; background: #eef2fb; }
+
+  .card { margin: 10mm; padding: 12mm 14mm; background: #fff; border: 1.5px solid #dbe4f7; border-radius: 18px; box-shadow: 0 0 0 6px #f0f4fd; }
+
+  /* ---------- Header ---------- */
+  .header { display: flex; justify-content: space-between; align-items: flex-start; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand img { width: 40px; height: auto; }
+  .wordmark { font-size: 15pt; font-weight: 800; color: #1e2a3a; }
+  .wordmark-accent { color: #2563eb; }
+  .brand-tagline { font-size: 7.5pt; color: #888; margin-top: 1px; }
+
+  .ribbon { position: relative; background: linear-gradient(135deg, #1e40af, #1e3a8a); color: #fff; font-size: 8pt; font-weight: 700; letter-spacing: 0.03em; text-align: center; padding: 7px 16px 9px; border-radius: 6px 6px 0 0; }
+  .ribbon-tail { display: flex; justify-content: space-between; }
+  .ribbon-tail span { width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 7px solid #1e3a8a; }
+
+  /* ---------- Title ---------- */
+  .title-block { text-align: center; margin-top: 6px; }
+  .title-word { font-size: 26pt; font-weight: 800; color: #1e2a3a; }
+  .title-sub { font-size: 12pt; font-weight: 600; color: #1e3a8a; margin-top: -2px; }
+
+  /* ---------- Body: photo + statement ---------- */
+  .body-row { display: flex; align-items: center; gap: 22px; margin-top: 14px; padding: 0 10mm; }
+  .photo-frame { width: 96px; height: 126px; border-radius: 10px; overflow: hidden; border: 2px solid #dbe4f7; background: #eef2fb; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .photo-frame img { width: 100%; height: 100%; object-fit: cover; }
+  .photo-placeholder { font-size: 26pt; font-weight: 700; color: #93aee0; }
+  .statement-col { flex: 1; text-align: center; }
+  .statement-intro { font-size: 9.5pt; color: #666; }
+  .candidate-name { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 20pt; font-weight: 700; color: #1e2a3a; margin: 3px 0; }
+  .statement-body { font-size: 9.3pt; color: #444; line-height: 1.5; max-width: 480px; margin: 0 auto; }
+
+  /* ---------- Stats row ---------- */
+  .stats-row { display: flex; gap: 14px; margin-top: 18px; }
+  .stats-card { flex: 1; background: #f6f8fd; border: 1px solid #e3e9f7; border-radius: 12px; padding: 12px 16px; }
+
+  .info-item { display: flex; justify-content: space-between; gap: 10px; font-size: 8.3pt; padding: 4px 0; border-bottom: 1px solid #e7ecf9; }
+  .info-item:last-child { border-bottom: none; }
+  .info-item span:first-child { color: #888; white-space: nowrap; flex-shrink: 0; }
+  .info-item span:last-child { font-weight: 700; color: #1e2a3a; text-align: right; }
+
+  .readiness-card { text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+  .readiness-label { font-size: 7.8pt; text-transform: uppercase; letter-spacing: 0.05em; color: #888; margin-bottom: 8px; }
+  .readiness-badge { display: inline-block; font-size: 11pt; font-weight: 800; padding: 7px 16px; border-radius: 100px; }
+  .readiness-badge.level-1 { background: #fee2e2; color: #b91c1c; }
+  .readiness-badge.level-2 { background: #fef3c7; color: #b45309; }
+  .readiness-badge.level-3 { background: #dcfce7; color: #15803d; }
+  .readiness-caption { font-size: 7.4pt; color: #888; margin-top: 8px; }
+
+  /* ---------- Footer ---------- */
+  .footer-row { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; padding-top: 14px; border-top: 1px solid #e7ecf9; }
+  .verify-col { display: flex; align-items: center; gap: 12px; }
+  .verify-col img { width: 56px; height: 56px; }
+  .verify-title { font-size: 8.5pt; font-weight: 700; color: #1e2a3a; }
+  .verify-desc { font-size: 7.2pt; color: #888; max-width: 260px; margin-top: 1px; }
+  .verify-link { font-size: 7.5pt; color: #1e40af; font-weight: 600; margin-top: 2px; }
+
+  .sign-col { text-align: right; display: flex; align-items: center; gap: 16px; }
+  .issued-by { font-size: 7.5pt; color: #888; line-height: 1.4; flex-shrink: 0; }
+  .issued-by b { color: #1e2a3a; }
+  .signature { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 13pt; color: #1e3a8a; flex-shrink: 0; }
+  .seal { width: 54px; height: 54px; border-radius: 50%; border: 2px solid #1e3a8a; text-align: center; font-size: 5pt; font-weight: 700; color: #1e3a8a; line-height: 1.5; overflow: hidden; flex-shrink: 0; padding-top: 18px; }
+
+  .disclaimer { font-size: 6.6pt; color: #999; text-align: center; margin-top: 12px; line-height: 1.5; }
+  .cert-id-footer { text-align: center; font-size: 7pt; color: #bbb; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+  <div class="card">
+
+    <div class="header">
+      <div class="brand">
+        <img src="{{ logo_data_uri }}" alt="MeritLense" />
+        <div>
+          <div class="wordmark">Merit<span class="wordmark-accent">Lense</span></div>
+          <div class="brand-tagline">MeritLense Workforce Readiness Assessment Platform</div>
+        </div>
+      </div>
+      <div>
+        <div class="ribbon">CERTIFICATE OF WORKFORCE<br />READINESS ASSESSMENT</div>
+        <div class="ribbon-tail"><span></span><span></span></div>
+      </div>
+    </div>
+
+    <div class="title-block">
+      <div class="title-word">MeritLense</div>
+      <div class="title-sub">Workforce Readiness Certificate</div>
+    </div>
+
+    <div class="body-row">
+      <div class="photo-frame">
+        {% if candidate_photo_data_uri %}
+        <img src="{{ candidate_photo_data_uri }}" alt="{{ candidate_name }}" />
+        {% else %}
+        <span class="photo-placeholder">{{ candidate_name|first|upper }}</span>
+        {% endif %}
+      </div>
+      <div class="statement-col">
+        <div class="statement-intro">MeritLense certifies that</div>
+        <div class="candidate-name">{{ candidate_name }}</div>
+        <div class="statement-body">
+          has completed the MeritLense Workforce Readiness Assessment for the {{ role_name }} role, evaluated against the MeritLense Workforce Readiness Standard.
+        </div>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stats-card">
+        <div class="info-item"><span>Certificate Number</span><span>{{ certificate_id }}</span></div>
+        <div class="info-item"><span>Issue Date</span><span>{{ issue_date }}</span></div>
+        <div class="info-item"><span>Assessment ID</span><span style="font-size:7pt;">{{ assessment_id }}</span></div>
+      </div>
+      <div class="stats-card">
+        <div class="info-item"><span>Role Profile</span><span>{{ role_name }}</span></div>
+        <div class="info-item"><span>Role Profile Version</span><span>{{ role_profile_version }}</span></div>
+        <div class="info-item"><span>Assessment Date</span><span>{{ assessment_date }}</span></div>
+      </div>
+      <div class="stats-card readiness-card">
+        <div class="readiness-label">Workforce Readiness Level</div>
+        <div class="readiness-badge level-{{ readiness_position }}">{{ readiness_label }}</div>
+        <div class="readiness-caption">Evaluated against the MeritLense Workforce Readiness Standard.</div>
+      </div>
+    </div>
+
+    <div class="footer-row">
+      <div class="verify-col">
+        <img src="{{ qr_data_uri }}" alt="Verification QR code" />
+        <div>
+          <div class="verify-title">Verify Certificate</div>
+          <div class="verify-desc">Scan the QR code to verify this certificate's authenticity, or visit the link below.</div>
+          <div class="verify-link">{{ verification_url }}</div>
+        </div>
+      </div>
+      <div class="sign-col">
+        <div class="issued-by">Issued by:<br /><b>MeritLense Workforce Assessment Platform</b></div>
+        <div class="signature">MeritLense</div>
+        <div class="seal"><div>MERITLENSE</div><div>ASSESSED</div></div>
+      </div>
+    </div>
+
+    <div class="disclaimer">
+      This certificate confirms the candidate's assessment completion and workforce readiness level based on the MeritLense Workforce Readiness Standard. It provides assessment evidence only and does not constitute a professional license, employment authorization, or guarantee of employment. Final hiring decisions remain solely with the employer.
+    </div>
+    <div class="cert-id-footer">Generated {{ generated_at }} &middot; MeritLense Readiness Intelligence Framework {{ system_version }}</div>
+
+  </div>
+
+</body>
+</html>

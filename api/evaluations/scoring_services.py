@@ -4,7 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from api.audit.services import AuditLogService
-from api.core.constants import AuditLogAction, AuditLogCategory, ReadinessStatus
+from api.core.constants import AuditLogAction, AuditLogCategory, EvaluationLayer, ReadinessStatus
 from api.sessions.models import CandidateResponse
 from api.translation.models import EvaluationInputArtifact
 
@@ -272,6 +272,15 @@ class Week6ScoringService:
             threshold_total = sum((Decimal(str(result.rule.pass_threshold)) for result in completed if result.rule), cls.DECIMAL_ZERO)
             percentage = cls._percentage(total_score, max_score)
             threshold_percentage = cls._percentage(threshold_total, max_score)
+            # All rules mapped to a given competency_code are expected to
+            # share one evaluation_layer (a competency belongs to one of
+            # Cognitive/Behavioral/Task Execution) - take it from whichever
+            # scored rule is available. Blank on rule sets that haven't
+            # been categorized, same as the ScoringRule field itself.
+            evaluation_layer = next(
+                (result.rule.evaluation_layer for result in completed if result.rule and result.rule.evaluation_layer),
+                "",
+            )
 
             if response_count == 0:
                 status = CompetencyEvaluationResult.STATUS_NOT_STARTED
@@ -290,6 +299,7 @@ class Week6ScoringService:
                     "session": evaluation.session,
                     "candidate": evaluation.candidate,
                     "competency_name": payload["name"],
+                    "evaluation_layer": evaluation_layer,
                     "total_score": total_score,
                     "max_score": max_score,
                     "percentage": percentage,
@@ -307,10 +317,54 @@ class Week6ScoringService:
         return saved
 
     @classmethod
+    def _compute_layer_breakdown(cls, competency_results):
+        """Buckets each scored competency by its evaluation_layer and
+        returns (layer_breakdown, weighted_final_percentage). Competencies
+        with no evaluation_layer set are excluded from both - if that
+        leaves zero layers with any data (e.g. this rule set has never
+        been categorized), weighted_final_percentage is None and the
+        caller falls back to the flat score/max_score calculation instead
+        of fabricating a Cognitive/Behavioral/Task breakdown that isn't real.
+        """
+        by_layer = {}
+        for result in competency_results:
+            layer = result.evaluation_layer
+            if not layer:
+                continue
+            bucket = by_layer.setdefault(layer, {"total_score": cls.DECIMAL_ZERO, "max_score": cls.DECIMAL_ZERO})
+            bucket["total_score"] += result.total_score
+            bucket["max_score"] += result.max_score
+
+        if not by_layer:
+            return {}, None
+
+        breakdown = {}
+        present_weight_sum = Decimal("0")
+        for layer, bucket in by_layer.items():
+            percentage = cls._percentage(bucket["total_score"], bucket["max_score"])
+            weight = EvaluationLayer.WEIGHTS.get(layer, 0)
+            breakdown[layer] = {"percentage": float(percentage), "weight": weight}
+            present_weight_sum += Decimal(str(weight))
+
+        if present_weight_sum == 0:
+            return breakdown, None
+
+        # Layers missing from this rule set have their weight redistributed
+        # proportionally among the ones present, rather than silently
+        # scoring against a denominator that assumes all three exist.
+        weighted_total = sum(
+            (Decimal(str(data["percentage"])) * Decimal(str(data["weight"])) for data in breakdown.values()),
+            cls.DECIMAL_ZERO,
+        )
+        final_percentage = cls._quantize(weighted_total / present_weight_sum)
+        return breakdown, final_percentage
+
+    @classmethod
     def _build_session_summary(cls, *, evaluation, rule_set, responses, response_results, competency_results):
         total_score = sum((Decimal(str(result.score)) for result in response_results), cls.DECIMAL_ZERO)
         max_score = sum((Decimal(str(result.max_score)) for result in response_results), cls.DECIMAL_ZERO)
-        overall_percentage = cls._percentage(total_score, max_score)
+        layer_breakdown, weighted_percentage = cls._compute_layer_breakdown(competency_results)
+        overall_percentage = weighted_percentage if weighted_percentage is not None else cls._percentage(total_score, max_score)
         incomplete_response_count = max(len(responses) - len(response_results), 0)
         critical_failures = [
             {
@@ -360,6 +414,7 @@ class Week6ScoringService:
                 "total_score": total_score,
                 "max_score": max_score,
                 "overall_percentage": overall_percentage,
+                "layer_breakdown": layer_breakdown,
                 "evaluated_response_count": len(response_results),
                 "total_response_count": len(responses),
                 "incomplete_response_count": incomplete_response_count,

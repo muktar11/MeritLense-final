@@ -3,7 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.db.models import Prefetch, Q
 from django.utils import timezone
 from api.audit.services import AuditLogService
@@ -34,7 +34,7 @@ from .permissions import CanManageEvaluation, CanViewEvaluation
 from api.core.constants import CertificateStatus, Roles, EvaluationStatus, EvaluationType
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
-from .models import EvaluationReadinessDecisionRecord, ScoringRuleSet, SessionEvaluationSummary
+from .models import Certificate, EvaluationReadinessDecisionRecord, ScoringRuleSet, SessionEvaluationSummary
 from .scoring_services import Week6ScoringError, Week6ScoringService
 from api.reports.models import EvaluationReport
 from api.reports.serializers import EvaluationReportSerializer
@@ -67,85 +67,95 @@ def _accessible_evaluations_queryset(user):
 
 
 class CandidateScoreSummaryView(APIView):
+    """GET /evaluations/candidate-scores - each accessible candidate's most
+    recent scored evaluation, including both certificate and transcript report
+    artifacts when they exist."""
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        summaries = []
-        seen_candidate_ids = set()
-        queryset = (
-            _accessible_evaluations_queryset(request.user)
-            .filter(session_summaries__isnull=False)
-            .select_related("candidate", "session")
+        user = request.user
+        summaries = (
+            SessionEvaluationSummary.objects.select_related(
+                "candidate",
+                "session",
+                "evaluation",
+                "evaluation__certificate",
+            )
             .prefetch_related(
                 Prefetch(
-                    "session_summaries",
-                    queryset=SessionEvaluationSummary.objects.select_related("rule_set").order_by("-generated_at", "-created_at"),
-                ),
-                Prefetch(
-                    "reports",
+                    "evaluation__reports",
                     queryset=EvaluationReport.objects.filter(
                         report_status=EvaluationReport.STATUS_ACTIVE,
                     ).order_by("-generated_at", "-created_at"),
-                ),
+                )
             )
-            .order_by("candidate_id", "-completed_at", "-scheduled_date", "-created_at")
-            .distinct()
+            .order_by("candidate_id", "-generated_at", "-created_at")
         )
 
-        for evaluation in queryset:
-            if evaluation.candidate_id in seen_candidate_ids:
-                continue
+        if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
+            pass
+        elif user.role == Roles.B2C:
+            summaries = summaries.filter(evaluation__created_by=user)
+        elif user.role == Roles.B2B:
+            if hasattr(user, "company_profile") and user.company_profile:
+                summaries = summaries.filter(evaluation__company=user.company_profile.company)
+            else:
+                summaries = summaries.none()
+        elif user.role == Roles.B2B_TEAM_MEMBER:
+            summaries = summaries.filter(
+                Q(evaluation__created_by=user) | Q(evaluation__candidate__shared_with=user)
+            ).distinct()
+        else:
+            summaries = summaries.none()
 
-            summary = next(iter(evaluation.session_summaries.all()), None)
-            if summary is None:
-                continue
+        latest_by_candidate = {}
+        for summary in summaries:
+            latest_by_candidate.setdefault(summary.candidate_id, summary)
 
-            seen_candidate_ids.add(evaluation.candidate_id)
+        results = []
+        for summary in latest_by_candidate.values():
+            evaluation = summary.evaluation
+            cert = getattr(evaluation, "certificate", None) if evaluation else None
+            active_report = next(iter(evaluation.reports.all()), None) if evaluation else None
 
-            active_report = next(iter(evaluation.reports.all()), None)
-            report_payload = None
-            if active_report is not None and active_report.employer_pdf:
-                report_payload = {
-                    "report_id": str(active_report.public_id),
-                    "report_number": active_report.report_number,
-                    "report_status": active_report.report_status,
-                    "pdf_url": request.build_absolute_uri(active_report.employer_pdf.url),
-                    "generated_at": active_report.generated_at,
-                }
-
-            certificate_payload = None
-            if evaluation.certificate_status == CertificateStatus.ISSUED and evaluation.certificate_url:
-                certificate_payload = {
-                    "certificate_id": str(evaluation.public_id),
-                    "pdf_url": evaluation.certificate_url,
-                    "issued_at": evaluation.certificate_issued_at,
-                }
-
-            competencies = []
-            for item in summary.competencies_summary or []:
-                competencies.append(
-                    {
-                        "code": item.get("competency_code") or "",
-                        "name": item.get("competency_name") or (item.get("competency_code") or "").replace("_", " ").title(),
-                        "percentage": float(item.get("percentage") or 0),
-                    }
-                )
-
-            summaries.append(
+            results.append(
                 {
-                    "candidate_id": str(evaluation.candidate.public_id),
-                    "evaluation_id": str(evaluation.public_id),
-                    "role_code": evaluation.session.role_code or evaluation.candidate_job_role or evaluation.candidate.job_role,
+                    "candidate_id": str(summary.candidate.public_id),
+                    "evaluation_id": str(evaluation.public_id) if evaluation else None,
+                    "role_code": summary.session.role_code if summary.session_id else summary.candidate.job_role,
                     "overall_percentage": float(summary.overall_percentage),
                     "status": summary.status,
                     "generated_at": summary.generated_at,
-                    "competencies": competencies,
-                    "certificate": certificate_payload,
-                    "report": report_payload,
+                    "competencies": [
+                        {
+                            "code": item.get("competency_code") or "",
+                            "name": item.get("competency_name")
+                            or (item.get("competency_code") or "").replace("_", " ").title(),
+                            "percentage": float(item.get("percentage") or 0),
+                        }
+                        for item in (summary.competencies_summary or [])
+                    ],
+                    "certificate": {
+                        "certificate_id": cert.certificate_id,
+                        "pdf_url": request.build_absolute_uri(cert.pdf_file.url),
+                        "issued_at": cert.issued_at,
+                    }
+                    if cert and cert.pdf_file
+                    else None,
+                    "report": {
+                        "report_id": str(active_report.public_id),
+                        "report_number": active_report.report_number,
+                        "report_status": active_report.report_status,
+                        "pdf_url": request.build_absolute_uri(active_report.employer_pdf.url),
+                        "generated_at": active_report.generated_at,
+                    }
+                    if active_report and active_report.employer_pdf
+                    else None,
                 }
             )
 
-        return Response(CandidateScoreSummarySerializer(summaries, many=True).data)
+        return Response(CandidateScoreSummarySerializer(results, many=True).data)
 
 
 class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.ModelViewSet):
@@ -438,6 +448,19 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             return Response({"detail": "No scoring summary has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
         return Response(SessionEvaluationSummarySerializer(summary).data)
 
+    @action(detail=True, methods=['get'], url_path='certificate')
+    def certificate(self, request, id=None):
+        evaluation = self.get_object()
+        cert = getattr(evaluation, "certificate", None)
+        if cert is None or not cert.pdf_file:
+            return Response({"detail": "No certificate has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "certificate_id": cert.certificate_id,
+            "pdf_url": request.build_absolute_uri(cert.pdf_file.url),
+            "issued_at": cert.issued_at,
+            "expires_at": cert.expires_at,
+        })
+
     @action(detail=True, methods=['get'], url_path='response-results')
     def response_results(self, request, id=None):
         evaluation = self.get_object()
@@ -700,6 +723,30 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
 
         if scheduled_changed or duration_changed:
             evaluation.save(update_fields=["status", "scheduled_date", "duration_minutes", "updated_at"])
+
+class CertificateVerifyView(APIView):
+    """GET /evaluations/certificates/verify/{certificate_id} - public QR
+    verification, mirroring api/contracts/views.py's agreement_verify.
+    No auth, and only the fields already printed on the certificate
+    itself - this lets a holder confirm a PDF/printed copy is genuine,
+    not a general-purpose evaluation lookup."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request, certificate_id):
+        certificate = Certificate.objects.filter(certificate_id=certificate_id).select_related("evaluation").first()
+        if certificate is None or not certificate.pdf_file:
+            return Response({"detail": "No certificate found for this ID."}, status=status.HTTP_404_NOT_FOUND)
+
+        is_expired = bool(certificate.expires_at and certificate.expires_at < timezone.now())
+        return Response({
+            "certificate_id": certificate.certificate_id,
+            "candidate_name": certificate.candidate.get_full_name(),
+            "issued_at": certificate.issued_at,
+            "expires_at": certificate.expires_at,
+            "status": "EXPIRED" if is_expired else "VALID",
+            "pdf_hash": certificate.pdf_hash,
+        })
 
 
 class ScoringRuleSetViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):

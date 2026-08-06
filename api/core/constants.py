@@ -232,6 +232,32 @@ class ReadinessStatus:
     ]
 
 
+class EvaluationLayer:
+    """Which of the three evaluation layers a scored competency counts
+    toward. Final score = 50% Cognitive + 30% Behavioral + 20% Task
+    Execution (per the AI Evaluation Framework spec) when a rule set's
+    competencies are categorized; Week6ScoringService falls back to the
+    flat score/max_score calculation for any rule set where none are."""
+
+    COGNITIVE = "COGNITIVE"
+    BEHAVIORAL = "BEHAVIORAL"
+    TASK_EXECUTION = "TASK_EXECUTION"
+
+    CHOICES = [
+        (COGNITIVE, "Cognitive"),
+        (BEHAVIORAL, "Behavioral"),
+        (TASK_EXECUTION, "Task Execution"),
+    ]
+
+    # Plain ints (not Decimal) so this constants module stays import-free -
+    # callers doing Decimal math convert with Decimal(str(weight)).
+    WEIGHTS = {
+        COGNITIVE: 50,
+        BEHAVIORAL: 30,
+        TASK_EXECUTION: 20,
+    }
+
+
 class AdminPermissions:
     USER_MANAGEMENT = "can_manage_users"
     COMPANY_VERIFICATION = "can_verify_companies"

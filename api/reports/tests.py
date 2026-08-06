@@ -30,6 +30,7 @@ from api.translation.models import (
     CandidateResponseTranslation,
     EvaluationInputArtifact,
 )
+from api.reports.services import EvaluationReportService
 
 
 class EvaluationReportApiTests(TestCase):
@@ -569,3 +570,38 @@ class EvaluationReportApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+
+class TopStrengthsAndRisksTests(TestCase):
+    """A competency can never appear as both a "strength" and a risk/gap in
+    the same report - a strength must have actually met its own configured
+    pass_threshold, not just ranked highest among several failing
+    competencies."""
+
+    def test_highest_scoring_competency_is_not_a_strength_if_it_failed_its_own_threshold(self):
+        competency_breakdown = [
+            {"display_name": "Patient Safety Awareness", "percentage": 40, "pass_threshold": 70},
+            {"display_name": "Hygiene Standards", "percentage": 10, "pass_threshold": 70},
+        ]
+
+        strengths, risks = EvaluationReportService._derive_top_strengths_and_risks(
+            competency_breakdown=competency_breakdown,
+            critical_failures=[],
+        )
+
+        self.assertEqual(strengths, [])
+        self.assertIn("Readiness gap identified in patient safety awareness", risks)
+
+    def test_a_competency_that_actually_passed_its_threshold_is_a_strength(self):
+        competency_breakdown = [
+            {"display_name": "Patient Safety Awareness", "percentage": 90, "pass_threshold": 70},
+            {"display_name": "Hygiene Standards", "percentage": 10, "pass_threshold": 70},
+        ]
+
+        strengths, risks = EvaluationReportService._derive_top_strengths_and_risks(
+            competency_breakdown=competency_breakdown,
+            critical_failures=[],
+        )
+
+        self.assertIn("Strong patient safety awareness", strengths)
+        self.assertNotIn("Readiness gap identified in patient safety awareness", risks)

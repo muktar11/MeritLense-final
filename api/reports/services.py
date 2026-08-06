@@ -256,6 +256,9 @@ class EvaluationReportService:
         identity = sanitized.get("identity_verification") or {}
         identity.pop("method", None)
         identity.pop("timestamp", None)
+        # Sensitive - stays in the internal audit record (report.report_payload)
+        # only, never in employer-facing output (PDF or this sanitized payload).
+        identity.pop("face_match_score", None)
 
         return sanitized
 
@@ -440,10 +443,10 @@ class EvaluationReportService:
         if matched and missing:
             return (
                 f"Candidate demonstrated {', '.join(matched)}. "
-                f"Additional evidence is needed for {', '.join(missing)}."
+                f"Additional evidence is needed to {', '.join(missing)}."
             )
         if missing:
-            return f"Additional evidence is needed for {', '.join(missing)}."
+            return f"Additional evidence is needed to {', '.join(missing)}."
         if matched:
             return f"Candidate demonstrated {', '.join(matched)}."
         return cls._normalize_text(item.get("explanation") or "Readiness gap identified from the candidate response.")
@@ -665,6 +668,7 @@ class EvaluationReportService:
         override_triggered = cls._get_override_triggered(evaluation, readiness_record)
         rule_engine_version = cls._get_rule_engine_version(readiness_record)
         assessment_status = cls._derive_assessment_status(evaluation)
+        assessment_completeness = cls._derive_assessment_completeness(summary)
         generated_at = timezone.now()
         top_strengths, top_risks = cls._derive_top_strengths_and_risks(
             competency_breakdown=competency_breakdown,
@@ -760,13 +764,24 @@ class EvaluationReportService:
                 "assessment_mode": "Guided Digital Simulation",
                 "assessment_date": (session.ended_at or generated_at).date().isoformat(),
                 "assessment_duration_minutes": cls._derive_assessment_duration_minutes(session),
-                "assessment_completeness": cls._derive_assessment_completeness(summary),
+                "assessment_completeness": assessment_completeness,
                 "assessment_quality": assessment_quality,
                 "assessment_coverage": cls._derive_assessment_coverage(session),
             },
             "executive_summary": {
                 "readiness_indicator": readiness_indicator,
                 "overall_score": cls._rounded_whole(summary.overall_percentage),
+                # A partial assessment's raw score is misleading on its own
+                # (e.g. "0/100" reads as a failing score, not "incomplete") -
+                # the employer-facing display uses this instead of the raw
+                # number whenever the assessment didn't fully complete.
+                # overall_score itself is left untouched for API/JSON
+                # consumers that need the real numeric value.
+                "overall_score_display": (
+                    cls._rounded_whole(summary.overall_percentage)
+                    if assessment_completeness >= 100
+                    else "Not fully available"
+                ),
                 "readiness_reason": {
                     "employer_message": employer_message,
                     "internal_reason": readiness_reason,
@@ -929,6 +944,17 @@ class EvaluationReportService:
             label = item.get("display_name") or item.get("competency_name") or item.get("competency_code")
             if not label or label == generic_label:
                 continue
+            # A "strength" must have actually met its own configured pass
+            # threshold - the same PASSED/BELOW_THRESHOLD line drawn in the
+            # Competency Breakdown table. Without this, the highest-ranked
+            # competency could be listed as a strength here while the same
+            # competency is flagged as a risk/gap elsewhere in the report,
+            # just because it happened to score highest among several
+            # failing competencies.
+            percentage = item.get("percentage")
+            pass_threshold = item.get("pass_threshold")
+            if percentage is None or pass_threshold is None or percentage < pass_threshold:
+                continue
             statement = cls._strength_statement(label)
             if statement not in strengths:
                 strengths.append(statement)
@@ -950,10 +976,20 @@ class EvaluationReportService:
         )
         for item in weakest:
             label = item.get("display_name") or item.get("competency_name") or item.get("competency_code")
-            if label and label != generic_label:
-                statement = cls._risk_statement(label)
-                if statement not in risks:
-                    risks.append(statement)
+            if not label or label == generic_label:
+                continue
+            # Same principle as the strengths check above, in reverse: only a
+            # genuine gap (actually below its own configured pass_threshold)
+            # belongs here - otherwise a competency that passed could still
+            # show up as a "risk" just for ranking lowest among several
+            # otherwise-passing competencies.
+            percentage = item.get("percentage")
+            pass_threshold = item.get("pass_threshold")
+            if percentage is None or pass_threshold is None or percentage >= pass_threshold:
+                continue
+            statement = cls._risk_statement(label)
+            if statement not in risks:
+                risks.append(statement)
             if len(risks) >= 3:
                 break
         return strengths[:3], risks[:3]

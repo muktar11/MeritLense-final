@@ -1123,7 +1123,13 @@
             <div class="readiness-top">
               <div>
                 <div class="readiness-score-label">Overall Score</div>
-                <div class="readiness-score">{{ summary.overall_score }}<span>/100</span></div>
+                <div class="readiness-score">
+                  {% if summary.overall_score_display == "Not fully available" %}
+                    <span style="font-size: 0.55em;">Not fully available</span>
+                  {% else %}
+                    {{ summary.overall_score_display|default:summary.overall_score }}<span>/100</span>
+                  {% endif %}
+                </div>
               </div>
               <div>
                 {% if summary.readiness_indicator.code == "READY" %}
@@ -1164,7 +1170,7 @@
             {% for item in summary.top_strengths %}
               <li>{{ item }}</li>
             {% empty %}
-              <li>No strengths were recorded in the current readiness summary.</li>
+              <li>No significant strengths identified in this assessment.</li>
             {% endfor %}
           </ul>
         </div>
@@ -1218,10 +1224,10 @@
         <div class="section-heading">
           <div>
             <div class="section-kicker">Page 2</div>
-            <div class="section-title">Assessment Context + Competency Overview</div>
+            <div class="section-title">Assessment Context + Methodology + Competency Overview</div>
           </div>
           <div class="section-note">
-            This page combines the assessment conditions, identity controls, methodology, and role-based competency results into a single employer review page.
+            This page combines the assessment conditions, identity controls, and methodology with a high-level competency overview - the full skill-by-skill breakdown follows on the next page.
           </div>
         </div>
 
@@ -1310,16 +1316,12 @@
 
             <div class="identity-metrics">
               <div class="mini-metric">
-                <div class="mini-label">Verification Status</div>
-                <div class="mini-value">{{ identity.verification_label|default:identity.status }}</div>
-              </div>
-              <div class="mini-metric">
-                <div class="mini-label">Face Match Score</div>
-                <div class="mini-value good">
-                  {% if identity.face_match_score != None and identity.face_match_score != "" %}
-                    {{ identity.face_match_score }}%
+                <div class="mini-label">Identity Verification Status</div>
+                <div class="mini-value">
+                  {% if identity.status == "VERIFIED" %}
+                    Completed
                   {% else %}
-                    --
+                    Not Completed
                   {% endif %}
                 </div>
               </div>
@@ -1357,9 +1359,9 @@
 
         <div class="card section-shell" style="margin-top: 8px;">
           <div class="subsection-head">
-            <div class="list-card-title">Competency Breakdown</div>
+            <div class="list-card-title">Competency Overview</div>
             <div class="tiny-copy subsection-note">
-              Skill-by-skill readiness results are grouped directly below the methodology so employers can move from what was assessed to how the candidate performed.
+              A high-level status per competency - the full skill-by-skill breakdown with scores, thresholds, and explanations follows on the next page.
             </div>
           </div>
 
@@ -1379,8 +1381,29 @@
               </div>
             {% endfor %}
           </div>
+        </div>
+      </div>
+    </div>
 
-          <div class="table-card" style="margin-top: 8px;">
+    <div class="footer">
+      <strong>{{ report.classification }}</strong> | Report {{ report_number }} | v{{ report.report_version }} | {{ report.generated_at|slice:":10" }} | {{ report.legal_disclaimer }}
+    </div>
+  </div>
+
+  <div class="page">
+    <div class="page-body">
+      <div class="card section-shell">
+        <div class="section-heading">
+          <div>
+            <div class="section-kicker">Page 3</div>
+            <div class="section-title">Competency Breakdown</div>
+          </div>
+          <div class="section-note">
+            Full skill-by-skill readiness results, showing exactly how each competency was scored against its configured threshold.
+          </div>
+        </div>
+
+        <div class="table-card">
             <table>
               <thead>
                 <tr>
@@ -1420,7 +1443,6 @@
               </tbody>
             </table>
           </div>
-        </div>
       </div>
     </div>
 
@@ -1434,8 +1456,8 @@
       <div class="card section-shell">
         <div class="section-heading">
           <div>
-            <div class="section-kicker">Page 3</div>
-            <div class="section-title">Risk Indicators + Action Planning</div>
+            <div class="section-kicker">Page 4</div>
+            <div class="section-title">Risk Indicators + Evidence Summary + Improvement Plan</div>
           </div>
           <div class="section-note">
             Risk review, evidence summary, and next-step actions are grouped together so employers can move from concern areas to recommended action without losing context.
@@ -1514,10 +1536,12 @@
           </table>
         </div>
 
-        <div style="margin-top: 8px;">
-          <div class="subsection-head">
-            <div class="list-card-title">Improvement Plan</div>
-            <div class="tiny-copy subsection-note">
+        <div class="card section-shell" style="margin-top: 8px;">
+          <div class="section-heading">
+            <div>
+              <div class="section-title">Improvement Plan &amp; Employer Recommendation</div>
+            </div>
+            <div class="section-note">
               Improvement planning is displayed when readiness gaps remain so employers can connect each concern area to a practical next step.
             </div>
           </div>

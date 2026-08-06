@@ -351,6 +351,12 @@
       font-weight: 700;
     }
 
+    .readiness-score-text {
+      font-size: 16px;
+      line-height: 1.2;
+      max-width: 180px;
+    }
+
     .status-badge,
     .risk-level,
     .tone-pill {
@@ -691,11 +697,21 @@
       font-weight: 700;
     }
 
+    .verify-ring-pending {
+      color: #8ea3c5;
+      border-color: #d7e4f7;
+      box-shadow: 0 0 0 4px rgba(142, 163, 197, 0.12);
+    }
+
     .identity-metrics {
       margin-top: 8px;
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
       gap: 6px;
+    }
+
+    .identity-metrics.single {
+      grid-template-columns: 1fr;
     }
 
     .mini-metric {
@@ -1123,7 +1139,11 @@
             <div class="readiness-top">
               <div>
                 <div class="readiness-score-label">Overall Score</div>
-                <div class="readiness-score">{{ summary.overall_score }}<span>/100</span></div>
+                {% if summary.overall_score_available %}
+                  <div class="readiness-score">{{ summary.overall_score_display }}<span>/100</span></div>
+                {% else %}
+                  <div class="readiness-score readiness-score-text">{{ summary.overall_score_display }}</div>
+                {% endif %}
               </div>
               <div>
                 {% if summary.readiness_indicator.code == "READY" %}
@@ -1144,7 +1164,13 @@
               <div class="metric-card">
                 <div class="metric-title">Assessment Quality</div>
                 <div class="metric-value">{{ assessment.assessment_quality }}</div>
-                <div class="metric-copy">{{ assessment.assessment_completeness }}% completeness recorded.</div>
+                <div class="metric-copy">
+                  {% if summary.overall_score_available %}
+                    {{ assessment.assessment_completeness }}% completeness recorded.
+                  {% else %}
+                    Overall score is withheld until assessment completeness reaches 100%.
+                  {% endif %}
+                </div>
               </div>
             </div>
 
@@ -1289,7 +1315,13 @@
                 </div>
               </div>
 
-              <div class="verify-ring">&#10003;</div>
+              <div class="verify-ring {% if not identity.employer_completed %}verify-ring-pending{% endif %}">
+                {% if identity.employer_completed %}
+                  &#10003;
+                {% else %}
+                  -
+                {% endif %}
+              </div>
 
               <div class="photo-card">
                 <div class="photo-label">Verified Photo (ID)</div>
@@ -1308,32 +1340,10 @@
               </div>
             </div>
 
-            <div class="identity-metrics">
+            <div class="identity-metrics single">
               <div class="mini-metric">
-                <div class="mini-label">Verification Status</div>
-                <div class="mini-value">{{ identity.verification_label|default:identity.status }}</div>
-              </div>
-              <div class="mini-metric">
-                <div class="mini-label">Face Match Score</div>
-                <div class="mini-value good">
-                  {% if identity.face_match_score != None and identity.face_match_score != "" %}
-                    {{ identity.face_match_score }}%
-                  {% else %}
-                    --
-                  {% endif %}
-                </div>
-              </div>
-              <div class="mini-metric">
-                <div class="mini-label">Liveness</div>
-                <div class="mini-value good">
-                  {% if identity.liveness_passed is None %}
-                    Pending
-                  {% elif identity.liveness_passed %}
-                    Passed
-                  {% else %}
-                    Failed
-                  {% endif %}
-                </div>
+                <div class="mini-label">Identity Verification Status</div>
+                <div class="mini-value">{{ identity.employer_status }}</div>
               </div>
             </div>
           </div>
@@ -1357,9 +1367,9 @@
 
         <div class="card section-shell" style="margin-top: 8px;">
           <div class="subsection-head">
-            <div class="list-card-title">Competency Breakdown</div>
+            <div class="list-card-title">Competency Overview</div>
             <div class="tiny-copy subsection-note">
-              Skill-by-skill readiness results are grouped directly below the methodology so employers can move from what was assessed to how the candidate performed.
+              This overview highlights the most important competency signals before the detailed breakdown on the next page.
             </div>
           </div>
 
@@ -1379,47 +1389,6 @@
               </div>
             {% endfor %}
           </div>
-
-          <div class="table-card" style="margin-top: 8px;">
-            <table>
-              <thead>
-                <tr>
-                  <th style="width: 21%;">Competency</th>
-                  <th style="width: 13%;">Score</th>
-                  <th style="width: 11%;">Threshold</th>
-                  <th style="width: 12%;">Status</th>
-                  <th style="width: 12%;">Responses</th>
-                  <th style="width: 31%;">Explanation</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in report.competency_breakdown %}
-                  <tr>
-                    <td>
-                      <div class="score-strong">{{ item.display_name|default:item.competency_name|default:item.competency_code }}</div>
-                    </td>
-                    <td><span class="score-strong">{{ item.score }}/{{ item.max_score }}</span><br />{{ item.percentage }}%</td>
-                    <td>{{ item.pass_threshold }}%</td>
-                    <td>
-                      {% if item.status == "PASSED" %}
-                        <span class="status-text status-good"><span class="dot"></span>Passed</span>
-                      {% elif item.status == "BELOW_THRESHOLD" %}
-                        <span class="status-text status-danger"><span class="dot"></span>Below Threshold</span>
-                      {% else %}
-                        <span class="status-text status-warn"><span class="dot"></span>{{ item.status|default:"Review" }}</span>
-                      {% endif %}
-                    </td>
-                    <td>{{ item.completed_response_count }}/{{ item.response_count }}</td>
-                    <td>{{ item.explanation }}</td>
-                  </tr>
-                {% empty %}
-                  <tr>
-                    <td colspan="6" class="empty-copy">No competency breakdown was available for this report.</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
         </div>
       </div>
     </div>
@@ -1435,10 +1404,71 @@
         <div class="section-heading">
           <div>
             <div class="section-kicker">Page 3</div>
-            <div class="section-title">Risk Indicators + Action Planning</div>
+            <div class="section-title">Full Competency Breakdown</div>
           </div>
           <div class="section-note">
-            Risk review, evidence summary, and next-step actions are grouped together so employers can move from concern areas to recommended action without losing context.
+            This page presents the detailed competency-by-competency assessment results, including score, threshold status, completion depth, and explanation.
+          </div>
+        </div>
+
+        <div class="table-card">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 21%;">Competency</th>
+                <th style="width: 13%;">Score</th>
+                <th style="width: 11%;">Threshold</th>
+                <th style="width: 12%;">Status</th>
+                <th style="width: 12%;">Responses</th>
+                <th style="width: 31%;">Explanation</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in report.competency_breakdown %}
+                <tr>
+                  <td>
+                    <div class="score-strong">{{ item.display_name|default:item.competency_name|default:item.competency_code }}</div>
+                  </td>
+                  <td><span class="score-strong">{{ item.score }}/{{ item.max_score }}</span><br />{{ item.percentage }}%</td>
+                  <td>{{ item.pass_threshold }}%</td>
+                  <td>
+                    {% if item.status == "PASSED" %}
+                      <span class="status-text status-good"><span class="dot"></span>Passed</span>
+                    {% elif item.status == "BELOW_THRESHOLD" %}
+                      <span class="status-text status-danger"><span class="dot"></span>Below Threshold</span>
+                    {% else %}
+                      <span class="status-text status-warn"><span class="dot"></span>{{ item.status|default:"Review" }}</span>
+                    {% endif %}
+                  </td>
+                  <td>{{ item.completed_response_count }}/{{ item.response_count }}</td>
+                  <td>{{ item.explanation }}</td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="6" class="empty-copy">No competency breakdown was available for this report.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <strong>{{ report.classification }}</strong> | Report {{ report_number }} | v{{ report.report_version }} | {{ report.generated_at|slice:":10" }} | {{ report.legal_disclaimer }}
+    </div>
+  </div>
+
+  <div class="page">
+    <div class="page-body">
+      <div class="card section-shell">
+        <div class="section-heading">
+          <div>
+            <div class="section-kicker">Page 4</div>
+            <div class="section-title">Risk Indicators + Evidence Summary + Improvement Plan</div>
+          </div>
+          <div class="section-note">
+            This page consolidates employer decision support into one place: identified risks, supporting evidence, and practical next-step recommendations.
           </div>
         </div>
 
@@ -1513,45 +1543,45 @@
             </tbody>
           </table>
         </div>
+      </div>
 
-        <div style="margin-top: 8px;">
-          <div class="subsection-head">
-            <div class="list-card-title">Improvement Plan</div>
-            <div class="tiny-copy subsection-note">
-              Improvement planning is displayed when readiness gaps remain so employers can connect each concern area to a practical next step.
-            </div>
+      <div class="card section-shell">
+        <div class="subsection-head">
+          <div class="list-card-title">Improvement Plan &amp; Employer Recommendation</div>
+          <div class="tiny-copy subsection-note">
+            This section turns the identified readiness gaps into practical remediation and employer decision guidance.
           </div>
-
-          {% if summary.readiness_indicator.code != "READY" %}
-            <div class="plan-grid">
-              {% for item in report.improvement_plan %}
-                <div class="plan-card">
-                  <div class="plan-head">
-                    <div class="plan-title">{{ item.competency }}</div>
-                    {% if item.priority == "High" %}
-                      <span class="tone-pill tone-danger"><span class="status-dot">!</span>{{ item.priority }} Priority</span>
-                    {% elif item.priority == "Medium" %}
-                      <span class="tone-pill tone-warn"><span class="status-dot">!</span>{{ item.priority }} Priority</span>
-                    {% else %}
-                      <span class="tone-pill tone-good"><span class="status-dot">&#10003;</span>{{ item.priority }} Priority</span>
-                    {% endif %}
-                  </div>
-                  <div class="plan-copy"><strong>Gap:</strong> {{ item.gap }}</div>
-                  <div class="plan-copy"><strong>Recommended Action:</strong> {{ item.recommended_action }}</div>
-                </div>
-              {% empty %}
-                <div class="plan-card">
-                  <div class="empty-copy">No structured improvement actions were available for this report.</div>
-                </div>
-              {% endfor %}
-            </div>
-          {% else %}
-            <div class="plan-card">
-              <div class="plan-title">No Improvement Plan Required</div>
-              <div class="plan-copy">The readiness result is Ready, so no structured remediation plan is required in the current employer-facing report.</div>
-            </div>
-          {% endif %}
         </div>
+
+        {% if summary.readiness_indicator.code != "READY" %}
+          <div class="plan-grid">
+            {% for item in report.improvement_plan %}
+              <div class="plan-card">
+                <div class="plan-head">
+                  <div class="plan-title">{{ item.competency }}</div>
+                  {% if item.priority == "High" %}
+                    <span class="tone-pill tone-danger"><span class="status-dot">!</span>{{ item.priority }} Priority</span>
+                  {% elif item.priority == "Medium" %}
+                    <span class="tone-pill tone-warn"><span class="status-dot">!</span>{{ item.priority }} Priority</span>
+                  {% else %}
+                    <span class="tone-pill tone-good"><span class="status-dot">&#10003;</span>{{ item.priority }} Priority</span>
+                  {% endif %}
+                </div>
+                <div class="plan-copy"><strong>Gap:</strong> {{ item.gap }}</div>
+                <div class="plan-copy"><strong>Recommended Action:</strong> {{ item.recommended_action }}</div>
+              </div>
+            {% empty %}
+              <div class="plan-card">
+                <div class="empty-copy">No structured improvement actions were available for this report.</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="plan-card">
+            <div class="plan-title">No Improvement Plan Required</div>
+            <div class="plan-copy">The readiness result is Ready, so no structured remediation plan is required in the current employer-facing report.</div>
+          </div>
+        {% endif %}
 
         <div class="summary-grid" style="margin-top: 8px;">
           <div class="card section-shell">

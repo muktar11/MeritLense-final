@@ -256,6 +256,12 @@ class EvaluationReportService:
         identity = sanitized.get("identity_verification") or {}
         identity.pop("method", None)
         identity.pop("timestamp", None)
+        identity.pop("face_match_score", None)
+        identity.pop("single_face_detected", None)
+        identity.pop("liveness_passed", None)
+        identity.pop("verification_duration_seconds", None)
+        identity.pop("verification_label", None)
+        identity.pop("verification_status", None)
 
         return sanitized
 
@@ -398,6 +404,8 @@ class EvaluationReportService:
                     text = "".join(raw_parts)
 
         text = re.sub(r"\s+", " ", text).strip()
+        text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+        text = re.sub(r"([,.;:!?]){2,}", r"\1", text)
         return text
 
     @classmethod
@@ -434,18 +442,45 @@ class EvaluationReportService:
         return f"Readiness gap identified in {label.lower()}"
 
     @classmethod
+    def _humanize_indicator_phrase(cls, value):
+        text = cls._normalize_text(value)
+        text = re.sub(r"[_\-]+", " ", text).strip(" ,.;:")
+        replacements = {
+            "identify hazard": "identify hazards",
+        }
+        lowered = text.lower()
+        return replacements.get(lowered, lowered or text)
+
+    @classmethod
+    def _format_indicator_list(cls, items):
+        cleaned = []
+        seen = set()
+        for item in items:
+            phrase = cls._humanize_indicator_phrase(item)
+            if phrase and phrase not in seen:
+                seen.add(phrase)
+                cleaned.append(phrase)
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        if len(cleaned) == 2:
+            return f"{cleaned[0]} and {cleaned[1]}"
+        return f"{', '.join(cleaned[:-1])}, and {cleaned[-1]}"
+
+    @classmethod
     def _employer_evidence_finding(cls, item):
         matched = cls._normalize_text_list(item.get("matched_indicators") or item.get("observed_indicators") or [])
         missing = cls._normalize_text_list(item.get("missing_indicators") or [])
         if matched and missing:
             return (
-                f"Candidate demonstrated {', '.join(matched)}. "
-                f"Additional evidence is needed for {', '.join(missing)}."
+                f"Candidate demonstrated {cls._format_indicator_list(matched)}. "
+                f"Additional evidence is needed to {cls._format_indicator_list(missing)}."
             )
         if missing:
-            return f"Additional evidence is needed for {', '.join(missing)}."
+            return f"Additional evidence is needed to {cls._format_indicator_list(missing)}."
         if matched:
-            return f"Candidate demonstrated {', '.join(matched)}."
+            return f"Candidate demonstrated {cls._format_indicator_list(matched)}."
         return cls._normalize_text(item.get("explanation") or "Readiness gap identified from the candidate response.")
 
     @classmethod
@@ -696,6 +731,7 @@ class EvaluationReportService:
             readiness_indicator=readiness_indicator,
             override_triggered=override_triggered,
         )
+        assessment_completeness = cls._derive_assessment_completeness(summary)
         reliability, reliability_factors = cls._derive_evaluation_reliability(
             session=session,
             summary=summary,
@@ -760,13 +796,18 @@ class EvaluationReportService:
                 "assessment_mode": "Guided Digital Simulation",
                 "assessment_date": (session.ended_at or generated_at).date().isoformat(),
                 "assessment_duration_minutes": cls._derive_assessment_duration_minutes(session),
-                "assessment_completeness": cls._derive_assessment_completeness(summary),
+                "assessment_completeness": assessment_completeness,
                 "assessment_quality": assessment_quality,
                 "assessment_coverage": cls._derive_assessment_coverage(session),
             },
             "executive_summary": {
                 "readiness_indicator": readiness_indicator,
                 "overall_score": cls._rounded_whole(summary.overall_percentage),
+                "overall_score_display": cls._derive_overall_score_display(
+                    overall_percentage=summary.overall_percentage,
+                    assessment_completeness=assessment_completeness,
+                ),
+                "overall_score_available": assessment_completeness >= 100,
                 "readiness_reason": {
                     "employer_message": employer_message,
                     "internal_reason": readiness_reason,
@@ -917,6 +958,19 @@ class EvaluationReportService:
     @classmethod
     def _derive_top_strengths_and_risks(cls, *, competency_breakdown, critical_failures):
         generic_label = "General Readiness Competency"
+        risk_labels = set()
+        risks = []
+        for failure in critical_failures:
+            label = cls._friendly_competency_name(
+                failure.get("competency_code") or failure.get("topic"),
+                failure.get("competency_name"),
+            )
+            if label and label != generic_label:
+                risk_labels.add(label)
+                statement = cls._risk_statement(label)
+                if statement not in risks:
+                    risks.append(statement)
+
         ordered = sorted(
             competency_breakdown,
             key=lambda item: item.get("percentage") if item.get("percentage") is not None else -1,
@@ -927,33 +981,44 @@ class EvaluationReportService:
             if not item:
                 continue
             label = item.get("display_name") or item.get("competency_name") or item.get("competency_code")
-            if not label or label == generic_label:
+            percentage = float(item.get("percentage") or 0)
+            threshold = float(item.get("pass_threshold") or 0)
+            if (
+                not label
+                or label == generic_label
+                or label in risk_labels
+                or item.get("completed_response_count", 0) <= 0
+                or item.get("status") == "BELOW_THRESHOLD"
+                or percentage < threshold
+            ):
                 continue
             statement = cls._strength_statement(label)
             if statement not in strengths:
                 strengths.append(statement)
             if len(strengths) >= 3:
                 break
-        risks = []
-        for failure in critical_failures:
-            label = cls._friendly_competency_name(
-                failure.get("competency_code") or failure.get("topic"),
-                failure.get("competency_name"),
-            )
-            if label and label != generic_label:
-                statement = cls._risk_statement(label)
-                if statement not in risks:
-                    risks.append(statement)
+        if not strengths:
+            strengths = ["No significant strengths identified in this assessment."]
+
         weakest = sorted(
             competency_breakdown,
             key=lambda item: item.get("percentage") if item.get("percentage") is not None else 101,
         )
         for item in weakest:
             label = item.get("display_name") or item.get("competency_name") or item.get("competency_code")
-            if label and label != generic_label:
-                statement = cls._risk_statement(label)
-                if statement not in risks:
-                    risks.append(statement)
+            percentage = float(item.get("percentage") or 0)
+            threshold = float(item.get("pass_threshold") or 0)
+            if (
+                not label
+                or label == generic_label
+                or item.get("completed_response_count", 0) <= 0
+                or item.get("status") != "BELOW_THRESHOLD"
+                or percentage >= threshold
+            ):
+                continue
+            statement = cls._risk_statement(label)
+            if statement not in risks:
+                risks.append(statement)
             if len(risks) >= 3:
                 break
         return strengths[:3], risks[:3]
@@ -1315,12 +1380,15 @@ class EvaluationReportService:
         timestamp_source = captured_artifact or reference_artifact
         timestamp = timestamp_source.uploaded_at.isoformat() if timestamp_source is not None else None
         verification_status = session.verification_status or "NOT_STARTED"
+        employer_completed = bool(session.identity_verified)
         return {
             "status": "VERIFIED" if session.identity_verified else "NOT_APPLICABLE",
             "method": "SESSION_IDENTITY_VERIFICATION" if session.identity_verified else None,
             "timestamp": timestamp,
             "verification_status": verification_status,
             "verification_label": cls._verification_status_label(verification_status),
+            "employer_completed": employer_completed,
+            "employer_status": "Completed" if employer_completed else "Not Completed",
             "face_match_score": cls._decimal(session.face_match_score),
             "single_face_detected": bool(session.single_face_detected),
             "liveness_passed": cls._resolve_liveness_passed(session),
@@ -1753,6 +1821,12 @@ class EvaluationReportService:
         return int(round((summary.evaluated_response_count / summary.total_response_count) * 100))
 
     @classmethod
+    def _derive_overall_score_display(cls, *, overall_percentage, assessment_completeness):
+        if assessment_completeness < 100:
+            return "Not fully available"
+        return str(cls._rounded_whole(overall_percentage))
+
+    @classmethod
     def _derive_assessment_coverage(cls, session):
         coverage = ["Safety", "Hygiene", "Communication", "Behavioral Indicators"]
         if session.task_observation_enabled:
@@ -2019,7 +2093,8 @@ class EvaluationReportService:
             "Executive Summary",
             f"Readiness Indicator: {readiness.get('display', readiness.get('value', ''))}",
             f"Readiness Reason: {(summary.get('readiness_reason') or {}).get('employer_message', '')}",
-            f"Overall Score: {summary.get('overall_score', '')}%",
+            f"Overall Score: {summary.get('overall_score_display', summary.get('overall_score', ''))}"
+            f"{'%' if summary.get('overall_score_available', True) else ''}",
             f"Assessment Scope: {summary.get('assessment_scope', '')}",
             f"Suggested Action: {summary.get('suggested_action_display', '')}",
             f"Assessment Coverage: {', '.join(context.get('assessment_coverage', []))}",
@@ -2113,8 +2188,7 @@ class EvaluationReportService:
             [
                 "",
                 "Verification",
-                f"Identity Verification Status: {identity.get('status', '')}",
-                f"Face Match Score: {identity.get('face_match_score', '')}",
+                f"Identity Verification Status: {identity.get('employer_status', '')}",
                 f"Verification URL: {report_payload.get('qr_verification_url', '')}",
                 f"Document Hash: {integrity.get('hash_value', '')}",
                 "",

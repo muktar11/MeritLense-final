@@ -19,7 +19,13 @@ from api.core.constants import (
     QuestionLifecycleStatus,
     Roles,
 )
-from api.evaluations.models import Evaluation, ScoringRule, ScoringRuleSet
+from api.evaluations.models import (
+    Evaluation,
+    ResponseEvaluationResult,
+    ScoringRule,
+    ScoringRuleSet,
+    SessionEvaluationSummary,
+)
 from api.evaluations.scoring_services import Week6ScoringService
 from api.interviews.models import InterviewConfiguration
 from api.questions.models import QuestionTemplate
@@ -281,8 +287,17 @@ class EvaluationReportApiTests(TestCase):
             ["readiness_indicator", "overall_score"],
         )
         self.assertEqual(
+            response.data["report_payload"]["executive_summary"]["overall_score_display"],
+            "70",
+        )
+        self.assertTrue(response.data["report_payload"]["executive_summary"]["overall_score_available"])
+        self.assertEqual(
             response.data["report_payload"]["executive_summary"]["assessment_scope"],
             "Pre-employment Workforce Readiness Only",
+        )
+        self.assertEqual(
+            response.data["report_payload"]["executive_summary"]["top_strengths"][0],
+            "No significant strengths identified in this assessment.",
         )
         self.assertIn(
             "Complete interview",
@@ -324,6 +339,10 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(
             response.data["report_payload"]["identity_verification"]["verification_status"],
             "NOT_STARTED",
+        )
+        self.assertEqual(
+            response.data["report_payload"]["identity_verification"]["employer_status"],
+            "Not Completed",
         )
         self.assertEqual(response.data["report_payload"]["verification_status"], "Authentic")
         self.assertTrue(response.data["report_payload"]["document_integrity"]["hash_value"])
@@ -370,6 +389,9 @@ class EvaluationReportApiTests(TestCase):
         self.assertNotIn("passport_id", employer_payload.data["candidate_snapshot"])
         self.assertNotIn("internal_reason", employer_payload.data["executive_summary"]["readiness_reason"])
         self.assertNotIn("top_source", employer_payload.data["executive_summary"])
+        self.assertNotIn("face_match_score", employer_payload.data["identity_verification"])
+        self.assertNotIn("liveness_passed", employer_payload.data["identity_verification"])
+        self.assertEqual(employer_payload.data["identity_verification"]["employer_status"], "Not Completed")
 
         export_pdf = self.client.get(f"/api/v1/evaluations/reports/{report.public_id}/export-pdf")
         self.assertEqual(export_pdf.status_code, 200)
@@ -460,6 +482,43 @@ class EvaluationReportApiTests(TestCase):
             "The response needs review.",
             report.report_payload["risk_indicators"]["integrity_risk"]["evidence"],
         )
+
+    def test_incomplete_assessment_hides_overall_score_from_employer_view(self):
+        summary = SessionEvaluationSummary.objects.get(evaluation=self.evaluation, rule_set=self.rule_set)
+        summary.evaluated_response_count = 0
+        summary.total_response_count = 1
+        summary.save(update_fields=["evaluated_response_count", "total_response_count"])
+
+        response = self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["report_payload"]["executive_summary"]["overall_score_display"],
+            "Not fully available",
+        )
+        self.assertFalse(response.data["report_payload"]["executive_summary"]["overall_score_available"])
+
+    def test_evidence_summary_uses_employer_friendly_grammar(self):
+        result = ResponseEvaluationResult.objects.get(evaluation=self.evaluation, rule_set=self.rule_set)
+        result.matched_indicators = ["dry floor"]
+        result.observed_indicators = ["dry floor"]
+        result.missing_indicators = ["identify hazard"]
+        result.save(update_fields=["matched_indicators", "observed_indicators", "missing_indicators"])
+
+        response = self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        findings = [item["finding"] for item in response.data["report_payload"]["evidence_summary"]]
+        self.assertTrue(any("Additional evidence is needed to identify hazards." in finding for finding in findings))
+        self.assertFalse(any("for identify hazard" in finding for finding in findings))
 
     def test_regenerate_report_marks_previous_one_stale_and_keeps_history(self):
         first = self.client.post(

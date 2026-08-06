@@ -1,9 +1,10 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 from api.audit.services import AuditLogService
 from api.payments.mixins import SubscriptionUsageMixin
@@ -24,20 +25,127 @@ from .serializers import (
     EvaluationCompleteSerializer,
     EvaluationRescheduleSerializer,
     EvaluationCancelSerializer,
+    CandidateScoreSummarySerializer,
     ResponseEvaluationResultSerializer,
     ScoringRuleSetSerializer,
     SessionEvaluationSummarySerializer,
 )
 from .permissions import CanManageEvaluation, CanViewEvaluation
-from api.core.constants import Roles, EvaluationStatus, EvaluationType
+from api.core.constants import CertificateStatus, Roles, EvaluationStatus, EvaluationType
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
-from .models import EvaluationReadinessDecisionRecord, ScoringRuleSet
+from .models import EvaluationReadinessDecisionRecord, ScoringRuleSet, SessionEvaluationSummary
 from .scoring_services import Week6ScoringError, Week6ScoringService
+from api.reports.models import EvaluationReport
 from api.reports.serializers import EvaluationReportSerializer
 from api.reports.services import EvaluationReportError, EvaluationReportService
 from api.sessions.models import InterviewSession
 from api.sessions.services import InterviewSessionService
+
+
+def _accessible_evaluations_queryset(user):
+    queryset = Evaluation.objects.all()
+
+    if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
+        return queryset
+
+    if user.role == Roles.B2C:
+        return queryset.filter(created_by=user)
+
+    if user.role == Roles.B2B:
+        if hasattr(user, 'company_profile'):
+            return queryset.filter(company=user.company_profile.company)
+        return queryset.none()
+
+    if user.role == Roles.B2B_TEAM_MEMBER:
+        return queryset.filter(
+            Q(created_by=user) |
+            Q(candidate__shared_with=user)
+        ).distinct()
+
+    return queryset.none()
+
+
+class CandidateScoreSummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        summaries = []
+        seen_candidate_ids = set()
+        queryset = (
+            _accessible_evaluations_queryset(request.user)
+            .filter(session_summaries__isnull=False)
+            .select_related("candidate", "session")
+            .prefetch_related(
+                Prefetch(
+                    "session_summaries",
+                    queryset=SessionEvaluationSummary.objects.select_related("rule_set").order_by("-generated_at", "-created_at"),
+                ),
+                Prefetch(
+                    "reports",
+                    queryset=EvaluationReport.objects.filter(
+                        report_status=EvaluationReport.STATUS_ACTIVE,
+                    ).order_by("-generated_at", "-created_at"),
+                ),
+            )
+            .order_by("candidate_id", "-completed_at", "-scheduled_date", "-created_at")
+            .distinct()
+        )
+
+        for evaluation in queryset:
+            if evaluation.candidate_id in seen_candidate_ids:
+                continue
+
+            summary = next(iter(evaluation.session_summaries.all()), None)
+            if summary is None:
+                continue
+
+            seen_candidate_ids.add(evaluation.candidate_id)
+
+            active_report = next(iter(evaluation.reports.all()), None)
+            report_payload = None
+            if active_report is not None and active_report.employer_pdf:
+                report_payload = {
+                    "report_id": str(active_report.public_id),
+                    "report_number": active_report.report_number,
+                    "report_status": active_report.report_status,
+                    "pdf_url": request.build_absolute_uri(active_report.employer_pdf.url),
+                    "generated_at": active_report.generated_at,
+                }
+
+            certificate_payload = None
+            if evaluation.certificate_status == CertificateStatus.ISSUED and evaluation.certificate_url:
+                certificate_payload = {
+                    "certificate_id": str(evaluation.public_id),
+                    "pdf_url": evaluation.certificate_url,
+                    "issued_at": evaluation.certificate_issued_at,
+                }
+
+            competencies = []
+            for item in summary.competencies_summary or []:
+                competencies.append(
+                    {
+                        "code": item.get("competency_code") or "",
+                        "name": item.get("competency_name") or (item.get("competency_code") or "").replace("_", " ").title(),
+                        "percentage": float(item.get("percentage") or 0),
+                    }
+                )
+
+            summaries.append(
+                {
+                    "candidate_id": str(evaluation.candidate.public_id),
+                    "evaluation_id": str(evaluation.public_id),
+                    "role_code": evaluation.session.role_code or evaluation.candidate_job_role or evaluation.candidate.job_role,
+                    "overall_percentage": float(summary.overall_percentage),
+                    "status": summary.status,
+                    "generated_at": summary.generated_at,
+                    "competencies": competencies,
+                    "certificate": certificate_payload,
+                    "report": report_payload,
+                }
+            )
+
+        return Response(CandidateScoreSummarySerializer(summaries, many=True).data)
 
 
 class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.ModelViewSet):
@@ -48,8 +156,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         if getattr(self, "swagger_fake_view", False):
             return Evaluation.objects.none()
 
-        user = self.request.user
-        queryset = Evaluation.objects.all()
+        queryset = _accessible_evaluations_queryset(self.request.user)
         
         status = self.request.query_params.get('status')
         if status:
@@ -71,24 +178,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         if to_date:
             queryset = queryset.filter(scheduled_date__lte=to_date)
         
-        if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
-            return queryset
-        
-        if user.role == Roles.B2C:
-            return queryset.filter(created_by=user)
-        
-        if user.role == Roles.B2B:
-            if hasattr(user, 'company_profile'):
-                return queryset.filter(company=user.company_profile.company)
-            return queryset.none()
-        
-        if user.role == Roles.B2B_TEAM_MEMBER:
-            return queryset.filter(
-                Q(created_by=user) |
-                Q(candidate__shared_with=user)
-            ).distinct()
-        
-        return queryset.none()
+        return queryset
     
     def get_serializer_class(self):
         if self.action == 'create':
@@ -384,7 +474,10 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             )
         except EvaluationReportError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(EvaluationReportSerializer(report).data, status=status.HTTP_200_OK)
+        return Response(
+            EvaluationReportSerializer(report, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["get"], url_path="report")
     def report(self, request, id=None):
@@ -408,7 +501,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             },
             request=request,
         )
-        return Response(EvaluationReportSerializer(report).data)
+        return Response(EvaluationReportSerializer(report, context={"request": request}).data)
 
     @action(detail=False, methods=['get'])
     def upcoming(self, request):

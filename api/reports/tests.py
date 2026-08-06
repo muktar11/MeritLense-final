@@ -294,6 +294,16 @@ class EvaluationReportApiTests(TestCase):
             "Interview Session -> Responses -> AI Processing -> Deterministic Scoring -> Rule Engine -> Evaluation Report",
         )
         self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_coverage"][0], "Safety")
+        self.assertIn("transcript_report", response.data["report_payload"])
+        self.assertEqual(
+            response.data["report_payload"]["transcript_report"]["evaluation_bands"][0]["code"],
+            "COGNITIVE",
+        )
+        self.assertTrue(response.data["report_payload"]["transcript_report"]["role_fit"])
+        self.assertEqual(
+            response.data["report_payload"]["identity_verification"]["verification_status"],
+            "NOT_STARTED",
+        )
         self.assertEqual(response.data["report_payload"]["verification_status"], "Authentic")
         self.assertTrue(response.data["report_payload"]["document_integrity"]["hash_value"])
         self.assertEqual(response.data["response_evidence_summary"][0]["traceability"]["translation_reference"]["status"], "COMPLETED")
@@ -311,6 +321,7 @@ class EvaluationReportApiTests(TestCase):
         latest_report = self.client.get(f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/report")
         self.assertEqual(latest_report.status_code, 200)
         self.assertEqual(latest_report.data["id"], str(report.public_id))
+        self.assertTrue(latest_report.data["employer_pdf_url"].endswith(".pdf"))
 
         report_detail = self.client.get(f"/api/v1/evaluations/reports/{report.public_id}")
         self.assertEqual(report_detail.status_code, 200)
@@ -346,6 +357,29 @@ class EvaluationReportApiTests(TestCase):
                 resource_id=report.id,
             ).exists()
         )
+
+    def test_candidate_score_summary_endpoint_returns_report_metadata(self):
+        self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+        report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status=EvaluationReport.STATUS_ACTIVE)
+
+        response = self.client.get("/api/v1/evaluations/candidate-scores")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        summary = response.data[0]
+        self.assertEqual(summary["candidate_id"], str(self.candidate.public_id))
+        self.assertEqual(summary["evaluation_id"], str(self.evaluation.public_id))
+        self.assertEqual(summary["status"], "REQUIRES_HUMAN_REVIEW")
+        self.assertEqual(summary["certificate"], None)
+        self.assertEqual(summary["report"]["report_id"], str(report.public_id))
+        self.assertEqual(summary["report"]["report_number"], report.report_number)
+        self.assertEqual(summary["report"]["report_status"], EvaluationReport.STATUS_ACTIVE)
+        self.assertTrue(summary["report"]["pdf_url"].endswith(".pdf"))
+        self.assertEqual(summary["competencies"][0]["code"], "safety_awareness")
 
     def test_regenerate_report_marks_previous_one_stale_and_keeps_history(self):
         first = self.client.post(

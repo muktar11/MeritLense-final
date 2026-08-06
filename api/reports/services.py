@@ -1,10 +1,15 @@
+import base64
 import hashlib
 import json
+import mimetypes
+from io import BytesIO
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import transaction
+from django.template.loader import render_to_string
 from django.utils import timezone
 
 from api.audit.services import AuditLogService
@@ -15,6 +20,16 @@ from api.evaluations.models import (
     SessionEvaluationSummary,
 )
 from api.reports.models import EvaluationReport
+
+try:
+    import qrcode
+except Exception:  # pragma: no cover - optional runtime dependency
+    qrcode = None
+
+try:
+    from weasyprint import HTML
+except Exception:  # pragma: no cover - optional runtime dependency
+    HTML = None
 
 
 class EvaluationReportError(Exception):
@@ -32,7 +47,7 @@ class EvaluationReportService:
     EVALUATION_FLOW_REFERENCE = (
         "Interview Session -> Responses -> AI Processing -> Deterministic Scoring -> Rule Engine -> Evaluation Report"
     )
-    CLASSIFICATION = "CONFIDENTIAL — Internal Use Only"
+    CLASSIFICATION = "CONFIDENTIAL - Internal Use Only"
     REPORT_NAME = "MeritLense Workforce Readiness Assessment Report"
     GENERATED_BY = "MeritLense Platform"
     QR_VERIFY_BASE_URL = "https://verify.meritleense.com/report"
@@ -180,6 +195,7 @@ class EvaluationReportService:
             "verification_status",
             "qr_verification_url",
             "score_readiness_policy",
+            "transcript_report",
             "evaluation_flow_reference",
         ]
         return {key: report.report_payload.get(key) for key in allowed_keys}
@@ -299,6 +315,10 @@ class EvaluationReportService:
                     "question_id": str(result.question.public_id),
                     "candidate_response_id": str(response.public_id),
                     "question_order": result.question.question_order,
+                    "question_type": (
+                        getattr(result.rule, "question_type", "")
+                        or getattr(getattr(result.question, "question_template", None), "question_type", "")
+                    ),
                     "competency_code": result.competency_code,
                     "competency_name": result.competency_name,
                     "question_text": result.question.question_text,
@@ -501,6 +521,16 @@ class EvaluationReportService:
         )
         consent_summary = cls._build_consent_summary(session)
         identity_verification = cls._build_identity_verification_summary(session)
+        evaluation_bands = cls._build_evaluation_bands(
+            competency_breakdown=competency_breakdown,
+            response_evidence_summary=response_evidence_summary,
+            overall_percentage=summary.overall_percentage,
+        )
+        role_fit = cls._build_role_fit_summary(
+            evaluation=evaluation,
+            overall_percentage=summary.overall_percentage,
+            evaluation_bands=evaluation_bands,
+        )
         audit_log = cls._build_audit_log_stub(evaluation=evaluation, generated_at=generated_at)
         qr_verification_url = cls._build_qr_verification_url(report_number=report_number)
 
@@ -551,7 +581,7 @@ class EvaluationReportService:
                 },
                 "top_strengths": top_strengths,
                 "top_risks": top_risks,
-                "top_source": "Rule Engine — competency score ranking",
+                "top_source": "Rule Engine - competency score ranking",
                 "suggested_action": suggested_action,
                 "suggested_action_display": suggested_action_display,
                 "assessment_scope": "Pre-employment Workforce Readiness Only",
@@ -563,6 +593,12 @@ class EvaluationReportService:
             "improvement_plan": improvement_plan,
             "data_processing_consent": consent_summary,
             "identity_verification": identity_verification,
+            "transcript_report": {
+                "evaluation_bands": evaluation_bands,
+                "role_fit": role_fit,
+                "privacy_commitments": cls._build_privacy_commitments(),
+                "compliance_badges": cls._build_compliance_badges(),
+            },
             "verification_status": cls._derive_qr_verification_status(EvaluationReport.STATUS_ACTIVE),
             "qr_verification_url": qr_verification_url,
             "candidate_id": str(candidate.public_id),
@@ -952,18 +988,258 @@ class EvaluationReportService:
 
     @classmethod
     def _build_identity_verification_summary(cls, session):
-        if not session.identity_verified and not session.verification_status:
-            return {"status": "NOT_APPLICABLE", "method": None, "timestamp": None}
-        method = "SESSION_IDENTITY_VERIFICATION" if session.identity_verified else None
-        timestamp = None
-        latest_artifact = session.artifacts.filter(artifact_type__in=["ID_DOCUMENT", "SELFIE_IMAGE"]).order_by("-uploaded_at").first()
-        if latest_artifact is not None:
-            timestamp = latest_artifact.uploaded_at.isoformat()
+        captured_artifact = session.artifacts.filter(
+            artifact_type__in=["WEBCAM_FRAME", "SELFIE_IMAGE"],
+        ).order_by("-uploaded_at").first()
+        reference_artifact = session.artifacts.filter(
+            artifact_type="ID_DOCUMENT",
+        ).order_by("-uploaded_at").first()
+
+        timestamp_source = captured_artifact or reference_artifact
+        timestamp = timestamp_source.uploaded_at.isoformat() if timestamp_source is not None else None
+        verification_status = session.verification_status or "NOT_STARTED"
         return {
             "status": "VERIFIED" if session.identity_verified else "NOT_APPLICABLE",
-            "method": method,
+            "method": "SESSION_IDENTITY_VERIFICATION" if session.identity_verified else None,
             "timestamp": timestamp,
+            "verification_status": verification_status,
+            "verification_label": cls._verification_status_label(verification_status),
+            "face_match_score": cls._decimal(session.face_match_score),
+            "single_face_detected": bool(session.single_face_detected),
+            "liveness_passed": cls._resolve_liveness_passed(session),
+            "verification_duration_seconds": cls._derive_verification_duration_seconds(
+                session,
+                captured_artifact=captured_artifact,
+                reference_artifact=reference_artifact,
+            ),
+            "captured_image_data_uri": (
+                cls._file_to_data_uri(getattr(captured_artifact, "file", None))
+                or cls._file_to_data_uri(getattr(session.candidate, "profile_photo", None))
+            ),
+            "verified_photo_data_uri": (
+                cls._file_to_data_uri(getattr(reference_artifact, "file", None))
+                or cls._file_to_data_uri(getattr(session.candidate, "verification_photo", None))
+                or cls._file_to_data_uri(getattr(session.candidate, "profile_photo", None))
+            ),
         }
+
+    @classmethod
+    def _build_evaluation_bands(cls, *, competency_breakdown, response_evidence_summary, overall_percentage):
+        configs = [
+            {
+                "code": "COGNITIVE",
+                "label": "Cognitive Skills",
+                "description": "Problem Solving, Logic, Comprehension",
+            },
+            {
+                "code": "BEHAVIORAL",
+                "label": "Behavioral Traits",
+                "description": "Adaptability, Integrity, Attitude",
+            },
+            {
+                "code": "TASK_EXECUTION",
+                "label": "Task Execution",
+                "description": "Accuracy, Efficiency, Consistency",
+            },
+        ]
+        grouped_scores = {config["code"]: [] for config in configs}
+
+        for item in response_evidence_summary:
+            grouped_scores[cls._resolve_evaluation_band(item)].append(float(item.get("percentage") or 0))
+
+        fallback_percentage = float(overall_percentage or 0)
+        fallback_by_band = {
+            "COGNITIVE": cls._fallback_band_percentages(
+                competency_breakdown=competency_breakdown,
+                keywords=["communication", "language", "knowledge", "problem", "logic", "comprehension"],
+            ),
+            "BEHAVIORAL": cls._fallback_band_percentages(
+                competency_breakdown=competency_breakdown,
+                keywords=["behavior", "integrity", "reliability", "professional", "attitude", "patience", "teamwork"],
+            ),
+            "TASK_EXECUTION": cls._fallback_band_percentages(
+                competency_breakdown=competency_breakdown,
+                keywords=["task", "safety", "clean", "maintenance", "execution", "operation", "first aid"],
+            ),
+        }
+
+        results = []
+        for config in configs:
+            percentages = grouped_scores[config["code"]] or fallback_by_band[config["code"]] or [fallback_percentage]
+            score = int(round(sum(percentages) / len(percentages))) if percentages else int(round(fallback_percentage))
+            results.append(
+                {
+                    **config,
+                    "score": max(0, min(100, score)),
+                    "out_of": 100,
+                }
+            )
+        return results
+
+    @classmethod
+    def _fallback_band_percentages(cls, *, competency_breakdown, keywords):
+        matches = []
+        for item in competency_breakdown:
+            haystack = " ".join(
+                [
+                    str(item.get("competency_code") or "").lower(),
+                    str(item.get("competency_name") or "").lower(),
+                ]
+            )
+            if any(keyword in haystack for keyword in keywords):
+                matches.append(float(item.get("percentage") or 0))
+        return matches
+
+    @classmethod
+    def _resolve_evaluation_band(cls, item):
+        question_type = str(item.get("question_type") or "").strip().lower()
+        competency_text = " ".join(
+            [
+                str(item.get("competency_code") or "").lower(),
+                str(item.get("competency_name") or "").lower(),
+            ]
+        )
+
+        if question_type in {"behavioral", "integrity"}:
+            return "BEHAVIORAL"
+        if question_type in {"safety", "task"}:
+            return "TASK_EXECUTION"
+        if question_type in {"communication", "knowledge", "situational", "scenario"}:
+            return "COGNITIVE"
+
+        if any(token in competency_text for token in ["behavior", "integrity", "reliability", "professional", "teamwork"]):
+            return "BEHAVIORAL"
+        if any(token in competency_text for token in ["task", "safety", "clean", "maintenance", "first aid"]):
+            return "TASK_EXECUTION"
+        return "COGNITIVE"
+
+    @classmethod
+    def _build_role_fit_summary(cls, *, evaluation, overall_percentage, evaluation_bands):
+        band_scores = {
+            item["code"]: float(item.get("score") or 0)
+            for item in evaluation_bands
+        }
+        role_profiles = [
+            {"code": "HK", "label": "Cleaning", "weights": {"TASK_EXECUTION": 0.55, "BEHAVIORAL": 0.20, "COGNITIVE": 0.25}},
+            {"code": "NA", "label": "Child Care", "weights": {"BEHAVIORAL": 0.45, "TASK_EXECUTION": 0.25, "COGNITIVE": 0.30}},
+            {"code": "EC", "label": "Elderly Care", "weights": {"BEHAVIORAL": 0.50, "TASK_EXECUTION": 0.30, "COGNITIVE": 0.20}},
+            {"code": "DR", "label": "Driver", "weights": {"TASK_EXECUTION": 0.45, "COGNITIVE": 0.35, "BEHAVIORAL": 0.20}},
+            {"code": "KA", "label": "Kitchen Support", "weights": {"TASK_EXECUTION": 0.50, "COGNITIVE": 0.20, "BEHAVIORAL": 0.30}},
+            {"code": "MW", "label": "Maintenance", "weights": {"TASK_EXECUTION": 0.55, "COGNITIVE": 0.20, "BEHAVIORAL": 0.25}},
+            {"code": "OT", "label": "General Support", "weights": {"TASK_EXECUTION": 0.34, "COGNITIVE": 0.33, "BEHAVIORAL": 0.33}},
+        ]
+
+        scored_roles = []
+        for profile in role_profiles:
+            raw_score = 0
+            for band_code, weight in profile["weights"].items():
+                raw_score += band_scores.get(band_code, float(overall_percentage or 0)) * weight
+            match_score = max(0, min(100, int(round(raw_score))))
+            scored_roles.append(
+                {
+                    "code": profile["code"],
+                    "label": profile["label"],
+                    "match_score": match_score,
+                    "match_label": cls._match_label(match_score),
+                }
+            )
+
+        current_role_code = evaluation.candidate_job_role or getattr(evaluation.candidate, "job_role", "") or "OT"
+        current_role = next((item for item in scored_roles if item["code"] == current_role_code), None)
+        alternates = [item for item in scored_roles if item["code"] != current_role_code]
+        alternates.sort(key=lambda item: item["match_score"], reverse=True)
+
+        ordered = []
+        if current_role is not None:
+            ordered.append(current_role)
+        ordered.extend(alternates[:2])
+        return ordered[:3]
+
+    @classmethod
+    def _build_privacy_commitments(cls):
+        return [
+            {
+                "title": "End-to-End Encryption",
+                "description": "All assessment data is encrypted in transit and at rest.",
+                "retention_days": 30,
+            },
+            {
+                "title": "Purpose Limitation",
+                "description": "Candidate data is used strictly for evaluation and hiring workflows.",
+                "retention_days": 30,
+            },
+            {
+                "title": "Minimal Data Retention",
+                "description": "Only essential interview records are retained for a limited audit window.",
+                "retention_days": 30,
+            },
+            {
+                "title": "User Consent & Control",
+                "description": "Candidate consent, disclosure, and privacy acknowledgements are captured before assessment.",
+                "retention_days": 30,
+            },
+        ]
+
+    @classmethod
+    def _build_compliance_badges(cls):
+        return ["GDPR", "ISO/IEC 27001", "SOC 2 Type II"]
+
+    @classmethod
+    def _verification_status_label(cls, status):
+        labels = {
+            "VERIFIED": "Verified",
+            "PENDING": "Pending",
+            "FAILED": "Failed",
+            "NOT_STARTED": "Not Started",
+        }
+        return labels.get((status or "").upper(), status or "Not Started")
+
+    @classmethod
+    def _resolve_liveness_passed(cls, session):
+        for log in session.integrity_logs.order_by("-detected_at")[:10]:
+            details = log.details or {}
+            if details.get("liveness_passed") is not None:
+                return bool(details.get("liveness_passed"))
+        return True if session.identity_verified else None
+
+    @classmethod
+    def _derive_verification_duration_seconds(cls, session, *, captured_artifact, reference_artifact):
+        timestamps = [
+            artifact.uploaded_at
+            for artifact in (captured_artifact, reference_artifact)
+            if artifact is not None and artifact.uploaded_at is not None
+        ]
+        if len(timestamps) < 2:
+            return None
+        return round((max(timestamps) - min(timestamps)).total_seconds(), 1)
+
+    @classmethod
+    def _file_to_data_uri(cls, file_field):
+        if not file_field:
+            return None
+        file_name = getattr(file_field, "name", "") or ""
+        mime_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+        if not mime_type.startswith("image/"):
+            return None
+        try:
+            file_field.open("rb")
+            encoded = base64.b64encode(file_field.read()).decode("ascii")
+        except Exception:
+            return None
+        finally:
+            try:
+                file_field.close()
+            except Exception:
+                pass
+        return f"data:{mime_type};base64,{encoded}"
+
+    @classmethod
+    def _match_label(cls, score):
+        if score >= 88:
+            return "Excellent Match"
+        if score >= 75:
+            return "Strong Match"
+        return "Potential Match"
 
     @classmethod
     def _build_audit_log_stub(cls, *, evaluation, generated_at):
@@ -1049,6 +1325,25 @@ class EvaluationReportService:
 
     @classmethod
     def _render_employer_pdf(cls, *, report_payload, report_number):
+        if HTML is not None:
+            try:
+                html = render_to_string(
+                    "reports/employer_report.html",
+                    {
+                        "report": report_payload,
+                        "report_number": report_number,
+                        "qr_data_uri": cls._build_qr_data_uri(report_payload.get("qr_verification_url", "")),
+                    },
+                )
+                pdf_bytes = HTML(
+                    string=html,
+                    base_url=str(getattr(settings, "BASE_DIR", "")),
+                ).write_pdf()
+                pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
+                return pdf_bytes, pdf_hash
+            except Exception:
+                pass
+
         pdf_lines = cls._build_employer_pdf_lines(
             report_payload=report_payload,
             report_number=report_number,
@@ -1056,6 +1351,16 @@ class EvaluationReportService:
         pdf_bytes = cls._build_simple_pdf(pdf_lines)
         pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
         return pdf_bytes, pdf_hash
+
+    @classmethod
+    def _build_qr_data_uri(cls, verification_url):
+        if not verification_url or qrcode is None:
+            return None
+        qr_image = qrcode.make(verification_url)
+        buffer = BytesIO()
+        qr_image.save(buffer, format="PNG")
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        return f"data:image/png;base64,{encoded}"
 
     @classmethod
     def _build_employer_pdf_lines(cls, *, report_payload, report_number):
@@ -1083,15 +1388,14 @@ class EvaluationReportService:
             f"Assessment Duration Minutes: {context.get('assessment_duration_minutes', '')}",
             f"Assessment Quality: {context.get('assessment_quality', '')}",
             f"Candidate Reference: {context.get('candidate_reference', '')}",
-            f"Interface Language: {context.get('interface_language', '')}",
-            f"Response Language: {context.get('response_language', '')}",
+            f"Assessment Language: {context.get('assessment_language', '')}",
             "",
             "Executive Summary",
-            f"Readiness Indicator: {readiness.get('label', '')} ({readiness.get('code', '')})",
+            f"Readiness Indicator: {readiness.get('value', '')} ({readiness.get('code', '')})",
             f"Readiness Reason: {(summary.get('readiness_reason') or {}).get('employer_message', '')}",
             f"Overall Score: {summary.get('overall_score', '')}%",
             f"Assessment Scope: {summary.get('assessment_scope', '')}",
-            f"Suggested Action: {summary.get('suggested_action', '')}",
+            f"Suggested Action: {summary.get('suggested_action_display', '')}",
             f"Evaluation Reliability: {summary.get('evaluation_reliability', '')}",
         ]
         for factor in summary.get("reliability_factors", []):

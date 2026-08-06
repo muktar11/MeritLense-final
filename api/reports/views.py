@@ -73,7 +73,10 @@ class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet
             )
         except EvaluationReportError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(EvaluationReportSerializer(new_report).data, status=status.HTTP_200_OK)
+        return Response(
+            EvaluationReportSerializer(new_report, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["get"], url_path="export-payload")
     def export_payload(self, request, id=None):

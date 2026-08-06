@@ -8,8 +8,8 @@ router.register(r'evaluations', EvaluationViewSet, basename='evaluation')
 router.register(r'rule-sets', ScoringRuleSetViewSet, basename='scoring-rule-set')
 
 urlpatterns = [
+    path('candidate-scores', CandidateScoreSummaryView.as_view(), name='candidate-score-summaries'),
     path('', include(router.urls)),
     path('', include(report_urlpatterns)),
-    path('candidate-scores', CandidateScoreSummaryView.as_view(), name='candidate-score-summary'),
     path('certificates/verify/<str:certificate_id>', CertificateVerifyView.as_view(), name='certificate-verify'),
 ]

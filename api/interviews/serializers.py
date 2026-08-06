@@ -512,12 +512,16 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
         evaluation = getattr(obj, "linked_evaluation", None)
         if evaluation is None:
             return None
-        report = evaluation.reports.first()
-        if report is None:
-            return None
+        from api.reports.models import EvaluationReport
         from api.reports.serializers import EvaluationReportListSerializer
 
-        return EvaluationReportListSerializer(report).data
+        report = evaluation.reports.filter(report_status=EvaluationReport.STATUS_ACTIVE).first()
+        if report is None:
+            return None
+        return EvaluationReportListSerializer(
+            report,
+            context={"request": self.context.get("request")},
+        ).data
 
     def get_observed_tasks(self, obj):
         tasks = obj.observed_tasks.select_related("task_definition").order_by("task_order")

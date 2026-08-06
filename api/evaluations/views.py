@@ -1,10 +1,10 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.views import APIView
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 from api.audit.services import AuditLogService
 from api.payments.mixins import SubscriptionUsageMixin
@@ -25,20 +25,137 @@ from .serializers import (
     EvaluationCompleteSerializer,
     EvaluationRescheduleSerializer,
     EvaluationCancelSerializer,
+    CandidateScoreSummarySerializer,
     ResponseEvaluationResultSerializer,
     ScoringRuleSetSerializer,
     SessionEvaluationSummarySerializer,
 )
 from .permissions import CanManageEvaluation, CanViewEvaluation
-from api.core.constants import Roles, EvaluationStatus, EvaluationType
+from api.core.constants import CertificateStatus, Roles, EvaluationStatus, EvaluationType
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
 from .models import Certificate, EvaluationReadinessDecisionRecord, ScoringRuleSet, SessionEvaluationSummary
 from .scoring_services import Week6ScoringError, Week6ScoringService
+from api.reports.models import EvaluationReport
 from api.reports.serializers import EvaluationReportSerializer
 from api.reports.services import EvaluationReportError, EvaluationReportService
 from api.sessions.models import InterviewSession
 from api.sessions.services import InterviewSessionService
+
+
+def _accessible_evaluations_queryset(user):
+    queryset = Evaluation.objects.all()
+
+    if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
+        return queryset
+
+    if user.role == Roles.B2C:
+        return queryset.filter(created_by=user)
+
+    if user.role == Roles.B2B:
+        if hasattr(user, 'company_profile'):
+            return queryset.filter(company=user.company_profile.company)
+        return queryset.none()
+
+    if user.role == Roles.B2B_TEAM_MEMBER:
+        return queryset.filter(
+            Q(created_by=user) |
+            Q(candidate__shared_with=user)
+        ).distinct()
+
+    return queryset.none()
+
+
+class CandidateScoreSummaryView(APIView):
+    """GET /evaluations/candidate-scores - each accessible candidate's most
+    recent scored evaluation, including both certificate and transcript report
+    artifacts when they exist."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        summaries = (
+            SessionEvaluationSummary.objects.select_related(
+                "candidate",
+                "session",
+                "evaluation",
+                "evaluation__certificate",
+            )
+            .prefetch_related(
+                Prefetch(
+                    "evaluation__reports",
+                    queryset=EvaluationReport.objects.filter(
+                        report_status=EvaluationReport.STATUS_ACTIVE,
+                    ).order_by("-generated_at", "-created_at"),
+                )
+            )
+            .order_by("candidate_id", "-generated_at", "-created_at")
+        )
+
+        if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
+            pass
+        elif user.role == Roles.B2C:
+            summaries = summaries.filter(evaluation__created_by=user)
+        elif user.role == Roles.B2B:
+            if hasattr(user, "company_profile") and user.company_profile:
+                summaries = summaries.filter(evaluation__company=user.company_profile.company)
+            else:
+                summaries = summaries.none()
+        elif user.role == Roles.B2B_TEAM_MEMBER:
+            summaries = summaries.filter(
+                Q(evaluation__created_by=user) | Q(evaluation__candidate__shared_with=user)
+            ).distinct()
+        else:
+            summaries = summaries.none()
+
+        latest_by_candidate = {}
+        for summary in summaries:
+            latest_by_candidate.setdefault(summary.candidate_id, summary)
+
+        results = []
+        for summary in latest_by_candidate.values():
+            evaluation = summary.evaluation
+            cert = getattr(evaluation, "certificate", None) if evaluation else None
+            active_report = next(iter(evaluation.reports.all()), None) if evaluation else None
+
+            results.append(
+                {
+                    "candidate_id": str(summary.candidate.public_id),
+                    "evaluation_id": str(evaluation.public_id) if evaluation else None,
+                    "role_code": summary.session.role_code if summary.session_id else summary.candidate.job_role,
+                    "overall_percentage": float(summary.overall_percentage),
+                    "status": summary.status,
+                    "generated_at": summary.generated_at,
+                    "competencies": [
+                        {
+                            "code": item.get("competency_code") or "",
+                            "name": item.get("competency_name")
+                            or (item.get("competency_code") or "").replace("_", " ").title(),
+                            "percentage": float(item.get("percentage") or 0),
+                        }
+                        for item in (summary.competencies_summary or [])
+                    ],
+                    "certificate": {
+                        "certificate_id": cert.certificate_id,
+                        "pdf_url": request.build_absolute_uri(cert.pdf_file.url),
+                        "issued_at": cert.issued_at,
+                    }
+                    if cert and cert.pdf_file
+                    else None,
+                    "report": {
+                        "report_id": str(active_report.public_id),
+                        "report_number": active_report.report_number,
+                        "report_status": active_report.report_status,
+                        "pdf_url": request.build_absolute_uri(active_report.employer_pdf.url),
+                        "generated_at": active_report.generated_at,
+                    }
+                    if active_report and active_report.employer_pdf
+                    else None,
+                }
+            )
+
+        return Response(CandidateScoreSummarySerializer(results, many=True).data)
 
 
 class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.ModelViewSet):
@@ -49,8 +166,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         if getattr(self, "swagger_fake_view", False):
             return Evaluation.objects.none()
 
-        user = self.request.user
-        queryset = Evaluation.objects.all()
+        queryset = _accessible_evaluations_queryset(self.request.user)
         
         status = self.request.query_params.get('status')
         if status:
@@ -72,24 +188,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         if to_date:
             queryset = queryset.filter(scheduled_date__lte=to_date)
         
-        if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
-            return queryset
-        
-        if user.role == Roles.B2C:
-            return queryset.filter(created_by=user)
-        
-        if user.role == Roles.B2B:
-            if hasattr(user, 'company_profile'):
-                return queryset.filter(company=user.company_profile.company)
-            return queryset.none()
-        
-        if user.role == Roles.B2B_TEAM_MEMBER:
-            return queryset.filter(
-                Q(created_by=user) |
-                Q(candidate__shared_with=user)
-            ).distinct()
-        
-        return queryset.none()
+        return queryset
     
     def get_serializer_class(self):
         if self.action == 'create':
@@ -398,7 +497,10 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             )
         except EvaluationReportError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(EvaluationReportSerializer(report).data, status=status.HTTP_200_OK)
+        return Response(
+            EvaluationReportSerializer(report, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["get"], url_path="report")
     def report(self, request, id=None):
@@ -422,7 +524,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             },
             request=request,
         )
-        return Response(EvaluationReportSerializer(report).data)
+        return Response(EvaluationReportSerializer(report, context={"request": request}).data)
 
     @action(detail=False, methods=['get'])
     def upcoming(self, request):
@@ -621,83 +723,6 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
 
         if scheduled_changed or duration_changed:
             evaluation.save(update_fields=["status", "scheduled_date", "duration_minutes", "updated_at"])
-
-
-class CandidateScoreSummaryView(APIView):
-    """GET /evaluations/candidate-scores - each accessible candidate's most
-    recently scored evaluation, with its real per-competency breakdown.
-
-    Score Management (the frontend page) used to read from ScoreSet/
-    CandidateScore (api/scores/) - a separate model nothing in the actual
-    scoring pipeline ever wrote to, and whose fixed area vocabulary
-    (SAFE_DRIVING, CLEANING, ...) doesn't correspond to any real
-    ScoringRule.competency_code in use. This reads the real output of
-    Week6ScoringService directly instead, so competency columns reflect
-    whatever competencies an evaluation's rule set actually scored, for
-    any role, with no per-role mapping to maintain.
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        user = request.user
-        summaries = SessionEvaluationSummary.objects.select_related(
-            "candidate", "session", "evaluation", "evaluation__certificate"
-        ).order_by("candidate_id", "-generated_at", "-created_at")
-
-        if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
-            pass
-        elif user.role == Roles.B2C:
-            summaries = summaries.filter(evaluation__created_by=user)
-        elif user.role == Roles.B2B:
-            if hasattr(user, "company_profile") and user.company_profile:
-                summaries = summaries.filter(evaluation__company=user.company_profile.company)
-            else:
-                summaries = summaries.none()
-        elif user.role == Roles.B2B_TEAM_MEMBER:
-            summaries = summaries.filter(
-                Q(evaluation__created_by=user) | Q(evaluation__candidate__shared_with=user)
-            ).distinct()
-        else:
-            summaries = summaries.none()
-
-        # One row per candidate - their most recent scored evaluation,
-        # picked in Python (not DISTINCT ON) to stay portable and to keep
-        # the access-control filtering above as plain ORM Q objects.
-        latest_by_candidate = {}
-        for summary in summaries:
-            latest_by_candidate.setdefault(summary.candidate_id, summary)
-
-        results = []
-        for summary in latest_by_candidate.values():
-            cert = getattr(summary.evaluation, "certificate", None) if summary.evaluation_id else None
-            results.append({
-                "candidate_id": str(summary.candidate.public_id),
-                "evaluation_id": str(summary.evaluation.public_id) if summary.evaluation_id else None,
-                "role_code": summary.session.role_code if summary.session_id else summary.candidate.job_role,
-                "overall_percentage": float(summary.overall_percentage),
-                "status": summary.status,
-                "generated_at": summary.generated_at,
-                "competencies": [
-                    {
-                        "code": item.get("competency_code"),
-                        "name": item.get("competency_name") or item.get("competency_code"),
-                        "percentage": item.get("percentage"),
-                    }
-                    for item in summary.competencies_summary
-                ],
-                # None when this evaluation's tier doesn't issue certificates,
-                # or generation genuinely hasn't happened yet - the frontend
-                # shows an honest "not available" rather than a broken link.
-                "certificate": {
-                    "certificate_id": cert.certificate_id,
-                    "pdf_url": request.build_absolute_uri(cert.pdf_file.url),
-                    "issued_at": cert.issued_at,
-                } if cert and cert.pdf_file else None,
-            })
-
-        return Response(results)
-
 
 class CertificateVerifyView(APIView):
     """GET /evaluations/certificates/verify/{certificate_id} - public QR

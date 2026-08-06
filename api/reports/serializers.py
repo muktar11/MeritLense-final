@@ -66,6 +66,7 @@ class EvaluationReportSerializer(PublicIdModelSerializer):
 class EvaluationReportListSerializer(PublicIdModelSerializer):
     evaluation_id = serializers.UUIDField(source="evaluation.public_id", read_only=True)
     session_id = serializers.UUIDField(source="session.public_id", read_only=True)
+    employer_pdf_url = serializers.SerializerMethodField()
 
     class Meta:
         model = EvaluationReport
@@ -83,7 +84,16 @@ class EvaluationReportListSerializer(PublicIdModelSerializer):
             "rule_engine_version",
             "requires_human_review",
             "scoring_rule_version",
+            "employer_pdf_url",
             "generated_at",
             "last_regenerated_at",
         ]
         read_only_fields = fields
+
+    def get_employer_pdf_url(self, obj):
+        if not obj.employer_pdf:
+            return ""
+        request = self.context.get("request")
+        if request is None:
+            return obj.employer_pdf.url
+        return request.build_absolute_uri(obj.employer_pdf.url)

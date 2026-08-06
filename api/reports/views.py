@@ -1,3 +1,5 @@
+from io import BytesIO
+
 from django.db.models import Q
 from django.http import FileResponse, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -73,7 +75,10 @@ class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet
             )
         except EvaluationReportError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(EvaluationReportSerializer(new_report).data, status=status.HTTP_200_OK)
+        return Response(
+            EvaluationReportSerializer(new_report, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["get"], url_path="export-payload")
     def export_payload(self, request, id=None):
@@ -132,12 +137,29 @@ class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet
             },
             request=request,
         )
-        report.employer_pdf.open("rb")
+        filename = f"{report.report_number}.pdf"
+
+        if report.employer_pdf.name and report.employer_pdf.storage.exists(report.employer_pdf.name):
+            report.employer_pdf.open("rb")
+            return FileResponse(
+                report.employer_pdf,
+                content_type="application/pdf",
+                as_attachment=True,
+                filename=filename,
+            )
+
+        try:
+            pdf_bytes, _pdf_hash = EvaluationReportService.render_existing_pdf(report)
+        except EvaluationReportError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        pdf_stream = BytesIO(pdf_bytes)
+        pdf_stream.seek(0)
         return FileResponse(
-            report.employer_pdf,
+            pdf_stream,
             content_type="application/pdf",
             as_attachment=True,
-            filename=f"{report.report_number}.pdf",
+            filename=filename,
         )
 
 

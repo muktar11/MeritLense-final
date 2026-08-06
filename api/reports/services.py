@@ -1,10 +1,22 @@
+import base64
+import copy
 import hashlib
 import json
+import mimetypes
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+from io import BytesIO
+from pathlib import Path
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import transaction
+from django.template.loader import render_to_string
 from django.utils import timezone
 
 from api.audit.services import AuditLogService
@@ -15,6 +27,16 @@ from api.evaluations.models import (
     SessionEvaluationSummary,
 )
 from api.reports.models import EvaluationReport
+
+try:
+    import qrcode
+except Exception:  # pragma: no cover - optional runtime dependency
+    qrcode = None
+
+try:
+    from weasyprint import HTML
+except Exception:  # pragma: no cover - optional runtime dependency
+    HTML = None
 
 
 class EvaluationReportError(Exception):
@@ -32,10 +54,12 @@ class EvaluationReportService:
     EVALUATION_FLOW_REFERENCE = (
         "Interview Session -> Responses -> AI Processing -> Deterministic Scoring -> Rule Engine -> Evaluation Report"
     )
-    CLASSIFICATION = "CONFIDENTIAL — Internal Use Only"
+    CLASSIFICATION = "CONFIDENTIAL - Internal Use Only"
     REPORT_NAME = "MeritLense Workforce Readiness Assessment Report"
     GENERATED_BY = "MeritLense Platform"
-    QR_VERIFY_BASE_URL = "https://verify.meritleense.com/report"
+    PUBLIC_VERIFY_FRONTEND_URL = "https://www.meritlense.com"
+    LOGO_PATH = Path(__file__).resolve().parents[1] / "evaluations" / "assets" / "meritlense-logo.png"
+    _logo_data_uri_cache = None
 
     @classmethod
     def generate_for_evaluation(cls, *, evaluation, actor):
@@ -160,29 +184,30 @@ class EvaluationReportService:
             "classification",
             "report_name",
             "report_version",
-            "api_schema_version",
-            "assessment_framework_version",
-            "rule_engine_version",
-            "role_profile_version",
             "report_status",
             "generated_at",
             "generated_by",
-            "legal_record_id",
             "legal_disclaimer",
             "document_integrity",
             "assessment_context",
             "executive_summary",
+            "assessment_methodology",
+            "critical_competency_status",
+            "competency_breakdown",
             "risk_indicators",
             "evidence_summary",
             "improvement_plan",
             "data_processing_consent",
+            "candidate_snapshot",
             "identity_verification",
             "verification_status",
             "qr_verification_url",
-            "score_readiness_policy",
-            "evaluation_flow_reference",
         ]
-        return {key: report.report_payload.get(key) for key in allowed_keys}
+        payload = {
+            key: copy.deepcopy(report.report_payload.get(key))
+            for key in allowed_keys
+        }
+        return cls._sanitize_employer_payload(payload)
 
     @classmethod
     def build_public_verification_payload(cls, report):
@@ -192,10 +217,68 @@ class EvaluationReportService:
             "target_role": payload.get("assessment_context", {}).get("target_role"),
             "assessment_date": payload.get("assessment_context", {}).get("assessment_date"),
             "verification_status": cls._derive_qr_verification_status(report.report_status),
-            "rule_engine_version": report.rule_engine_version,
+            "public_report_status": cls._display_report_status(report.report_status),
             "sha256_hash": report.pdf_hash or payload.get("document_integrity", {}).get("hash_value", ""),
             "verification_timestamp": timezone.now().isoformat(),
         }
+
+    @classmethod
+    def _sanitize_employer_payload(cls, payload):
+        sanitized = copy.deepcopy(payload or {})
+
+        sanitized.pop("api_schema_version", None)
+        sanitized.pop("assessment_framework_version", None)
+        sanitized.pop("role_profile_version", None)
+        sanitized.pop("rule_engine_version", None)
+        sanitized.pop("legal_record_id", None)
+
+        assessment_context = sanitized.get("assessment_context") or {}
+        for key in ["candidate_email", "candidate_passport_id", "assessment_session_id", "role_profile_version"]:
+            assessment_context.pop(key, None)
+
+        candidate_snapshot = sanitized.get("candidate_snapshot") or {}
+        for key in ["email", "passport_id"]:
+            candidate_snapshot.pop(key, None)
+
+        executive_summary = sanitized.get("executive_summary") or {}
+        readiness_reason = executive_summary.get("readiness_reason")
+        if isinstance(readiness_reason, dict):
+            executive_summary["readiness_reason"] = {
+                "employer_message": readiness_reason.get("employer_message", ""),
+            }
+        override_details = executive_summary.get("override_details")
+        if isinstance(override_details, dict):
+            executive_summary["override_details"] = {
+                "triggered": bool(override_details.get("triggered")),
+            }
+        executive_summary.pop("top_source", None)
+
+        identity = sanitized.get("identity_verification") or {}
+        identity.pop("method", None)
+        identity.pop("timestamp", None)
+
+        return sanitized
+
+    @classmethod
+    def _display_report_status(cls, report_status):
+        mapping = {
+            EvaluationReport.STATUS_ACTIVE: "Active",
+            EvaluationReport.STATUS_SUPERSEDED: "Superseded",
+            EvaluationReport.STATUS_REVOKED: "Revoked",
+        }
+        return mapping.get(report_status, str(report_status or "").title())
+
+    @classmethod
+    def render_existing_pdf(cls, report):
+        payload = copy.deepcopy(report.report_payload or {})
+        if not payload:
+            raise EvaluationReportError(
+                "This report PDF is unavailable and cannot be rebuilt because its stored payload is missing."
+            )
+        return cls._render_employer_pdf(
+            report_payload=payload,
+            report_number=report.report_number,
+        )
 
     @classmethod
     def _get_summary(cls, evaluation):
@@ -257,9 +340,119 @@ class EvaluationReportService:
         return len(reports)
 
     @classmethod
+    def _friendly_competency_name(cls, competency_code=None, competency_name=None):
+        haystack = " ".join(
+            [
+                str(competency_code or "").lower(),
+                str(competency_name or "").lower(),
+            ]
+        )
+        mappings = [
+            (["patient", "safety"], "Patient Safety Awareness"),
+            (["hygiene"], "Hygiene Standards"),
+            (["clean"], "Hygiene Standards"),
+            (["sanitation"], "Hygiene Standards"),
+            (["communication"], "Communication Ability"),
+            (["language"], "Communication Ability"),
+            (["integrity"], "Integrity & Reliability"),
+            (["reliability"], "Integrity & Reliability"),
+            (["behavior"], "Integrity & Reliability"),
+            (["practical", "task"], "Practical Task Execution"),
+            (["task", "execution"], "Practical Task Execution"),
+            (["task"], "Practical Task Execution"),
+            (["safety"], "Safety Awareness"),
+            (["knowledge"], "Knowledge & Comprehension"),
+            (["logic"], "Knowledge & Comprehension"),
+            (["comprehension"], "Knowledge & Comprehension"),
+            (["cognitive"], "Knowledge & Comprehension"),
+            (["unmapped"], "General Readiness Competency"),
+        ]
+        for tokens, label in mappings:
+            if all(token in haystack for token in tokens):
+                return label
+        return cls._titleize_code(competency_name or competency_code or "Readiness Competency")
+
+    @classmethod
+    def _titleize_code(cls, value):
+        text = re.sub(r"[_\-]+", " ", str(value or "")).strip()
+        return re.sub(r"\s+", " ", text).title() if text else ""
+
+    @classmethod
+    def _normalize_text(cls, value):
+        if value is None:
+            return ""
+        if isinstance(value, (list, tuple, set)):
+            items = cls._normalize_text_list(value)
+            return ", ".join(items)
+
+        text = str(value).strip()
+        if not text:
+            return ""
+
+        if "," in text:
+            raw_parts = text.split(",")
+            non_empty_parts = [part for part in raw_parts if part != ""]
+            if non_empty_parts:
+                single_char_ratio = sum(len(part.strip()) <= 1 for part in non_empty_parts) / len(non_empty_parts)
+                if single_char_ratio >= 0.75:
+                    text = "".join(raw_parts)
+
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    @classmethod
+    def _normalize_text_list(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            normalized = cls._normalize_text(value)
+            return [normalized] if normalized else []
+
+        items = list(value) if isinstance(value, (list, tuple, set)) else [value]
+        stringified = [str(item) for item in items if item not in (None, "")]
+        if stringified:
+            single_char_ratio = sum(len(item.strip()) <= 1 for item in stringified) / len(stringified)
+            if single_char_ratio >= 0.75:
+                rebuilt = cls._normalize_text(",".join(stringified))
+                return [rebuilt] if rebuilt else []
+
+        cleaned = []
+        seen = set()
+        for item in items:
+            normalized = cls._normalize_text(item)
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                cleaned.append(normalized)
+        return cleaned
+
+    @classmethod
+    def _strength_statement(cls, label):
+        return f"Strong {label.lower()}"
+
+    @classmethod
+    def _risk_statement(cls, label):
+        return f"Readiness gap identified in {label.lower()}"
+
+    @classmethod
+    def _employer_evidence_finding(cls, item):
+        matched = cls._normalize_text_list(item.get("matched_indicators") or item.get("observed_indicators") or [])
+        missing = cls._normalize_text_list(item.get("missing_indicators") or [])
+        if matched and missing:
+            return (
+                f"Candidate demonstrated {', '.join(matched)}. "
+                f"Additional evidence is needed for {', '.join(missing)}."
+            )
+        if missing:
+            return f"Additional evidence is needed for {', '.join(missing)}."
+        if matched:
+            return f"Candidate demonstrated {', '.join(matched)}."
+        return cls._normalize_text(item.get("explanation") or "Readiness gap identified from the candidate response.")
+
+    @classmethod
     def _build_competency_breakdown(cls, competency_results):
         rows = []
         for item in competency_results:
+            display_name = cls._friendly_competency_name(item.competency_code, item.competency_name)
             explanation = (
                 f"This competency is below threshold because the score is {item.percentage} percent "
                 f"and the configured threshold is {item.pass_threshold} percent."
@@ -273,6 +466,7 @@ class EvaluationReportService:
                 {
                     "competency_code": item.competency_code,
                     "competency_name": item.competency_name,
+                    "display_name": display_name,
                     "score": cls._decimal(item.total_score),
                     "max_score": cls._decimal(item.max_score),
                     "percentage": cls._decimal(item.percentage),
@@ -299,8 +493,13 @@ class EvaluationReportService:
                     "question_id": str(result.question.public_id),
                     "candidate_response_id": str(response.public_id),
                     "question_order": result.question.question_order,
+                    "question_type": (
+                        getattr(result.rule, "question_type", "")
+                        or getattr(getattr(result.question, "question_template", None), "question_type", "")
+                    ),
                     "competency_code": result.competency_code,
                     "competency_name": result.competency_name,
+                    "display_name": cls._friendly_competency_name(result.competency_code, result.competency_name),
                     "question_text": result.question.question_text,
                     "score": cls._decimal(result.score),
                     "max_score": cls._decimal(result.max_score),
@@ -347,15 +546,18 @@ class EvaluationReportService:
     def _build_human_review_flags(cls, *, evaluation, summary, response_results, competency_results):
         flags = []
         for failure in summary.critical_failures:
+            competency = cls._friendly_competency_name(
+                failure.get("competency_code"),
+                failure.get("competency_name"),
+            )
             flags.append(
                 {
                     "flag_type": "critical_failure",
                     "severity": "high",
                     "source": "scoring_engine",
                     "candidate_response_id": failure.get("response_id"),
-                    "message": (
-                        f"Critical failure detected for {failure.get('question_code') or 'unknown question'} "
-                        f"in {failure.get('competency_code') or 'unknown competency'}."
+                    "message": cls._normalize_text(
+                        failure.get("reason") or f"Required readiness evidence was not met for {competency}."
                     ),
                     "requires_review": True,
                 }
@@ -364,6 +566,9 @@ class EvaluationReportService:
             response = result.response
             evaluation_input = getattr(response, "evaluation_input_artifact", None)
             interpretation = getattr(response, "ai_interpretation", None)
+            review_message = cls._normalize_text(getattr(evaluation_input, "review_reason", ""))
+            if "confidence" in review_message.lower() or "threshold" in review_message.lower():
+                review_message = "Response interpretation requires manual review."
             if result.requires_human_review:
                 flags.append(
                     {
@@ -371,7 +576,7 @@ class EvaluationReportService:
                         "severity": "medium",
                         "source": "ai_processing",
                         "candidate_response_id": str(response.public_id),
-                        "message": getattr(evaluation_input, "review_reason", "") or "Human review is required for this response.",
+                        "message": review_message or "Human review is required for this response.",
                         "requires_review": True,
                     }
                 )
@@ -385,7 +590,7 @@ class EvaluationReportService:
                         "severity": "medium",
                         "source": "ai_processing",
                         "candidate_response_id": str(response.public_id),
-                        "message": ", ".join(transcript_issues),
+                        "message": ", ".join(cls._normalize_text_list(transcript_issues)),
                         "requires_review": True,
                     }
                 )
@@ -396,7 +601,8 @@ class EvaluationReportService:
                         "severity": "medium",
                         "source": "translation",
                         "candidate_response_id": str(response.public_id),
-                        "message": response.translation_error or "Translation failed.",
+                        "message": cls._normalize_text(response.translation_error)
+                        or "Response translation requires manual review.",
                         "requires_review": True,
                     }
                 )
@@ -407,7 +613,9 @@ class EvaluationReportService:
                         "severity": "high",
                         "source": "scoring_engine",
                         "candidate_response_id": str(response.public_id),
-                        "message": f"Required indicators were not satisfied for question {result.question.question_order}.",
+                        "message": (
+                            f"Additional evidence is required for assessment question {result.question.question_order}."
+                        ),
                         "requires_review": True,
                     }
                 )
@@ -418,19 +626,20 @@ class EvaluationReportService:
                         "severity": "medium",
                         "source": "session",
                         "candidate_response_id": str(response.public_id),
-                        "message": "Candidate response is incomplete or missing transcript text.",
+                        "message": "No usable response was captured for this assessment item.",
                         "requires_review": True,
                     }
                 )
         for item in competency_results:
             if item.status == CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD:
+                competency = cls._friendly_competency_name(item.competency_code, item.competency_name)
                 flags.append(
                     {
                         "flag_type": "below_threshold_competency",
                         "severity": "medium",
                         "source": "scoring_engine",
                         "candidate_response_id": "",
-                        "message": f"{item.competency_name or item.competency_code} is below threshold at {item.percentage} percent.",
+                        "message": f"{competency} is below the required threshold.",
                         "requires_review": True,
                     }
                 )
@@ -501,6 +710,22 @@ class EvaluationReportService:
         )
         consent_summary = cls._build_consent_summary(session)
         identity_verification = cls._build_identity_verification_summary(session)
+        candidate_snapshot = cls._build_candidate_snapshot(candidate, session)
+        evaluation_bands = cls._build_evaluation_bands(
+            competency_breakdown=competency_breakdown,
+            response_evidence_summary=response_evidence_summary,
+            overall_percentage=summary.overall_percentage,
+        )
+        assessment_methodology = cls._build_assessment_methodology()
+        critical_competency_status = cls._build_critical_competency_status(
+            competency_breakdown=competency_breakdown,
+            risk_indicators=risk_indicators,
+        )
+        role_fit = cls._build_role_fit_summary(
+            evaluation=evaluation,
+            overall_percentage=summary.overall_percentage,
+            evaluation_bands=evaluation_bands,
+        )
         audit_log = cls._build_audit_log_stub(evaluation=evaluation, generated_at=generated_at)
         qr_verification_url = cls._build_qr_verification_url(report_number=report_number)
 
@@ -523,6 +748,9 @@ class EvaluationReportService:
             },
             "assessment_context": {
                 "candidate_reference": cls._build_candidate_reference(candidate),
+                "candidate_name": candidate_snapshot["full_name"],
+                "candidate_email": candidate_snapshot["email"],
+                "candidate_passport_id": candidate_snapshot["passport_id"],
                 "assessment_session_id": str(session.public_id),
                 "assessment_status": assessment_status,
                 "target_role": session.role_name or evaluation.get_candidate_job_role_display(),
@@ -551,18 +779,27 @@ class EvaluationReportService:
                 },
                 "top_strengths": top_strengths,
                 "top_risks": top_risks,
-                "top_source": "Rule Engine — competency score ranking",
+                "top_source": "Rule Engine - competency score ranking",
                 "suggested_action": suggested_action,
                 "suggested_action_display": suggested_action_display,
                 "assessment_scope": "Pre-employment Workforce Readiness Only",
                 "evaluation_reliability": reliability,
                 "reliability_factors": reliability_factors,
             },
+            "assessment_methodology": assessment_methodology,
+            "critical_competency_status": critical_competency_status,
             "risk_indicators": risk_indicators,
             "evidence_summary": evidence_summary,
             "improvement_plan": improvement_plan,
             "data_processing_consent": consent_summary,
+            "candidate_snapshot": candidate_snapshot,
             "identity_verification": identity_verification,
+            "transcript_report": {
+                "evaluation_bands": evaluation_bands,
+                "role_fit": role_fit,
+                "privacy_commitments": cls._build_privacy_commitments(),
+                "compliance_badges": cls._build_compliance_badges(),
+            },
             "verification_status": cls._derive_qr_verification_status(EvaluationReport.STATUS_ACTIVE),
             "qr_verification_url": qr_verification_url,
             "candidate_id": str(candidate.public_id),
@@ -665,34 +902,58 @@ class EvaluationReportService:
 
         normalized = str(raw_value).strip().upper()
         if raw_value in {"جاهز", "READY"} or normalized == "READY":
-            return {"value": "جاهز", "code": "READY", "level": 1}
+            return {"value": "جاهز", "display": "Ready", "code": "READY", "level": 1}
         if raw_value in {"متوسط", "PARTIALLY_READY"} or normalized == "PARTIALLY_READY":
-            return {"value": "جاهزية جزئية", "code": "PARTIALLY_READY", "level": 2}
+            return {"value": "جاهزية جزئية", "display": "Partially Ready", "code": "PARTIALLY_READY", "level": 2}
         if raw_value in {"غير جاهز", "NOT_READY", "توجد فجوات جاهزية"} or normalized == "NOT_READY":
-            return {"value": "توجد فجوات جاهزية", "code": "NOT_READY", "level": 3}
-        return {"value": "جاهزية جزئية", "code": "PARTIALLY_READY", "level": 2}
+            return {
+                "value": "توجد فجوات جاهزية",
+                "display": "Readiness Gaps Identified",
+                "code": "NOT_READY",
+                "level": 3,
+            }
+        return {"value": "جاهزية جزئية", "display": "Partially Ready", "code": "PARTIALLY_READY", "level": 2}
 
     @classmethod
     def _derive_top_strengths_and_risks(cls, *, competency_breakdown, critical_failures):
+        generic_label = "General Readiness Competency"
         ordered = sorted(
             competency_breakdown,
             key=lambda item: item.get("percentage") if item.get("percentage") is not None else -1,
             reverse=True,
         )
-        strengths = [item.get("competency_name") or item.get("competency_code") for item in ordered[:3] if item]
+        strengths = []
+        for item in ordered:
+            if not item:
+                continue
+            label = item.get("display_name") or item.get("competency_name") or item.get("competency_code")
+            if not label or label == generic_label:
+                continue
+            statement = cls._strength_statement(label)
+            if statement not in strengths:
+                strengths.append(statement)
+            if len(strengths) >= 3:
+                break
         risks = []
         for failure in critical_failures:
-            label = failure.get("competency_name") or failure.get("competency_code") or failure.get("topic")
-            if label and label not in risks:
-                risks.append(label)
+            label = cls._friendly_competency_name(
+                failure.get("competency_code") or failure.get("topic"),
+                failure.get("competency_name"),
+            )
+            if label and label != generic_label:
+                statement = cls._risk_statement(label)
+                if statement not in risks:
+                    risks.append(statement)
         weakest = sorted(
             competency_breakdown,
             key=lambda item: item.get("percentage") if item.get("percentage") is not None else 101,
         )
         for item in weakest:
-            label = item.get("competency_name") or item.get("competency_code")
-            if label and label not in risks:
-                risks.append(label)
+            label = item.get("display_name") or item.get("competency_name") or item.get("competency_code")
+            if label and label != generic_label:
+                statement = cls._risk_statement(label)
+                if statement not in risks:
+                    risks.append(statement)
             if len(risks) >= 3:
                 break
         return strengths[:3], risks[:3]
@@ -703,9 +964,14 @@ class EvaluationReportService:
         for failure in critical_failures:
             items.append(
                 {
-                    "category": failure.get("competency_name") or failure.get("competency_code") or "Critical Requirement",
-                    "finding": failure.get("reason") or failure.get("question_code") or "Critical readiness requirement not met",
-                    "source": failure.get("question_code") or failure.get("response_id") or "Rule Engine",
+                    "category": cls._friendly_competency_name(
+                        failure.get("competency_code"),
+                        failure.get("competency_name"),
+                    ),
+                    "finding": cls._normalize_text(
+                        failure.get("reason") or "Critical readiness requirement was not met."
+                    ),
+                    "source": "Assessment requirement",
                     "severity": "High",
                 }
             )
@@ -713,8 +979,8 @@ class EvaluationReportService:
             if item.get("missing_indicators"):
                 items.append(
                     {
-                        "category": item.get("competency_name") or item.get("competency_code"),
-                        "finding": item.get("explanation") or "Readiness gap identified from scored response.",
+                        "category": item.get("display_name") or item.get("competency_name") or item.get("competency_code"),
+                        "finding": cls._employer_evidence_finding(item),
                         "source": f"Simulation {item.get('question_order')}",
                         "severity": "High" if item.get("critical_failure") else "Medium",
                     }
@@ -754,16 +1020,18 @@ class EvaluationReportService:
         avg_language_quality = sum(interpretation_confidences) / len(interpretation_confidences) if interpretation_confidences else 1.0
 
         integrity_flag_messages = [
-            flag.get("message") for flag in human_review_flags if flag.get("flag_type") in {"critical_failure", "low_confidence_interpretation", "transcript_issue"}
+            cls._normalize_text(flag.get("message"))
+            for flag in human_review_flags
+            if flag.get("flag_type") in {"critical_failure", "low_confidence_interpretation", "transcript_issue"}
         ]
 
         return {
-            "note": "SCALE DIRECTION: risk_score higher = higher risk (0=no risk, 100=max risk). OPPOSITE to competency scores where higher=better. Backend maintains separate scales.",
+            "note": "Risk scores use a 0 to 100 scale. Higher scores indicate greater readiness concern.",
             "safety_risk": cls._risk_block(
                 competency_item=safety_item,
                 competency_percentage=safety_pct,
                 has_critical_failure=any("safety" in str((f.get("competency_code") or f.get("competency_name") or "")).lower() for f in critical_failures),
-                fallback_evidence=[f.get("question_code") or f.get("reason") for f in critical_failures],
+                fallback_evidence=[f.get("reason") for f in critical_failures],
             ),
             "hygiene_risk": cls._risk_block(
                 competency_item=hygiene_item,
@@ -795,8 +1063,9 @@ class EvaluationReportService:
             level = "Low"
         evidence = []
         if competency_item and competency_item.get("status") == "BELOW_THRESHOLD":
-            evidence.append(f"{competency_item.get('competency_name') or competency_item.get('competency_code')} below threshold")
-        evidence.extend([item for item in fallback_evidence if item])
+            label = competency_item.get("display_name") or competency_item.get("competency_name") or competency_item.get("competency_code")
+            evidence.append(f"{label} is below the required threshold.")
+        evidence.extend(cls._normalize_text_list(fallback_evidence))
         return {
             "level": level,
             "risk_score": risk_score,
@@ -814,7 +1083,8 @@ class EvaluationReportService:
             level = "Low"
         evidence = []
         if competency_item and competency_percentage < 70:
-            evidence.append(f"{competency_item.get('competency_name') or competency_item.get('competency_code')} shows communication gap")
+            label = competency_item.get("display_name") or competency_item.get("competency_name") or competency_item.get("competency_code")
+            evidence.append(f"{label} requires additional communication support.")
         return {"level": level, "risk_score": risk_score, "evidence": evidence}
 
     @classmethod
@@ -827,9 +1097,10 @@ class EvaluationReportService:
             level = "Medium"
         else:
             level = "Low"
-        evidence = integrity_flag_messages[:5]
+        evidence = cls._normalize_text_list(integrity_flag_messages)[:5]
         if integrity_item and integrity_item.get("status") == "BELOW_THRESHOLD":
-            evidence.append(f"{integrity_item.get('competency_name') or integrity_item.get('competency_code')} below threshold")
+            label = integrity_item.get("display_name") or integrity_item.get("competency_name") or integrity_item.get("competency_code")
+            evidence.append(f"{label} is below the required threshold.")
         return {"level": level, "risk_score": risk_score, "evidence": evidence[:5]}
 
     @classmethod
@@ -841,8 +1112,8 @@ class EvaluationReportService:
         for block_name, risk in risk_indicators.items():
             if block_name == "note" or risk["level"] == "Low":
                 continue
-            competency = block_name.replace("_risk", "").replace("_", " ").title()
-            gap = ", ".join(risk.get("evidence") or []) or f"{competency} readiness gap identified"
+            competency = cls._friendly_competency_name(block_name.replace("_risk", ""))
+            gap = ", ".join(cls._normalize_text_list(risk.get("evidence") or [])) or f"{competency} readiness gap identified."
             recommended_action = "Targeted critical training" if risk["level"] == "High" else "Focused training"
             items.append(
                 {
@@ -853,13 +1124,16 @@ class EvaluationReportService:
                 }
             )
         for failure in critical_failures:
-            competency = failure.get("competency_name") or failure.get("competency_code") or "Critical Requirement"
+            competency = cls._friendly_competency_name(
+                failure.get("competency_code"),
+                failure.get("competency_name"),
+            )
             if any(item["competency"] == competency for item in items):
                 continue
             items.append(
                 {
                     "competency": competency,
-                    "gap": failure.get("reason") or "Critical readiness requirement not met",
+                    "gap": cls._normalize_text(failure.get("reason") or "Critical readiness requirement not met."),
                     "recommended_action": "Basic safety training" if "safety" in competency.lower() else "Targeted remedial training",
                     "priority": "High",
                 }
@@ -942,6 +1216,84 @@ class EvaluationReportService:
         return "Limited"
 
     @classmethod
+    def _build_assessment_methodology(cls):
+        return [
+            {
+                "domain": "Safety Awareness",
+                "evaluated": "Emergency response, hazard identification, protocol knowledge",
+                "method": "Scenario-based Q&A + Simulation",
+            },
+            {
+                "domain": "Hygiene & Standards",
+                "evaluated": "Cleanliness procedures, cross-contamination prevention",
+                "method": "Scenario-based Q&A",
+            },
+            {
+                "domain": "Communication Ability",
+                "evaluated": "Language clarity, instruction following, response quality",
+                "method": "Communication Assessment Module + Speech Processing",
+            },
+            {
+                "domain": "Practical Task Execution",
+                "evaluated": "Step sequence, completion rate, time management",
+                "method": "Task Observation Module",
+            },
+            {
+                "domain": "Behavioral Indicators",
+                "evaluated": "Integrity, reliability, consistency under pressure",
+                "method": "Behavioral Assessment Module",
+            },
+        ]
+
+    @classmethod
+    def _build_critical_competency_status(cls, *, competency_breakdown, risk_indicators):
+        categories = [
+            ("Safety", ["safety"]),
+            ("Hygiene", ["hygiene", "clean", "sanitation"]),
+            ("Communication", ["communication", "language"]),
+            ("Integrity", ["integrity", "reliability", "behavior"]),
+        ]
+        items = []
+        for label, tokens in categories:
+            competency = None
+            for item in competency_breakdown:
+                haystack = " ".join(
+                    [
+                        str(item.get("competency_code") or "").lower(),
+                        str(item.get("competency_name") or "").lower(),
+                    ]
+                )
+                if any(token in haystack for token in tokens):
+                    competency = item
+                    break
+            risk = risk_indicators.get(f"{label.lower()}_risk", {}) if isinstance(risk_indicators, dict) else {}
+            risk_level = risk.get("level", "Low")
+            if risk_level == "Low" and competency and competency.get("status") != "BELOW_THRESHOLD":
+                status_label = "Meets Standard"
+                tone = "good"
+            elif risk_level == "Medium":
+                status_label = "Review Needed"
+                tone = "warn"
+            else:
+                status_label = "Attention Required"
+                tone = "danger"
+            items.append(
+                {
+                    "label": label,
+                    "status_label": status_label,
+                    "tone": tone,
+                    "risk_level": risk_level,
+                    "risk_score": risk.get("risk_score", 0),
+                    "percentage": competency.get("percentage") if competency else 0,
+                    "score": competency.get("score") if competency else 0,
+                    "max_score": competency.get("max_score") if competency else 0,
+                    "pass_threshold": competency.get("pass_threshold") if competency else 0,
+                    "summary": ", ".join(cls._normalize_text_list(risk.get("evidence") or [])) or "No supporting evidence recorded.",
+                }
+            )
+        return items
+
+    @classmethod
     def _build_consent_summary(cls, session):
         agreement = session.candidate_consent_agreement
         return {
@@ -952,18 +1304,373 @@ class EvaluationReportService:
 
     @classmethod
     def _build_identity_verification_summary(cls, session):
-        if not session.identity_verified and not session.verification_status:
-            return {"status": "NOT_APPLICABLE", "method": None, "timestamp": None}
-        method = "SESSION_IDENTITY_VERIFICATION" if session.identity_verified else None
-        timestamp = None
-        latest_artifact = session.artifacts.filter(artifact_type__in=["ID_DOCUMENT", "SELFIE_IMAGE"]).order_by("-uploaded_at").first()
-        if latest_artifact is not None:
-            timestamp = latest_artifact.uploaded_at.isoformat()
+        candidate = session.candidate
+        captured_artifact = session.artifacts.filter(
+            artifact_type__in=["WEBCAM_FRAME", "SELFIE_IMAGE"],
+        ).order_by("-uploaded_at").first()
+        reference_artifact = session.artifacts.filter(
+            artifact_type="ID_DOCUMENT",
+        ).order_by("-uploaded_at").first()
+
+        timestamp_source = captured_artifact or reference_artifact
+        timestamp = timestamp_source.uploaded_at.isoformat() if timestamp_source is not None else None
+        verification_status = session.verification_status or "NOT_STARTED"
         return {
             "status": "VERIFIED" if session.identity_verified else "NOT_APPLICABLE",
-            "method": method,
+            "method": "SESSION_IDENTITY_VERIFICATION" if session.identity_verified else None,
             "timestamp": timestamp,
+            "verification_status": verification_status,
+            "verification_label": cls._verification_status_label(verification_status),
+            "face_match_score": cls._decimal(session.face_match_score),
+            "single_face_detected": bool(session.single_face_detected),
+            "liveness_passed": cls._resolve_liveness_passed(session),
+            "verification_duration_seconds": cls._derive_verification_duration_seconds(
+                session,
+                captured_artifact=captured_artifact,
+                reference_artifact=reference_artifact,
+            ),
+            "captured_image_data_uri": (
+                cls._file_to_data_uri(getattr(captured_artifact, "file", None))
+                or cls._file_to_data_uri(getattr(candidate, "verification_photo", None))
+                or cls._file_to_data_uri(getattr(candidate, "profile_photo", None))
+                or cls._document_to_image_data_uri(getattr(candidate, "passport_document", None))
+            ),
+            "verified_photo_data_uri": (
+                cls._document_to_image_data_uri(getattr(reference_artifact, "file", None))
+                or cls._file_to_data_uri(getattr(candidate, "verification_photo", None))
+                or cls._document_to_image_data_uri(getattr(candidate, "passport_document", None))
+                or cls._file_to_data_uri(getattr(candidate, "profile_photo", None))
+            ),
         }
+
+    @classmethod
+    def _build_evaluation_bands(cls, *, competency_breakdown, response_evidence_summary, overall_percentage):
+        configs = [
+            {
+                "code": "COGNITIVE",
+                "label": "Cognitive Skills",
+                "description": "Problem Solving, Logic, Comprehension",
+            },
+            {
+                "code": "BEHAVIORAL",
+                "label": "Behavioral Traits",
+                "description": "Adaptability, Integrity, Attitude",
+            },
+            {
+                "code": "TASK_EXECUTION",
+                "label": "Task Execution",
+                "description": "Accuracy, Efficiency, Consistency",
+            },
+        ]
+        grouped_scores = {config["code"]: [] for config in configs}
+
+        for item in response_evidence_summary:
+            grouped_scores[cls._resolve_evaluation_band(item)].append(float(item.get("percentage") or 0))
+
+        fallback_percentage = float(overall_percentage or 0)
+        fallback_by_band = {
+            "COGNITIVE": cls._fallback_band_percentages(
+                competency_breakdown=competency_breakdown,
+                keywords=["communication", "language", "knowledge", "problem", "logic", "comprehension"],
+            ),
+            "BEHAVIORAL": cls._fallback_band_percentages(
+                competency_breakdown=competency_breakdown,
+                keywords=["behavior", "integrity", "reliability", "professional", "attitude", "patience", "teamwork"],
+            ),
+            "TASK_EXECUTION": cls._fallback_band_percentages(
+                competency_breakdown=competency_breakdown,
+                keywords=["task", "safety", "clean", "maintenance", "execution", "operation", "first aid"],
+            ),
+        }
+
+        results = []
+        for config in configs:
+            percentages = grouped_scores[config["code"]] or fallback_by_band[config["code"]] or [fallback_percentage]
+            score = int(round(sum(percentages) / len(percentages))) if percentages else int(round(fallback_percentage))
+            results.append(
+                {
+                    **config,
+                    "score": max(0, min(100, score)),
+                    "out_of": 100,
+                }
+            )
+        return results
+
+    @classmethod
+    def _fallback_band_percentages(cls, *, competency_breakdown, keywords):
+        matches = []
+        for item in competency_breakdown:
+            haystack = " ".join(
+                [
+                    str(item.get("competency_code") or "").lower(),
+                    str(item.get("competency_name") or "").lower(),
+                ]
+            )
+            if any(keyword in haystack for keyword in keywords):
+                matches.append(float(item.get("percentage") or 0))
+        return matches
+
+    @classmethod
+    def _resolve_evaluation_band(cls, item):
+        question_type = str(item.get("question_type") or "").strip().lower()
+        competency_text = " ".join(
+            [
+                str(item.get("competency_code") or "").lower(),
+                str(item.get("competency_name") or "").lower(),
+            ]
+        )
+
+        if question_type in {"behavioral", "integrity"}:
+            return "BEHAVIORAL"
+        if question_type in {"safety", "task"}:
+            return "TASK_EXECUTION"
+        if question_type in {"communication", "knowledge", "situational", "scenario"}:
+            return "COGNITIVE"
+
+        if any(token in competency_text for token in ["behavior", "integrity", "reliability", "professional", "teamwork"]):
+            return "BEHAVIORAL"
+        if any(token in competency_text for token in ["task", "safety", "clean", "maintenance", "first aid"]):
+            return "TASK_EXECUTION"
+        return "COGNITIVE"
+
+    @classmethod
+    def _build_role_fit_summary(cls, *, evaluation, overall_percentage, evaluation_bands):
+        band_scores = {
+            item["code"]: float(item.get("score") or 0)
+            for item in evaluation_bands
+        }
+        role_profiles = [
+            {
+                "code": "HK",
+                "label": "Cleaning",
+                "description": "Evaluates hygiene awareness, attention to detail, and task efficiency.",
+                "weights": {"TASK_EXECUTION": 0.55, "BEHAVIORAL": 0.20, "COGNITIVE": 0.25},
+            },
+            {
+                "code": "NA",
+                "label": "Child Care",
+                "description": "Assesses empathy, patience, responsibility, and safety awareness.",
+                "weights": {"BEHAVIORAL": 0.45, "TASK_EXECUTION": 0.25, "COGNITIVE": 0.30},
+            },
+            {
+                "code": "EC",
+                "label": "Elderly Care",
+                "description": "Measures compassion, reliability, communication, and personal care skills.",
+                "weights": {"BEHAVIORAL": 0.50, "TASK_EXECUTION": 0.30, "COGNITIVE": 0.20},
+            },
+            {
+                "code": "DR",
+                "label": "Driver",
+                "description": "Balances hazard awareness, consistency, and route decision-making.",
+                "weights": {"TASK_EXECUTION": 0.45, "COGNITIVE": 0.35, "BEHAVIORAL": 0.20},
+            },
+            {
+                "code": "KA",
+                "label": "Kitchen Support",
+                "description": "Highlights food safety, pacing, and team coordination.",
+                "weights": {"TASK_EXECUTION": 0.50, "COGNITIVE": 0.20, "BEHAVIORAL": 0.30},
+            },
+            {
+                "code": "MW",
+                "label": "Maintenance",
+                "description": "Measures task accuracy, troubleshooting, and dependable follow-through.",
+                "weights": {"TASK_EXECUTION": 0.55, "COGNITIVE": 0.20, "BEHAVIORAL": 0.25},
+            },
+            {
+                "code": "OT",
+                "label": "General Support",
+                "description": "General multi-signal fit across task execution, cognitive, and behavioral traits.",
+                "weights": {"TASK_EXECUTION": 0.34, "COGNITIVE": 0.33, "BEHAVIORAL": 0.33},
+            },
+        ]
+
+        scored_roles = []
+        for profile in role_profiles:
+            raw_score = 0
+            for band_code, weight in profile["weights"].items():
+                raw_score += band_scores.get(band_code, float(overall_percentage or 0)) * weight
+            match_score = max(0, min(100, int(round(raw_score))))
+            scored_roles.append(
+                {
+                    "code": profile["code"],
+                    "label": profile["label"],
+                    "description": profile["description"],
+                    "match_score": match_score,
+                    "match_label": cls._match_label(match_score),
+                }
+            )
+
+        preferred_labels = ["Cleaning", "Child Care", "Elderly Care"]
+        preferred_roles = [
+            item for item in scored_roles
+            if item["label"] in preferred_labels
+        ]
+        if len(preferred_roles) >= 3:
+            preferred_roles.sort(key=lambda item: preferred_labels.index(item["label"]))
+            return preferred_roles[:3]
+
+        current_role_code = evaluation.candidate_job_role or getattr(evaluation.candidate, "job_role", "") or "OT"
+        current_role = next((item for item in scored_roles if item["code"] == current_role_code), None)
+        alternates = [item for item in scored_roles if item["code"] != current_role_code]
+        alternates.sort(key=lambda item: item["match_score"], reverse=True)
+
+        ordered = []
+        if current_role is not None:
+            ordered.append(current_role)
+        ordered.extend(alternates[:2])
+        return ordered[:3]
+
+    @classmethod
+    def _build_privacy_commitments(cls):
+        return [
+            {
+                "title": "End-to-End Encryption",
+                "description": "All assessment data is encrypted in transit and at rest.",
+                "retention_days": 30,
+            },
+            {
+                "title": "Purpose Limitation",
+                "description": "Candidate data is used strictly for evaluation and hiring workflows.",
+                "retention_days": 30,
+            },
+            {
+                "title": "Minimal Data Retention",
+                "description": "Only essential interview records are retained for a limited audit window.",
+                "retention_days": 30,
+            },
+            {
+                "title": "User Consent & Control",
+                "description": "Candidate consent, disclosure, and privacy acknowledgements are captured before assessment.",
+                "retention_days": 30,
+            },
+        ]
+
+    @classmethod
+    def _build_compliance_badges(cls):
+        return ["GDPR", "ISO/IEC 27001", "SOC 2 Type II"]
+
+    @classmethod
+    def _verification_status_label(cls, status):
+        labels = {
+            "VERIFIED": "Verified",
+            "PENDING": "Pending",
+            "FAILED": "Failed",
+            "NOT_STARTED": "Not Started",
+        }
+        return labels.get((status or "").upper(), status or "Not Started")
+
+    @classmethod
+    def _resolve_liveness_passed(cls, session):
+        for log in session.integrity_logs.order_by("-detected_at")[:10]:
+            details = log.details or {}
+            if details.get("liveness_passed") is not None:
+                return bool(details.get("liveness_passed"))
+        return True if session.identity_verified else None
+
+    @classmethod
+    def _derive_verification_duration_seconds(cls, session, *, captured_artifact, reference_artifact):
+        timestamps = [
+            artifact.uploaded_at
+            for artifact in (captured_artifact, reference_artifact)
+            if artifact is not None and artifact.uploaded_at is not None
+        ]
+        if len(timestamps) < 2:
+            return None
+        return round((max(timestamps) - min(timestamps)).total_seconds(), 1)
+
+    @classmethod
+    def _file_to_data_uri(cls, file_field):
+        if not file_field:
+            return None
+        file_name = getattr(file_field, "name", "") or ""
+        mime_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+        if not mime_type.startswith("image/"):
+            return None
+        try:
+            file_field.open("rb")
+            encoded = base64.b64encode(file_field.read()).decode("ascii")
+        except Exception:
+            return None
+        finally:
+            try:
+                file_field.close()
+            except Exception:
+                pass
+        return f"data:{mime_type};base64,{encoded}"
+
+    @classmethod
+    def _document_to_image_data_uri(cls, file_field):
+        return cls._file_to_data_uri(file_field) or cls._pdf_file_to_png_data_uri(file_field)
+
+    @classmethod
+    def _pdf_file_to_png_data_uri(cls, file_field):
+        if not file_field:
+            return None
+
+        file_name = getattr(file_field, "name", "") or ""
+        if Path(file_name).suffix.lower() != ".pdf":
+            return None
+
+        pdftoppm_path = shutil.which("pdftoppm")
+        if not pdftoppm_path:
+            return None
+
+        try:
+            file_field.open("rb")
+        except Exception:
+            return None
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="report-pdf-preview-") as tmpdir:
+                source_path = Path(tmpdir) / "reference.pdf"
+                output_prefix = str(Path(tmpdir) / "reference-page")
+
+                with open(source_path, "wb") as source_file:
+                    if hasattr(file_field, "chunks"):
+                        for chunk in file_field.chunks():
+                            source_file.write(chunk)
+                    else:
+                        source_file.write(file_field.read())
+
+                subprocess.run(
+                    [
+                        pdftoppm_path,
+                        "-f",
+                        "1",
+                        "-l",
+                        "1",
+                        "-singlefile",
+                        "-png",
+                        str(source_path),
+                        output_prefix,
+                    ],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=30,
+                )
+
+                image_path = Path(f"{output_prefix}.png")
+                if not image_path.exists():
+                    return None
+
+                encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+                return f"data:image/png;base64,{encoded}"
+        except Exception:
+            return None
+        finally:
+            try:
+                file_field.close()
+            except Exception:
+                pass
+
+    @classmethod
+    def _match_label(cls, score):
+        if score >= 88:
+            return "Excellent Match"
+        if score >= 75:
+            return "Strong Match"
+        return "Potential Match"
 
     @classmethod
     def _build_audit_log_stub(cls, *, evaluation, generated_at):
@@ -984,7 +1691,10 @@ class EvaluationReportService:
 
     @classmethod
     def _build_qr_verification_url(cls, *, report_number):
-        return f"{cls.QR_VERIFY_BASE_URL}/{report_number}"
+        frontend_url = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
+        if not frontend_url or "localhost" in frontend_url or "127.0.0.1" in frontend_url:
+            frontend_url = cls.PUBLIC_VERIFY_FRONTEND_URL
+        return f"{frontend_url}/en/verify-report?id={report_number}"
 
     @classmethod
     def _derive_qr_verification_status(cls, report_status):
@@ -1005,6 +1715,16 @@ class EvaluationReportService:
         token = str(candidate.public_id).split("-")[0].upper()
         year = timezone.now().year
         return f"ML-REF-{year}-{token}"
+
+    @classmethod
+    def _build_candidate_snapshot(cls, candidate, session):
+        return {
+            "full_name": candidate.get_full_name(),
+            "email": candidate.email,
+            "passport_id": candidate.passport_id,
+            "role_name": session.role_name or candidate.get_job_role_display(),
+            "preferred_language": cls._display_language(candidate.preferred_language),
+        }
 
     @classmethod
     def _display_language(cls, value):
@@ -1049,8 +1769,40 @@ class EvaluationReportService:
 
     @classmethod
     def _render_employer_pdf(cls, *, report_payload, report_number):
+        employer_payload = cls._sanitize_employer_payload(report_payload)
+        html = render_to_string(
+            "reports/employer_report.html",
+            {
+                "report": employer_payload,
+                "report_number": report_number,
+                "qr_data_uri": cls._build_qr_data_uri(employer_payload.get("qr_verification_url", "")),
+                "logo_data_uri": cls._logo_data_uri(),
+            },
+        )
+
+        if HTML is not None:
+            try:
+                pdf_bytes = HTML(
+                    string=html,
+                    base_url=str(getattr(settings, "BASE_DIR", "")),
+                ).write_pdf()
+                pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
+                return pdf_bytes, pdf_hash
+            except Exception:
+                pass
+
+        playwright_pdf = cls._render_employer_pdf_via_playwright(html=html)
+        if playwright_pdf is not None:
+            pdf_hash = hashlib.sha256(playwright_pdf).hexdigest()
+            return playwright_pdf, pdf_hash
+
+        chrome_pdf = cls._render_employer_pdf_via_chrome(html=html)
+        if chrome_pdf is not None:
+            pdf_hash = hashlib.sha256(chrome_pdf).hexdigest()
+            return chrome_pdf, pdf_hash
+
         pdf_lines = cls._build_employer_pdf_lines(
-            report_payload=report_payload,
+            report_payload=employer_payload,
             report_number=report_number,
         )
         pdf_bytes = cls._build_simple_pdf(pdf_lines)
@@ -1058,10 +1810,189 @@ class EvaluationReportService:
         return pdf_bytes, pdf_hash
 
     @classmethod
+    def _logo_data_uri(cls):
+        if cls._logo_data_uri_cache is None:
+            try:
+                encoded = base64.b64encode(cls.LOGO_PATH.read_bytes()).decode("ascii")
+                cls._logo_data_uri_cache = f"data:image/png;base64,{encoded}"
+            except Exception:
+                cls._logo_data_uri_cache = None
+        return cls._logo_data_uri_cache
+
+    @classmethod
+    def _render_employer_pdf_via_playwright(cls, *, html):
+        playwright_binary = shutil.which("playwright")
+        if not playwright_binary:
+            return None
+
+        with tempfile.TemporaryDirectory(prefix="meritlense-report-pw-") as temp_dir:
+            temp_path = Path(temp_dir)
+            html_path = temp_path / "employer-report.html"
+            pdf_path = temp_path / "employer-report.pdf"
+            html_path.write_text(html, encoding="utf-8")
+
+            command_sets = [
+                [
+                    playwright_binary,
+                    "pdf",
+                    "--channel",
+                    "chrome",
+                    "--paper-format",
+                    "A4",
+                    "--wait-for-timeout",
+                    "1200",
+                    html_path.resolve().as_uri(),
+                    str(pdf_path),
+                ],
+                [
+                    playwright_binary,
+                    "pdf",
+                    "--paper-format",
+                    "A4",
+                    "--wait-for-timeout",
+                    "1200",
+                    html_path.resolve().as_uri(),
+                    str(pdf_path),
+                ],
+            ]
+
+            for command in command_sets:
+                try:
+                    subprocess.run(
+                        command,
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=90,
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    continue
+
+                if pdf_path.exists():
+                    return pdf_path.read_bytes()
+
+        return None
+
+    @classmethod
+    def _render_employer_pdf_via_chrome(cls, *, html):
+        chrome_binary = cls._resolve_chrome_binary()
+        if not chrome_binary:
+            return None
+
+        with tempfile.TemporaryDirectory(prefix="meritlense-report-") as temp_dir:
+            temp_path = Path(temp_dir)
+            html_path = temp_path / "employer-report.html"
+            pdf_path = temp_path / "employer-report.pdf"
+            profile_dir = temp_path / "chrome-profile"
+            cache_dir = temp_path / "xdg-cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            html_path.write_text(html, encoding="utf-8")
+            chrome_env = os.environ.copy()
+            chrome_env.setdefault("XDG_CACHE_HOME", str(cache_dir))
+
+            chrome_commands = [
+                [
+                    chrome_binary,
+                    "--headless=new",
+                    "--disable-gpu",
+                    "--disable-background-networking",
+                    "--disable-component-update",
+                    "--disable-sync",
+                    "--metrics-recording-only",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--allow-file-access-from-files",
+                    "--no-pdf-header-footer",
+                    f"--user-data-dir={profile_dir}",
+                    f"--print-to-pdf={pdf_path}",
+                    "--print-to-pdf-no-header",
+                    html_path.resolve().as_uri(),
+                ],
+                [
+                    chrome_binary,
+                    "--headless",
+                    "--disable-gpu",
+                    "--disable-background-networking",
+                    "--disable-component-update",
+                    "--disable-sync",
+                    "--metrics-recording-only",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--allow-file-access-from-files",
+                    "--no-pdf-header-footer",
+                    f"--user-data-dir={profile_dir}",
+                    f"--print-to-pdf={pdf_path}",
+                    "--print-to-pdf-no-header",
+                    html_path.resolve().as_uri(),
+                ],
+            ]
+
+            for command in chrome_commands:
+                try:
+                    subprocess.run(
+                        command,
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=90,
+                        env=chrome_env,
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    continue
+
+                if pdf_path.exists():
+                    return pdf_path.read_bytes()
+
+        return None
+
+    @classmethod
+    def _resolve_chrome_binary(cls):
+        configured = [
+            getattr(settings, "CHROME_BIN", ""),
+        ]
+        configured.extend(
+            [
+                os_value
+                for os_value in [
+                    os.environ.get("GOOGLE_CHROME_BIN"),
+                    os.environ.get("CHROME_BIN"),
+                ]
+                if os_value
+            ]
+        )
+
+        discovered = [
+            shutil.which("google-chrome"),
+            shutil.which("chromium"),
+            shutil.which("chromium-browser"),
+            shutil.which("chrome"),
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+
+        for candidate in configured + discovered:
+            if candidate and Path(candidate).exists():
+                return candidate
+        return None
+
+    @classmethod
+    def _build_qr_data_uri(cls, verification_url):
+        if not verification_url or qrcode is None:
+            return None
+        qr_image = qrcode.make(verification_url)
+        buffer = BytesIO()
+        qr_image.save(buffer, format="PNG")
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        return f"data:image/png;base64,{encoded}"
+
+    @classmethod
     def _build_employer_pdf_lines(cls, *, report_payload, report_number):
         context = report_payload.get("assessment_context", {})
         summary = report_payload.get("executive_summary", {})
         readiness = summary.get("readiness_indicator", {})
+        methodology = report_payload.get("assessment_methodology", [])
+        critical_status = report_payload.get("critical_competency_status", [])
+        competency_breakdown = report_payload.get("competency_breakdown", [])
         risk_indicators = report_payload.get("risk_indicators", {})
         evidence_summary = report_payload.get("evidence_summary", [])
         improvement_plan = report_payload.get("improvement_plan", [])
@@ -1083,19 +2014,53 @@ class EvaluationReportService:
             f"Assessment Duration Minutes: {context.get('assessment_duration_minutes', '')}",
             f"Assessment Quality: {context.get('assessment_quality', '')}",
             f"Candidate Reference: {context.get('candidate_reference', '')}",
-            f"Interface Language: {context.get('interface_language', '')}",
-            f"Response Language: {context.get('response_language', '')}",
+            f"Assessment Language: {context.get('assessment_language', '')}",
             "",
             "Executive Summary",
-            f"Readiness Indicator: {readiness.get('label', '')} ({readiness.get('code', '')})",
+            f"Readiness Indicator: {readiness.get('display', readiness.get('value', ''))}",
             f"Readiness Reason: {(summary.get('readiness_reason') or {}).get('employer_message', '')}",
             f"Overall Score: {summary.get('overall_score', '')}%",
             f"Assessment Scope: {summary.get('assessment_scope', '')}",
-            f"Suggested Action: {summary.get('suggested_action', '')}",
+            f"Suggested Action: {summary.get('suggested_action_display', '')}",
+            f"Assessment Coverage: {', '.join(context.get('assessment_coverage', []))}",
             f"Evaluation Reliability: {summary.get('evaluation_reliability', '')}",
         ]
         for factor in summary.get("reliability_factors", []):
             lines.append(f"  - {factor}")
+        lines.extend(["", "Top Strengths"])
+        for strength in summary.get("top_strengths", []):
+            lines.append(f"- {strength}")
+        lines.extend(["", "Top Risks"])
+        for risk in summary.get("top_risks", []):
+            lines.append(f"- {risk}")
+        lines.extend(["", "Assessment Methodology"])
+        for item in methodology:
+            lines.extend(
+                [
+                    f"- {item.get('domain', '')}",
+                    f"  Evaluated: {item.get('evaluated', '')}",
+                    f"  Method: {item.get('method', '')}",
+                ]
+            )
+        lines.extend(["", "Critical Competency Status"])
+        for item in critical_status:
+            lines.append(
+                f"- {item.get('label', '')}: {item.get('status_label', '')} | "
+                f"{item.get('score', '')}/{item.get('max_score', '')} ({item.get('percentage', '')}%)"
+            )
+        lines.extend(["", "Competency Breakdown"])
+        for item in competency_breakdown:
+            lines.extend(
+                [
+                    f"- {item.get('display_name') or item.get('competency_name') or item.get('competency_code', '')}",
+                    (
+                        "  Score: "
+                        f"{item.get('score', '')}/{item.get('max_score', '')} "
+                        f"({item.get('percentage', '')}%) | Threshold: {item.get('pass_threshold', '')}% | "
+                        f"Status: {item.get('status', '')}"
+                    ),
+                ]
+            )
         lines.extend([
             "",
             "Risk Indicators",
@@ -1109,7 +2074,7 @@ class EvaluationReportService:
                     lines.append(f"- {risk_name}: {risk}")
                     continue
                 title = risk_name.replace("_", " ").replace("risk", "risk").title()
-                detail = ", ".join(risk.get("evidence") or []) or "No supporting evidence recorded."
+                detail = ", ".join(cls._normalize_text_list(risk.get("evidence") or [])) or "No supporting evidence recorded."
                 lines.extend(
                     [
                         f"- {title}: {risk.get('level', '')} ({risk.get('risk_score', '')})",
@@ -1149,15 +2114,9 @@ class EvaluationReportService:
                 "",
                 "Verification",
                 f"Identity Verification Status: {identity.get('status', '')}",
-                f"Single Face Detected: {identity.get('single_face_detected', '')}",
                 f"Face Match Score: {identity.get('face_match_score', '')}",
-                f"Rule Engine Version: {report_payload.get('rule_engine_version', '')}",
-                f"Legal Record Reference: {report_payload.get('legal_record_id', '')}",
                 f"Verification URL: {report_payload.get('qr_verification_url', '')}",
                 f"Document Hash: {integrity.get('hash_value', '')}",
-                "",
-                "Assessment Flow",
-                report_payload.get("evaluation_flow_reference", ""),
                 "",
                 "Legal Disclaimer",
                 report_payload.get("legal_disclaimer", ""),

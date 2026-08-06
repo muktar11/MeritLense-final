@@ -5,253 +5,1587 @@
   <style>
     @page {
       size: A4;
-      margin: 18mm 14mm 24mm 14mm;
+      margin: 8mm 9mm 10mm 9mm;
     }
+
+    :root {
+      --ink: #1b2f5c;
+      --muted: #6880ab;
+      --line: #d5e2fb;
+      --line-strong: #bfd4fb;
+      --panel: #fbfdff;
+      --soft: #f4f8ff;
+      --brand-blue: #2f6fe8;
+      --brand-purple: #7b56f5;
+      --brand-pink: #f05cc5;
+      --brand-green: #21bb71;
+      --brand-green-soft: #ebfff4;
+      --brand-amber: #f1aa29;
+      --brand-amber-soft: #fff4d9;
+      --brand-red: #dc5a5a;
+      --brand-red-soft: #ffecec;
+      --brand-sky: #42b4ff;
+      --brand-sky-soft: #edf8ff;
+      --shadow: rgba(73, 110, 191, 0.06);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
-      font-family: Arial, sans-serif;
-      font-size: 11px;
-      color: #1f2937;
-      line-height: 1.45;
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--ink);
+      background: #ffffff;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
-    .footer {
-      position: fixed;
-      bottom: -12mm;
-      left: 0;
-      right: 0;
-      font-size: 9px;
-      color: #4b5563;
-      border-top: 1px solid #d1d5db;
-      padding-top: 6px;
-    }
+
     .page {
+      min-height: 277mm;
+      display: flex;
+      flex-direction: column;
       page-break-after: always;
     }
+
     .page:last-child {
       page-break-after: auto;
     }
-    h1, h2, h3 {
-      margin: 0 0 8px 0;
+
+    .page-body {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
-    h1 {
-      font-size: 20px;
-      color: #111827;
+
+    .card,
+    .table-card,
+    .metric-card,
+    .stat-card,
+    .badge-strip {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: linear-gradient(180deg, #ffffff 0%, var(--panel) 100%);
+      box-shadow: 0 8px 18px var(--shadow);
     }
-    h2 {
-      font-size: 14px;
-      color: #111827;
-      border-bottom: 1px solid #e5e7eb;
-      padding-bottom: 4px;
-      margin-top: 14px;
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.5fr 0.95fr;
+      gap: 10px;
+      padding: 12px 14px;
     }
-    .muted {
-      color: #6b7280;
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
-    .grid {
-      display: table;
-      width: 100%;
-      border-collapse: collapse;
+
+    .brand-logo {
+      width: 48px;
+      height: 48px;
+      object-fit: contain;
+      flex: 0 0 auto;
     }
-    .row {
-      display: table-row;
+
+    .brand-name {
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--brand-blue);
+      letter-spacing: -0.02em;
     }
-    .cell {
-      display: table-cell;
+
+    .brand-name span {
+      color: var(--brand-pink);
+    }
+
+    .report-title {
+      margin-top: 6px;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.2;
+      color: #22396a;
+    }
+
+    .report-title .tm {
+      font-size: 11px;
       vertical-align: top;
-      padding: 6px 8px 6px 0;
     }
-    .summary-box {
-      border: 1px solid #d1d5db;
-      border-radius: 8px;
-      padding: 10px 12px;
-      margin-bottom: 10px;
+
+    .brand-note {
+      margin-top: 5px;
+      font-size: 7.3px;
+      line-height: 1.45;
+      color: #4f7be0;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
     }
-    .pill {
-      display: inline-block;
-      padding: 3px 8px;
+
+    .hero-copy {
+      margin-top: 6px;
+      font-size: 7.1px;
+      line-height: 1.55;
+      color: var(--muted);
+      max-width: 88%;
+    }
+
+    .meta-card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 10px 11px;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    }
+
+    .meta-title {
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 1.35;
+      color: #1e3561;
+    }
+
+    .meta-points {
+      margin-top: 7px;
+      display: flex;
+      gap: 8px;
+      font-size: 6.8px;
+      color: #4b78d5;
+      font-weight: 700;
+      flex-wrap: wrap;
+    }
+
+    .meta-grid {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .meta-block {
+      padding: 6px 7px;
+      border-radius: 10px;
+      background: #ffffff;
+      border: 1px solid #e2edff;
+    }
+
+    .meta-label {
+      font-size: 5.8px;
+      color: #7487ab;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .meta-value {
+      margin-top: 2px;
+      font-size: 7.2px;
+      line-height: 1.35;
+      color: #223a68;
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    .candidate-strip {
+      display: grid;
+      grid-template-columns: 1.05fr 1.1fr 0.95fr 0.8fr;
+      overflow: hidden;
+    }
+
+    .candidate-cell {
+      padding: 7px 9px;
+      border-right: 1px solid var(--line);
+      background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+    }
+
+    .candidate-cell:last-child {
+      border-right: none;
+    }
+
+    .candidate-kicker {
+      font-size: 5.8px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #7285aa;
+    }
+
+    .candidate-value {
+      margin-top: 2px;
+      font-size: 7.2px;
+      line-height: 1.35;
+      font-weight: 700;
+      color: #223a68;
+      word-break: break-word;
+    }
+
+    .section-shell {
+      padding: 9px 11px;
+    }
+
+    .section-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 7px;
+    }
+
+    .section-kicker {
+      font-size: 6px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #7487ab;
+      font-weight: 700;
+    }
+
+    .section-title {
+      margin-top: 2px;
+      font-size: 13px;
+      line-height: 1.2;
+      color: #245ece;
+      font-weight: 700;
+    }
+
+    .section-note {
+      font-size: 6.5px;
+      line-height: 1.45;
+      color: var(--muted);
+      max-width: 44%;
+      text-align: right;
+    }
+
+    .subsection-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 7px;
+    }
+
+    .subsection-note {
+      max-width: 46%;
+      text-align: right;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 8px;
+    }
+
+    .summary-rows {
+      display: grid;
+      gap: 6px;
+    }
+
+    .summary-row {
+      display: grid;
+      grid-template-columns: 0.95fr 1.45fr;
+      gap: 10px;
+      padding: 7px 8px;
+      border-radius: 12px;
+      background: #ffffff;
+      border: 1px solid #e2edff;
+    }
+
+    .summary-label {
+      font-size: 6.2px;
+      line-height: 1.35;
+      color: #7184a8;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .summary-value {
+      font-size: 7.2px;
+      line-height: 1.45;
+      color: #223a68;
+      font-weight: 700;
+    }
+
+    .summary-subcopy {
+      margin-top: 2px;
+      font-size: 6.3px;
+      line-height: 1.45;
+      color: var(--muted);
+      font-weight: 400;
+    }
+
+    .readiness-card {
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .readiness-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .readiness-score-label {
+      font-size: 6.4px;
+      color: #607197;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .readiness-score {
+      margin-top: 3px;
+      font-size: 26px;
+      line-height: 1;
+      color: var(--brand-blue);
+      font-weight: 700;
+    }
+
+    .readiness-score span {
+      font-size: 9px;
+      color: #5a729c;
+      font-weight: 700;
+    }
+
+    .status-badge,
+    .risk-level,
+    .tone-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 9px;
       border-radius: 999px;
-      font-weight: bold;
-      font-size: 10px;
+      font-size: 6.2px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      border: 1px solid transparent;
     }
-    .green { background: #dcfce7; color: #166534; }
-    .yellow { background: #fef3c7; color: #92400e; }
-    .red { background: #fee2e2; color: #991b1b; }
+
+    .status-dot,
+    .level-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 8px;
+      line-height: 1;
+      color: #ffffff;
+      font-weight: 700;
+      flex: 0 0 auto;
+    }
+
+    .tone-good {
+      background: var(--brand-green-soft);
+      border-color: #c8efd8;
+      color: #178b52;
+    }
+
+    .tone-good .status-dot,
+    .tone-good .level-dot {
+      background: linear-gradient(135deg, #22bf71, #62d594);
+    }
+
+    .tone-warn {
+      background: var(--brand-amber-soft);
+      border-color: #f6dd9b;
+      color: #bb7b10;
+    }
+
+    .tone-warn .status-dot,
+    .tone-warn .level-dot {
+      background: linear-gradient(135deg, #f0ac2e, #f4c55a);
+    }
+
+    .tone-danger {
+      background: var(--brand-red-soft);
+      border-color: #f4c8c8;
+      color: #c14c4c;
+    }
+
+    .tone-danger .status-dot,
+    .tone-danger .level-dot {
+      background: linear-gradient(135deg, #d95b5b, #f08a8a);
+    }
+
+    .tone-neutral {
+      background: #eff4ff;
+      border-color: #d7e4ff;
+      color: #47658f;
+    }
+
+    .tone-neutral .status-dot,
+    .tone-neutral .level-dot {
+      background: linear-gradient(135deg, #5d8ef1, #7db0ff);
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .metric-card {
+      padding: 8px;
+      min-height: 64px;
+    }
+
+    .metric-title {
+      font-size: 6px;
+      color: #7386aa;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .metric-value {
+      margin-top: 4px;
+      font-size: 11px;
+      line-height: 1.2;
+      color: #223a68;
+      font-weight: 700;
+    }
+
+    .metric-copy {
+      margin-top: 3px;
+      font-size: 6.2px;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+
+    .list-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .list-card {
+      padding: 10px 11px;
+    }
+
+    .list-card-title {
+      font-size: 9px;
+      color: #225dd0;
+      font-weight: 700;
+    }
+
+    .bullet-list {
+      margin: 7px 0 0;
+      padding-left: 16px;
+    }
+
+    .bullet-list li {
+      margin: 0 0 5px;
+      font-size: 6.7px;
+      line-height: 1.45;
+      color: #263f6c;
+    }
+
+    .coverage-list {
+      margin: 7px 0 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .coverage-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 7px;
+      border-radius: 11px;
+      border: 1px solid #dcebff;
+      background: #ffffff;
+      font-size: 6.6px;
+      color: #223a68;
+      font-weight: 700;
+    }
+
+    .check-mark {
+      width: 15px;
+      height: 15px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #22bf71, #5bd08f);
+      color: #ffffff;
+      font-size: 9px;
+      line-height: 1;
+      flex: 0 0 auto;
+    }
+
+    .qr-card {
+      padding: 10px 11px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .qr-box {
+      width: 74px;
+      height: 74px;
+      border-radius: 12px;
+      border: 1px solid #dbe8ff;
+      background: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      flex: 0 0 auto;
+    }
+
+    .qr-box img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .qr-box .placeholder {
+      font-size: 6px;
+      line-height: 1.35;
+      color: #7990ba;
+      text-align: center;
+      padding: 0 6px;
+    }
+
+    .qr-title {
+      font-size: 8.3px;
+      color: #225dd0;
+      font-weight: 700;
+    }
+
+    .qr-copy,
+    .tiny-copy {
+      margin-top: 3px;
+      font-size: 6.1px;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+
+    .verification-link {
+      margin-top: 4px;
+      font-size: 5.5px;
+      line-height: 1.45;
+      color: #4e6fa9;
+      word-break: break-all;
+    }
+
+    .two-column {
+      display: grid;
+      grid-template-columns: 0.95fr 1.05fr;
+      gap: 8px;
+    }
+
+    .context-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .context-block {
+      padding: 7px 8px;
+      border-radius: 11px;
+      background: #ffffff;
+      border: 1px solid #dcebff;
+    }
+
+    .context-label {
+      font-size: 5.9px;
+      color: #7184a8;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .context-value {
+      margin-top: 3px;
+      font-size: 7px;
+      line-height: 1.45;
+      color: #223a68;
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    .photo-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      position: relative;
+    }
+
+    .photo-card {
+      min-width: 0;
+    }
+
+    .photo-label {
+      margin-bottom: 4px;
+      font-size: 6.2px;
+      color: #2a3f6a;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .photo-frame {
+      height: 104px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      background: linear-gradient(180deg, #f9fbff 0%, #f0f6ff 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .photo-frame img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .photo-placeholder {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 0 12px;
+      font-size: 6.3px;
+      line-height: 1.45;
+      color: #67799d;
+      background: linear-gradient(180deg, #f7faff 0%, #edf4ff 100%);
+    }
+
+    .photo-placeholder strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 7px;
+      color: #263f6b;
+    }
+
+    .verify-ring {
+      position: absolute;
+      left: 50%;
+      top: 48px;
+      transform: translateX(-50%);
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      border: 2px solid #bde8c9;
+      background: #ffffff;
+      box-shadow: 0 0 0 4px rgba(34, 191, 113, 0.12);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--brand-green);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .identity-metrics {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+    }
+
+    .mini-metric {
+      padding: 7px 8px;
+      border-radius: 11px;
+      background: #ffffff;
+      border: 1px solid #dcebff;
+    }
+
+    .mini-label {
+      font-size: 5.9px;
+      color: #7184a8;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .mini-value {
+      margin-top: 3px;
+      font-size: 8px;
+      color: #223a68;
+      font-weight: 700;
+    }
+
+    .mini-value.good {
+      color: #1d9d5e;
+    }
+
+    .method-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .method-card {
+      padding: 8px 9px;
+      border-radius: 14px;
+      border: 1px solid #dcebff;
+      background: #ffffff;
+    }
+
+    .method-domain {
+      font-size: 8px;
+      color: #245ece;
+      font-weight: 700;
+    }
+
+    .method-copy {
+      margin-top: 4px;
+      font-size: 6.3px;
+      line-height: 1.45;
+      color: #607298;
+    }
+
+    .method-copy strong {
+      color: #273f6c;
+    }
+
+    .framework-note {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid #dbe8ff;
+      background: linear-gradient(180deg, #f7fbff 0%, #eef6ff 100%);
+      font-size: 6.2px;
+      line-height: 1.5;
+      color: #55729e;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+
+    .status-card {
+      padding: 8px 9px;
+      border-radius: 14px;
+      border: 1px solid #dcebff;
+      background: #ffffff;
+    }
+
+    .status-card-title {
+      font-size: 7.3px;
+      color: #245ece;
+      font-weight: 700;
+    }
+
+    .status-card-score {
+      margin-top: 5px;
+      font-size: 10px;
+      color: #223a68;
+      font-weight: 700;
+    }
+
+    .status-card-copy {
+      margin-top: 4px;
+      font-size: 5.8px;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+
+    .table-card {
+      padding: 8px 9px;
+      overflow: hidden;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
-      margin-top: 8px;
+      table-layout: fixed;
     }
-    th, td {
-      border: 1px solid #e5e7eb;
-      padding: 6px;
-      text-align: left;
+
+    th,
+    td {
+      padding: 6px 5px;
+      border-bottom: 1px solid #e6efff;
       vertical-align: top;
+      text-align: left;
     }
+
     th {
-      background: #f9fafb;
+      font-size: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #7386aa;
+      font-weight: 700;
+      background: #f8fbff;
     }
-    .coverage span {
+
+    td {
+      font-size: 6.4px;
+      line-height: 1.45;
+      color: #263f6b;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .score-strong {
+      font-weight: 700;
+      color: #223a68;
+    }
+
+    .status-text {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 6px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .status-text .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
       display: inline-block;
-      margin-right: 10px;
-      margin-bottom: 4px;
+      flex: 0 0 auto;
     }
-    .qr {
-      width: 90px;
-      height: 90px;
+
+    .status-good {
+      color: #178b52;
     }
-    ul {
-      margin: 6px 0 0 18px;
-      padding: 0;
+
+    .status-good .dot {
+      background: #21bb71;
+    }
+
+    .status-warn {
+      color: #bb7b10;
+    }
+
+    .status-warn .dot {
+      background: #f1aa29;
+    }
+
+    .status-danger {
+      color: #c14c4c;
+    }
+
+    .status-danger .dot {
+      background: #dc5a5a;
+    }
+
+    .risk-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .risk-card {
+      padding: 9px 10px;
+    }
+
+    .risk-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .risk-title {
+      font-size: 8.5px;
+      color: #245ece;
+      font-weight: 700;
+    }
+
+    .risk-score {
+      text-align: right;
+      font-size: 16px;
+      line-height: 1;
+      color: #223a68;
+      font-weight: 700;
+    }
+
+    .risk-score span {
+      display: block;
+      margin-top: 2px;
+      font-size: 6px;
+      color: #7184a8;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .evidence-list {
+      margin: 7px 0 0;
+      padding-left: 15px;
+    }
+
+    .evidence-list li {
+      margin: 0 0 4px;
+      font-size: 6.2px;
+      line-height: 1.45;
+      color: #5d7097;
+    }
+
+    .legend-note {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: linear-gradient(180deg, #f7fbff 0%, #eef6ff 100%);
+      border: 1px solid #dbe8ff;
+      font-size: 6.1px;
+      line-height: 1.5;
+      color: #5a7198;
+    }
+
+    .plan-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .plan-card {
+      padding: 8px 9px;
+      border-radius: 14px;
+      border: 1px solid #dcebff;
+      background: #ffffff;
+    }
+
+    .plan-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .plan-title {
+      font-size: 8.4px;
+      color: #245ece;
+      font-weight: 700;
+    }
+
+    .plan-copy {
+      margin-top: 3px;
+      font-size: 6.2px;
+      line-height: 1.5;
+      color: #607298;
+    }
+
+    .footer {
+      margin-top: 6px;
+      padding-top: 4px;
+      border-top: 1px solid var(--line);
+      font-size: 5.6px;
+      line-height: 1.45;
+      color: #5c7198;
+    }
+
+    .footer strong {
+      color: #435d8b;
+    }
+
+    .empty-copy {
+      font-size: 6.4px;
+      line-height: 1.45;
+      color: var(--muted);
     }
   </style>
 </head>
 <body>
-  <div class="footer">
-    {{ report.classification }} | v{{ report.report_version }} | {{ report.generated_at|slice:":10" }} | Rule Engine {{ report.rule_engine_version }} | Legal Record: {{ report.legal_record_id }} | {{ report.legal_disclaimer }}
-  </div>
-
+  {% with assessment=report.assessment_context summary=report.executive_summary identity=report.identity_verification candidate=report.candidate_snapshot methodology=report.assessment_methodology critical_status=report.critical_competency_status %}
   <div class="page">
-    <h1>{{ report.report_name }}</h1>
-    <div class="grid">
-      <div class="row">
-        <div class="cell" style="width: 72%;">
-          <div class="summary-box">
-            <strong>Candidate Reference:</strong> {{ report.assessment_context.candidate_reference }}<br />
-            <strong>Target Role:</strong> {{ report.assessment_context.target_role }}<br />
-            <strong>Assessment Date:</strong> {{ report.assessment_context.assessment_date }}<br />
-            <strong>Duration:</strong> {{ report.assessment_context.assessment_duration_minutes }} minutes
-          </div>
-          <div class="summary-box">
-            <strong>Overall Score:</strong> {{ report.executive_summary.overall_score }}<br />
-            <strong>Readiness Indicator:</strong>
-            {% if report.executive_summary.readiness_indicator.code == "READY" %}
-              <span class="pill green">🟢 {{ report.executive_summary.readiness_indicator.value }}</span>
-            {% elif report.executive_summary.readiness_indicator.code == "PARTIALLY_READY" %}
-              <span class="pill yellow">🟡 {{ report.executive_summary.readiness_indicator.value }}</span>
-            {% else %}
-              <span class="pill red">🔴 {{ report.executive_summary.readiness_indicator.value }}</span>
+    <div class="page-body">
+      <div class="hero card">
+        <div>
+          <div class="brand-row">
+            {% if logo_data_uri %}
+              <img class="brand-logo" src="{{ logo_data_uri }}" alt="MeritLense logo" />
             {% endif %}
-            <br />
-            <strong>Suggested Action:</strong> {{ report.executive_summary.suggested_action_display }}<br />
-            <strong>Assessment Reliability:</strong> {{ report.executive_summary.evaluation_reliability }}
+            <div class="brand-name">Merit<span>Lense</span></div>
+          </div>
+          <div class="report-title">{{ report.report_name }}<span class="tm">&trade;</span></div>
+          <div class="brand-note">Employer Decision Support | Workforce Readiness Assessment</div>
+          <div class="hero-copy">
+            Structured, auditable readiness reporting for pre-employment use only. MeritLense measures readiness against the target role requirements, while the employer remains the final decision maker.
           </div>
         </div>
-        <div class="cell" style="width: 28%; text-align: right;">
-          {% if qr_data_uri %}
-            <img class="qr" src="{{ qr_data_uri }}" alt="QR verification code" />
-          {% endif %}
-          <div class="muted" style="margin-top: 6px;">QR Verification</div>
+        <div class="meta-card">
+          <div class="meta-title">Trusted by Employers. Built for Compliance.</div>
+          <div class="meta-points">
+            <span>Secure</span>
+            <span>Transparent</span>
+            <span>Reliable</span>
+          </div>
+          <div class="meta-grid">
+            <div class="meta-block">
+              <div class="meta-label">Classification</div>
+              <div class="meta-value">{{ report.classification }}</div>
+            </div>
+            <div class="meta-block">
+              <div class="meta-label">Report Status</div>
+              <div class="meta-value">{{ report.report_status }}</div>
+            </div>
+            <div class="meta-block">
+              <div class="meta-label">Version</div>
+              <div class="meta-value">v{{ report.report_version }}</div>
+            </div>
+            <div class="meta-block">
+              <div class="meta-label">Generated By</div>
+              <div class="meta-value">{{ report.generated_by }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="candidate-strip badge-strip">
+        <div class="candidate-cell">
+          <div class="candidate-kicker">Candidate</div>
+          <div class="candidate-value">{{ assessment.candidate_name|default:candidate.full_name }}</div>
+        </div>
+        <div class="candidate-cell">
+          <div class="candidate-kicker">Reference</div>
+          <div class="candidate-value">{{ assessment.candidate_reference }}</div>
+        </div>
+        <div class="candidate-cell">
+          <div class="candidate-kicker">Target Role</div>
+          <div class="candidate-value">{{ assessment.target_role }}</div>
+        </div>
+        <div class="candidate-cell">
+          <div class="candidate-kicker">Assessment Date</div>
+          <div class="candidate-value">{{ assessment.assessment_date }}</div>
+        </div>
+      </div>
+
+      <div class="card section-shell">
+        <div class="section-heading">
+          <div>
+            <div class="section-kicker">Page 1</div>
+            <div class="section-title">Executive Summary</div>
+          </div>
+          <div class="section-note">
+            Official readiness output is derived from MeritLense Assessment Logic. Overall score is supportive context only and does not replace the readiness indicator.
+          </div>
+        </div>
+
+        <div class="summary-grid">
+          <div class="summary-rows">
+            <div class="summary-row">
+              <div class="summary-label">Readiness Indicator</div>
+              <div class="summary-value">
+                {% if summary.readiness_indicator.code == "READY" %}
+                  <span class="status-badge tone-good"><span class="status-dot">R</span>{{ summary.readiness_indicator.display|default:summary.readiness_indicator.value }}</span>
+                {% elif summary.readiness_indicator.code == "PARTIALLY_READY" %}
+                  <span class="status-badge tone-warn"><span class="status-dot">P</span>{{ summary.readiness_indicator.display|default:summary.readiness_indicator.value }}</span>
+                {% else %}
+                  <span class="status-badge tone-danger"><span class="status-dot">G</span>{{ summary.readiness_indicator.display|default:summary.readiness_indicator.value }}</span>
+                {% endif %}
+                <div class="summary-subcopy">{{ summary.readiness_reason.employer_message }}</div>
+              </div>
+            </div>
+
+            <div class="summary-row">
+              <div class="summary-label">Suggested Action</div>
+              <div class="summary-value">{{ summary.suggested_action_display }}</div>
+            </div>
+
+            <div class="summary-row">
+              <div class="summary-label">Assessment Coverage</div>
+              <div class="summary-value">
+                {% for item in assessment.assessment_coverage %}
+                  {{ item }}{% if not forloop.last %} | {% endif %}
+                {% endfor %}
+              </div>
+            </div>
+
+            <div class="summary-row">
+              <div class="summary-label">Assessment Reliability</div>
+              <div class="summary-value">
+                {{ summary.evaluation_reliability }}
+                <div class="summary-subcopy">
+                  {% for factor in summary.reliability_factors %}
+                    {{ factor }}{% if not forloop.last %} | {% endif %}
+                  {% endfor %}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="readiness-card card">
+            <div class="readiness-top">
+              <div>
+                <div class="readiness-score-label">Overall Score</div>
+                <div class="readiness-score">{{ summary.overall_score }}<span>/100</span></div>
+              </div>
+              <div>
+                {% if summary.readiness_indicator.code == "READY" %}
+                  <span class="status-badge tone-good"><span class="status-dot">1</span>Ready</span>
+                {% elif summary.readiness_indicator.code == "PARTIALLY_READY" %}
+                  <span class="status-badge tone-warn"><span class="status-dot">2</span>Partially Ready</span>
+                {% else %}
+                  <span class="status-badge tone-danger"><span class="status-dot">3</span>Readiness Gaps Identified</span>
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="metric-grid">
+              <div class="metric-card">
+                <div class="metric-title">Assessment Scope</div>
+                <div class="metric-value">{{ summary.assessment_scope }}</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-title">Assessment Quality</div>
+                <div class="metric-value">{{ assessment.assessment_quality }}</div>
+                <div class="metric-copy">{{ assessment.assessment_completeness }}% completeness recorded.</div>
+              </div>
+            </div>
+
+            <div class="metric-card">
+              <div class="metric-title">Public Verification</div>
+              <div class="metric-value">{{ report.verification_status }}</div>
+              <div class="metric-copy">QR verification opens a public status page only and does not reveal personal evaluation results.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="list-grid">
+        <div class="list-card card">
+          <div class="list-card-title">Top Strengths</div>
+          <ul class="bullet-list">
+            {% for item in summary.top_strengths %}
+              <li>{{ item }}</li>
+            {% empty %}
+              <li>No strengths were recorded in the current readiness summary.</li>
+            {% endfor %}
+          </ul>
+        </div>
+        <div class="list-card card">
+          <div class="list-card-title">Top Risks</div>
+          <ul class="bullet-list">
+            {% for item in summary.top_risks %}
+              <li>{{ item }}</li>
+            {% empty %}
+              <li>No top risks were recorded in the current readiness summary.</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+
+      <div class="summary-grid">
+        <div class="card section-shell">
+          <div class="list-card-title">Assessment Coverage</div>
+          <ul class="coverage-list">
+            {% for item in assessment.assessment_coverage %}
+              <li class="coverage-item"><span class="check-mark">&#10003;</span>{{ item }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+
+        <div class="qr-card card">
+          <div class="qr-box">
+            {% if qr_data_uri %}
+              <img src="{{ qr_data_uri }}" alt="Report verification QR code" />
+            {% else %}
+              <div class="placeholder">QR unavailable</div>
+            {% endif %}
+          </div>
+          <div>
+            <div class="qr-title">QR Verification</div>
+            <div class="qr-copy">Use this QR code to confirm authenticity, public report status, target role, and verification details.</div>
+            <div class="verification-link">{{ report.qr_verification_url }}</div>
+          </div>
         </div>
       </div>
     </div>
 
-    <h2>Top Strengths</h2>
-    <ul>
-      {% for item in report.executive_summary.top_strengths %}
-        <li>{{ item }}</li>
-      {% endfor %}
-    </ul>
-
-    <h2>Top Risks</h2>
-    <ul>
-      {% for item in report.executive_summary.top_risks %}
-        <li>{{ item }}</li>
-      {% endfor %}
-    </ul>
-
-    <h2>Assessment Coverage</h2>
-    <div class="coverage">
-      {% for item in report.assessment_context.assessment_coverage %}
-        <span>✓ {{ item }}</span>
-      {% endfor %}
+    <div class="footer">
+      <strong>{{ report.classification }}</strong> | Report {{ report_number }} | v{{ report.report_version }} | {{ report.generated_at|slice:":10" }} | {{ report.legal_disclaimer }}
     </div>
   </div>
 
   <div class="page">
-    <h1>Assessment Context</h1>
-    <table>
-      <tr><th>Target Role</th><td>{{ report.assessment_context.target_role }}</td></tr>
-      <tr><th>Assessment Type</th><td>{{ report.assessment_context.assessment_type }}</td></tr>
-      <tr><th>Assessment Language</th><td>{{ report.assessment_context.assessment_language }}</td></tr>
-      <tr><th>Assessment Mode</th><td>{{ report.assessment_context.assessment_mode }}</td></tr>
-      <tr><th>Assessment Completeness</th><td>{{ report.assessment_context.assessment_completeness }}%</td></tr>
-      <tr><th>Framework Version</th><td>{{ report.assessment_framework_version }}</td></tr>
-      <tr><th>Role Profile Version</th><td>{{ report.assessment_context.role_profile_version }}</td></tr>
-    </table>
+    <div class="page-body">
+      <div class="card section-shell">
+        <div class="section-heading">
+          <div>
+            <div class="section-kicker">Page 2</div>
+            <div class="section-title">Assessment Context + Competency Overview</div>
+          </div>
+          <div class="section-note">
+            This page combines the assessment conditions, identity controls, methodology, and role-based competency results into a single employer review page.
+          </div>
+        </div>
 
-    <h2>Assessment Methodology Summary</h2>
-    <table>
-      <tr><th>Domain</th><th>What Was Evaluated</th><th>Method</th></tr>
-      <tr><td>Safety Awareness</td><td>Emergency response, hazard identification, protocol knowledge</td><td>Scenario-based Q&A + Simulation</td></tr>
-      <tr><td>Hygiene & Standards</td><td>Cleanliness procedures, cross-contamination prevention</td><td>Scenario-based Q&A</td></tr>
-      <tr><td>Communication Ability</td><td>Language clarity, instruction following, response quality</td><td>AI voice analysis + Speech-to-Text</td></tr>
-      <tr><td>Practical Task Execution</td><td>Step sequence, completion rate, time management</td><td>Task Observation Module</td></tr>
-      <tr><td>Behavioral Indicators</td><td>Integrity, reliability, consistency under pressure</td><td>Behavioral Q&A + Rule Engine Consistency Layer</td></tr>
-    </table>
+        <div class="two-column">
+          <div class="card section-shell">
+            <div class="list-card-title">Assessment Context</div>
+            <div class="context-grid">
+              <div class="context-block">
+                <div class="context-label">Assessment Status</div>
+                <div class="context-value">{{ assessment.assessment_status }}</div>
+              </div>
+              <div class="context-block">
+                <div class="context-label">Assessment Type</div>
+                <div class="context-value">{{ assessment.assessment_type }}</div>
+              </div>
+              <div class="context-block">
+                <div class="context-label">Assessment Language</div>
+                <div class="context-value">{{ assessment.assessment_language }}</div>
+              </div>
+              <div class="context-block">
+                <div class="context-label">Assessment Mode</div>
+                <div class="context-value">{{ assessment.assessment_mode }}</div>
+              </div>
+              <div class="context-block">
+                <div class="context-label">Duration</div>
+                <div class="context-value">{{ assessment.assessment_duration_minutes }} minutes</div>
+              </div>
+              <div class="context-block">
+                <div class="context-label">Completeness</div>
+                <div class="context-value">{{ assessment.assessment_completeness }}%</div>
+              </div>
+              <div class="context-block">
+                <div class="context-label">Candidate Reference</div>
+                <div class="context-value">{{ assessment.candidate_reference }}</div>
+              </div>
+              <div class="context-block">
+                <div class="context-label">Consent Status</div>
+                <div class="context-value">
+                  {% if report.data_processing_consent.candidate_consented %}
+                    Candidate consent recorded
+                  {% else %}
+                    Consent record unavailable
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card section-shell">
+            <div class="list-card-title">Identity Verification</div>
+            <div class="photo-grid">
+              <div class="photo-card">
+                <div class="photo-label">Captured Image</div>
+                <div class="photo-frame">
+                  {% if identity.captured_image_data_uri %}
+                    <img src="{{ identity.captured_image_data_uri }}" alt="Captured candidate image" />
+                  {% else %}
+                    <div class="photo-placeholder">
+                      <div>
+                        <strong>{{ assessment.candidate_name|default:candidate.full_name }}</strong>
+                        No live capture on file
+                      </div>
+                    </div>
+                  {% endif %}
+                </div>
+              </div>
+
+              <div class="verify-ring">&#10003;</div>
+
+              <div class="photo-card">
+                <div class="photo-label">Verified Photo (ID)</div>
+                <div class="photo-frame">
+                  {% if identity.verified_photo_data_uri %}
+                    <img src="{{ identity.verified_photo_data_uri }}" alt="Verified ID image" />
+                  {% else %}
+                    <div class="photo-placeholder">
+                      <div>
+                        <strong>{{ assessment.candidate_name|default:candidate.full_name }}</strong>
+                        No reference image on file
+                      </div>
+                    </div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="identity-metrics">
+              <div class="mini-metric">
+                <div class="mini-label">Verification Status</div>
+                <div class="mini-value">{{ identity.verification_label|default:identity.status }}</div>
+              </div>
+              <div class="mini-metric">
+                <div class="mini-label">Face Match Score</div>
+                <div class="mini-value good">
+                  {% if identity.face_match_score != None and identity.face_match_score != "" %}
+                    {{ identity.face_match_score }}%
+                  {% else %}
+                    --
+                  {% endif %}
+                </div>
+              </div>
+              <div class="mini-metric">
+                <div class="mini-label">Liveness</div>
+                <div class="mini-value good">
+                  {% if identity.liveness_passed is None %}
+                    Pending
+                  {% elif identity.liveness_passed %}
+                    Passed
+                  {% else %}
+                    Failed
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card section-shell" style="margin-top: 8px;">
+          <div class="list-card-title">Assessment Methodology</div>
+          <div class="method-grid">
+            {% for item in methodology %}
+              <div class="method-card">
+                <div class="method-domain">{{ item.domain }}</div>
+                <div class="method-copy"><strong>What Was Evaluated:</strong> {{ item.evaluated }}</div>
+                <div class="method-copy"><strong>Method:</strong> {{ item.method }}</div>
+              </div>
+            {% endfor %}
+          </div>
+          <div class="framework-note">
+            Powered by MeritLense Workforce Readiness Assessment | MeritLense Assessment Logic supports a consistent readiness review while employers make the final decision.
+          </div>
+        </div>
+
+        <div class="card section-shell" style="margin-top: 8px;">
+          <div class="subsection-head">
+            <div class="list-card-title">Competency Breakdown</div>
+            <div class="tiny-copy subsection-note">
+              Skill-by-skill readiness results are grouped directly below the methodology so employers can move from what was assessed to how the candidate performed.
+            </div>
+          </div>
+
+          <div class="status-grid">
+            {% for item in critical_status %}
+              <div class="status-card">
+                <div class="status-card-title">{{ item.label }}</div>
+                {% if item.tone == "good" %}
+                  <div style="margin-top: 5px;"><span class="tone-pill tone-good"><span class="status-dot">&#10003;</span>{{ item.status_label }}</span></div>
+                {% elif item.tone == "warn" %}
+                  <div style="margin-top: 5px;"><span class="tone-pill tone-warn"><span class="status-dot">!</span>{{ item.status_label }}</span></div>
+                {% else %}
+                  <div style="margin-top: 5px;"><span class="tone-pill tone-danger"><span class="status-dot">!</span>{{ item.status_label }}</span></div>
+                {% endif %}
+                <div class="status-card-score">{{ item.score }}/{{ item.max_score }} ({{ item.percentage }}%)</div>
+                <div class="status-card-copy">{{ item.summary }}</div>
+              </div>
+            {% endfor %}
+          </div>
+
+          <div class="table-card" style="margin-top: 8px;">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 21%;">Competency</th>
+                  <th style="width: 13%;">Score</th>
+                  <th style="width: 11%;">Threshold</th>
+                  <th style="width: 12%;">Status</th>
+                  <th style="width: 12%;">Responses</th>
+                  <th style="width: 31%;">Explanation</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in report.competency_breakdown %}
+                  <tr>
+                    <td>
+                      <div class="score-strong">{{ item.display_name|default:item.competency_name|default:item.competency_code }}</div>
+                    </td>
+                    <td><span class="score-strong">{{ item.score }}/{{ item.max_score }}</span><br />{{ item.percentage }}%</td>
+                    <td>{{ item.pass_threshold }}%</td>
+                    <td>
+                      {% if item.status == "PASSED" %}
+                        <span class="status-text status-good"><span class="dot"></span>Passed</span>
+                      {% elif item.status == "BELOW_THRESHOLD" %}
+                        <span class="status-text status-danger"><span class="dot"></span>Below Threshold</span>
+                      {% else %}
+                        <span class="status-text status-warn"><span class="dot"></span>{{ item.status|default:"Review" }}</span>
+                      {% endif %}
+                    </td>
+                    <td>{{ item.completed_response_count }}/{{ item.response_count }}</td>
+                    <td>{{ item.explanation }}</td>
+                  </tr>
+                {% empty %}
+                  <tr>
+                    <td colspan="6" class="empty-copy">No competency breakdown was available for this report.</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <strong>{{ report.classification }}</strong> | Report {{ report_number }} | v{{ report.report_version }} | {{ report.generated_at|slice:":10" }} | {{ report.legal_disclaimer }}
+    </div>
   </div>
 
   <div class="page">
-    <h1>Competency Breakdown</h1>
-    <table>
-      <tr>
-        <th>Competency</th>
-        <th>Score</th>
-        <th>Max</th>
-        <th>Percentage</th>
-        <th>Status</th>
-        <th>Explanation</th>
-      </tr>
-      {% for item in report.competency_breakdown %}
-      <tr>
-        <td>{{ item.competency_name|default:item.competency_code }}</td>
-        <td>{{ item.score }}</td>
-        <td>{{ item.max_score }}</td>
-        <td>{{ item.percentage }}%</td>
-        <td>{{ item.status }}</td>
-        <td>{{ item.explanation }}</td>
-      </tr>
-      {% endfor %}
-    </table>
-  </div>
+    <div class="page-body">
+      <div class="card section-shell">
+        <div class="section-heading">
+          <div>
+            <div class="section-kicker">Page 3</div>
+            <div class="section-title">Risk Indicators + Action Planning</div>
+          </div>
+          <div class="section-note">
+            Risk review, evidence summary, and next-step actions are grouped together so employers can move from concern areas to recommended action without losing context.
+          </div>
+        </div>
 
-  <div class="page">
-    <h1>Risk Indicators</h1>
-    <table>
-      <tr><th>Category</th><th>Level</th><th>Risk Score</th><th>Evidence</th></tr>
-      <tr><td>Safety Risk</td><td>{{ report.risk_indicators.safety_risk.level }}</td><td>{{ report.risk_indicators.safety_risk.risk_score }}</td><td>{{ report.risk_indicators.safety_risk.evidence|join:", " }}</td></tr>
-      <tr><td>Hygiene Risk</td><td>{{ report.risk_indicators.hygiene_risk.level }}</td><td>{{ report.risk_indicators.hygiene_risk.risk_score }}</td><td>{{ report.risk_indicators.hygiene_risk.evidence|join:", " }}</td></tr>
-      <tr><td>Communication Risk</td><td>{{ report.risk_indicators.communication_risk.level }}</td><td>{{ report.risk_indicators.communication_risk.risk_score }}</td><td>{{ report.risk_indicators.communication_risk.evidence|join:", " }}</td></tr>
-      <tr><td>Integrity Risk</td><td>{{ report.risk_indicators.integrity_risk.level }}</td><td>{{ report.risk_indicators.integrity_risk.risk_score }}</td><td>{{ report.risk_indicators.integrity_risk.evidence|join:", " }}</td></tr>
-    </table>
+        <div class="risk-grid">
+          {% for key, risk in report.risk_indicators.items %}
+            {% if key != "note" %}
+              <div class="risk-card card">
+                <div class="risk-head">
+                  <div>
+                    <div class="risk-title">{{ key|cut:"_risk"|title }} Risk</div>
+                    {% if risk.level == "Low" %}
+                      <div style="margin-top: 6px;"><span class="risk-level tone-good"><span class="level-dot">&#10003;</span>{{ risk.level }} Risk</span></div>
+                    {% elif risk.level == "Medium" %}
+                      <div style="margin-top: 6px;"><span class="risk-level tone-warn"><span class="level-dot">!</span>{{ risk.level }} Risk</span></div>
+                    {% else %}
+                      <div style="margin-top: 6px;"><span class="risk-level tone-danger"><span class="level-dot">!</span>{{ risk.level }} Risk</span></div>
+                    {% endif %}
+                  </div>
+                  <div class="risk-score">
+                    {{ risk.risk_score }}
+                    <span>Risk Score</span>
+                  </div>
+                </div>
+                <ul class="evidence-list">
+                  {% for item in risk.evidence %}
+                    <li>{{ item }}</li>
+                  {% empty %}
+                    <li>No supporting evidence recorded.</li>
+                  {% endfor %}
+                </ul>
+              </div>
+            {% endif %}
+          {% endfor %}
+        </div>
 
-    <h2>Evidence Summary</h2>
-    <table>
-      <tr><th>Category</th><th>Finding</th><th>Source</th><th>Severity</th></tr>
-      {% for item in report.evidence_summary %}
-      <tr>
-        <td>{{ item.category }}</td>
-        <td>{{ item.finding }}</td>
-        <td>{{ item.source }}</td>
-        <td>{{ item.severity }}</td>
-      </tr>
-      {% endfor %}
-    </table>
-  </div>
+        {% if report.risk_indicators.note %}
+          <div class="legend-note">{{ report.risk_indicators.note }}</div>
+        {% endif %}
 
-  {% if report.improvement_plan %}
-  <div class="page">
-    <h1>Improvement Plan</h1>
-    <table>
-      <tr><th>Competency</th><th>Gap</th><th>Recommended Action</th><th>Priority</th></tr>
-      {% for item in report.improvement_plan %}
-      <tr>
-        <td>{{ item.competency }}</td>
-        <td>{{ item.gap }}</td>
-        <td>{{ item.recommended_action }}</td>
-        <td>{{ item.priority }}</td>
-      </tr>
-      {% endfor %}
-    </table>
+        <div class="table-card" style="margin-top: 8px;">
+          <div class="list-card-title" style="margin-bottom: 6px;">Evidence Summary</div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 16%;">Category</th>
+                <th style="width: 42%;">Finding</th>
+                <th style="width: 24%;">Source</th>
+                <th style="width: 18%;">Severity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in report.evidence_summary %}
+                <tr>
+                  <td class="score-strong">{{ item.category }}</td>
+                  <td>{{ item.finding }}</td>
+                  <td>{{ item.source }}</td>
+                  <td>
+                    {% if item.severity == "High" %}
+                      <span class="risk-level tone-danger"><span class="level-dot">!</span>{{ item.severity }}</span>
+                    {% elif item.severity == "Medium" %}
+                      <span class="risk-level tone-warn"><span class="level-dot">!</span>{{ item.severity }}</span>
+                    {% else %}
+                      <span class="risk-level tone-good"><span class="level-dot">&#10003;</span>{{ item.severity }}</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="4" class="empty-copy">No structured evidence summary was available for this report.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div style="margin-top: 8px;">
+          <div class="subsection-head">
+            <div class="list-card-title">Improvement Plan</div>
+            <div class="tiny-copy subsection-note">
+              Improvement planning is displayed when readiness gaps remain so employers can connect each concern area to a practical next step.
+            </div>
+          </div>
+
+          {% if summary.readiness_indicator.code != "READY" %}
+            <div class="plan-grid">
+              {% for item in report.improvement_plan %}
+                <div class="plan-card">
+                  <div class="plan-head">
+                    <div class="plan-title">{{ item.competency }}</div>
+                    {% if item.priority == "High" %}
+                      <span class="tone-pill tone-danger"><span class="status-dot">!</span>{{ item.priority }} Priority</span>
+                    {% elif item.priority == "Medium" %}
+                      <span class="tone-pill tone-warn"><span class="status-dot">!</span>{{ item.priority }} Priority</span>
+                    {% else %}
+                      <span class="tone-pill tone-good"><span class="status-dot">&#10003;</span>{{ item.priority }} Priority</span>
+                    {% endif %}
+                  </div>
+                  <div class="plan-copy"><strong>Gap:</strong> {{ item.gap }}</div>
+                  <div class="plan-copy"><strong>Recommended Action:</strong> {{ item.recommended_action }}</div>
+                </div>
+              {% empty %}
+                <div class="plan-card">
+                  <div class="empty-copy">No structured improvement actions were available for this report.</div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="plan-card">
+              <div class="plan-title">No Improvement Plan Required</div>
+              <div class="plan-copy">The readiness result is Ready, so no structured remediation plan is required in the current employer-facing report.</div>
+            </div>
+          {% endif %}
+        </div>
+
+        <div class="summary-grid" style="margin-top: 8px;">
+          <div class="card section-shell">
+            <div class="list-card-title">Recommended Employer Action</div>
+            <div class="metric-value" style="margin-top: 6px;">{{ summary.suggested_action_display }}</div>
+            <div class="metric-copy">
+              {% if summary.readiness_indicator.code == "READY" %}
+                The candidate met the current readiness requirements for the assessed role. Employers may proceed using standard hiring controls.
+              {% elif summary.readiness_indicator.code == "PARTIALLY_READY" %}
+                Readiness gaps were identified. Consider targeted training and then re-check the candidate against the role requirements.
+              {% else %}
+                Readiness gaps were identified. Re-evaluation after targeted training is recommended before proceeding.
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="card section-shell">
+            <div class="list-card-title">Reliability Factors</div>
+            <ul class="bullet-list">
+              {% for factor in summary.reliability_factors %}
+                <li>{{ factor }}</li>
+              {% empty %}
+                <li>No reliability factors were recorded.</li>
+              {% endfor %}
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <strong>{{ report.classification }}</strong> | Report {{ report_number }} | v{{ report.report_version }} | {{ report.generated_at|slice:":10" }} | {{ report.legal_disclaimer }}
+    </div>
   </div>
-  {% endif %}
+  {% endwith %}
 </body>
 </html>

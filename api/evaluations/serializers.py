@@ -20,6 +20,38 @@ from api.sessions.models import InterviewSession
 from api.sessions.services import InterviewSessionService
 
 
+class CandidateScoreSummaryCompetencySerializer(serializers.Serializer):
+    code = serializers.CharField()
+    name = serializers.CharField()
+    percentage = serializers.FloatField()
+
+
+class CandidateCertificateSummarySerializer(serializers.Serializer):
+    certificate_id = serializers.CharField()
+    pdf_url = serializers.CharField()
+    issued_at = serializers.DateTimeField(allow_null=True)
+
+
+class CandidateReportSummarySerializer(serializers.Serializer):
+    report_id = serializers.CharField()
+    report_number = serializers.CharField()
+    report_status = serializers.CharField()
+    pdf_url = serializers.CharField()
+    generated_at = serializers.DateTimeField()
+
+
+class CandidateScoreSummarySerializer(serializers.Serializer):
+    candidate_id = serializers.CharField()
+    evaluation_id = serializers.CharField(allow_null=True)
+    role_code = serializers.CharField()
+    overall_percentage = serializers.FloatField()
+    status = serializers.CharField()
+    generated_at = serializers.DateTimeField()
+    competencies = CandidateScoreSummaryCompetencySerializer(many=True)
+    certificate = CandidateCertificateSummarySerializer(allow_null=True)
+    report = CandidateReportSummarySerializer(allow_null=True)
+
+
 class EvaluationSerializer(PublicIdModelSerializer):
     candidate_details = CandidateSerializer(source='candidate', read_only=True)
     evaluation_type_display = serializers.CharField(source='get_evaluation_type_display', read_only=True)
@@ -85,12 +117,16 @@ class EvaluationSerializer(PublicIdModelSerializer):
         return EvaluationReadinessDecisionRecordSerializer(record).data
 
     def get_latest_report(self, obj):
-        report = obj.reports.first()
-        if report is None:
-            return None
+        from api.reports.models import EvaluationReport
         from api.reports.serializers import EvaluationReportListSerializer
 
-        return EvaluationReportListSerializer(report).data
+        report = obj.reports.filter(report_status=EvaluationReport.STATUS_ACTIVE).first()
+        if report is None:
+            return None
+        return EvaluationReportListSerializer(
+            report,
+            context={"request": self.context.get("request")},
+        ).data
     
     def validate_scheduled_date(self, value):
         if value <= timezone.now():
@@ -281,12 +317,16 @@ class EvaluationListSerializer(PublicIdModelSerializer):
         return EvaluationReadinessDecisionRecordSerializer(record).data
 
     def get_latest_report(self, obj):
-        report = obj.reports.first()
-        if report is None:
-            return None
+        from api.reports.models import EvaluationReport
         from api.reports.serializers import EvaluationReportListSerializer
 
-        return EvaluationReportListSerializer(report).data
+        report = obj.reports.filter(report_status=EvaluationReport.STATUS_ACTIVE).first()
+        if report is None:
+            return None
+        return EvaluationReportListSerializer(
+            report,
+            context={"request": self.context.get("request")},
+        ).data
 
 
 class EvaluationReadinessDecisionRecordSerializer(PublicIdModelSerializer):

@@ -1,8 +1,14 @@
 import base64
+import copy
 import hashlib
 import json
 import mimetypes
+import os
+import shutil
+import subprocess
+import tempfile
 from io import BytesIO
+from pathlib import Path
 from decimal import Decimal
 
 from django.conf import settings
@@ -51,6 +57,8 @@ class EvaluationReportService:
     REPORT_NAME = "MeritLense Workforce Readiness Assessment Report"
     GENERATED_BY = "MeritLense Platform"
     QR_VERIFY_BASE_URL = "https://verify.meritleense.com/report"
+    LOGO_PATH = Path(__file__).resolve().parents[1] / "evaluations" / "assets" / "meritlense-logo.png"
+    _logo_data_uri_cache = None
 
     @classmethod
     def generate_for_evaluation(cls, *, evaluation, actor):
@@ -187,18 +195,34 @@ class EvaluationReportService:
             "document_integrity",
             "assessment_context",
             "executive_summary",
+            "assessment_methodology",
+            "critical_competency_status",
+            "competency_breakdown",
             "risk_indicators",
             "evidence_summary",
             "improvement_plan",
             "data_processing_consent",
+            "candidate_snapshot",
             "identity_verification",
             "verification_status",
             "qr_verification_url",
-            "score_readiness_policy",
-            "transcript_report",
-            "evaluation_flow_reference",
         ]
-        return {key: report.report_payload.get(key) for key in allowed_keys}
+        payload = {
+            key: copy.deepcopy(report.report_payload.get(key))
+            for key in allowed_keys
+        }
+        executive_summary = payload.get("executive_summary") or {}
+        readiness_reason = executive_summary.get("readiness_reason")
+        if isinstance(readiness_reason, dict):
+            executive_summary["readiness_reason"] = {
+                "employer_message": readiness_reason.get("employer_message", ""),
+            }
+        override_details = executive_summary.get("override_details")
+        if isinstance(override_details, dict):
+            executive_summary["override_details"] = {
+                "triggered": bool(override_details.get("triggered")),
+            }
+        return payload
 
     @classmethod
     def build_public_verification_payload(cls, report):
@@ -212,6 +236,18 @@ class EvaluationReportService:
             "sha256_hash": report.pdf_hash or payload.get("document_integrity", {}).get("hash_value", ""),
             "verification_timestamp": timezone.now().isoformat(),
         }
+
+    @classmethod
+    def render_existing_pdf(cls, report):
+        payload = copy.deepcopy(report.report_payload or {})
+        if not payload:
+            raise EvaluationReportError(
+                "This report PDF is unavailable and cannot be rebuilt because its stored payload is missing."
+            )
+        return cls._render_employer_pdf(
+            report_payload=payload,
+            report_number=report.report_number,
+        )
 
     @classmethod
     def _get_summary(cls, evaluation):
@@ -521,10 +557,16 @@ class EvaluationReportService:
         )
         consent_summary = cls._build_consent_summary(session)
         identity_verification = cls._build_identity_verification_summary(session)
+        candidate_snapshot = cls._build_candidate_snapshot(candidate, session)
         evaluation_bands = cls._build_evaluation_bands(
             competency_breakdown=competency_breakdown,
             response_evidence_summary=response_evidence_summary,
             overall_percentage=summary.overall_percentage,
+        )
+        assessment_methodology = cls._build_assessment_methodology()
+        critical_competency_status = cls._build_critical_competency_status(
+            competency_breakdown=competency_breakdown,
+            risk_indicators=risk_indicators,
         )
         role_fit = cls._build_role_fit_summary(
             evaluation=evaluation,
@@ -553,6 +595,9 @@ class EvaluationReportService:
             },
             "assessment_context": {
                 "candidate_reference": cls._build_candidate_reference(candidate),
+                "candidate_name": candidate_snapshot["full_name"],
+                "candidate_email": candidate_snapshot["email"],
+                "candidate_passport_id": candidate_snapshot["passport_id"],
                 "assessment_session_id": str(session.public_id),
                 "assessment_status": assessment_status,
                 "target_role": session.role_name or evaluation.get_candidate_job_role_display(),
@@ -588,10 +633,13 @@ class EvaluationReportService:
                 "evaluation_reliability": reliability,
                 "reliability_factors": reliability_factors,
             },
+            "assessment_methodology": assessment_methodology,
+            "critical_competency_status": critical_competency_status,
             "risk_indicators": risk_indicators,
             "evidence_summary": evidence_summary,
             "improvement_plan": improvement_plan,
             "data_processing_consent": consent_summary,
+            "candidate_snapshot": candidate_snapshot,
             "identity_verification": identity_verification,
             "transcript_report": {
                 "evaluation_bands": evaluation_bands,
@@ -701,12 +749,17 @@ class EvaluationReportService:
 
         normalized = str(raw_value).strip().upper()
         if raw_value in {"جاهز", "READY"} or normalized == "READY":
-            return {"value": "جاهز", "code": "READY", "level": 1}
+            return {"value": "جاهز", "display": "Ready", "code": "READY", "level": 1}
         if raw_value in {"متوسط", "PARTIALLY_READY"} or normalized == "PARTIALLY_READY":
-            return {"value": "جاهزية جزئية", "code": "PARTIALLY_READY", "level": 2}
+            return {"value": "جاهزية جزئية", "display": "Partially Ready", "code": "PARTIALLY_READY", "level": 2}
         if raw_value in {"غير جاهز", "NOT_READY", "توجد فجوات جاهزية"} or normalized == "NOT_READY":
-            return {"value": "توجد فجوات جاهزية", "code": "NOT_READY", "level": 3}
-        return {"value": "جاهزية جزئية", "code": "PARTIALLY_READY", "level": 2}
+            return {
+                "value": "توجد فجوات جاهزية",
+                "display": "Readiness Gaps Identified",
+                "code": "NOT_READY",
+                "level": 3,
+            }
+        return {"value": "جاهزية جزئية", "display": "Partially Ready", "code": "PARTIALLY_READY", "level": 2}
 
     @classmethod
     def _derive_top_strengths_and_risks(cls, *, competency_breakdown, critical_failures):
@@ -978,6 +1031,84 @@ class EvaluationReportService:
         return "Limited"
 
     @classmethod
+    def _build_assessment_methodology(cls):
+        return [
+            {
+                "domain": "Safety Awareness",
+                "evaluated": "Emergency response, hazard identification, protocol knowledge",
+                "method": "Scenario-based Q&A + Simulation",
+            },
+            {
+                "domain": "Hygiene & Standards",
+                "evaluated": "Cleanliness procedures, cross-contamination prevention",
+                "method": "Scenario-based Q&A",
+            },
+            {
+                "domain": "Communication Ability",
+                "evaluated": "Language clarity, instruction following, response quality",
+                "method": "AI voice analysis + Speech-to-Text",
+            },
+            {
+                "domain": "Practical Task Execution",
+                "evaluated": "Step sequence, completion rate, time management",
+                "method": "Task Observation Module",
+            },
+            {
+                "domain": "Behavioral Indicators",
+                "evaluated": "Integrity, reliability, consistency under pressure",
+                "method": "Behavioral Q&A + Rule Engine Consistency Layer",
+            },
+        ]
+
+    @classmethod
+    def _build_critical_competency_status(cls, *, competency_breakdown, risk_indicators):
+        categories = [
+            ("Safety", ["safety"]),
+            ("Hygiene", ["hygiene", "clean", "sanitation"]),
+            ("Communication", ["communication", "language"]),
+            ("Integrity", ["integrity", "reliability", "behavior"]),
+        ]
+        items = []
+        for label, tokens in categories:
+            competency = None
+            for item in competency_breakdown:
+                haystack = " ".join(
+                    [
+                        str(item.get("competency_code") or "").lower(),
+                        str(item.get("competency_name") or "").lower(),
+                    ]
+                )
+                if any(token in haystack for token in tokens):
+                    competency = item
+                    break
+            risk = risk_indicators.get(f"{label.lower()}_risk", {}) if isinstance(risk_indicators, dict) else {}
+            risk_level = risk.get("level", "Low")
+            if risk_level == "Low" and competency and competency.get("status") != "BELOW_THRESHOLD":
+                status_label = "Meets Standard"
+                tone = "good"
+            elif risk_level == "Medium":
+                status_label = "Review Needed"
+                tone = "warn"
+            else:
+                status_label = "Attention Required"
+                tone = "danger"
+            items.append(
+                {
+                    "label": label,
+                    "status_label": status_label,
+                    "tone": tone,
+                    "risk_level": risk_level,
+                    "risk_score": risk.get("risk_score", 0),
+                    "percentage": competency.get("percentage") if competency else 0,
+                    "score": competency.get("score") if competency else 0,
+                    "max_score": competency.get("max_score") if competency else 0,
+                    "pass_threshold": competency.get("pass_threshold") if competency else 0,
+                    "summary": ", ".join(risk.get("evidence") or []) or "No supporting evidence recorded.",
+                }
+            )
+        return items
+
+    @classmethod
     def _build_consent_summary(cls, session):
         agreement = session.candidate_consent_agreement
         return {
@@ -988,6 +1119,7 @@ class EvaluationReportService:
 
     @classmethod
     def _build_identity_verification_summary(cls, session):
+        candidate = session.candidate
         captured_artifact = session.artifacts.filter(
             artifact_type__in=["WEBCAM_FRAME", "SELFIE_IMAGE"],
         ).order_by("-uploaded_at").first()
@@ -1014,12 +1146,15 @@ class EvaluationReportService:
             ),
             "captured_image_data_uri": (
                 cls._file_to_data_uri(getattr(captured_artifact, "file", None))
-                or cls._file_to_data_uri(getattr(session.candidate, "profile_photo", None))
+                or cls._file_to_data_uri(getattr(candidate, "verification_photo", None))
+                or cls._file_to_data_uri(getattr(candidate, "profile_photo", None))
+                or cls._document_to_image_data_uri(getattr(candidate, "passport_document", None))
             ),
             "verified_photo_data_uri": (
-                cls._file_to_data_uri(getattr(reference_artifact, "file", None))
-                or cls._file_to_data_uri(getattr(session.candidate, "verification_photo", None))
-                or cls._file_to_data_uri(getattr(session.candidate, "profile_photo", None))
+                cls._document_to_image_data_uri(getattr(reference_artifact, "file", None))
+                or cls._file_to_data_uri(getattr(candidate, "verification_photo", None))
+                or cls._document_to_image_data_uri(getattr(candidate, "passport_document", None))
+                or cls._file_to_data_uri(getattr(candidate, "profile_photo", None))
             ),
         }
 
@@ -1120,13 +1255,48 @@ class EvaluationReportService:
             for item in evaluation_bands
         }
         role_profiles = [
-            {"code": "HK", "label": "Cleaning", "weights": {"TASK_EXECUTION": 0.55, "BEHAVIORAL": 0.20, "COGNITIVE": 0.25}},
-            {"code": "NA", "label": "Child Care", "weights": {"BEHAVIORAL": 0.45, "TASK_EXECUTION": 0.25, "COGNITIVE": 0.30}},
-            {"code": "EC", "label": "Elderly Care", "weights": {"BEHAVIORAL": 0.50, "TASK_EXECUTION": 0.30, "COGNITIVE": 0.20}},
-            {"code": "DR", "label": "Driver", "weights": {"TASK_EXECUTION": 0.45, "COGNITIVE": 0.35, "BEHAVIORAL": 0.20}},
-            {"code": "KA", "label": "Kitchen Support", "weights": {"TASK_EXECUTION": 0.50, "COGNITIVE": 0.20, "BEHAVIORAL": 0.30}},
-            {"code": "MW", "label": "Maintenance", "weights": {"TASK_EXECUTION": 0.55, "COGNITIVE": 0.20, "BEHAVIORAL": 0.25}},
-            {"code": "OT", "label": "General Support", "weights": {"TASK_EXECUTION": 0.34, "COGNITIVE": 0.33, "BEHAVIORAL": 0.33}},
+            {
+                "code": "HK",
+                "label": "Cleaning",
+                "description": "Evaluates hygiene awareness, attention to detail, and task efficiency.",
+                "weights": {"TASK_EXECUTION": 0.55, "BEHAVIORAL": 0.20, "COGNITIVE": 0.25},
+            },
+            {
+                "code": "NA",
+                "label": "Child Care",
+                "description": "Assesses empathy, patience, responsibility, and safety awareness.",
+                "weights": {"BEHAVIORAL": 0.45, "TASK_EXECUTION": 0.25, "COGNITIVE": 0.30},
+            },
+            {
+                "code": "EC",
+                "label": "Elderly Care",
+                "description": "Measures compassion, reliability, communication, and personal care skills.",
+                "weights": {"BEHAVIORAL": 0.50, "TASK_EXECUTION": 0.30, "COGNITIVE": 0.20},
+            },
+            {
+                "code": "DR",
+                "label": "Driver",
+                "description": "Balances hazard awareness, consistency, and route decision-making.",
+                "weights": {"TASK_EXECUTION": 0.45, "COGNITIVE": 0.35, "BEHAVIORAL": 0.20},
+            },
+            {
+                "code": "KA",
+                "label": "Kitchen Support",
+                "description": "Highlights food safety, pacing, and team coordination.",
+                "weights": {"TASK_EXECUTION": 0.50, "COGNITIVE": 0.20, "BEHAVIORAL": 0.30},
+            },
+            {
+                "code": "MW",
+                "label": "Maintenance",
+                "description": "Measures task accuracy, troubleshooting, and dependable follow-through.",
+                "weights": {"TASK_EXECUTION": 0.55, "COGNITIVE": 0.20, "BEHAVIORAL": 0.25},
+            },
+            {
+                "code": "OT",
+                "label": "General Support",
+                "description": "General multi-signal fit across task execution, cognitive, and behavioral traits.",
+                "weights": {"TASK_EXECUTION": 0.34, "COGNITIVE": 0.33, "BEHAVIORAL": 0.33},
+            },
         ]
 
         scored_roles = []
@@ -1139,10 +1309,20 @@ class EvaluationReportService:
                 {
                     "code": profile["code"],
                     "label": profile["label"],
+                    "description": profile["description"],
                     "match_score": match_score,
                     "match_label": cls._match_label(match_score),
                 }
             )
+
+        preferred_labels = ["Cleaning", "Child Care", "Elderly Care"]
+        preferred_roles = [
+            item for item in scored_roles
+            if item["label"] in preferred_labels
+        ]
+        if len(preferred_roles) >= 3:
+            preferred_roles.sort(key=lambda item: preferred_labels.index(item["label"]))
+            return preferred_roles[:3]
 
         current_role_code = evaluation.candidate_job_role or getattr(evaluation.candidate, "job_role", "") or "OT"
         current_role = next((item for item in scored_roles if item["code"] == current_role_code), None)
@@ -1234,6 +1414,72 @@ class EvaluationReportService:
         return f"data:{mime_type};base64,{encoded}"
 
     @classmethod
+    def _document_to_image_data_uri(cls, file_field):
+        return cls._file_to_data_uri(file_field) or cls._pdf_file_to_png_data_uri(file_field)
+
+    @classmethod
+    def _pdf_file_to_png_data_uri(cls, file_field):
+        if not file_field:
+            return None
+
+        file_name = getattr(file_field, "name", "") or ""
+        if Path(file_name).suffix.lower() != ".pdf":
+            return None
+
+        pdftoppm_path = shutil.which("pdftoppm")
+        if not pdftoppm_path:
+            return None
+
+        try:
+            file_field.open("rb")
+        except Exception:
+            return None
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="report-pdf-preview-") as tmpdir:
+                source_path = Path(tmpdir) / "reference.pdf"
+                output_prefix = str(Path(tmpdir) / "reference-page")
+
+                with open(source_path, "wb") as source_file:
+                    if hasattr(file_field, "chunks"):
+                        for chunk in file_field.chunks():
+                            source_file.write(chunk)
+                    else:
+                        source_file.write(file_field.read())
+
+                subprocess.run(
+                    [
+                        pdftoppm_path,
+                        "-f",
+                        "1",
+                        "-l",
+                        "1",
+                        "-singlefile",
+                        "-png",
+                        str(source_path),
+                        output_prefix,
+                    ],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=30,
+                )
+
+                image_path = Path(f"{output_prefix}.png")
+                if not image_path.exists():
+                    return None
+
+                encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+                return f"data:image/png;base64,{encoded}"
+        except Exception:
+            return None
+        finally:
+            try:
+                file_field.close()
+            except Exception:
+                pass
+
+    @classmethod
     def _match_label(cls, score):
         if score >= 88:
             return "Excellent Match"
@@ -1260,6 +1506,9 @@ class EvaluationReportService:
 
     @classmethod
     def _build_qr_verification_url(cls, *, report_number):
+        frontend_url = (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
+        if frontend_url:
+            return f"{frontend_url}/en/verify-report?id={report_number}"
         return f"{cls.QR_VERIFY_BASE_URL}/{report_number}"
 
     @classmethod
@@ -1281,6 +1530,16 @@ class EvaluationReportService:
         token = str(candidate.public_id).split("-")[0].upper()
         year = timezone.now().year
         return f"ML-REF-{year}-{token}"
+
+    @classmethod
+    def _build_candidate_snapshot(cls, candidate, session):
+        return {
+            "full_name": candidate.get_full_name(),
+            "email": candidate.email,
+            "passport_id": candidate.passport_id,
+            "role_name": session.role_name or candidate.get_job_role_display(),
+            "preferred_language": cls._display_language(candidate.preferred_language),
+        }
 
     @classmethod
     def _display_language(cls, value):
@@ -1325,16 +1584,18 @@ class EvaluationReportService:
 
     @classmethod
     def _render_employer_pdf(cls, *, report_payload, report_number):
+        html = render_to_string(
+            "reports/employer_report.html",
+            {
+                "report": report_payload,
+                "report_number": report_number,
+                "qr_data_uri": cls._build_qr_data_uri(report_payload.get("qr_verification_url", "")),
+                "logo_data_uri": cls._logo_data_uri(),
+            },
+        )
+
         if HTML is not None:
             try:
-                html = render_to_string(
-                    "reports/employer_report.html",
-                    {
-                        "report": report_payload,
-                        "report_number": report_number,
-                        "qr_data_uri": cls._build_qr_data_uri(report_payload.get("qr_verification_url", "")),
-                    },
-                )
                 pdf_bytes = HTML(
                     string=html,
                     base_url=str(getattr(settings, "BASE_DIR", "")),
@@ -1344,6 +1605,16 @@ class EvaluationReportService:
             except Exception:
                 pass
 
+        playwright_pdf = cls._render_employer_pdf_via_playwright(html=html)
+        if playwright_pdf is not None:
+            pdf_hash = hashlib.sha256(playwright_pdf).hexdigest()
+            return playwright_pdf, pdf_hash
+
+        chrome_pdf = cls._render_employer_pdf_via_chrome(html=html)
+        if chrome_pdf is not None:
+            pdf_hash = hashlib.sha256(chrome_pdf).hexdigest()
+            return chrome_pdf, pdf_hash
+
         pdf_lines = cls._build_employer_pdf_lines(
             report_payload=report_payload,
             report_number=report_number,
@@ -1351,6 +1622,172 @@ class EvaluationReportService:
         pdf_bytes = cls._build_simple_pdf(pdf_lines)
         pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
         return pdf_bytes, pdf_hash
+
+    @classmethod
+    def _logo_data_uri(cls):
+        if cls._logo_data_uri_cache is None:
+            try:
+                encoded = base64.b64encode(cls.LOGO_PATH.read_bytes()).decode("ascii")
+                cls._logo_data_uri_cache = f"data:image/png;base64,{encoded}"
+            except Exception:
+                cls._logo_data_uri_cache = None
+        return cls._logo_data_uri_cache
+
+    @classmethod
+    def _render_employer_pdf_via_playwright(cls, *, html):
+        playwright_binary = shutil.which("playwright")
+        if not playwright_binary:
+            return None
+
+        with tempfile.TemporaryDirectory(prefix="meritlense-report-pw-") as temp_dir:
+            temp_path = Path(temp_dir)
+            html_path = temp_path / "employer-report.html"
+            pdf_path = temp_path / "employer-report.pdf"
+            html_path.write_text(html, encoding="utf-8")
+
+            command_sets = [
+                [
+                    playwright_binary,
+                    "pdf",
+                    "--channel",
+                    "chrome",
+                    "--paper-format",
+                    "A4",
+                    "--wait-for-timeout",
+                    "1200",
+                    html_path.resolve().as_uri(),
+                    str(pdf_path),
+                ],
+                [
+                    playwright_binary,
+                    "pdf",
+                    "--paper-format",
+                    "A4",
+                    "--wait-for-timeout",
+                    "1200",
+                    html_path.resolve().as_uri(),
+                    str(pdf_path),
+                ],
+            ]
+
+            for command in command_sets:
+                try:
+                    subprocess.run(
+                        command,
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=90,
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    continue
+
+                if pdf_path.exists():
+                    return pdf_path.read_bytes()
+
+        return None
+
+    @classmethod
+    def _render_employer_pdf_via_chrome(cls, *, html):
+        chrome_binary = cls._resolve_chrome_binary()
+        if not chrome_binary:
+            return None
+
+        with tempfile.TemporaryDirectory(prefix="meritlense-report-") as temp_dir:
+            temp_path = Path(temp_dir)
+            html_path = temp_path / "employer-report.html"
+            pdf_path = temp_path / "employer-report.pdf"
+            profile_dir = temp_path / "chrome-profile"
+            cache_dir = temp_path / "xdg-cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            html_path.write_text(html, encoding="utf-8")
+            chrome_env = os.environ.copy()
+            chrome_env.setdefault("XDG_CACHE_HOME", str(cache_dir))
+
+            chrome_commands = [
+                [
+                    chrome_binary,
+                    "--headless=new",
+                    "--disable-gpu",
+                    "--disable-background-networking",
+                    "--disable-component-update",
+                    "--disable-sync",
+                    "--metrics-recording-only",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--allow-file-access-from-files",
+                    "--no-pdf-header-footer",
+                    f"--user-data-dir={profile_dir}",
+                    f"--print-to-pdf={pdf_path}",
+                    "--print-to-pdf-no-header",
+                    html_path.resolve().as_uri(),
+                ],
+                [
+                    chrome_binary,
+                    "--headless",
+                    "--disable-gpu",
+                    "--disable-background-networking",
+                    "--disable-component-update",
+                    "--disable-sync",
+                    "--metrics-recording-only",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--allow-file-access-from-files",
+                    "--no-pdf-header-footer",
+                    f"--user-data-dir={profile_dir}",
+                    f"--print-to-pdf={pdf_path}",
+                    "--print-to-pdf-no-header",
+                    html_path.resolve().as_uri(),
+                ],
+            ]
+
+            for command in chrome_commands:
+                try:
+                    subprocess.run(
+                        command,
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=90,
+                        env=chrome_env,
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    continue
+
+                if pdf_path.exists():
+                    return pdf_path.read_bytes()
+
+        return None
+
+    @classmethod
+    def _resolve_chrome_binary(cls):
+        configured = [
+            getattr(settings, "CHROME_BIN", ""),
+        ]
+        configured.extend(
+            [
+                os_value
+                for os_value in [
+                    os.environ.get("GOOGLE_CHROME_BIN"),
+                    os.environ.get("CHROME_BIN"),
+                ]
+                if os_value
+            ]
+        )
+
+        discovered = [
+            shutil.which("google-chrome"),
+            shutil.which("chromium"),
+            shutil.which("chromium-browser"),
+            shutil.which("chrome"),
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+
+        for candidate in configured + discovered:
+            if candidate and Path(candidate).exists():
+                return candidate
+        return None
 
     @classmethod
     def _build_qr_data_uri(cls, verification_url):
@@ -1367,6 +1804,9 @@ class EvaluationReportService:
         context = report_payload.get("assessment_context", {})
         summary = report_payload.get("executive_summary", {})
         readiness = summary.get("readiness_indicator", {})
+        methodology = report_payload.get("assessment_methodology", [])
+        critical_status = report_payload.get("critical_competency_status", [])
+        competency_breakdown = report_payload.get("competency_breakdown", [])
         risk_indicators = report_payload.get("risk_indicators", {})
         evidence_summary = report_payload.get("evidence_summary", [])
         improvement_plan = report_payload.get("improvement_plan", [])
@@ -1391,15 +1831,50 @@ class EvaluationReportService:
             f"Assessment Language: {context.get('assessment_language', '')}",
             "",
             "Executive Summary",
-            f"Readiness Indicator: {readiness.get('value', '')} ({readiness.get('code', '')})",
+            f"Readiness Indicator: {readiness.get('display', readiness.get('value', ''))} ({readiness.get('code', '')})",
             f"Readiness Reason: {(summary.get('readiness_reason') or {}).get('employer_message', '')}",
             f"Overall Score: {summary.get('overall_score', '')}%",
             f"Assessment Scope: {summary.get('assessment_scope', '')}",
             f"Suggested Action: {summary.get('suggested_action_display', '')}",
+            f"Assessment Coverage: {', '.join(context.get('assessment_coverage', []))}",
             f"Evaluation Reliability: {summary.get('evaluation_reliability', '')}",
         ]
         for factor in summary.get("reliability_factors", []):
             lines.append(f"  - {factor}")
+        lines.extend(["", "Top Strengths"])
+        for strength in summary.get("top_strengths", []):
+            lines.append(f"- {strength}")
+        lines.extend(["", "Top Risks"])
+        for risk in summary.get("top_risks", []):
+            lines.append(f"- {risk}")
+        lines.extend(["", "Assessment Methodology"])
+        for item in methodology:
+            lines.extend(
+                [
+                    f"- {item.get('domain', '')}",
+                    f"  Evaluated: {item.get('evaluated', '')}",
+                    f"  Method: {item.get('method', '')}",
+                ]
+            )
+        lines.extend(["", "Critical Competency Status"])
+        for item in critical_status:
+            lines.append(
+                f"- {item.get('label', '')}: {item.get('status_label', '')} | "
+                f"{item.get('score', '')}/{item.get('max_score', '')} ({item.get('percentage', '')}%)"
+            )
+        lines.extend(["", "Competency Breakdown"])
+        for item in competency_breakdown:
+            lines.extend(
+                [
+                    f"- {item.get('competency_name') or item.get('competency_code', '')}",
+                    (
+                        "  Score: "
+                        f"{item.get('score', '')}/{item.get('max_score', '')} "
+                        f"({item.get('percentage', '')}%) | Threshold: {item.get('pass_threshold', '')}% | "
+                        f"Status: {item.get('status', '')}"
+                    ),
+                ]
+            )
         lines.extend([
             "",
             "Risk Indicators",
@@ -1459,9 +1934,6 @@ class EvaluationReportService:
                 f"Legal Record Reference: {report_payload.get('legal_record_id', '')}",
                 f"Verification URL: {report_payload.get('qr_verification_url', '')}",
                 f"Document Hash: {integrity.get('hash_value', '')}",
-                "",
-                "Assessment Flow",
-                report_payload.get("evaluation_flow_reference", ""),
                 "",
                 "Legal Disclaimer",
                 report_payload.get("legal_disclaimer", ""),

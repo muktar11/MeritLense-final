@@ -263,6 +263,18 @@ class EvaluationReportApiTests(TestCase):
         self.assertTrue(response.data["requires_human_review"])
         self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_status"], "COMPLETED")
         self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_quality"], "Limited")
+        self.assertEqual(
+            response.data["report_payload"]["assessment_context"]["candidate_name"],
+            self.candidate.get_full_name(),
+        )
+        self.assertEqual(
+            response.data["report_payload"]["assessment_context"]["candidate_email"],
+            self.candidate.email,
+        )
+        self.assertEqual(
+            response.data["report_payload"]["assessment_context"]["candidate_passport_id"],
+            self.candidate.passport_id,
+        )
         self.assertEqual(response.data["report_payload"]["executive_summary"]["readiness_indicator"]["code"], "PARTIALLY_READY")
         self.assertEqual(
             list(response.data["report_payload"]["executive_summary"].keys())[:2],
@@ -292,6 +304,10 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(
             response.data["report_payload"]["evaluation_flow_reference"],
             "Interview Session -> Responses -> AI Processing -> Deterministic Scoring -> Rule Engine -> Evaluation Report",
+        )
+        self.assertEqual(
+            response.data["report_payload"]["candidate_snapshot"]["full_name"],
+            self.candidate.get_full_name(),
         )
         self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_coverage"][0], "Safety")
         self.assertIn("transcript_report", response.data["report_payload"])
@@ -380,6 +396,25 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(summary["report"]["report_status"], EvaluationReport.STATUS_ACTIVE)
         self.assertTrue(summary["report"]["pdf_url"].endswith(".pdf"))
         self.assertEqual(summary["competencies"][0]["code"], "safety_awareness")
+
+    def test_export_pdf_rebuilds_when_stored_file_is_missing(self):
+        self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+        report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status=EvaluationReport.STATUS_ACTIVE)
+        self.assertTrue(report.employer_pdf.storage.exists(report.employer_pdf.name))
+
+        report.employer_pdf.storage.delete(report.employer_pdf.name)
+        self.assertFalse(report.employer_pdf.storage.exists(report.employer_pdf.name))
+
+        response = self.client.get(f"/api/v1/evaluations/reports/{report.public_id}/export-pdf")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn(f'{report.report_number}.pdf', response["Content-Disposition"])
+        self.assertTrue(b"".join(response.streaming_content).startswith(b"%PDF"))
 
     def test_regenerate_report_marks_previous_one_stale_and_keeps_history(self):
         first = self.client.post(

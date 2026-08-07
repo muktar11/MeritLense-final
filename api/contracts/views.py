@@ -47,6 +47,10 @@ def _user_company(user):
     return getattr(user, 'managed_company', None)
 
 
+def _requires_company_owner(agreement_types):
+    return any(agreement_type in COMPANY_SCOPED_TYPES for agreement_type in agreement_types)
+
+
 def _mask_email(email):
     local, _, domain = email.partition('@')
     if not domain:
@@ -114,6 +118,11 @@ class AgreementSignInitiateView(APIView):
             )
 
         company = _user_company(request.user)
+        if _requires_company_owner(data['agreement_types']) and company is None:
+            return Response(
+                {'error': 'Only the company owner can sign company legal agreements.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         email = request.user.email
 
         otp_service = OTPService()
@@ -286,6 +295,12 @@ class AgreementSignConfirmView(APIView):
             return Response({'error': error, 'locked': locked}, status=status.HTTP_400_BAD_REQUEST)
 
         company = _user_company(request.user)
+        if _requires_company_owner([agreement.agreement_type for agreement in agreements]):
+            if company is None or any(agreement.company_id != company.id for agreement in agreements):
+                return Response(
+                    {'error': 'Only the company owner can sign company legal agreements.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
         now = timezone.now()
         ip_address = _client_ip(request)
         user_agent = request.META.get('HTTP_USER_AGENT', '')

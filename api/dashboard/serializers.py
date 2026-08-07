@@ -2,6 +2,7 @@ from rest_framework import serializers
 from api.candidates.models import Candidate
 from api.core.serializers import PublicIdModelSerializer
 from api.evaluations.models import Evaluation
+from api.dashboard.models import AdminAlertConfiguration
 
 class DashboardStatsSerializer(serializers.Serializer):
     total_candidates = serializers.IntegerField()
@@ -96,3 +97,9 @@ class MonthlyActivitySerializer(serializers.Serializer):
     candidates_added = serializers.IntegerField()
     evaluations_completed = serializers.IntegerField()
     certificates_issued = serializers.IntegerField()
+
+
+class AdminAlertConfigurationSerializer(PublicIdModelSerializer):
+    class Meta:
+        model = AdminAlertConfiguration
+        fields = ["id", "settings", "updated_at"]

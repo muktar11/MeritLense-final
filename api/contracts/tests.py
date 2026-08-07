@@ -1,22 +1,36 @@
+import shutil
+import tempfile
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.utils import timezone
+from django.test import override_settings
 from rest_framework.test import APIClient, APITestCase
 
 from api.accounts.models import Company, CompanyEmployerProfile, TeamMemberProfile, User
-from api.core.constants import Roles, SubscriptionStatus
-from api.payments.models import Customer, Price, Subscription
+from api.contracts.models import Agreement
+from api.core.constants import AgreementType, AgreementStatus, Roles
 
 
 def make_document(name="document.pdf"):
     return SimpleUploadedFile(name, b"%PDF-1.4 test", content_type="application/pdf")
 
 
-class SubscriptionPermissionTests(APITestCase):
+class AgreementSigningPermissionTests(APITestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._media_dir = tempfile.mkdtemp(prefix="contract-tests-")
+        cls._override = override_settings(MEDIA_ROOT=cls._media_dir)
+        cls._override.enable()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._override.disable()
+        shutil.rmtree(cls._media_dir, ignore_errors=True)
+        super().tearDownClass()
+
     def setUp(self):
         self.client = APIClient()
-
         self.owner = User.objects.create_user(
             email="owner@example.com",
             password="testpass123",
@@ -33,18 +47,10 @@ class SubscriptionPermissionTests(APITestCase):
             role=Roles.B2B_TEAM_MEMBER,
             is_verified=True,
         )
-        self.admin = User.objects.create_user(
-            email="admin@example.com",
-            password="testpass123",
-            first_name="Admin",
-            last_name="User",
-            role=Roles.ADMIN,
-            is_verified=True,
-        )
 
         self.company = Company.objects.create(
             name="MeritLense Co",
-            registration_number="ML-001",
+            registration_number="ML-AGR-001",
             company_size="11-50",
             industry="Tech",
             phone_number="+251900000000",
@@ -83,70 +89,50 @@ class SubscriptionPermissionTests(APITestCase):
             invited_by=self.owner,
         )
 
-        self.customer = Customer.objects.create(
-            user=self.owner,
-            stripe_customer_id="cus_123",
-            email=self.owner.email,
-            name=self.owner.get_full_name(),
-        )
-        self.price = Price.objects.create(
-            name="Business Monthly",
-            stripe_price_id="price_123",
-            stripe_product_id="prod_123",
-            target_user_type="B2B",
-            unit_amount="49.99",
-            currency="usd",
-            interval="MONTHLY",
-        )
-        self.subscription = Subscription.objects.create(
-            user=self.owner,
-            company=self.company,
-            customer=self.customer,
-            stripe_subscription_id="sub_123",
-            stripe_price=self.price,
-            status=SubscriptionStatus.ACTIVE,
-            current_period_start=timezone.now(),
-            current_period_end=timezone.now() + timezone.timedelta(days=30),
-            quantity=1,
-        )
-
-    @patch("api.payments.models.Subscription.cancel", return_value=True)
-    def test_team_member_cannot_cancel_company_subscription(self, cancel_mock):
+    def test_team_member_cannot_initiate_company_agreement_signing(self):
         self.client.force_authenticate(self.team_member)
 
         response = self.client.post(
-            f"/api/v1/payments/subscriptions/{self.subscription.public_id}/cancel",
-            {"at_period_end": True, "cancellation_reason": "Testing"},
+            "/api/v1/agreements/sign/initiate",
+            {
+                "agreement_types": [AgreementType.B2B_AGREEMENT, AgreementType.DPA],
+                "signatory_name": "Team Member",
+                "authorized_signatory_confirmed": True,
+            },
             format="json",
         )
 
-        self.assertEqual(response.status_code, 403)
-        cancel_mock.assert_not_called()
+        self.assertEqual(response.status_code, 403, response.data)
+        self.assertEqual(Agreement.objects.count(), 0)
 
-    @patch("api.payments.models.Subscription.cancel", return_value=True)
-    def test_owner_can_cancel_company_subscription(self, cancel_mock):
+    @patch("api.contracts.views.OTPService.send", return_value=True)
+    @patch("api.contracts.views.OTPService.issue")
+    def test_company_owner_can_initiate_company_agreement_signing(self, issue_mock, send_mock):
         self.client.force_authenticate(self.owner)
+        issue_mock.return_value = ("123456", "hashed-code", self.owner.created_at)
 
         response = self.client.post(
-            f"/api/v1/payments/subscriptions/{self.subscription.public_id}/cancel",
-            {"at_period_end": True, "cancellation_reason": "Testing"},
+            "/api/v1/agreements/sign/initiate",
+            {
+                "agreement_types": [AgreementType.B2B_AGREEMENT, AgreementType.DPA],
+                "signatory_name": "Owner User",
+                "authorized_signatory_confirmed": True,
+            },
             format="json",
         )
 
         self.assertEqual(response.status_code, 200, response.data)
-        cancel_mock.assert_called_once_with(True)
-
-    @patch("api.payments.views.stripe.Subscription.modify", return_value={"id": "sub_123"})
-    def test_team_member_cannot_reactivate_company_subscription(self, modify_mock):
-        self.subscription.status = SubscriptionStatus.CANCELED
-        self.subscription.save(update_fields=["status"])
-        self.client.force_authenticate(self.team_member)
-
-        response = self.client.post(
-            f"/api/v1/payments/subscriptions/{self.subscription.public_id}/reactivate",
-            {},
-            format="json",
+        self.assertEqual(Agreement.objects.count(), 2)
+        self.assertEqual(
+            set(
+                Agreement.objects.values_list("agreement_type", flat=True)
+            ),
+            {AgreementType.B2B_AGREEMENT, AgreementType.DPA},
         )
-
-        self.assertEqual(response.status_code, 403)
-        modify_mock.assert_not_called()
+        self.assertTrue(
+            all(
+                agreement.company_id == self.company.id and agreement.status == AgreementStatus.PENDING
+                for agreement in Agreement.objects.all()
+            )
+        )
+        send_mock.assert_called_once()

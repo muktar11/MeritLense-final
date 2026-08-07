@@ -69,6 +69,14 @@ class InterviewSessionApiTests(APITestCase):
             role=Roles.B2C,
             is_verified=True,
         )
+        self.admin_user = User.objects.create_user(
+            email="admin@example.com",
+            password="testpass123",
+            first_name="Admin",
+            last_name="User",
+            role=Roles.ADMIN,
+            is_verified=True,
+        )
         self.client.force_authenticate(self.user)
 
         self.candidate = Candidate.objects.create(
@@ -122,6 +130,7 @@ class InterviewSessionApiTests(APITestCase):
             )
 
     def test_can_crud_interview_configuration(self):
+        self.client.force_authenticate(self.admin_user)
         response = self.client.post(
             "/api/v1/interviews/configs/",
             {
@@ -157,6 +166,7 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(delete_response.status_code, 204)
 
     def test_can_crud_question_template(self):
+        self.client.force_authenticate(self.admin_user)
         response = self.client.post(
             "/api/v1/interviews/question-templates/",
             {
@@ -206,6 +216,7 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(delete_response.status_code, 204)
 
     def test_can_crud_interview_rubric(self):
+        self.client.force_authenticate(self.admin_user)
         response = self.client.post(
             "/api/v1/interviews/rubrics/",
             {
@@ -238,6 +249,7 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(patch_response.data["notes"], "Updated")
 
     def test_can_crud_package_session_config_and_role_coverage(self):
+        self.client.force_authenticate(self.admin_user)
         package_response = self.client.post(
             "/api/v1/interviews/package-configs/",
             {
@@ -292,38 +304,50 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(list_coverage.status_code, 200)
         self.assertTrue(any(item["id"] == package_id for item in list_packages.data))
 
-    def test_team_member_cannot_manage_interview_setup(self):
-        team_member = User.objects.create_user(
-            email="team@example.com",
-            password="testpass123",
-            first_name="Team",
-            last_name="Member",
-            role=Roles.B2B_TEAM_MEMBER,
-            is_verified=True,
-        )
-        self.client.force_authenticate(team_member)
+    def test_non_admin_roles_cannot_manage_interview_setup(self):
+        users = [
+            self.user,
+            User.objects.create_user(
+                email="owner-b2b@example.com",
+                password="testpass123",
+                first_name="Owner",
+                last_name="Business",
+                role=Roles.B2B,
+                is_verified=True,
+            ),
+            User.objects.create_user(
+                email="team@example.com",
+                password="testpass123",
+                first_name="Team",
+                last_name="Member",
+                role=Roles.B2B_TEAM_MEMBER,
+                is_verified=True,
+            ),
+        ]
 
-        response = self.client.post(
-            "/api/v1/interviews/configs/",
-            {
-                "role_name": "Driver",
-                "role_code": "driver",
-                "language": "EN",
-                "evaluation_tier": "FULL",
-                "duration_minutes": 25,
-                "total_questions": 2,
-                "allow_retries": False,
-                "max_retries": 0,
-                "enable_translation": False,
-                "enable_task_module": False,
-                "enable_integrity_checks": False,
-                "rubric_version": "v1",
-                "question_set_version": "v1",
-                "is_active": True,
-            },
-            format="json",
-        )
-        self.assertEqual(response.status_code, 403)
+        for actor in users:
+            self.client.force_authenticate(actor)
+            response = self.client.post(
+                "/api/v1/interviews/configs/",
+                {
+                    "role_name": "Driver",
+                    "role_code": "driver",
+                    "language": "EN",
+                    "evaluation_tier": "FULL",
+                    "duration_minutes": 25,
+                    "total_questions": 2,
+                    "allow_retries": False,
+                    "max_retries": 0,
+                    "enable_translation": False,
+                    "enable_task_module": False,
+                    "enable_integrity_checks": False,
+                    "rubric_version": "v1",
+                    "question_set_version": "v1",
+                    "is_active": True,
+                },
+                format="json",
+            )
+            self.assertEqual(response.status_code, 403, response.data)
 
     def test_create_start_answer_and_complete_interview_session(self):
         create_response = self.client.post(

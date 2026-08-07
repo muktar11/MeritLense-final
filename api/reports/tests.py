@@ -570,6 +570,32 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(status[1]["score_display"], "Not Assessed")
         self.assertEqual(status[2]["status_label"], "Not Assessed")
 
+    def test_multi_sentence_evidence_does_not_produce_run_on_punctuation(self):
+        risk_indicators = {
+            "integrity_risk": {
+                "level": "Medium",
+                "risk_score": 40,
+                "evidence": [
+                    "Response interpretation requires manual review.",
+                    "The response is unclear and does not relate to patient confidentiality or response protocol.",
+                    "Insufficient detail to provide a comprehensive answer.",
+                ],
+            },
+            "note": "unused",
+        }
+        status = EvaluationReportService._build_critical_competency_status(
+            competency_breakdown=[],
+            risk_indicators=risk_indicators,
+        )
+        integrity_summary = status[3]["summary"]
+
+        self.assertNotIn(".,", integrity_summary)
+        self.assertEqual(
+            integrity_summary,
+            "Response interpretation requires manual review. The response is unclear and does not relate to "
+            "patient confidentiality or response protocol. Insufficient detail to provide a comprehensive answer.",
+        )
+
     def test_regenerate_report_marks_previous_one_stale_and_keeps_history(self):
         first = self.client.post(
             f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",

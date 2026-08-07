@@ -443,6 +443,14 @@ class EvaluationReportService:
         return cleaned
 
     @classmethod
+    def _join_evidence_sentences(cls, items):
+        # Each item here is already a complete, punctuated sentence (e.g.
+        # "X is below the required threshold.") - joining with ", " produces
+        # a "sentence., Next sentence." run-on, so these join with a space
+        # instead, unlike short comma-separated phrase lists elsewhere.
+        return " ".join(cls._normalize_text_list(items))
+
+    @classmethod
     def _strength_statement(cls, label):
         return f"Strong {label.lower()}"
 
@@ -1250,7 +1258,7 @@ class EvaluationReportService:
             if block_name == "note" or risk["level"] not in {"High", "Medium"}:
                 continue
             competency = cls._friendly_competency_name(block_name.replace("_risk", ""))
-            gap = ", ".join(cls._normalize_text_list(risk.get("evidence") or [])) or f"{competency} readiness gap identified."
+            gap = cls._join_evidence_sentences(risk.get("evidence") or []) or f"{competency} readiness gap identified."
             recommended_action = "Targeted critical training" if risk["level"] == "High" else "Focused training"
             items.append(
                 {
@@ -1434,7 +1442,7 @@ class EvaluationReportService:
                     "score": competency.get("score") if competency else 0,
                     "max_score": competency.get("max_score") if competency else 0,
                     "pass_threshold": competency.get("pass_threshold") if competency else 0,
-                    "summary": ", ".join(cls._normalize_text_list(risk.get("evidence") or [])) or "No supporting evidence recorded.",
+                    "summary": cls._join_evidence_sentences(risk.get("evidence") or []) or "No supporting evidence recorded.",
                 }
             )
         return items
@@ -2231,7 +2239,7 @@ class EvaluationReportService:
                     lines.append(f"- {risk_name}: {risk}")
                     continue
                 title = risk_name.replace("_", " ").replace("risk", "risk").title()
-                detail = ", ".join(cls._normalize_text_list(risk.get("evidence") or [])) or "No supporting evidence recorded."
+                detail = cls._join_evidence_sentences(risk.get("evidence") or []) or "No supporting evidence recorded."
                 lines.extend(
                     [
                         f"- {title}: {risk.get('level', '')} ({risk.get('risk_score_display', risk.get('risk_score', ''))})",

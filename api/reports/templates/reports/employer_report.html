@@ -1285,13 +1285,7 @@
               </div>
               <div class="context-block">
                 <div class="context-label">Consent Status</div>
-                <div class="context-value">
-                  {% if report.data_processing_consent.candidate_consented %}
-                    Candidate consent recorded
-                  {% else %}
-                    Consent record unavailable
-                  {% endif %}
-                </div>
+                <div class="context-value">{{ report.data_processing_consent.employer_status }}</div>
               </div>
             </div>
           </div>
@@ -1381,10 +1375,12 @@
                   <div style="margin-top: 5px;"><span class="tone-pill tone-good"><span class="status-dot">&#10003;</span>{{ item.status_label }}</span></div>
                 {% elif item.tone == "warn" %}
                   <div style="margin-top: 5px;"><span class="tone-pill tone-warn"><span class="status-dot">!</span>{{ item.status_label }}</span></div>
+                {% elif item.tone == "neutral" %}
+                  <div style="margin-top: 5px;"><span class="tone-pill tone-neutral"><span class="status-dot">-</span>{{ item.status_label }}</span></div>
                 {% else %}
                   <div style="margin-top: 5px;"><span class="tone-pill tone-danger"><span class="status-dot">!</span>{{ item.status_label }}</span></div>
                 {% endif %}
-                <div class="status-card-score">{{ item.score }}/{{ item.max_score }} ({{ item.percentage }}%)</div>
+                <div class="status-card-score">{{ item.score_display }}</div>
                 <div class="status-card-copy">{{ item.summary }}</div>
               </div>
             {% endfor %}
@@ -1429,15 +1425,19 @@
                   <td>
                     <div class="score-strong">{{ item.display_name|default:item.competency_name|default:item.competency_code }}</div>
                   </td>
-                  <td><span class="score-strong">{{ item.score }}/{{ item.max_score }}</span><br />{{ item.percentage }}%</td>
-                  <td>{{ item.pass_threshold }}%</td>
+                  <td><span class="score-strong">{{ item.score_display }}</span></td>
+                  <td>{% if item.assessment_status == "NOT_ASSESSED" or item.assessment_status == "INSUFFICIENT_EVIDENCE" %}-{% else %}{{ item.pass_threshold }}%{% endif %}</td>
                   <td>
-                    {% if item.status == "PASSED" %}
+                    {% if item.assessment_status == "MEETS_THRESHOLD" or item.assessment_status == "EVALUATED" %}
                       <span class="status-text status-good"><span class="dot"></span>Passed</span>
-                    {% elif item.status == "BELOW_THRESHOLD" %}
+                    {% elif item.assessment_status == "BELOW_THRESHOLD" %}
                       <span class="status-text status-danger"><span class="dot"></span>Below Threshold</span>
+                    {% elif item.assessment_status == "NOT_ASSESSED" %}
+                      <span class="status-text status-warn"><span class="dot"></span>Not Assessed</span>
+                    {% elif item.assessment_status == "INSUFFICIENT_EVIDENCE" %}
+                      <span class="status-text status-warn"><span class="dot"></span>Insufficient Evidence</span>
                     {% else %}
-                      <span class="status-text status-warn"><span class="dot"></span>{{ item.status|default:"Review" }}</span>
+                      <span class="status-text status-warn"><span class="dot"></span>{{ item.assessment_status|default:"Review" }}</span>
                     {% endif %}
                   </td>
                   <td>{{ item.completed_response_count }}/{{ item.response_count }}</td>
@@ -1483,12 +1483,14 @@
                       <div style="margin-top: 6px;"><span class="risk-level tone-good"><span class="level-dot">&#10003;</span>{{ risk.level }} Risk</span></div>
                     {% elif risk.level == "Medium" %}
                       <div style="margin-top: 6px;"><span class="risk-level tone-warn"><span class="level-dot">!</span>{{ risk.level }} Risk</span></div>
+                    {% elif risk.level == "Not Assessed" %}
+                      <div style="margin-top: 6px;"><span class="risk-level tone-neutral"><span class="level-dot">-</span>Not Assessed</span></div>
                     {% else %}
                       <div style="margin-top: 6px;"><span class="risk-level tone-danger"><span class="level-dot">!</span>{{ risk.level }} Risk</span></div>
                     {% endif %}
                   </div>
                   <div class="risk-score">
-                    {{ risk.risk_score }}
+                    {{ risk.risk_score_display|default:risk.risk_score }}
                     <span>Risk Score</span>
                   </div>
                 </div>

@@ -30,6 +30,7 @@ from api.evaluations.scoring_services import Week6ScoringService
 from api.interviews.models import InterviewConfiguration
 from api.questions.models import QuestionTemplate
 from api.reports.models import EvaluationReport
+from api.reports.services import EvaluationReportService
 from api.sessions.models import CandidateResponse, InterviewSession, SessionQuestion
 from api.translation.models import (
     CandidateResponseInterpretation,
@@ -519,6 +520,54 @@ class EvaluationReportApiTests(TestCase):
         findings = [item["finding"] for item in response.data["report_payload"]["evidence_summary"]]
         self.assertTrue(any("Additional evidence is needed to identify hazards." in finding for finding in findings))
         self.assertFalse(any("for identify hazard" in finding for finding in findings))
+
+    def test_employer_text_and_strengths_do_not_contradict_reported_risks(self):
+        self.assertEqual(
+            EvaluationReportService._friendly_competency_name("unmapped", "Unmapped"),
+            "Overall Workforce Readiness",
+        )
+        self.assertEqual(
+            EvaluationReportService._normalize_text("Response interpretation requires manual review.,"),
+            "Response interpretation requires manual review.",
+        )
+        self.assertEqual(
+            EvaluationReportService._normalize_text("Additional evidence is needed for identify hazard."),
+            "Additional evidence is needed to identify hazards.",
+        )
+
+        strengths, risks = EvaluationReportService._derive_top_strengths_and_risks(
+            competency_breakdown=[
+                {
+                    "display_name": "Patient Safety Awareness",
+                    "percentage": 35,
+                    "pass_threshold": 70,
+                    "max_score": 10,
+                    "completed_response_count": 1,
+                    "assessment_status": "BELOW_THRESHOLD",
+                }
+            ],
+            critical_failures=[],
+        )
+
+        self.assertEqual(strengths, ["No significant strengths identified in this assessment."])
+        self.assertEqual(risks, ["Readiness gap identified in patient safety awareness"])
+
+    def test_empty_competency_scores_are_reported_as_not_assessed(self):
+        risks = EvaluationReportService._build_risk_indicators(
+            competency_breakdown=[],
+            response_evidence_summary=[],
+            human_review_flags=[],
+            critical_failures=[],
+        )
+        status = EvaluationReportService._build_critical_competency_status(
+            competency_breakdown=[],
+            risk_indicators=risks,
+        )
+
+        self.assertEqual(risks["hygiene_risk"]["risk_score_display"], "Not Assessed")
+        self.assertEqual(risks["communication_risk"]["level"], "Not Assessed")
+        self.assertEqual(status[1]["score_display"], "Not Assessed")
+        self.assertEqual(status[2]["status_label"], "Not Assessed")
 
     def test_regenerate_report_marks_previous_one_stale_and_keeps_history(self):
         first = self.client.post(

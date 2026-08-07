@@ -57,6 +57,7 @@ class EvaluationReportService:
     CLASSIFICATION = "CONFIDENTIAL - Internal Use Only"
     REPORT_NAME = "MeritLense Workforce Readiness Assessment Report"
     GENERATED_BY = "MeritLense Platform"
+    GENERIC_COMPETENCY_LABEL = "Overall Workforce Readiness"
     PUBLIC_VERIFY_FRONTEND_URL = "https://www.meritlense.com"
     LOGO_PATH = Path(__file__).resolve().parents[1] / "evaluations" / "assets" / "meritlense-logo.png"
     _logo_data_uri_cache = None
@@ -256,9 +257,12 @@ class EvaluationReportService:
         identity = sanitized.get("identity_verification") or {}
         identity.pop("method", None)
         identity.pop("timestamp", None)
-        # Sensitive - stays in the internal audit record (report.report_payload)
-        # only, never in employer-facing output (PDF or this sanitized payload).
         identity.pop("face_match_score", None)
+        identity.pop("single_face_detected", None)
+        identity.pop("liveness_passed", None)
+        identity.pop("verification_duration_seconds", None)
+        identity.pop("verification_label", None)
+        identity.pop("verification_status", None)
 
         return sanitized
 
@@ -368,7 +372,7 @@ class EvaluationReportService:
             (["logic"], "Knowledge & Comprehension"),
             (["comprehension"], "Knowledge & Comprehension"),
             (["cognitive"], "Knowledge & Comprehension"),
-            (["unmapped"], "General Readiness Competency"),
+            (["unmapped"], cls.GENERIC_COMPETENCY_LABEL),
         ]
         for tokens, label in mappings:
             if all(token in haystack for token in tokens):
@@ -401,6 +405,16 @@ class EvaluationReportService:
                     text = "".join(raw_parts)
 
         text = re.sub(r"\s+", " ", text).strip()
+        text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+        text = re.sub(r"\.(?:\s*[,.;:!?])+", ".", text)
+        text = re.sub(r",(?:\s*[,;:!?])+", ",", text)
+        text = re.sub(r"([;:!?])(?:\s*[,.;:!?])+", r"\1", text)
+        text = re.sub(
+            r"additional evidence is needed for identify hazards?",
+            "Additional evidence is needed to identify hazards",
+            text,
+            flags=re.IGNORECASE,
+        )
         return text
 
     @classmethod
@@ -437,18 +451,45 @@ class EvaluationReportService:
         return f"Readiness gap identified in {label.lower()}"
 
     @classmethod
+    def _humanize_indicator_phrase(cls, value):
+        text = cls._normalize_text(value)
+        text = re.sub(r"[_\-]+", " ", text).strip(" ,.;:")
+        replacements = {
+            "identify hazard": "identify hazards",
+        }
+        lowered = text.lower()
+        return replacements.get(lowered, lowered or text)
+
+    @classmethod
+    def _format_indicator_list(cls, items):
+        cleaned = []
+        seen = set()
+        for item in items:
+            phrase = cls._humanize_indicator_phrase(item)
+            if phrase and phrase not in seen:
+                seen.add(phrase)
+                cleaned.append(phrase)
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        if len(cleaned) == 2:
+            return f"{cleaned[0]} and {cleaned[1]}"
+        return f"{', '.join(cleaned[:-1])}, and {cleaned[-1]}"
+
+    @classmethod
     def _employer_evidence_finding(cls, item):
         matched = cls._normalize_text_list(item.get("matched_indicators") or item.get("observed_indicators") or [])
         missing = cls._normalize_text_list(item.get("missing_indicators") or [])
         if matched and missing:
             return (
-                f"Candidate demonstrated {', '.join(matched)}. "
-                f"Additional evidence is needed to {', '.join(missing)}."
+                f"Candidate demonstrated {cls._format_indicator_list(matched)}. "
+                f"Additional evidence is needed to {cls._format_indicator_list(missing)}."
             )
         if missing:
-            return f"Additional evidence is needed to {', '.join(missing)}."
+            return f"Additional evidence is needed to {cls._format_indicator_list(missing)}."
         if matched:
-            return f"Candidate demonstrated {', '.join(matched)}."
+            return f"Candidate demonstrated {cls._format_indicator_list(matched)}."
         return cls._normalize_text(item.get("explanation") or "Readiness gap identified from the candidate response.")
 
     @classmethod
@@ -456,11 +497,26 @@ class EvaluationReportService:
         rows = []
         for item in competency_results:
             display_name = cls._friendly_competency_name(item.competency_code, item.competency_name)
-            explanation = (
-                f"This competency is below threshold because the score is {item.percentage} percent "
-                f"and the configured threshold is {item.pass_threshold} percent."
-            )
-            if item.status != CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD:
+            max_score = cls._decimal(item.max_score)
+            completed_response_count = item.completed_response_count or 0
+            if max_score <= 0:
+                assessment_status = "NOT_ASSESSED"
+                score_display = "Not Assessed"
+                explanation = "This competency was not assessed in this session."
+            elif completed_response_count <= 0:
+                assessment_status = "INSUFFICIENT_EVIDENCE"
+                score_display = "Insufficient Evidence"
+                explanation = "There was insufficient completed evidence to assess this competency."
+            elif item.status == CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD:
+                assessment_status = item.status
+                score_display = f"{cls._decimal(item.total_score)}/{max_score} ({cls._decimal(item.percentage)}%)"
+                explanation = (
+                    f"This competency is below threshold because the score is {item.percentage} percent "
+                    f"and the configured threshold is {item.pass_threshold} percent."
+                )
+            else:
+                assessment_status = item.status
+                score_display = f"{cls._decimal(item.total_score)}/{max_score} ({cls._decimal(item.percentage)}%)"
                 explanation = (
                     f"This competency scored {item.total_score} out of {item.max_score} "
                     f"({item.percentage} percent) across {item.completed_response_count} completed responses."
@@ -471,9 +527,11 @@ class EvaluationReportService:
                     "competency_name": item.competency_name,
                     "display_name": display_name,
                     "score": cls._decimal(item.total_score),
-                    "max_score": cls._decimal(item.max_score),
+                    "max_score": max_score,
                     "percentage": cls._decimal(item.percentage),
                     "status": item.status,
+                    "assessment_status": assessment_status,
+                    "score_display": score_display,
                     "response_count": item.response_count,
                     "completed_response_count": item.completed_response_count,
                     "incomplete_response_count": item.incomplete_response_count,
@@ -668,7 +726,6 @@ class EvaluationReportService:
         override_triggered = cls._get_override_triggered(evaluation, readiness_record)
         rule_engine_version = cls._get_rule_engine_version(readiness_record)
         assessment_status = cls._derive_assessment_status(evaluation)
-        assessment_completeness = cls._derive_assessment_completeness(summary)
         generated_at = timezone.now()
         top_strengths, top_risks = cls._derive_top_strengths_and_risks(
             competency_breakdown=competency_breakdown,
@@ -700,6 +757,7 @@ class EvaluationReportService:
             readiness_indicator=readiness_indicator,
             override_triggered=override_triggered,
         )
+        assessment_completeness = cls._derive_assessment_completeness(summary)
         reliability, reliability_factors = cls._derive_evaluation_reliability(
             session=session,
             summary=summary,
@@ -771,17 +829,11 @@ class EvaluationReportService:
             "executive_summary": {
                 "readiness_indicator": readiness_indicator,
                 "overall_score": cls._rounded_whole(summary.overall_percentage),
-                # A partial assessment's raw score is misleading on its own
-                # (e.g. "0/100" reads as a failing score, not "incomplete") -
-                # the employer-facing display uses this instead of the raw
-                # number whenever the assessment didn't fully complete.
-                # overall_score itself is left untouched for API/JSON
-                # consumers that need the real numeric value.
-                "overall_score_display": (
-                    cls._rounded_whole(summary.overall_percentage)
-                    if assessment_completeness >= 100
-                    else "Not fully available"
+                "overall_score_display": cls._derive_overall_score_display(
+                    overall_percentage=summary.overall_percentage,
+                    assessment_completeness=assessment_completeness,
                 ),
+                "overall_score_available": assessment_completeness >= 100,
                 "readiness_reason": {
                     "employer_message": employer_message,
                     "internal_reason": readiness_reason,
@@ -931,7 +983,32 @@ class EvaluationReportService:
 
     @classmethod
     def _derive_top_strengths_and_risks(cls, *, competency_breakdown, critical_failures):
-        generic_label = "General Readiness Competency"
+        generic_label = cls.GENERIC_COMPETENCY_LABEL
+        risk_labels = set()
+        risks = []
+        for failure in critical_failures:
+            label = cls._friendly_competency_name(
+                failure.get("competency_code") or failure.get("topic"),
+                failure.get("competency_name"),
+            )
+            if label and label != generic_label:
+                risk_labels.add(label)
+                statement = cls._risk_statement(label)
+                if statement not in risks:
+                    risks.append(statement)
+
+        for item in competency_breakdown:
+            label = item.get("display_name") or item.get("competency_name") or item.get("competency_code")
+            if (
+                label
+                and label != generic_label
+                and item.get("assessment_status") == CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD
+            ):
+                risk_labels.add(label)
+                statement = cls._risk_statement(label)
+                if statement not in risks:
+                    risks.append(statement)
+
         ordered = sorted(
             competency_breakdown,
             key=lambda item: item.get("percentage") if item.get("percentage") is not None else -1,
@@ -942,50 +1019,46 @@ class EvaluationReportService:
             if not item:
                 continue
             label = item.get("display_name") or item.get("competency_name") or item.get("competency_code")
-            if not label or label == generic_label:
-                continue
-            # A "strength" must have actually met its own configured pass
-            # threshold - the same PASSED/BELOW_THRESHOLD line drawn in the
-            # Competency Breakdown table. Without this, the highest-ranked
-            # competency could be listed as a strength here while the same
-            # competency is flagged as a risk/gap elsewhere in the report,
-            # just because it happened to score highest among several
-            # failing competencies.
-            percentage = item.get("percentage")
-            pass_threshold = item.get("pass_threshold")
-            if percentage is None or pass_threshold is None or percentage < pass_threshold:
+            percentage = float(item.get("percentage") or 0)
+            threshold = float(item.get("pass_threshold") or 0)
+            if (
+                not label
+                or label == generic_label
+                or label in risk_labels
+                or item.get("completed_response_count", 0) <= 0
+                or item.get("assessment_status")
+                not in {
+                    CompetencyEvaluationResult.STATUS_EVALUATED,
+                    CompetencyEvaluationResult.STATUS_MEETS_THRESHOLD,
+                }
+                or float(item.get("max_score") or 0) <= 0
+                or percentage <= 0
+                or percentage < threshold
+            ):
                 continue
             statement = cls._strength_statement(label)
             if statement not in strengths:
                 strengths.append(statement)
             if len(strengths) >= 3:
                 break
-        risks = []
-        for failure in critical_failures:
-            label = cls._friendly_competency_name(
-                failure.get("competency_code") or failure.get("topic"),
-                failure.get("competency_name"),
-            )
-            if label and label != generic_label:
-                statement = cls._risk_statement(label)
-                if statement not in risks:
-                    risks.append(statement)
+        if not strengths:
+            strengths = ["No significant strengths identified in this assessment."]
+
         weakest = sorted(
             competency_breakdown,
             key=lambda item: item.get("percentage") if item.get("percentage") is not None else 101,
         )
         for item in weakest:
             label = item.get("display_name") or item.get("competency_name") or item.get("competency_code")
-            if not label or label == generic_label:
-                continue
-            # Same principle as the strengths check above, in reverse: only a
-            # genuine gap (actually below its own configured pass_threshold)
-            # belongs here - otherwise a competency that passed could still
-            # show up as a "risk" just for ranking lowest among several
-            # otherwise-passing competencies.
-            percentage = item.get("percentage")
-            pass_threshold = item.get("pass_threshold")
-            if percentage is None or pass_threshold is None or percentage >= pass_threshold:
+            percentage = float(item.get("percentage") or 0)
+            threshold = float(item.get("pass_threshold") or 0)
+            if (
+                not label
+                or label == generic_label
+                or item.get("completed_response_count", 0) <= 0
+                or item.get("assessment_status") != CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD
+                or percentage >= threshold
+            ):
                 continue
             statement = cls._risk_statement(label)
             if statement not in risks:
@@ -1090,6 +1163,13 @@ class EvaluationReportService:
 
     @classmethod
     def _risk_block(cls, *, competency_item, competency_percentage, has_critical_failure, fallback_evidence):
+        if not competency_item or competency_item.get("assessment_status") in {"NOT_ASSESSED", "INSUFFICIENT_EVIDENCE"}:
+            return {
+                "level": "Not Assessed",
+                "risk_score": None,
+                "risk_score_display": "Not Assessed",
+                "evidence": ["Insufficient evidence was available to assess this risk category."],
+            }
         risk_score = max(0, min(100, int(round(100 - float(competency_percentage or 0)))))
         if has_critical_failure or competency_percentage < 40:
             level = "High"
@@ -1105,11 +1185,19 @@ class EvaluationReportService:
         return {
             "level": level,
             "risk_score": risk_score,
+            "risk_score_display": str(risk_score),
             "evidence": evidence[:5],
         }
 
     @classmethod
     def _communication_risk_block(cls, *, avg_language_quality, competency_item, competency_percentage):
+        if not competency_item or competency_item.get("assessment_status") in {"NOT_ASSESSED", "INSUFFICIENT_EVIDENCE"}:
+            return {
+                "level": "Not Assessed",
+                "risk_score": None,
+                "risk_score_display": "Not Assessed",
+                "evidence": ["Insufficient evidence was available to assess communication risk."],
+            }
         risk_score = max(0, min(100, int(round((1 - avg_language_quality) * 100))))
         if avg_language_quality < 0.5:
             level = "High"
@@ -1121,10 +1209,18 @@ class EvaluationReportService:
         if competency_item and competency_percentage < 70:
             label = competency_item.get("display_name") or competency_item.get("competency_name") or competency_item.get("competency_code")
             evidence.append(f"{label} requires additional communication support.")
-        return {"level": level, "risk_score": risk_score, "evidence": evidence}
+        return {"level": level, "risk_score": risk_score, "risk_score_display": str(risk_score), "evidence": evidence}
 
     @classmethod
     def _integrity_risk_block(cls, *, integrity_item, integrity_percentage, human_review_flags, integrity_flag_messages):
+        if not integrity_item or integrity_item.get("assessment_status") in {"NOT_ASSESSED", "INSUFFICIENT_EVIDENCE"}:
+            evidence = cls._normalize_text_list(integrity_flag_messages)[:5]
+            return {
+                "level": "Not Assessed",
+                "risk_score": None,
+                "risk_score_display": "Not Assessed",
+                "evidence": evidence or ["Insufficient evidence was available to assess integrity risk."],
+            }
         has_integrity_flag = any(flag.get("requires_review") for flag in human_review_flags)
         risk_score = max(0, min(100, int(round(100 - float(integrity_percentage or 92)))))
         if has_integrity_flag:
@@ -1137,7 +1233,12 @@ class EvaluationReportService:
         if integrity_item and integrity_item.get("status") == "BELOW_THRESHOLD":
             label = integrity_item.get("display_name") or integrity_item.get("competency_name") or integrity_item.get("competency_code")
             evidence.append(f"{label} is below the required threshold.")
-        return {"level": level, "risk_score": risk_score, "evidence": evidence[:5]}
+        return {
+            "level": level,
+            "risk_score": risk_score,
+            "risk_score_display": str(risk_score),
+            "evidence": evidence[:5],
+        }
 
     @classmethod
     def _build_improvement_plan(cls, *, readiness_indicator, competency_breakdown, risk_indicators, critical_failures):
@@ -1146,7 +1247,7 @@ class EvaluationReportService:
         items = []
         priority_map = {"High": "High", "Medium": "Medium", "Low": "Low"}
         for block_name, risk in risk_indicators.items():
-            if block_name == "note" or risk["level"] == "Low":
+            if block_name == "note" or risk["level"] not in {"High", "Medium"}:
                 continue
             competency = cls._friendly_competency_name(block_name.replace("_risk", ""))
             gap = ", ".join(cls._normalize_text_list(risk.get("evidence") or [])) or f"{competency} readiness gap identified."
@@ -1304,15 +1405,23 @@ class EvaluationReportService:
                     break
             risk = risk_indicators.get(f"{label.lower()}_risk", {}) if isinstance(risk_indicators, dict) else {}
             risk_level = risk.get("level", "Low")
-            if risk_level == "Low" and competency and competency.get("status") != "BELOW_THRESHOLD":
+            assessment_status = competency.get("assessment_status") if competency else "NOT_ASSESSED"
+            if assessment_status in {"NOT_ASSESSED", "INSUFFICIENT_EVIDENCE"}:
+                status_label = "Not Assessed" if assessment_status == "NOT_ASSESSED" else "Insufficient Evidence"
+                tone = "neutral"
+                score_display = status_label
+            elif risk_level == "Low" and competency.get("status") != "BELOW_THRESHOLD":
                 status_label = "Meets Standard"
                 tone = "good"
+                score_display = competency.get("score_display")
             elif risk_level == "Medium":
                 status_label = "Review Needed"
                 tone = "warn"
+                score_display = competency.get("score_display")
             else:
                 status_label = "Attention Required"
                 tone = "danger"
+                score_display = competency.get("score_display") if competency else "Not Assessed"
             items.append(
                 {
                     "label": label,
@@ -1320,6 +1429,7 @@ class EvaluationReportService:
                     "tone": tone,
                     "risk_level": risk_level,
                     "risk_score": risk.get("risk_score", 0),
+                    "score_display": score_display,
                     "percentage": competency.get("percentage") if competency else 0,
                     "score": competency.get("score") if competency else 0,
                     "max_score": competency.get("max_score") if competency else 0,
@@ -1332,8 +1442,10 @@ class EvaluationReportService:
     @classmethod
     def _build_consent_summary(cls, session):
         agreement = session.candidate_consent_agreement
+        candidate_consented = bool(agreement and agreement.status == "SIGNED")
         return {
-            "candidate_consented": bool(agreement and agreement.status == "SIGNED"),
+            "candidate_consented": candidate_consented,
+            "employer_status": "Completed" if candidate_consented else "Not Completed",
             "consent_timestamp": agreement.accepted_at.isoformat() if agreement and agreement.accepted_at else None,
             "consent_version": agreement.version if agreement else None,
         }
@@ -1351,12 +1463,15 @@ class EvaluationReportService:
         timestamp_source = captured_artifact or reference_artifact
         timestamp = timestamp_source.uploaded_at.isoformat() if timestamp_source is not None else None
         verification_status = session.verification_status or "NOT_STARTED"
+        employer_completed = bool(session.identity_verified)
         return {
             "status": "VERIFIED" if session.identity_verified else "NOT_APPLICABLE",
             "method": "SESSION_IDENTITY_VERIFICATION" if session.identity_verified else None,
             "timestamp": timestamp,
             "verification_status": verification_status,
             "verification_label": cls._verification_status_label(verification_status),
+            "employer_completed": employer_completed,
+            "employer_status": "Completed" if employer_completed else "Not Completed",
             "face_match_score": cls._decimal(session.face_match_score),
             "single_face_detected": bool(session.single_face_detected),
             "liveness_passed": cls._resolve_liveness_passed(session),
@@ -1789,6 +1904,12 @@ class EvaluationReportService:
         return int(round((summary.evaluated_response_count / summary.total_response_count) * 100))
 
     @classmethod
+    def _derive_overall_score_display(cls, *, overall_percentage, assessment_completeness):
+        if assessment_completeness < 100:
+            return "Not fully available"
+        return str(cls._rounded_whole(overall_percentage))
+
+    @classmethod
     def _derive_assessment_coverage(cls, session):
         coverage = ["Safety", "Hygiene", "Communication", "Behavioral Indicators"]
         if session.task_observation_enabled:
@@ -2055,7 +2176,8 @@ class EvaluationReportService:
             "Executive Summary",
             f"Readiness Indicator: {readiness.get('display', readiness.get('value', ''))}",
             f"Readiness Reason: {(summary.get('readiness_reason') or {}).get('employer_message', '')}",
-            f"Overall Score: {summary.get('overall_score', '')}%",
+            f"Overall Score: {summary.get('overall_score_display', summary.get('overall_score', ''))}"
+            f"{'%' if summary.get('overall_score_available', True) else ''}",
             f"Assessment Scope: {summary.get('assessment_scope', '')}",
             f"Suggested Action: {summary.get('suggested_action_display', '')}",
             f"Assessment Coverage: {', '.join(context.get('assessment_coverage', []))}",
@@ -2082,7 +2204,7 @@ class EvaluationReportService:
         for item in critical_status:
             lines.append(
                 f"- {item.get('label', '')}: {item.get('status_label', '')} | "
-                f"{item.get('score', '')}/{item.get('max_score', '')} ({item.get('percentage', '')}%)"
+                f"{item.get('score_display', '')}"
             )
         lines.extend(["", "Competency Breakdown"])
         for item in competency_breakdown:
@@ -2091,9 +2213,8 @@ class EvaluationReportService:
                     f"- {item.get('display_name') or item.get('competency_name') or item.get('competency_code', '')}",
                     (
                         "  Score: "
-                        f"{item.get('score', '')}/{item.get('max_score', '')} "
-                        f"({item.get('percentage', '')}%) | Threshold: {item.get('pass_threshold', '')}% | "
-                        f"Status: {item.get('status', '')}"
+                        f"{item.get('score_display', '')} | "
+                        f"Status: {item.get('assessment_status', item.get('status', ''))}"
                     ),
                 ]
             )
@@ -2113,7 +2234,7 @@ class EvaluationReportService:
                 detail = ", ".join(cls._normalize_text_list(risk.get("evidence") or [])) or "No supporting evidence recorded."
                 lines.extend(
                     [
-                        f"- {title}: {risk.get('level', '')} ({risk.get('risk_score', '')})",
+                        f"- {title}: {risk.get('level', '')} ({risk.get('risk_score_display', risk.get('risk_score', ''))})",
                         f"  Detail: {detail}",
                     ]
                 )
@@ -2149,8 +2270,7 @@ class EvaluationReportService:
             [
                 "",
                 "Verification",
-                f"Identity Verification Status: {identity.get('status', '')}",
-                f"Face Match Score: {identity.get('face_match_score', '')}",
+                f"Identity Verification Status: {identity.get('employer_status', '')}",
                 f"Verification URL: {report_payload.get('qr_verification_url', '')}",
                 f"Document Hash: {integrity.get('hash_value', '')}",
                 "",

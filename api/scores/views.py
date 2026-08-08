@@ -475,10 +475,10 @@ class JobRoleScoreAreasView(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
     
     def list(self, request):
-        from api.core.constants import JobRoles as candidateJobRoles
+        from api.core.constants import CandidateJobRoles
         
         result = []
-        role_dict = dict(candidateJobRoles.CHOICES)
+        role_dict = dict(CandidateJobRoles.CHOICES)
         
         for role_code, role_label in role_dict.items():
             areas = JOB_ROLE_SCORE_AREAS.get(role_code, JOB_ROLE_SCORE_AREAS.get('OT', []))
@@ -509,9 +509,9 @@ class JobRoleScoreAreasView(viewsets.ViewSet):
     
     @action(detail=False, methods=['get'], url_path='by-role/(?P<role_code>[^/.]+)')
     def by_role(self, request, role_code=None):
-        from api.core.constants import JobRoles as candidateJobRoles
+        from api.core.constants import CandidateJobRoles
         
-        role_dict = dict(candidateJobRoles.CHOICES)
+        role_dict = dict(CandidateJobRoles.CHOICES)
         if role_code not in role_dict:
             return Response(
                 {'error': f'Invalid job role code: {role_code}'},

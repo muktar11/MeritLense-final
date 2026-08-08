@@ -11,7 +11,7 @@ from api.core.constants import (
     EvaluationStatus,
     EvaluationType,
     InterviewEvaluationTier,
-    JobRoles,
+    CandidateJobRoles,
     Languages,
     ReadinessStatus,
 )
@@ -63,7 +63,7 @@ class Evaluation(TimeStampedModel, SoftDeleteModel):
     candidate_last_name = models.CharField(max_length=150)
     candidate_email = models.EmailField()
     candidate_passport_id = models.CharField(max_length=50)
-    candidate_job_role = models.CharField(max_length=2, choices=JobRoles.CHOICES)
+    candidate_job_role = models.CharField(max_length=2, choices=CandidateJobRoles.CHOICES)
     candidate_preferred_language = models.CharField(
         max_length=3,
         choices=Languages.CHOICES,

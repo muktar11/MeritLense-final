@@ -6,7 +6,7 @@ from django.db.models.functions import TruncDate, TruncMonth
 from django.utils import timezone
 from datetime import timedelta
 
-from api.core.constants import EvaluationStatus, JobRoles, Languages, Roles
+from api.core.constants import CandidateJobRoles, EvaluationStatus, Languages, Roles
 from api.candidates.models import Candidate
 from api.core.permisssions import IsB2BTeamMember, IsB2BUser
 from api.evaluations.models import Evaluation
@@ -134,7 +134,7 @@ class B2BScoreDistributionView(APIView):
         ).select_related('candidate')
         
         role_distribution = {}
-        role_dict = dict(JobRoles.CHOICES)
+        role_dict = dict(CandidateJobRoles.CHOICES)
         
         for eval in evaluations:
             role = eval.candidate_job_role

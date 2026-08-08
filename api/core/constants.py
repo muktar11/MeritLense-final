@@ -378,7 +378,14 @@ class JobRoles:
         (OTHER, "Other"),
     ]
     
-class candidateJobRoles:
+class CandidateJobRoles:
+    """Canonical roles for candidates and candidate evaluations.
+
+    These are deliberately separate from ``JobRoles``, which describes the
+    professional role of a MeritLense account holder.  Keeping evaluations on
+    ``JobRoles`` allowed candidate records such as ``NA`` (Nanny) to be copied
+    into a field whose declared choices only accepted values such as ``SE``.
+    """
     NANNY = 'NA'
     DRIVER = 'DR'
     HOUSEKEEPER = 'HK'
@@ -396,6 +403,11 @@ class candidateJobRoles:
         (MAINTAINANCEWORKER, 'Maintenance Worker'),
         (OTHER, 'Other'),
     ]
+
+
+# Backwards-compatible name retained for existing API imports. New code should
+# use CandidateJobRoles so the distinction from account-holder roles is clear.
+candidateJobRoles = CandidateJobRoles
 
 
 class Nationalities:

@@ -1,7 +1,7 @@
 from django.db import models
 from django.core.validators import FileExtensionValidator
 from api.core.models import TimeStampedModel, SoftDeleteModel
-from api.core.constants import candidateJobRoles, Languages, CandidateStatus
+from api.core.constants import CandidateJobRoles, Languages, CandidateStatus
 from api.accounts.models import User
 
 
@@ -12,7 +12,7 @@ class Candidate(TimeStampedModel, SoftDeleteModel):
     email = models.EmailField()
     passport_id = models.CharField(max_length=50, unique=True)
     
-    job_role = models.CharField(max_length=2, choices=candidateJobRoles.CHOICES)
+    job_role = models.CharField(max_length=2, choices=CandidateJobRoles.CHOICES)
     core_skills = models.TextField(help_text="Comma-separated skills")
     preferred_language = models.CharField(
         max_length=3,

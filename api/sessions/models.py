@@ -2,6 +2,7 @@ import secrets
 from datetime import timedelta
 from pathlib import Path
 
+from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.utils import timezone
@@ -205,7 +206,7 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
             self.candidate_consent_agreement_id
             and self.identity_verified
             and self.face_match_score is not None
-            and float(self.face_match_score) >= 85.0
+            and float(self.face_match_score) >= settings.IDENTITY_VERIFICATION_MATCH_THRESHOLD
             and self.device_check_completed_at
             and self.verbal_confirmation_recorded_at
             and self.privacy_notice_acknowledged_at

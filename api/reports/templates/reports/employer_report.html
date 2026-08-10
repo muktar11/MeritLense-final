@@ -621,11 +621,14 @@
       word-break: break-word;
     }
 
+    .photo-compare {
+      position: relative;
+    }
+
     .photo-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 8px;
-      position: relative;
     }
 
     .photo-card {
@@ -682,7 +685,7 @@
       position: absolute;
       left: 50%;
       top: 48px;
-      transform: translateX(-50%);
+      margin-left: -17px;
       width: 34px;
       height: 34px;
       border-radius: 999px;
@@ -1292,20 +1295,38 @@
 
           <div class="card section-shell">
             <div class="list-card-title">Identity Verification</div>
-            <div class="photo-grid">
-              <div class="photo-card">
-                <div class="photo-label">Captured Image</div>
-                <div class="photo-frame">
-                  {% if identity.captured_image_data_uri %}
-                    <img src="{{ identity.captured_image_data_uri }}" alt="Captured candidate image" />
-                  {% else %}
-                    <div class="photo-placeholder">
-                      <div>
-                        <strong>{{ assessment.candidate_name|default:candidate.full_name }}</strong>
-                        No live capture on file
+            <div class="photo-compare">
+              <div class="photo-grid">
+                <div class="photo-card">
+                  <div class="photo-label">Captured Image</div>
+                  <div class="photo-frame">
+                    {% if identity.captured_image_data_uri %}
+                      <img src="{{ identity.captured_image_data_uri }}" alt="Captured candidate image" />
+                    {% else %}
+                      <div class="photo-placeholder">
+                        <div>
+                          <strong>{{ assessment.candidate_name|default:candidate.full_name }}</strong>
+                          No live capture on file
+                        </div>
                       </div>
-                    </div>
-                  {% endif %}
+                    {% endif %}
+                  </div>
+                </div>
+
+                <div class="photo-card">
+                  <div class="photo-label">Verified Photo (ID)</div>
+                  <div class="photo-frame">
+                    {% if identity.verified_photo_data_uri %}
+                      <img src="{{ identity.verified_photo_data_uri }}" alt="Verified ID image" />
+                    {% else %}
+                      <div class="photo-placeholder">
+                        <div>
+                          <strong>{{ assessment.candidate_name|default:candidate.full_name }}</strong>
+                          No reference image on file
+                        </div>
+                      </div>
+                    {% endif %}
+                  </div>
                 </div>
               </div>
 
@@ -1315,22 +1336,6 @@
                 {% else %}
                   -
                 {% endif %}
-              </div>
-
-              <div class="photo-card">
-                <div class="photo-label">Verified Photo (ID)</div>
-                <div class="photo-frame">
-                  {% if identity.verified_photo_data_uri %}
-                    <img src="{{ identity.verified_photo_data_uri }}" alt="Verified ID image" />
-                  {% else %}
-                    <div class="photo-placeholder">
-                      <div>
-                        <strong>{{ assessment.candidate_name|default:candidate.full_name }}</strong>
-                        No reference image on file
-                      </div>
-                    </div>
-                  {% endif %}
-                </div>
               </div>
             </div>
 

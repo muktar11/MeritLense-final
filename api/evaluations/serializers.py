@@ -44,6 +44,7 @@ class CandidateScoreSummarySerializer(serializers.Serializer):
     candidate_id = serializers.CharField()
     evaluation_id = serializers.CharField(allow_null=True)
     role_code = serializers.CharField()
+    evaluation_tier = serializers.CharField(allow_null=True)
     overall_percentage = serializers.FloatField()
     status = serializers.CharField()
     generated_at = serializers.DateTimeField()

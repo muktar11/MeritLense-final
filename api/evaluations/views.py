@@ -124,6 +124,7 @@ class CandidateScoreSummaryView(APIView):
                     "candidate_id": str(summary.candidate.public_id),
                     "evaluation_id": str(evaluation.public_id) if evaluation else None,
                     "role_code": summary.session.role_code if summary.session_id else summary.candidate.job_role,
+                    "evaluation_tier": evaluation.evaluation_tier if evaluation else None,
                     "overall_percentage": float(summary.overall_percentage),
                     "status": summary.status,
                     "generated_at": summary.generated_at,

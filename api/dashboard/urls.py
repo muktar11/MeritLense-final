@@ -14,6 +14,7 @@ urlpatterns = [
     path('b2b/performance-metrics', views_b2b.B2BPerformanceMetricsView.as_view(), name='b2b-performance-metrics'),
     path('b2b/status-distribution', views_b2b.B2BEvaluationStatusDistributionView.as_view(), name='b2b-status-distribution'),
     path('b2b/monthly-activity', views_b2b.B2BMonthlyActivityView.as_view(), name='b2b-monthly-activity'),
+    path('b2b/candidate-comparison', views_b2b.B2BCandidateComparisonView.as_view(), name='b2b-candidate-comparison'),
 
     path('b2c/stats', views_b2c.B2CDashboardStatsView.as_view(), name='b2c-stats'),
     path('b2c/candidates/recent', views_b2c.B2CRecentCandidatesView.as_view(), name='b2c-recent-candidates'),

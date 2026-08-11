@@ -94,35 +94,47 @@ class B2CRecentEvaluationsView(APIView):
 
 class B2CCandidateComparisonView(APIView):
     permission_classes = [IsAuthenticated, IsB2CUser]
-    
+
     def get(self, request):
         user = request.user
-        
+
         candidates = Candidate.objects.filter(created_by=user)
-        
+
+        # When specific candidates are requested (the multi-candidate
+        # comparison page), return exactly those - including ones with no
+        # score yet, so a selected candidate never silently vanishes from
+        # the comparison. Without this param, keep the original top-scored-
+        # only leaderboard behavior the dashboard widget already relies on.
+        raw_ids = request.query_params.get('candidate_ids', '')
+        requested_ids = [v.strip() for v in raw_ids.split(',') if v.strip()]
+        if requested_ids:
+            # candidate_ids from the frontend are public_id UUIDs (the only
+            # candidate identifier the API ever exposes as "id" elsewhere -
+            # see PublicIdModelSerializer), not the internal integer PK.
+            candidates = candidates.filter(public_id__in=requested_ids)
+
         if not candidates.exists():
-            print(f"No candidates found for user {user.id}")
             return Response([])
-        
+
         result = []
         for candidate in candidates:
             latest_score_set = ScoreSet.objects.filter(
                 candidate=candidate
             ).order_by('-created_at').first()
-            
+
             if latest_score_set and latest_score_set.average_score:
                 scores = CandidateScore.objects.filter(
                     candidate=candidate,
                     evaluation=latest_score_set.evaluation
                 )
-                
+
                 scores_by_area = {}
                 for score in scores:
                     area_display = dict(ScoreArea.CHOICES).get(score.area, score.area)
                     scores_by_area[area_display] = float(score.score)
-                
+
                 result.append({
-                    'candidate_id': candidate.id,
+                    'candidate_id': str(candidate.public_id),
                     'candidate_name': candidate.get_full_name(),
                     'job_role': candidate.get_job_role_display(),
                     'average_score': float(latest_score_set.average_score),
@@ -130,16 +142,19 @@ class B2CCandidateComparisonView(APIView):
                 })
             else:
                 result.append({
-                    'candidate_id': candidate.id,
+                    'candidate_id': str(candidate.public_id),
                     'candidate_name': candidate.get_full_name(),
                     'job_role': candidate.get_job_role_display(),
                     'average_score': 0,
                     'scores_by_area': {}
                 })
-        
+
+        if requested_ids:
+            return Response(result)
+
         result_with_scores = [item for item in result if item['average_score'] > 0]
         result_with_scores.sort(key=lambda x: x['average_score'], reverse=True)
-        
+
         return Response(result_with_scores)
 
 class B2CEvaluationTimeRangeView(APIView):

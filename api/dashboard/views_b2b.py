@@ -6,11 +6,12 @@ from django.db.models.functions import TruncDate, TruncMonth
 from django.utils import timezone
 from datetime import timedelta
 
-from api.core.constants import CandidateJobRoles, EvaluationStatus, Languages, Roles
+from api.core.constants import CandidateJobRoles, EvaluationStatus, Languages, Roles, ScoreArea
 from api.candidates.models import Candidate
 from api.core.permisssions import IsB2BTeamMember, IsB2BUser
 from api.evaluations.models import Evaluation
 from api.accounts.models import User
+from api.scores.models import ScoreSet, CandidateScore
 from .serializers import (
     DashboardStatsSerializer, RecentCandidateSerializer, RecentEvaluationSerializer,
     ScoreDistributionSerializer, EvaluationTrendSerializer, LanguageDistributionSerializer,
@@ -394,6 +395,77 @@ class B2BMonthlyActivityView(APIView):
         
         result = list(months_data.values())
         result.sort(key=lambda x: x['month'])
-        
+
         serializer = MonthlyActivitySerializer(result, many=True)
         return Response(serializer.data)
+
+
+class B2BCandidateComparisonView(APIView):
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+
+    def get(self, request):
+        company = None
+        if request.user.role == Roles.B2B and hasattr(request.user, 'company_profile'):
+            company = request.user.company_profile.company
+        elif request.user.role == Roles.B2B_TEAM_MEMBER and hasattr(request.user, 'team_member_profile'):
+            company = request.user.team_member_profile.company
+
+        if not company:
+            return Response({'error': 'Company not found'}, status=400)
+
+        candidates = Candidate.objects.filter(company=company)
+
+        # Same contract as B2CCandidateComparisonView: when specific
+        # candidates are requested, return exactly those (including
+        # unscored ones) rather than the top-scored-only leaderboard slice.
+        raw_ids = request.query_params.get('candidate_ids', '')
+        requested_ids = [v.strip() for v in raw_ids.split(',') if v.strip()]
+        if requested_ids:
+            # candidate_ids from the frontend are public_id UUIDs (the only
+            # candidate identifier the API ever exposes as "id" elsewhere -
+            # see PublicIdModelSerializer), not the internal integer PK.
+            candidates = candidates.filter(public_id__in=requested_ids)
+
+        if not candidates.exists():
+            return Response([])
+
+        result = []
+        for candidate in candidates:
+            latest_score_set = ScoreSet.objects.filter(
+                candidate=candidate
+            ).order_by('-created_at').first()
+
+            if latest_score_set and latest_score_set.average_score:
+                scores = CandidateScore.objects.filter(
+                    candidate=candidate,
+                    evaluation=latest_score_set.evaluation
+                )
+
+                scores_by_area = {}
+                for score in scores:
+                    area_display = dict(ScoreArea.CHOICES).get(score.area, score.area)
+                    scores_by_area[area_display] = float(score.score)
+
+                result.append({
+                    'candidate_id': str(candidate.public_id),
+                    'candidate_name': candidate.get_full_name(),
+                    'job_role': candidate.get_job_role_display(),
+                    'average_score': float(latest_score_set.average_score),
+                    'scores_by_area': scores_by_area
+                })
+            else:
+                result.append({
+                    'candidate_id': str(candidate.public_id),
+                    'candidate_name': candidate.get_full_name(),
+                    'job_role': candidate.get_job_role_display(),
+                    'average_score': 0,
+                    'scores_by_area': {}
+                })
+
+        if requested_ids:
+            return Response(result)
+
+        result_with_scores = [item for item in result if item['average_score'] > 0]
+        result_with_scores.sort(key=lambda x: x['average_score'], reverse=True)
+
+        return Response(result_with_scores)

@@ -6,12 +6,12 @@ from django.db.models.functions import TruncDate, TruncMonth
 from django.utils import timezone
 from datetime import timedelta
 
-from api.core.constants import CandidateJobRoles, EvaluationStatus, Languages, Roles, ScoreArea
+from api.core.constants import CandidateJobRoles, EvaluationStatus, Languages, Roles
 from api.candidates.models import Candidate
 from api.core.permisssions import IsB2BTeamMember, IsB2BUser
 from api.evaluations.models import Evaluation
 from api.accounts.models import User
-from api.scores.models import ScoreSet, CandidateScore
+from .comparison_services import build_candidate_comparison_entry
 from .serializers import (
     DashboardStatsSerializer, RecentCandidateSerializer, RecentEvaluationSerializer,
     ScoreDistributionSerializer, EvaluationTrendSerializer, LanguageDistributionSerializer,
@@ -429,38 +429,7 @@ class B2BCandidateComparisonView(APIView):
         if not candidates.exists():
             return Response([])
 
-        result = []
-        for candidate in candidates:
-            latest_score_set = ScoreSet.objects.filter(
-                candidate=candidate
-            ).order_by('-created_at').first()
-
-            if latest_score_set and latest_score_set.average_score:
-                scores = CandidateScore.objects.filter(
-                    candidate=candidate,
-                    evaluation=latest_score_set.evaluation
-                )
-
-                scores_by_area = {}
-                for score in scores:
-                    area_display = dict(ScoreArea.CHOICES).get(score.area, score.area)
-                    scores_by_area[area_display] = float(score.score)
-
-                result.append({
-                    'candidate_id': str(candidate.public_id),
-                    'candidate_name': candidate.get_full_name(),
-                    'job_role': candidate.get_job_role_display(),
-                    'average_score': float(latest_score_set.average_score),
-                    'scores_by_area': scores_by_area
-                })
-            else:
-                result.append({
-                    'candidate_id': str(candidate.public_id),
-                    'candidate_name': candidate.get_full_name(),
-                    'job_role': candidate.get_job_role_display(),
-                    'average_score': 0,
-                    'scores_by_area': {}
-                })
+        result = [build_candidate_comparison_entry(c) for c in candidates]
 
         if requested_ids:
             return Response(result)

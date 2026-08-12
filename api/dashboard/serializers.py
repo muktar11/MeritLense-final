@@ -77,7 +77,7 @@ class PerformanceMetricSerializer(serializers.Serializer):
 
 
 class CandidateComparisonSerializer(serializers.Serializer):
-    candidate_id = serializers.IntegerField()
+    candidate_id = serializers.UUIDField()
     candidate_name = serializers.CharField()
     job_role = serializers.CharField()
     average_score = serializers.FloatField()

@@ -1091,6 +1091,8 @@ class CandidateScoreSummaryApiTests(TestCase):
     def test_certificate_is_included_once_generated(self):
         from api.evaluations.certificate_services import generate_certificate
 
+        self.session.identity_verified = True
+        self.session.save(update_fields=["identity_verified"])
         summary = SessionEvaluationSummary.objects.get(evaluation=self.evaluation)
         generate_certificate(self.evaluation, summary)
 
@@ -1430,6 +1432,9 @@ class AutomaticScoringOnCompletionTests(TestCase):
             is_active=True,
         )
 
+        self.session.identity_verified = True
+        self.session.save(update_fields=["identity_verified"])
+
         InterviewSessionService.complete_session(self.session, actor=self.user)
 
         evaluation = Evaluation.objects.get(session=self.session)
@@ -1520,6 +1525,8 @@ class CertificateGenerationTests(TestCase):
         from api.core.constants import ReadinessStatus
         self.evaluation.readiness_status = ReadinessStatus.READY
         self.evaluation.save(update_fields=["readiness_status"])
+        self.session.identity_verified = True
+        self.session.save(update_fields=["identity_verified"])
         summary = SessionEvaluationSummary.objects.create(
             evaluation=self.evaluation,
             session=self.session,
@@ -1539,10 +1546,13 @@ class CertificateGenerationTests(TestCase):
             competencies_summary=[
                 {"competency_code": "safety_awareness", "competency_name": "Safety Awareness", "percentage": 70.0, "response_count": 1},
             ],
+            total_response_count=1,
+            evaluated_response_count=1,
             status=SessionEvaluationSummary.STATUS_EVALUATED,
         )
 
         certificate = generate_certificate(self.evaluation, summary)
+        self.assertIsNotNone(certificate)
 
         self.assertTrue(certificate.certificate_id.startswith(f"ML-{timezone.now().year}-"))
         # Two independent identifiers on two independent counters - the
@@ -1560,6 +1570,10 @@ class CertificateGenerationTests(TestCase):
         readiness = _readiness_gauge_context(self.evaluation)
         self.assertEqual(readiness["label"], "Ready")
         self.assertEqual(readiness["position"], 3)
+
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.certificate_status, "ISSUED")
+        self.assertIsNotNone(self.evaluation.certificate_issued_at)
 
     def test_candidate_photo_is_none_when_never_uploaded(self):
         from api.evaluations.certificate_services import _candidate_photo_data_uri
@@ -1585,6 +1599,8 @@ class CertificateGenerationTests(TestCase):
         self.assertEqual(pending, {"label": "Partially Ready", "position": 2})
 
     def test_regenerating_keeps_the_same_certificate_id(self):
+        self.session.identity_verified = True
+        self.session.save(update_fields=["identity_verified"])
         summary = SessionEvaluationSummary.objects.create(
             evaluation=self.evaluation,
             session=self.session,
@@ -1595,6 +1611,7 @@ class CertificateGenerationTests(TestCase):
             ),
             total_score=Decimal("70"), max_score=Decimal("100"), overall_percentage=Decimal("70.00"),
             competencies_summary=[], status=SessionEvaluationSummary.STATUS_EVALUATED,
+            total_response_count=1, evaluated_response_count=1,
         )
 
         first = generate_certificate(self.evaluation, summary)
@@ -1604,3 +1621,137 @@ class CertificateGenerationTests(TestCase):
         self.assertEqual(first.certificate_id, second.certificate_id)
         self.assertEqual(first.assessment_id, second.assessment_id)
         self.assertEqual(first.issued_at, second.issued_at)
+
+
+class CertificateEligibilityTests(TestCase):
+    """certificate_eligibility()/generate_certificate() must refuse to
+    issue a certificate outside the documented flow: Not Ready, an
+    incomplete assessment, or failed/missing identity verification must
+    each independently block issuance, regardless of the others."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="cert-elig@example.com",
+            password="testpass123",
+            first_name="Cert",
+            last_name="Elig",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Elig",
+            last_name="Candidate",
+            email="cert-elig-candidate@example.com",
+            passport_id="CERTELIG001",
+            job_role="NA",
+            core_skills="safety",
+            preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf",
+            created_by=self.user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=45,
+            total_questions=1,
+            allow_retries=True,
+            max_retries=1,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+        )
+        self.session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            role_code=self.config.role_code,
+            ui_language="EN",
+            candidate_language="EN",
+            tts_language_code="en-US",
+            stt_language_code="en-US",
+            total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+            identity_verified=True,
+        )
+        self.evaluation = Evaluation.objects.create(
+            session=self.session,
+            candidate=self.candidate,
+            evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now() + timezone.timedelta(days=1),
+            duration_minutes=45,
+            created_by=self.user,
+        )
+
+    def _summary(self, total_response_count=1, evaluated_response_count=1):
+        return SessionEvaluationSummary.objects.create(
+            evaluation=self.evaluation,
+            session=self.session,
+            candidate=self.candidate,
+            rule_set=ScoringRuleSet.objects.create(
+                name="Cert Elig Rules", version="v1", role_code="domestic_worker", role_name="Housekeeper",
+                evaluation_tier=InterviewEvaluationTier.FULL, is_active=True, created_by=self.user,
+            ),
+            total_score=Decimal("70"), max_score=Decimal("100"), overall_percentage=Decimal("70.00"),
+            competencies_summary=[], status=SessionEvaluationSummary.STATUS_EVALUATED,
+            total_response_count=total_response_count,
+            evaluated_response_count=evaluated_response_count,
+        )
+
+    def test_not_ready_gets_no_certificate(self):
+        from api.core.constants import ReadinessStatus, CertificateStatus
+        self.evaluation.readiness_status = ReadinessStatus.NOT_READY
+        self.evaluation.save(update_fields=["readiness_status"])
+        summary = self._summary()
+
+        certificate = generate_certificate(self.evaluation, summary)
+
+        self.assertIsNone(certificate)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.certificate_status, CertificateStatus.NOT_ISSUED)
+        self.assertFalse(Certificate.objects.filter(evaluation=self.evaluation).exists())
+
+    def test_incomplete_assessment_gets_no_certificate_even_if_ready(self):
+        from api.core.constants import ReadinessStatus, CertificateStatus
+        self.evaluation.readiness_status = ReadinessStatus.READY
+        self.evaluation.save(update_fields=["readiness_status"])
+        summary = self._summary(total_response_count=4, evaluated_response_count=2)
+
+        certificate = generate_certificate(self.evaluation, summary)
+
+        self.assertIsNone(certificate)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.certificate_status, CertificateStatus.NOT_ISSUED)
+
+    def test_unverified_identity_gets_no_certificate_even_if_ready_and_complete(self):
+        from api.core.constants import ReadinessStatus, CertificateStatus
+        self.evaluation.readiness_status = ReadinessStatus.READY
+        self.evaluation.save(update_fields=["readiness_status"])
+        self.session.identity_verified = False
+        self.session.save(update_fields=["identity_verified"])
+        summary = self._summary()
+
+        certificate = generate_certificate(self.evaluation, summary)
+
+        self.assertIsNone(certificate)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.certificate_status, CertificateStatus.NOT_ISSUED)
+
+    def test_partially_ready_complete_and_verified_gets_a_certificate(self):
+        # PARTIALLY_READY isn't a stored readiness_status value (only READY/
+        # NOT_READY/PENDING are) - it's the resolved display classification
+        # for PENDING/unmatched, same as the internal report - see
+        # EvaluationReportService._resolve_readiness_indicator.
+        from api.core.constants import CertificateStatus
+        summary = self._summary()
+
+        certificate = generate_certificate(self.evaluation, summary)
+
+        self.assertIsNotNone(certificate)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.certificate_status, CertificateStatus.ISSUED)

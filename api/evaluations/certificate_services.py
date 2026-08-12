@@ -119,6 +119,39 @@ def _role_profile_version(session):
     return EvaluationReportService._derive_role_profile_version(session)
 
 
+def certificate_eligibility(evaluation, summary):
+    """Certificate issuance decision, per the MeritLense flow:
+    Assessment -> Verification/Completion Checks -> Assessment Logic ->
+    Readiness Level -> Report -> Certificate Decision.
+
+    Ready / Partially Ready -> eligible (Report + Certificate).
+    Not Ready -> not eligible (Report only - training/re-assessment path).
+    Incomplete assessment or failed/missing identity verification ->
+    not eligible regardless of readiness (Preliminary/Incomplete Report
+    only) - a certificate must never be issued on data that isn't both
+    real and complete.
+
+    Returns (eligible: bool, reason: str) - reason is one of "READY",
+    "PARTIALLY_READY" (both eligible), or "NOT_READY", "INCOMPLETE",
+    "VERIFICATION_FAILED" (not eligible), for audit logging.
+    """
+    from api.reports.services import EvaluationReportService
+
+    readiness_record = EvaluationReadinessRecordService.get_existing(evaluation)
+    indicator = EvaluationReportService._resolve_readiness_indicator(evaluation, readiness_record)
+    assessment_completeness = EvaluationReportService._derive_assessment_completeness(summary)
+    session = evaluation.session
+    identity_verified = bool(session and session.identity_verified)
+
+    if not identity_verified:
+        return False, "VERIFICATION_FAILED"
+    if assessment_completeness < 100:
+        return False, "INCOMPLETE"
+    if indicator["code"] == "NOT_READY":
+        return False, "NOT_READY"
+    return True, indicator["code"]
+
+
 def generate_certificate(evaluation, summary):
     """Builds (or regenerates) the Certificate + PDF for `evaluation`,
     given its just-computed SessionEvaluationSummary. This is a
@@ -126,7 +159,22 @@ def generate_certificate(evaluation, summary):
     report - it states a real readiness classification (from the same
     rule engine as the internal report), but none of the raw score,
     per-competency/per-layer breakdown, or identity-check data that
-    belongs in that separate, more detailed report instead."""
+    belongs in that separate, more detailed report instead.
+
+    Returns None (and marks the evaluation NOT_ISSUED) without producing
+    a PDF when the candidate isn't eligible per certificate_eligibility -
+    the internal report is generated independently of this and is not
+    gated the same way, since a Not Ready/incomplete candidate still gets
+    a report (with a training/re-assessment recommendation), just no
+    certificate."""
+    from api.core.constants import CertificateStatus
+
+    eligible, reason = certificate_eligibility(evaluation, summary)
+    if not eligible:
+        evaluation.certificate_status = CertificateStatus.NOT_ISSUED
+        evaluation.save(update_fields=["certificate_status"])
+        return None
+
     from weasyprint import HTML
 
     certificate, created = Certificate.objects.get_or_create(
@@ -172,4 +220,9 @@ def generate_certificate(evaluation, summary):
     certificate.pdf_file.save(filename, ContentFile(pdf_bytes), save=False)
     certificate.pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
     certificate.save()
+
+    evaluation.certificate_status = CertificateStatus.ISSUED
+    evaluation.certificate_issued_at = certificate.issued_at
+    evaluation.save(update_fields=["certificate_status", "certificate_issued_at"])
+
     return certificate

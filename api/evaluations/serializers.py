@@ -59,6 +59,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     certificate_status_display = serializers.CharField(source='get_certificate_status_display', read_only=True)
     created_by_name = serializers.SerializerMethodField()
+    session_id = serializers.SerializerMethodField()
     latest_session_summary = serializers.SerializerMethodField()
     readiness_legal_record = serializers.SerializerMethodField()
     latest_report = serializers.SerializerMethodField()
@@ -82,7 +83,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
             'readiness_legal_record',
             'latest_report',
             'readiness_status', 'readiness_override_applied', 'readiness_override_reason',
-            'meeting_link', 'meeting_id', 'meeting_password',
+            'meeting_link', 'meeting_id', 'meeting_password', 'session_id',
             'location',
             'created_by', 'created_by_name',
             'company',
@@ -96,11 +97,15 @@ class EvaluationSerializer(PublicIdModelSerializer):
             'evaluation_tier', 'package_code', 'coverage_level',
             'readiness_indicator_enabled', 'certificate_enabled',
             'readiness_status', 'readiness_override_applied', 'readiness_override_reason',
+            'session_id',
             'created_at', 'updated_at'
         ]
     
     def get_created_by_name(self, obj):
         return obj.created_by.get_full_name()
+
+    def get_session_id(self, obj):
+        return str(obj.session.public_id) if obj.session_id else None
 
     def get_latest_session_summary(self, obj):
         summary = obj.session_summaries.select_related("rule_set").first()

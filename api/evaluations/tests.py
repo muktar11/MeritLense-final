@@ -319,6 +319,7 @@ class EvaluationInterviewSchedulingApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         evaluation = Evaluation.objects.get(public_id=response.data["id"])
         self.assertIsNotNone(evaluation.session_id)
+        self.assertEqual(response.data["session_id"], str(evaluation.session.public_id))
         link = urlsplit(evaluation.meeting_link)
         query = parse_qs(link.query)
         self.assertEqual(link.path, "/en/interview")

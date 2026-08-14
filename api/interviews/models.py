@@ -2,6 +2,7 @@ from django.db import models
 
 from api.core.constants import CoverageLevel, InterviewEvaluationTier, PackageAudience
 from api.core.models import TimeStampedModel
+from api.questions.skill_tags import normalize_skill_tag
 
 
 class InterviewConfiguration(TimeStampedModel):
@@ -130,3 +131,15 @@ class InterviewRubric(TimeStampedModel):
 
     def __str__(self):
         return f"{self.role_name} - {self.skill_tag}"
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        self.skill_tag = normalize_skill_tag(self.skill_tag, scoring_type=self.scoring_type)
+        self.scoring_category = normalize_skill_tag(
+            self.scoring_category,
+            scoring_type=self.scoring_type,
+            fallback=self.skill_tag,
+        )
+        if update_fields is not None:
+            kwargs["update_fields"] = set(update_fields) | {"skill_tag", "scoring_category"}
+        super().save(*args, **kwargs)

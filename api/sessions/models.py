@@ -271,6 +271,7 @@ class SessionQuestion(TimeStampedModel):
     )
     question_text = models.TextField()
     domain = models.CharField(max_length=100, blank=True)
+    skill_tag = models.CharField(max_length=150, blank=True)
     skill = models.CharField(max_length=100, blank=True)
     difficulty = models.CharField(max_length=20, blank=True)
     question_order = models.PositiveIntegerField()

@@ -12,6 +12,7 @@ from django.utils import timezone
 from api.audit.services import AuditLogService
 from api.core.constants import AuditLogAction, AuditLogCategory, AuditLogSeverity
 from api.interviews.models import InterviewRubric
+from api.questions.skill_tags import normalize_skill_code, normalize_skill_tag
 from api.sessions.models import CandidateResponse
 from api.storage.services import enqueue_background_job
 
@@ -380,11 +381,12 @@ class ResponseInterpretationService:
     def build_prompt(cls, *, response, transcript, input_language, input_transcript_type):
         template = getattr(response.question, "question_template", None)
         rubric = None
-        if template and template.skill_tag:
+        normalized_skill_tag = normalize_skill_tag(getattr(template, "skill_tag", ""))
+        if template and normalized_skill_tag:
             rubric = (
                 InterviewRubric.objects.filter(
                     role_code__iexact=response.session.role_code,
-                    skill_tag__iexact=template.skill_tag,
+                    skill_tag__iexact=normalized_skill_tag,
                 )
                 .order_by("-created_at")
                 .first()
@@ -413,7 +415,7 @@ class ResponseInterpretationService:
             },
             "question": {
                 "text": response.question.question_text,
-                "skill": response.question.skill,
+                "skill": normalized_skill_tag or response.question.skill,
                 "domain": response.question.domain,
                 "expected_steps": expected_steps,
                 "keywords": keywords,
@@ -502,7 +504,7 @@ class EvaluationInputBuilderService:
         missing_indicators = interpretation.normalized_indicators.get("missing_steps") or []
         competency_code = ""
         if template:
-            competency_code = template.skill_id or template.skill_tag or template.skill
+            competency_code = normalize_skill_code(template.skill_id or template.skill_tag or template.skill)
         language_notes = {
             "clarity": interpretation.normalized_indicators.get("language_quality", ""),
             "translation_used": bool(response.translated_transcript and response.translation_status == "COMPLETED"),

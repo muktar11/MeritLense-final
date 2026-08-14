@@ -644,6 +644,45 @@ class Week6ScoringServiceTests(TestCase):
             ).exists()
         )
 
+    def test_week6_scoring_normalizes_legacy_competency_codes(self):
+        self.rule_set.rules.all().delete()
+        legacy_rule = ScoringRule.objects.create(
+            rule_set=self.rule_set,
+            competency_code="patient_safety",
+            competency_name="Patient Safety",
+            expected_indicators=["identify hazard", "clean spill", "prevent recurrence"],
+            required_indicators=["identify hazard"],
+            weighted_indicators={
+                "identify hazard": "4",
+                "clean spill": "3",
+                "prevent recurrence": "3",
+            },
+            max_score="10.00",
+            pass_threshold="7.00",
+            scoring_method=ScoringRule.SCORING_METHOD_WEIGHTED_MATCH,
+            is_active=True,
+        )
+        artifact = self.response.evaluation_input_artifact
+        artifact.competency_code = "patient_safety"
+        artifact.save(update_fields=["competency_code", "updated_at"])
+
+        summary = Week6ScoringService.run_for_evaluation(
+            evaluation=self.evaluation,
+            actor=self.user,
+            rule_set=self.rule_set,
+        )
+
+        response_result = ResponseEvaluationResult.objects.get(evaluation=self.evaluation, response=self.response)
+        competency_result = CompetencyEvaluationResult.objects.get(
+            evaluation=self.evaluation,
+            competency_code="safety_awareness",
+        )
+        self.assertEqual(response_result.rule_id, legacy_rule.id)
+        self.assertEqual(response_result.competency_code, "safety_awareness")
+        self.assertEqual(response_result.competency_name, "Safety Awareness")
+        self.assertEqual(competency_result.competency_code, "safety_awareness")
+        self.assertEqual(competency_result.competency_name, "Safety Awareness")
+
     def test_unanswered_response_is_skipped_as_incomplete_instead_of_blocking_scoring(self):
         unmapped_template = QuestionTemplate.objects.create(
             role_name="Housekeeper",

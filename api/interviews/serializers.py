@@ -11,6 +11,7 @@ from api.interviews.models import (
     RolePackageCoverage,
 )
 from api.questions.models import QuestionTemplate
+from api.questions.skill_tags import normalize_skill_tag
 from api.sessions.models import CandidateResponse, InterviewSession, QuestionAudioArtifact, SessionArtifact, SessionQuestion
 from api.sessions.models import ObservedTaskDefinition, SessionObservedTask, TaskObservationResult
 
@@ -268,12 +269,15 @@ class RolePackageCoverageSerializer(PublicIdModelSerializer):
 
 
 class SessionQuestionSerializer(PublicIdModelSerializer):
+    skill_tag = serializers.SerializerMethodField()
+
     class Meta:
         model = SessionQuestion
         fields = [
             "id",
             "question_text",
             "domain",
+            "skill_tag",
             "skill",
             "difficulty",
             "question_order",
@@ -283,6 +287,14 @@ class SessionQuestionSerializer(PublicIdModelSerializer):
             "answered_at",
         ]
         read_only_fields = fields
+
+    def get_skill_tag(self, obj):
+        if obj.skill_tag:
+            return normalize_skill_tag(obj.skill_tag)
+        template = getattr(obj, "question_template", None)
+        if template is not None and template.skill_tag:
+            return normalize_skill_tag(template.skill_tag)
+        return normalize_skill_tag(obj.skill)
 
 
 class CandidateResponseSerializer(PublicIdModelSerializer):

@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from api.core.constants import InterviewEvaluationTier, ReadinessStatus
+from api.questions.skill_tags import normalize_skill_tag
 from .readiness_record_services import EvaluationReadinessRecordService
 
 
@@ -112,7 +113,7 @@ class EvaluationRuleEngine:
                 continue
             score = cls._extract_score(response.metadata)
             if score is not None and score == Decimal("0"):
-                topic = template.skill_tag or template.skill or template.domain
+                topic = normalize_skill_tag(template.skill_tag or template.skill) or template.domain
                 return template.question_code or str(template.public_id), topic, score
         return None
 

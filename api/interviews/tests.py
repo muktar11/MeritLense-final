@@ -205,6 +205,47 @@ class InterviewSessionApiTests(APITestCase):
         delete_response = self.client.delete(f"/api/v1/interviews/question-templates/{template_id}/")
         self.assertEqual(delete_response.status_code, 204)
 
+    def test_question_template_create_normalizes_role_specific_skill_tag(self):
+        response = self.client.post(
+            "/api/v1/interviews/question-templates/",
+            {
+                "role_name": "Nursing Assistant",
+                "role_code": "nursing_assistant",
+                "question_code": "NA-SAF-010",
+                "question_version": "1.0",
+                "question_status": "active",
+                "domain": "Patient Safety",
+                "skill_tag": "Patient Safety",
+                "skill": "Patient Safety",
+                "sequence_number": 10,
+                "difficulty": "MEDIUM",
+                "question_text": "What would you do first?",
+                "question_type": "safety",
+                "question_format": "SCENARIO",
+                "expected_steps": ["call for help"],
+                "keywords": ["safety"],
+                "weight": "1.00",
+                "language": "EN",
+                "scoring_type": "0/3/5",
+                "difficulty_score": 2,
+                "estimated_time_seconds": 60,
+                "expected_answer_type": "structured",
+                "evaluation_tier": "FULL",
+                "rubric_version": "v2.0",
+                "question_set_version": "v1.2",
+                "is_mandatory": True,
+                "follow_up_allowed": False,
+                "critical_question": False,
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        template = QuestionTemplate.objects.get(public_id=response.data["id"])
+        self.assertEqual(template.skill_tag, "Safety Awareness")
+        self.assertEqual(template.skill, "Safety Awareness")
+        self.assertEqual(template.skill_id, "safety_awareness")
+
     def test_can_crud_interview_rubric(self):
         response = self.client.post(
             "/api/v1/interviews/rubrics/",
@@ -236,6 +277,31 @@ class InterviewSessionApiTests(APITestCase):
         )
         self.assertEqual(patch_response.status_code, 200)
         self.assertEqual(patch_response.data["notes"], "Updated")
+
+    def test_interview_rubric_create_normalizes_role_specific_skill_tag(self):
+        response = self.client.post(
+            "/api/v1/interviews/rubrics/",
+            {
+                "role_name": "Nursing Assistant",
+                "role_code": "nursing_assistant",
+                "skill_tag": "Patient Safety",
+                "scoring_category": "Patient Safety",
+                "weight": "0.3500",
+                "max_score": 52,
+                "scoring_type": "0/3/5",
+                "domain": "Patient Safety",
+                "notes": "Maps to knowledge_score",
+                "rubric_version": "v2.0",
+                "question_set_version": "v1.2",
+                "evaluation_criteria": [{"question_ref": "NA-SAF-001"}],
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        rubric = InterviewRubric.objects.get(public_id=response.data["id"])
+        self.assertEqual(rubric.skill_tag, "Safety Awareness")
+        self.assertEqual(rubric.scoring_category, "Safety Awareness")
 
     def test_can_crud_package_session_config_and_role_coverage(self):
         package_response = self.client.post(
@@ -1569,6 +1635,11 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["question_order"], 1)
         self.assertEqual(response.data["status"], "ASKED")
+        active_question = session.questions.select_related("question_template").order_by("question_order").first()
+        self.assertIsNotNone(active_question)
+        self.assertEqual(response.data["domain"], active_question.domain)
+        self.assertEqual(response.data["skill_tag"], active_question.question_template.skill_tag)
+        self.assertEqual(response.data["skill"], active_question.skill)
 
     def test_question_generation_avoids_repeating_prior_question_codes_for_candidate(self):
         previous_session = InterviewSession.objects.create(
@@ -1695,8 +1766,10 @@ class InterviewSessionApiTests(APITestCase):
         generated = list(session.questions.select_related("question_template").order_by("question_order"))
         domains = {question.domain for question in generated}
         skills = {question.skill for question in generated}
+        skill_tags = {question.skill_tag for question in generated}
         self.assertGreaterEqual(len(domains), 3)
         self.assertEqual(len(skills), len(generated))
+        self.assertEqual(skill_tags, skills)
 
     def test_task_observation_flow_assigns_starts_and_completes_task(self):
         task_config = InterviewConfiguration.objects.create(

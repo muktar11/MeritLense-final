@@ -8,6 +8,7 @@ from django.db import transaction
 from api.core.constants import ExpectedAnswerType, InterviewEvaluationTier, QuestionLifecycleStatus
 from api.interviews.models import InterviewConfiguration, InterviewRubric
 from api.questions.models import QuestionTemplate
+from api.questions.skill_tags import normalize_skill_fields, normalize_skill_tag
 
 try:
     from openpyxl import load_workbook
@@ -197,22 +198,60 @@ class Command(BaseCommand):
         return grouped
 
     def _sync_rubrics(self, metadata, rubric_rows, criteria_by_skill):
+        aggregated = {}
         for row in rubric_rows:
+            canonical_skill_tag = normalize_skill_tag(
+                row["skill_tag"],
+                scoring_type=row["scoring_type"],
+            )
+            canonical_category = normalize_skill_tag(
+                row["scoring_category"],
+                scoring_type=row["scoring_type"],
+                fallback=canonical_skill_tag,
+            ) or canonical_skill_tag
+            key = (metadata["role_code"], metadata["rubric_version"], canonical_skill_tag)
+            payload = aggregated.setdefault(
+                key,
+                {
+                    "role_name": metadata["role_name"],
+                    "role_code": metadata["role_code"],
+                    "skill_tag": canonical_skill_tag,
+                    "scoring_category": canonical_category,
+                    "weight": Decimal("0"),
+                    "max_score": 0,
+                    "scoring_type": row["scoring_type"],
+                    "domain": canonical_skill_tag,
+                    "notes": [],
+                    "question_set_version": metadata["question_set_version"],
+                    "evaluation_criteria": [],
+                    "is_active": True,
+                },
+            )
+            payload["weight"] += row["weight"]
+            payload["max_score"] += row["max_score"]
+            if not payload["scoring_type"]:
+                payload["scoring_type"] = row["scoring_type"]
+            if row["notes"]:
+                payload["notes"].append(str(row["notes"]).strip())
+            payload["evaluation_criteria"].extend(criteria_by_skill.get(row["skill_tag"], []))
+
+        for row in aggregated.values():
+            row["evaluation_criteria"] = self._dedupe_evaluation_criteria(row["evaluation_criteria"])
             InterviewRubric.objects.update_or_create(
-                role_code=metadata["role_code"],
+                role_code=row["role_code"],
                 skill_tag=row["skill_tag"],
                 rubric_version=metadata["rubric_version"],
                 defaults={
-                    "role_name": metadata["role_name"],
-                    "role_code": metadata["role_code"],
+                    "role_name": row["role_name"],
+                    "role_code": row["role_code"],
                     "scoring_category": row["scoring_category"],
                     "weight": row["weight"],
                     "max_score": row["max_score"],
                     "scoring_type": row["scoring_type"],
                     "domain": row["domain"],
-                    "notes": row["notes"],
-                    "question_set_version": metadata["question_set_version"],
-                    "evaluation_criteria": criteria_by_skill.get(row["skill_tag"], []),
+                    "notes": "\n".join(dict.fromkeys(row["notes"])),
+                    "question_set_version": row["question_set_version"],
+                    "evaluation_criteria": row["evaluation_criteria"],
                     "is_active": True,
                 },
             )
@@ -223,6 +262,11 @@ class Command(BaseCommand):
         ).update(is_active=False, question_status=QuestionLifecycleStatus.ARCHIVED)
 
         for row in question_rows:
+            normalized = normalize_skill_fields(
+                skill_tag=row["skill_tag"],
+                skill=row["skill_tag"],
+                scoring_type=row["scoring_type"],
+            )
             QuestionTemplate.objects.update_or_create(
                 role_code=metadata["role_code"],
                 question_code=row["question_code"],
@@ -231,8 +275,9 @@ class Command(BaseCommand):
                 defaults={
                     "role_name": metadata["role_name"],
                     "domain": row["domain"],
-                    "skill_tag": row["skill_tag"],
-                    "skill": row["skill_tag"],
+                    "skill_tag": normalized["skill_tag"],
+                    "skill_id": normalized["skill_id"],
+                    "skill": normalized["skill"],
                     "sequence_number": row["sequence_number"],
                     "question_text": row["question_text"],
                     "question_type": row["question_type"],
@@ -307,3 +352,20 @@ class Command(BaseCommand):
             "MEDIUM": 2,
             "HARD": 3,
         }.get(str(difficulty).upper(), 2)
+
+    def _dedupe_evaluation_criteria(self, items):
+        seen = set()
+        deduped = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            key = (
+                str(item.get("question_ref") or "").strip(),
+                str(item.get("must_include_points") or "").strip(),
+                str(item.get("score_note") or "").strip(),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped

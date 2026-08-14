@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from api.audit.services import AuditLogService
 from api.core.constants import AuditLogAction, AuditLogCategory, EvaluationLayer, ReadinessStatus
+from api.questions.skill_tags import normalize_skill_code, normalize_skill_tag
 from api.sessions.models import CandidateResponse
 from api.translation.models import EvaluationInputArtifact
 
@@ -152,12 +153,19 @@ class Week6ScoringService:
             passed_required = False
 
         percentage = cls._percentage(raw_score, max_score)
+        template = getattr(response.question, "question_template", None)
         competency_code = (
-            getattr(artifact, "competency_code", "")
-            or rule.competency_code
-            or getattr(response.question.question_template, "skill_tag", "")
+            normalize_skill_code(getattr(artifact, "competency_code", ""))
+            or normalize_skill_code(rule.competency_code)
+            or normalize_skill_code(
+                getattr(template, "skill_id", "")
+                or getattr(template, "skill_tag", "")
+                or getattr(template, "skill", "")
+            )
         )
-        competency_name = rule.competency_name or competency_code.replace("_", " ").title()
+        competency_name = normalize_skill_tag(
+            rule.competency_name or competency_code or getattr(template, "skill_tag", "")
+        )
         explanation = cls._build_explanation(
             matched=matched,
             missing=missing,
@@ -215,8 +223,14 @@ class Week6ScoringService:
             rule = rule_set.rules.filter(question_code=question_code, is_active=True).first()
             if rule:
                 return rule
-        competency_code = getattr(artifact, "competency_code", "")
-        if competency_code:
+        raw_competency_code = getattr(artifact, "competency_code", "")
+        candidate_codes = []
+        if raw_competency_code:
+            candidate_codes.append(raw_competency_code)
+        normalized_competency_code = normalize_skill_code(raw_competency_code)
+        if normalized_competency_code and normalized_competency_code not in candidate_codes:
+            candidate_codes.append(normalized_competency_code)
+        for competency_code in candidate_codes:
             rule = rule_set.rules.filter(competency_code=competency_code, is_active=True).first()
             if rule:
                 return rule
@@ -254,10 +268,10 @@ class Week6ScoringService:
                 competency_code = result.competency_code
                 competency_name = result.competency_name
             elif artifact is not None:
-                competency_code = artifact.competency_code
-                competency_name = artifact.competency_code.replace("_", " ").title()
+                competency_code = normalize_skill_code(artifact.competency_code)
+                competency_name = normalize_skill_tag(artifact.competency_code)
             grouped.setdefault(competency_code or "unmapped", {
-                "name": competency_name or (competency_code or "unmapped").replace("_", " ").title(),
+                "name": competency_name or normalize_skill_tag(competency_code or "unmapped"),
                 "responses": [],
             })["responses"].append((response, result))
 

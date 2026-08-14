@@ -9,6 +9,7 @@ from api.core.constants import (
     QuestionLifecycleStatus,
 )
 from api.core.models import TimeStampedModel
+from .skill_tags import normalize_skill_fields
 
 
 class QuestionTemplate(TimeStampedModel):
@@ -80,3 +81,18 @@ class QuestionTemplate(TimeStampedModel):
 
     def __str__(self):
         return f"{self.role_name} - {self.question_code or self.skill_tag} - {self.difficulty}"
+
+    def save(self, *args, **kwargs):
+        normalized = normalize_skill_fields(
+            skill_tag=self.skill_tag,
+            skill=self.skill,
+            skill_id=self.skill_id,
+            scoring_type=self.scoring_type,
+        )
+        update_fields = kwargs.get("update_fields")
+        self.skill_tag = normalized["skill_tag"]
+        self.skill = normalized["skill"]
+        self.skill_id = normalized["skill_id"]
+        if update_fields is not None:
+            kwargs["update_fields"] = set(update_fields) | {"skill_tag", "skill", "skill_id"}
+        super().save(*args, **kwargs)

@@ -35,6 +35,7 @@ from api.interviews.voice_services import (
 )
 from api.translation.services import AIProcessingError, TranslationService
 from api.questions.models import QuestionTemplate
+from api.questions.skill_tags import normalize_skill_fields, normalize_skill_tag
 from api.storage.services import MediaStorageService
 
 from .models import (
@@ -157,13 +158,21 @@ class QuestionGenerationService:
         selected_templates = cls._select_templates(session, localized, target_count)
         questions = []
         for order, template in enumerate(selected_templates, start=1):
+            normalized = normalize_skill_fields(
+                skill_tag=template.skill_tag,
+                skill=template.skill,
+                skill_id=template.skill_id,
+                scoring_type=template.scoring_type,
+                fallback=template.domain,
+            )
             questions.append(
                 SessionQuestion(
                     session=session,
                     question_template=template,
                     question_text=template.question_text,
                     domain=template.domain,
-                    skill=template.skill_tag or template.skill,
+                    skill_tag=normalized["skill_tag"],
+                    skill=normalized["skill"],
                     difficulty=template.difficulty,
                     question_order=order,
                     is_mandatory=template.is_mandatory,
@@ -263,7 +272,7 @@ class QuestionGenerationService:
             template = prior.question_template
             question_code = ((template.question_code if template else "") or "").strip().lower()
             domain = (prior.domain or "").strip().lower()
-            skill = (prior.skill or "").strip().lower()
+            skill = ((prior.skill_tag or prior.skill) or "").strip().lower()
             question_type = ((template.question_type if template else "") or "").strip().lower()
             if question_code:
                 question_codes[question_code] += 1
@@ -286,7 +295,7 @@ class QuestionGenerationService:
         template_language = (template.language or "").strip().lower()
         session_language = (session.candidate_language or "").strip().lower()
         domain = (template.domain or "").strip().lower()
-        skill = (template.skill_tag or template.skill or "").strip().lower()
+        skill = normalize_skill_tag(template.skill_tag or template.skill or "").strip().lower()
         question_type = (template.question_type or "").strip().lower()
         difficulty = (template.difficulty or "").strip().upper()
         question_code = (template.question_code or "").strip().lower()
@@ -323,7 +332,7 @@ class QuestionGenerationService:
     @classmethod
     def _update_selected_context(cls, selected_context, template):
         domain = (template.domain or "").strip().lower()
-        skill = (template.skill_tag or template.skill or "").strip().lower()
+        skill = normalize_skill_tag(template.skill_tag or template.skill or "").strip().lower()
         question_type = (template.question_type or "").strip().lower()
         difficulty = (template.difficulty or "").strip().upper()
         if domain:
@@ -343,8 +352,8 @@ class QuestionGenerationService:
         right_code = (right.question_code or "").strip().lower()
         if left_code and right_code and left_code == right_code:
             return True
-        left_skill = (left.skill_tag or left.skill or "").strip().lower()
-        right_skill = (right.skill_tag or right.skill or "").strip().lower()
+        left_skill = normalize_skill_tag(left.skill_tag or left.skill or "").strip().lower()
+        right_skill = normalize_skill_tag(right.skill_tag or right.skill or "").strip().lower()
         left_domain = (left.domain or "").strip().lower()
         right_domain = (right.domain or "").strip().lower()
         return bool(

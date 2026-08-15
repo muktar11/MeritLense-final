@@ -6,6 +6,7 @@ from .models import (
     CompetencyEvaluationResult,
     Evaluation,
     EvaluationReadinessDecisionRecord,
+    EvaluatorRating,
     ResponseEvaluationResult,
     ScoringRule,
     ScoringRuleSet,
@@ -63,7 +64,8 @@ class EvaluationSerializer(PublicIdModelSerializer):
     latest_session_summary = serializers.SerializerMethodField()
     readiness_legal_record = serializers.SerializerMethodField()
     latest_report = serializers.SerializerMethodField()
-    
+    evaluator_rating = serializers.SerializerMethodField()
+
     class Meta:
         model = Evaluation
         fields = [
@@ -82,6 +84,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
             'latest_session_summary',
             'readiness_legal_record',
             'latest_report',
+            'evaluator_rating',
             'readiness_status', 'readiness_override_applied', 'readiness_override_reason',
             'meeting_link', 'meeting_id', 'meeting_password', 'session_id',
             'location',
@@ -133,7 +136,13 @@ class EvaluationSerializer(PublicIdModelSerializer):
             report,
             context={"request": self.context.get("request")},
         ).data
-    
+
+    def get_evaluator_rating(self, obj):
+        rating = getattr(obj, "evaluator_rating", None)
+        if rating is None:
+            return None
+        return EvaluatorRatingSerializer(rating).data
+
     def validate_scheduled_date(self, value):
         if value <= timezone.now():
             raise serializers.ValidationError("Scheduled date must be in the future")
@@ -276,6 +285,30 @@ class EvaluationRescheduleSerializer(serializers.Serializer):
 
 class EvaluationCancelSerializer(serializers.Serializer):
     reason = serializers.CharField(required=False, allow_blank=True)
+
+
+class EvaluatorRatingSerializer(PublicIdModelSerializer):
+    rated_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EvaluatorRating
+        fields = [
+            'id', 'safety_awareness', 'behavior_integrity',
+            'psych_professional', 'task_execution',
+            'rated_by', 'rated_by_name', 'rated_at',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+    def get_rated_by_name(self, obj):
+        return obj.rated_by.get_full_name() if obj.rated_by else None
+
+
+class EvaluatorRatingWriteSerializer(serializers.Serializer):
+    safety_awareness = serializers.IntegerField(min_value=0, max_value=100)
+    behavior_integrity = serializers.IntegerField(min_value=0, max_value=100)
+    psych_professional = serializers.IntegerField(min_value=0, max_value=100)
+    task_execution = serializers.IntegerField(min_value=0, max_value=100)
 
 
 class EvaluationListSerializer(PublicIdModelSerializer):

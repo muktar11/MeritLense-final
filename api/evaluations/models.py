@@ -1,7 +1,7 @@
 from django.utils import timezone
 from django.db import models
 from django.db.models import Q
-from django.core.validators import MinValueValidator
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
 from api.core.models import TimeStampedModel, SoftDeleteModel
 from api.core.constants import (
@@ -705,3 +705,44 @@ class Certificate(TimeStampedModel):
 
     def __str__(self):
         return self.certificate_id or f"Certificate for {self.candidate.get_full_name()}"
+
+
+class EvaluatorRating(TimeStampedModel):
+    """Evaluator's manual 0-100 rating on the 4 fixed pools (see
+    api/questions/skill_tags.py's SKILL_TAG_CODES). Separate from, and
+    never blended into, Evaluation.score/readiness_status or
+    certificate_eligibility() - purely an additional, evaluator-entered
+    signal. One mutable row per evaluation, updated in place on
+    resubmission (unlike EvaluationReadinessDecisionRecord, which is
+    immutable, or EvaluationReport, which is snapshotted per version)."""
+
+    evaluation = models.OneToOneField(
+        Evaluation, on_delete=models.CASCADE, related_name="evaluator_rating"
+    )
+    safety_awareness = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    behavior_integrity = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    psych_professional = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    task_execution = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    rated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="evaluator_ratings_given",
+    )
+    rated_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Evaluator Rating"
+        verbose_name_plural = "Evaluator Ratings"
+
+    def __str__(self):
+        return f"Evaluator rating for evaluation {self.evaluation_id}"

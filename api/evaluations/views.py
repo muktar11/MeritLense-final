@@ -29,6 +29,8 @@ from .serializers import (
     ResponseEvaluationResultSerializer,
     ScoringRuleSetSerializer,
     SessionEvaluationSummarySerializer,
+    EvaluatorRatingSerializer,
+    EvaluatorRatingWriteSerializer,
 )
 from .permissions import CanManageEvaluation, CanViewEvaluation
 from api.core.constants import CertificateStatus, Roles, EvaluationStatus, EvaluationType
@@ -36,6 +38,7 @@ from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverit
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
 from .models import Certificate, EvaluationReadinessDecisionRecord, ScoringRuleSet, SessionEvaluationSummary
 from .scoring_services import Week6ScoringError, Week6ScoringService
+from .evaluator_rating_services import submit_evaluator_rating
 from api.reports.models import EvaluationReport
 from api.reports.serializers import EvaluationReportSerializer
 from api.reports.services import EvaluationReportError, EvaluationReportService
@@ -207,7 +210,12 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             self.permission_classes = [IsAuthenticated, CanViewEvaluation]
         elif self.action in ['complete', 'reschedule', 'cancel']:
             self.permission_classes = [IsAuthenticated, CanManageEvaluation]
-        
+        elif self.action == 'evaluator_rating':
+            self.permission_classes = (
+                [IsAuthenticated, CanManageEvaluation] if self.request.method == 'POST'
+                else [IsAuthenticated, CanViewEvaluation]
+            )
+
         return super().get_permissions()
 
     def create(self, request, *args, **kwargs):
@@ -487,6 +495,39 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response(EvaluationReadinessDecisionRecordSerializer(record).data)
+
+    @action(detail=True, methods=['get', 'post'], url_path='evaluator-rating')
+    def evaluator_rating(self, request, id=None):
+        evaluation = self.get_object()
+
+        if request.method == 'GET':
+            rating = getattr(evaluation, "evaluator_rating", None)
+            if rating is None:
+                return Response(
+                    {"detail": "No evaluator rating has been submitted yet."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            return Response(EvaluatorRatingSerializer(rating).data)
+
+        serializer = EvaluatorRatingWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        rating, created = submit_evaluator_rating(
+            evaluation,
+            ratings=serializer.validated_data,
+            actor=request.user,
+        )
+        AuditLogService.log(
+            user=request.user,
+            action=AuditLogAction.EVALUATOR_RATING_SUBMITTED,
+            category=AuditLogCategory.EVALUATION,
+            description=f"Evaluator rating {'submitted' if created else 'updated'} for {evaluation.candidate.get_full_name()}",
+            resource=evaluation,
+            data=serializer.validated_data,
+        )
+        return Response(
+            EvaluatorRatingSerializer(rating).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["post"], url_path="generate-report")
     def generate_report(self, request, id=None):

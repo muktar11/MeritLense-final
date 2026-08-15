@@ -11,7 +11,7 @@ from api.accounts.models import Company, CompanyEmployerProfile, User
 from api.audit.models import AuditLog
 from api.candidates.models import Candidate
 from api.core.constants import AuditLogAction, CandidateResponseType, CoverageLevel, EvaluationLayer, EvaluationStatus, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles, SubscriptionStatus, BillingInterval
-from api.evaluations.models import Certificate, CompetencyEvaluationResult, Evaluation, EvaluationReadinessDecisionRecord, ResponseEvaluationResult, ScoringRule, ScoringRuleSet, SessionEvaluationSummary
+from api.evaluations.models import Certificate, CompetencyEvaluationResult, Evaluation, EvaluationReadinessDecisionRecord, EvaluatorRating, ResponseEvaluationResult, ScoringRule, ScoringRuleSet, SessionEvaluationSummary
 from api.evaluations.scoring_services import Week6ScoringService
 from api.evaluations.certificate_services import generate_certificate
 from api.payments.models import Customer, Price, Subscription
@@ -1795,3 +1795,206 @@ class CertificateEligibilityTests(TestCase):
         self.assertIsNotNone(certificate)
         self.evaluation.refresh_from_db()
         self.assertEqual(self.evaluation.certificate_status, CertificateStatus.ISSUED)
+
+
+class EvaluatorRatingTests(TestCase):
+    """The evaluator's manual 0-100 rating on the 4 fixed pools is purely
+    additive: it must never change Evaluation.score/readiness_status, and
+    must only trigger certificate regeneration when a certificate was
+    already issued - never first-issue one on its own."""
+
+    VALID_RATINGS = {
+        "safety_awareness": 80,
+        "behavior_integrity": 70,
+        "psych_professional": 90,
+        "task_execution": 60,
+    }
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="rating-owner@example.com",
+            password="testpass123",
+            first_name="Rating",
+            last_name="Owner",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.other_user = User.objects.create_user(
+            email="rating-other@example.com",
+            password="testpass123",
+            first_name="Other",
+            last_name="Owner",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Rating",
+            last_name="Candidate",
+            email="rating-candidate@example.com",
+            passport_id="RATING001",
+            job_role="NA",
+            core_skills="safety",
+            preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf",
+            created_by=self.user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=45,
+            total_questions=1,
+            allow_retries=True,
+            max_retries=1,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+        )
+        self.session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            role_code=self.config.role_code,
+            ui_language="EN",
+            candidate_language="EN",
+            tts_language_code="en-US",
+            stt_language_code="en-US",
+            total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+            identity_verified=True,
+        )
+        self.evaluation = Evaluation.objects.create(
+            session=self.session,
+            candidate=self.candidate,
+            evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now() + timezone.timedelta(days=1),
+            duration_minutes=45,
+            created_by=self.user,
+        )
+        self.url = f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/evaluator-rating"
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def _summary(self):
+        return SessionEvaluationSummary.objects.create(
+            evaluation=self.evaluation,
+            session=self.session,
+            candidate=self.candidate,
+            rule_set=ScoringRuleSet.objects.create(
+                name="Rating Test Rules", version="v1", role_code="domestic_worker", role_name="Housekeeper",
+                evaluation_tier=InterviewEvaluationTier.FULL, is_active=True, created_by=self.user,
+            ),
+            total_score=Decimal("70"), max_score=Decimal("100"), overall_percentage=Decimal("70.00"),
+            competencies_summary=[], status=SessionEvaluationSummary.STATUS_EVALUATED,
+            total_response_count=1, evaluated_response_count=1,
+        )
+
+    def test_get_returns_404_before_any_rating_submitted(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_post_creates_a_rating(self):
+        response = self.client.post(self.url, self.VALID_RATINGS, format="json")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(EvaluatorRating.objects.count(), 1)
+        rating = EvaluatorRating.objects.get(evaluation=self.evaluation)
+        self.assertEqual(rating.safety_awareness, 80)
+        self.assertEqual(rating.rated_by, self.user)
+
+    def test_resubmission_updates_the_same_row(self):
+        self.client.post(self.url, self.VALID_RATINGS, format="json")
+        first_rated_at = EvaluatorRating.objects.get(evaluation=self.evaluation).rated_at
+
+        updated = {**self.VALID_RATINGS, "safety_awareness": 45}
+        response = self.client.post(self.url, updated, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(EvaluatorRating.objects.count(), 1)
+        rating = EvaluatorRating.objects.get(evaluation=self.evaluation)
+        self.assertEqual(rating.safety_awareness, 45)
+        self.assertGreaterEqual(rating.rated_at, first_rated_at)
+
+    def test_out_of_range_values_are_rejected(self):
+        too_high = {**self.VALID_RATINGS, "safety_awareness": 101}
+        response = self.client.post(self.url, too_high, format="json")
+        self.assertEqual(response.status_code, 400)
+
+        too_low = {**self.VALID_RATINGS, "task_execution": -1}
+        response = self.client.post(self.url, too_low, format="json")
+        self.assertEqual(response.status_code, 400)
+
+        self.assertEqual(EvaluatorRating.objects.count(), 0)
+
+    def test_missing_field_is_rejected(self):
+        incomplete = {k: v for k, v in self.VALID_RATINGS.items() if k != "task_execution"}
+        response = self.client.post(self.url, incomplete, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(EvaluatorRating.objects.count(), 0)
+
+    def test_user_without_manage_access_is_denied(self):
+        # A B2C stranger is excluded by _accessible_evaluations_queryset
+        # before CanManageEvaluation's object check even runs, so DRF's
+        # generic get_object() 404s rather than 403ing - same ambiguity
+        # already accepted by test_non_owner_cannot_reschedule_or_cancel
+        # above for the sibling reschedule/cancel actions.
+        self.client.force_authenticate(self.other_user)
+        response = self.client.post(self.url, self.VALID_RATINGS, format="json")
+        self.assertIn(response.status_code, {403, 404})
+        self.assertEqual(EvaluatorRating.objects.count(), 0)
+
+    def test_submitting_a_rating_does_not_alter_score_or_readiness(self):
+        summary = self._summary()
+        Week6ScoringService._apply_evaluation_rollups(evaluation=self.evaluation, summary=summary, actor=self.user)
+        self.evaluation.refresh_from_db()
+        original_score = self.evaluation.score
+        original_readiness = self.evaluation.readiness_status
+        original_cert_status = self.evaluation.certificate_status
+
+        response = self.client.post(self.url, self.VALID_RATINGS, format="json")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.score, original_score)
+        self.assertEqual(self.evaluation.readiness_status, original_readiness)
+        self.assertEqual(self.evaluation.certificate_status, original_cert_status)
+
+    def test_submitting_a_rating_does_not_first_issue_a_certificate(self):
+        # certificate_status stays NOT_ISSUED - no summary/certificate exists yet,
+        # so there's nothing eligible for submit_evaluator_rating to regenerate.
+        from api.core.constants import CertificateStatus
+        response = self.client.post(self.url, self.VALID_RATINGS, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.certificate_status, CertificateStatus.NOT_ISSUED)
+        self.assertFalse(Certificate.objects.filter(evaluation=self.evaluation).exists())
+
+    def test_submitting_a_rating_regenerates_an_already_issued_certificate(self):
+        summary = self._summary()
+        certificate = generate_certificate(self.evaluation, summary)
+        self.assertIsNotNone(certificate)
+        original_hash = certificate.pdf_hash
+
+        response = self.client.post(self.url, self.VALID_RATINGS, format="json")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        certificate.refresh_from_db()
+        self.assertNotEqual(certificate.pdf_hash, original_hash)
+
+    def test_report_payload_reflects_rating_state_at_generation_time(self):
+        from api.reports.services import EvaluationReportService
+
+        self.assertIsNone(EvaluationReportService._build_evaluator_rating(self.evaluation))
+
+        self.client.post(self.url, self.VALID_RATINGS, format="json")
+        self.evaluation.refresh_from_db()
+
+        payload = EvaluationReportService._build_evaluator_rating(self.evaluation)
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["safety_awareness"], 80)
+        self.assertEqual(payload["task_execution"], 60)

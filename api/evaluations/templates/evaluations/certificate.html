@@ -53,6 +53,14 @@
   .readiness-badge.level-3 { background: #dcfce7; color: #15803d; }
   .readiness-caption { font-size: 7.4pt; color: #888; margin-top: 8px; }
 
+  /* ---------- Evaluator rating row ---------- */
+  .evaluator-row { margin-top: 12px; padding: 8px 12px; background: #f6f8fd; border: 1px solid #e3e9f7; border-radius: 10px; display: flex; align-items: center; gap: 12px; }
+  .evaluator-row-label { font-size: 7pt; text-transform: uppercase; letter-spacing: 0.04em; color: #888; white-space: nowrap; flex-shrink: 0; }
+  .evaluator-chips { display: flex; gap: 8px; flex: 1; }
+  .evaluator-chip { flex: 1; text-align: center; background: #fff; border: 1px solid #e7ecf9; border-radius: 8px; padding: 4px 6px; }
+  .evaluator-chip span { display: block; font-size: 6.2pt; color: #888; }
+  .evaluator-chip b { font-size: 10pt; color: #1e2a3a; }
+
   /* ---------- Footer ---------- */
   .footer-row { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; padding-top: 14px; border-top: 1px solid #e7ecf9; }
   .verify-col { display: flex; align-items: center; gap: 12px; }
@@ -128,6 +136,18 @@
         <div class="readiness-caption">Evaluated against the MeritLense Workforce Readiness Standard.</div>
       </div>
     </div>
+
+    {% if evaluator_rating %}
+    <div class="evaluator-row">
+      <div class="evaluator-row-label">Evaluator<br />Assessment</div>
+      <div class="evaluator-chips">
+        <div class="evaluator-chip"><span>Safety Awareness</span><b>{{ evaluator_rating.safety_awareness }}</b></div>
+        <div class="evaluator-chip"><span>Behavior &amp; Integrity</span><b>{{ evaluator_rating.behavior_integrity }}</b></div>
+        <div class="evaluator-chip"><span>Psych &amp; Professional</span><b>{{ evaluator_rating.psych_professional }}</b></div>
+        <div class="evaluator-chip"><span>Task Execution</span><b>{{ evaluator_rating.task_execution }}</b></div>
+      </div>
+    </div>
+    {% endif %}
 
     <div class="footer-row">
       <div class="verify-col">

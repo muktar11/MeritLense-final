@@ -109,6 +109,21 @@ def _readiness_gauge_context(evaluation):
     return {"label": gauge["label"], "position": gauge["position"]}
 
 
+def _evaluator_rating_context(evaluation):
+    """The evaluator's manual 0-100 ratings on the 4 fixed pools, if any
+    have been submitted (see EvaluatorRating in models.py) - purely
+    additional display data, never a factor in certificate_eligibility()."""
+    rating = getattr(evaluation, "evaluator_rating", None)
+    if rating is None:
+        return None
+    return {
+        "safety_awareness": rating.safety_awareness,
+        "behavior_integrity": rating.behavior_integrity,
+        "psych_professional": rating.psych_professional,
+        "task_execution": rating.task_execution,
+    }
+
+
 def _role_profile_version(session):
     """Same version string the internal evaluation report uses (role code
     + question set version) - see EvaluationReportService._derive_role_profile_version."""
@@ -211,6 +226,7 @@ def generate_certificate(evaluation, summary):
         "verification_url": verification_url,
         "qr_data_uri": _build_qr_data_uri(verification_url),
         "generated_at": now.strftime("%Y-%m-%d %H:%M UTC"),
+        "evaluator_rating": _evaluator_rating_context(evaluation),
     }
 
     html_string = render_to_string("evaluations/certificate.html", context)

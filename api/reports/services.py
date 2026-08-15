@@ -550,6 +550,26 @@ class EvaluationReportService:
         return rows
 
     @classmethod
+    def _build_evaluator_rating(cls, evaluation):
+        """The evaluator's manual 0-100 ratings on the 4 fixed pools, pulled
+        live at generation time (same idiom as identity_verified being
+        pulled live from the session) - None if no rating has been
+        submitted yet. Snapshotted into report_payload like everything
+        else here, so a later rating/resubmission only shows up on a
+        freshly generated report, consistent with report immutability."""
+        rating = getattr(evaluation, "evaluator_rating", None)
+        if rating is None:
+            return None
+        return {
+            "safety_awareness": rating.safety_awareness,
+            "behavior_integrity": rating.behavior_integrity,
+            "psych_professional": rating.psych_professional,
+            "task_execution": rating.task_execution,
+            "rated_by_name": rating.rated_by.get_full_name() if rating.rated_by else None,
+            "rated_at": rating.rated_at.isoformat() if rating.rated_at else None,
+        }
+
+    @classmethod
     def _build_response_evidence(cls, response_results):
         rows = []
         for result in response_results:
@@ -880,6 +900,7 @@ class EvaluationReportService:
             "candidate_id": str(candidate.public_id),
             "overall_score": cls._decimal(summary.overall_percentage),
             "competency_breakdown": competency_breakdown,
+            "evaluator_rating": cls._build_evaluator_rating(evaluation),
             "critical_failures": summary.critical_failures,
             "human_review_flags": human_review_flags,
             "audit_log": audit_log,

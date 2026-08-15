@@ -1457,6 +1457,32 @@
           </table>
         </div>
       </div>
+
+      <div class="card section-shell" style="margin-top: 8px;">
+        <div class="list-card-title">Evaluator Ratings (Manual Assessment)</div>
+        {% if report.evaluator_rating %}
+          <div class="status-grid">
+            <div class="status-card">
+              <div class="status-card-title">Safety Awareness</div>
+              <div class="status-card-score">{{ report.evaluator_rating.safety_awareness }}/100</div>
+            </div>
+            <div class="status-card">
+              <div class="status-card-title">Behavior &amp; Integrity</div>
+              <div class="status-card-score">{{ report.evaluator_rating.behavior_integrity }}/100</div>
+            </div>
+            <div class="status-card">
+              <div class="status-card-title">Psych &amp; Professional</div>
+              <div class="status-card-score">{{ report.evaluator_rating.psych_professional }}/100</div>
+            </div>
+            <div class="status-card">
+              <div class="status-card-title">Task Execution</div>
+              <div class="status-card-score">{{ report.evaluator_rating.task_execution }}/100</div>
+            </div>
+          </div>
+        {% else %}
+          <p class="tiny-copy">Not yet rated by an evaluator.</p>
+        {% endif %}
+      </div>
     </div>
 
     <div class="footer">

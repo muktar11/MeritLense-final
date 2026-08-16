@@ -9,6 +9,8 @@ from rest_framework.test import APITestCase
 
 from api.accounts.models import User
 from api.candidates.models import Candidate
+from api.core.constants import EvaluationType
+from api.evaluations.models import Evaluation
 from api.interviews.models import InterviewConfiguration
 from api.sessions.models import InterviewSession
 
@@ -58,6 +60,26 @@ class LiveCallApiTests(APITestCase):
         self.assertEqual(candidate_response.data["role"], "CANDIDATE")
         self.assertEqual(LiveCallSession.objects.count(), 1)
         self.assertEqual(LiveCallParticipant.objects.count(), 2)
+
+    def test_join_response_includes_linked_evaluation_id(self):
+        evaluation = Evaluation.objects.create(
+            session=self.session,
+            candidate=self.session.candidate,
+            evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now() + timezone.timedelta(hours=1),
+            duration_minutes=45,
+            created_by=self.owner,
+        )
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(f"/api/v1/live-calls/sessions/{self.session.public_id}/join")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["call"]["evaluation_id"], str(evaluation.public_id))
+
+    def test_join_response_evaluation_id_is_null_without_a_linked_evaluation(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(f"/api/v1/live-calls/sessions/{self.session.public_id}/join")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data["call"]["evaluation_id"])
 
     def test_each_participant_can_set_independent_languages(self):
         self.client.force_authenticate(self.owner)

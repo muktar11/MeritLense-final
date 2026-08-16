@@ -21,7 +21,11 @@ class LiveCallParticipantSerializer(serializers.ModelSerializer):
 class LiveCallSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(source="public_id", read_only=True)
     participants = LiveCallParticipantSerializer(many=True, read_only=True)
+    evaluation_id = serializers.SerializerMethodField()
 
     class Meta:
         model = LiveCallSession
-        fields = ("id", "state", "audio_policy", "started_at", "ended_at", "participants")
+        fields = ("id", "state", "audio_policy", "started_at", "ended_at", "participants", "evaluation_id")
+
+    def get_evaluation_id(self, obj):
+        return str(obj.evaluation.public_id) if obj.evaluation_id else None

@@ -23,6 +23,7 @@ from api.questions.models import QuestionTemplate
 from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionArtifact, SessionObservedTask, TaskObservationResult
 from api.sessions.services import InterviewSessionService
 from api.translation.models import CandidateResponseInterpretation, CandidateResponseTranslation, EvaluationInputArtifact
+from api.translation.services import AIProcessingError, AIProcessingOrchestrationService
 from api.evaluations.models import Evaluation
 from meritlense.asgi import application
 
@@ -2424,8 +2425,12 @@ class InterviewSessionApiTests(APITestCase):
                     "raw_content": json.dumps(
                         {
                             "answer_relevance": "high",
-                            "mentioned_steps": ["keep child away", "clean spill"],
-                            "missing_steps": ["prevent recurrence"],
+                            # "step1" is the fixture's canonical expected_steps
+                            # phrasing (see setUp); "kept the child away" is a
+                            # paraphrase that should get filtered out by the
+                            # closed-vocabulary constraint rather than stored.
+                            "mentioned_steps": ["step1", "kept the child away"],
+                            "missing_steps": ["step2"],
                             "safety_risks": [],
                             "compliance_risks": [],
                             "language_quality": "clear",
@@ -2457,13 +2462,184 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(stored.processing_status, "PROCESSING_COMPLETED")
         self.assertTrue(CandidateResponseTranslation.objects.filter(response=stored, status="COMPLETED").exists())
         self.assertTrue(CandidateResponseInterpretation.objects.filter(response=stored, status="COMPLETED").exists())
+        interpretation = CandidateResponseInterpretation.objects.get(response=stored)
+        self.assertEqual(
+            interpretation.normalized_indicators.get("unmatched_step_phrases"), ["kept the child away"]
+        )
         artifact = EvaluationInputArtifact.objects.get(response=stored)
-        self.assertEqual(artifact.observed_indicators, ["keep child away", "clean spill"])
-        self.assertEqual(artifact.missing_indicators, ["prevent recurrence"])
+        self.assertEqual(artifact.observed_indicators, ["step1"])
+        self.assertEqual(artifact.missing_indicators, ["step2"])
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TRANSLATION_COMPLETED).exists())
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.INTERPRETATION_COMPLETED).exists())
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.RULE_INPUT_PREPARATION_COMPLETED).exists())
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.AI_PROCESSING_COMPLETED).exists())
+
+    def test_process_ai_survives_translation_failure_and_flags_for_review(self):
+        session = self._create_and_start_session()
+        session.translation_target = "EN"
+        session.save(update_fields=["translation_target", "updated_at"])
+        question = self._mark_first_question_asked(session)
+        response = CandidateResponse.objects.create(
+            session=session,
+            question=question,
+            response_type="TEXT",
+            transcript="ابق الطفل بعيدا ثم نظف السائل",
+            original_transcript="ابق الطفل بعيدا ثم نظف السائل",
+            transcript_language="ar",
+            stt_status="COMPLETED",
+        )
+
+        class FailingTranslationProvider:
+            def __init__(self):
+                self.provider = "GOOGLE"
+
+            def translate(self, **kwargs):
+                raise AIProcessingError("Translation provider timed out", code="translation_timeout")
+
+        class FakeInterpretationProvider:
+            def interpret(self, **kwargs):
+                return {
+                    "provider": "OPENAI",
+                    "model": "gpt-4o-mini",
+                    "raw_content": json.dumps(
+                        {
+                            "answer_relevance": "high",
+                            "mentioned_steps": ["step1", "step2"],
+                            "missing_steps": [],
+                            "safety_risks": [],
+                            "compliance_risks": [],
+                            "language_quality": "clear",
+                            "confidence_notes": [],
+                            "uncertainty_notes": [],
+                            "transcript_issues": [],
+                            "key_evidence_phrases": [],
+                        }
+                    ),
+                    "metadata": {},
+                }
+
+        with patch(
+            "api.translation.services.TranslationService.provider_class", FailingTranslationProvider
+        ), patch(
+            "api.translation.services.ResponseInterpretationService.get_provider",
+            return_value=FakeInterpretationProvider(),
+        ):
+            api_response = self.client.post(
+                f"/api/v1/interviews/responses/{response.public_id}/process-ai/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(api_response.status_code, 200, api_response.data)
+        stored = CandidateResponse.objects.get(pk=response.pk)
+        self.assertEqual(stored.translation_status, "FAILED")
+        self.assertEqual(stored.interpretation_status, "COMPLETED")
+        self.assertEqual(stored.processing_status, "PROCESSING_COMPLETED")
+        interpretation = CandidateResponseInterpretation.objects.get(response=stored)
+        self.assertEqual(interpretation.input_transcript_type, "original_untranslated")
+        self.assertEqual(interpretation.input_language, "ar")
+        artifact = EvaluationInputArtifact.objects.get(response=stored)
+        self.assertEqual(artifact.observed_indicators, ["step1", "step2"])
+        self.assertTrue(artifact.requires_human_review)
+        self.assertIn("Translation failed", artifact.review_reason)
+
+    def test_resolve_interpretation_input_falls_back_to_original_on_translation_failure(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+        response = CandidateResponse.objects.create(
+            session=session,
+            question=question,
+            response_type="TEXT",
+            transcript="Texto original en espanol.",
+            original_transcript="Texto original en espanol.",
+            transcript_language="es",
+            translation_status="FAILED",
+            stt_status="COMPLETED",
+        )
+
+        transcript, language, transcript_type = AIProcessingOrchestrationService._resolve_interpretation_input(
+            response
+        )
+
+        self.assertEqual(transcript, "Texto original en espanol.")
+        self.assertEqual(language, "es")
+        self.assertEqual(transcript_type, "original_untranslated")
+
+    def test_resolve_interpretation_input_uses_translation_when_completed(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+        response = CandidateResponse.objects.create(
+            session=session,
+            question=question,
+            response_type="TEXT",
+            transcript="Texto original en espanol.",
+            original_transcript="Texto original en espanol.",
+            transcript_language="es",
+            translation_status="COMPLETED",
+            translated_transcript="Original text in Spanish.",
+            translation_target_language="en",
+            stt_status="COMPLETED",
+        )
+
+        transcript, language, transcript_type = AIProcessingOrchestrationService._resolve_interpretation_input(
+            response
+        )
+
+        self.assertEqual(transcript, "Original text in Spanish.")
+        self.assertEqual(language, "en")
+        self.assertEqual(transcript_type, "translated")
+
+    def test_interpretation_step_extraction_without_canonical_steps_is_unfiltered(self):
+        session = self._create_and_start_session()
+        question = self._mark_first_question_asked(session)
+        question.question_template.expected_steps = []
+        question.question_template.save(update_fields=["expected_steps"])
+        response = CandidateResponse.objects.create(
+            session=session,
+            question=question,
+            response_type="TEXT",
+            transcript="I would clean the spill and warn others.",
+            original_transcript="I would clean the spill and warn others.",
+            transcript_language="en",
+            translation_status="NOT_REQUIRED",
+            stt_status="COMPLETED",
+        )
+
+        class FakeInterpretationProvider:
+            def interpret(self, **kwargs):
+                return {
+                    "provider": "OPENAI",
+                    "model": "gpt-4o-mini",
+                    "raw_content": json.dumps(
+                        {
+                            "answer_relevance": "high",
+                            "mentioned_steps": ["cleaned the spill", "warned others"],
+                            "missing_steps": [],
+                            "safety_risks": [],
+                            "compliance_risks": [],
+                            "language_quality": "clear",
+                            "confidence_notes": [],
+                            "uncertainty_notes": [],
+                            "transcript_issues": [],
+                            "key_evidence_phrases": [],
+                        }
+                    ),
+                    "metadata": {},
+                }
+
+        with patch(
+            "api.translation.services.ResponseInterpretationService.get_provider",
+            return_value=FakeInterpretationProvider(),
+        ):
+            api_response = self.client.post(
+                f"/api/v1/interviews/responses/{response.public_id}/process-ai/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(api_response.status_code, 200, api_response.data)
+        artifact = EvaluationInputArtifact.objects.get(response__pk=response.pk)
+        self.assertEqual(artifact.observed_indicators, ["cleaned the spill", "warned others"])
 
     def test_process_ai_skips_translation_when_languages_match(self):
         session = self._create_and_start_session()

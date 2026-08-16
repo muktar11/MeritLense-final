@@ -403,7 +403,14 @@ class ResponseInterpretationService:
                 "answer_relevance, mentioned_steps, missing_steps, safety_risks, compliance_risks, "
                 "language_quality, extraction_confidence, confidence_notes, uncertainty_notes, transcript_issues, "
                 "key_evidence_phrases. "
-                "Do not return any scoring, pass/fail, suitability, hiring, ranking, or recommendation fields."
+                "Do not return any scoring, pass/fail, suitability, hiring, ranking, or recommendation fields. "
+                "The transcript may be in the candidate's own language (see session.input_language and "
+                "session.input_transcript_type - 'original' or 'original_untranslated' means it has not been "
+                "machine-translated). Interpret it directly using your own understanding of that language rather "
+                "than assuming prior translation to English. "
+                "For mentioned_steps and missing_steps, choose entries only from question.expected_steps, copied "
+                "verbatim (exact text, not translated or paraphrased) - do not invent new step phrasing. If a step "
+                "from expected_steps was not clearly addressed, omit it from mentioned_steps rather than guessing."
             ),
             "legal_disclaimer": LEGAL_DISCLAIMER_TEXT,
             "session": {
@@ -471,6 +478,23 @@ class ResponseInterpretationService:
         return payload, normalized
 
     @classmethod
+    def _constrain_to_canonical_steps(cls, values, canonical_steps):
+        """Keeps only entries that exactly match (case/whitespace-normalized)
+        a canonical expected_steps string, normalizing survivors to the
+        canonical casing/phrasing. Enforces build_prompt's closed-vocabulary
+        instruction in code, since an LLM won't always follow it exactly.
+        Returns (kept, dropped)."""
+        canonical_by_key = {" ".join(step.strip().lower().split()): step for step in canonical_steps}
+        kept, dropped = [], []
+        for value in values:
+            key = " ".join(value.strip().lower().split())
+            if key in canonical_by_key:
+                kept.append(canonical_by_key[key])
+            else:
+                dropped.append(value)
+        return kept, dropped
+
+    @classmethod
     def interpret(cls, *, response, transcript, input_language, input_transcript_type):
         provider = cls.get_provider()
         prompt = cls.build_prompt(
@@ -482,6 +506,22 @@ class ResponseInterpretationService:
         prompt_hash = cls.build_prompt_hash(prompt)
         result = provider.interpret(prompt=prompt)
         structured_output, normalized = cls.parse_and_validate(result["raw_content"])
+
+        template = getattr(response.question, "question_template", None)
+        canonical_steps = template.expected_steps if template else []
+        if canonical_steps:
+            kept_mentioned, dropped_mentioned = cls._constrain_to_canonical_steps(
+                normalized["mentioned_steps"], canonical_steps
+            )
+            kept_missing, dropped_missing = cls._constrain_to_canonical_steps(
+                normalized["missing_steps"], canonical_steps
+            )
+            normalized["mentioned_steps"] = kept_mentioned
+            normalized["missing_steps"] = kept_missing
+            unmatched = dropped_mentioned + dropped_missing
+            if unmatched:
+                normalized["unmatched_step_phrases"] = unmatched
+
         confidence_score = normalized.get("extraction_confidence")
         storage_normalized = {
             **normalized,
@@ -521,6 +561,10 @@ class EvaluationInputBuilderService:
             review_reasons.append("Interpretation returned uncertainty notes that need human review.")
         if interpretation.normalized_indicators.get("transcript_issues"):
             review_reasons.append("Transcript issues were detected and should be reviewed by a human.")
+        if response.translation_status == "FAILED":
+            review_reasons.append(
+                "Translation failed; interpretation used the original-language transcript without translation."
+            )
         return {
             "competency_code": competency_code,
             "expected_indicators": expected_indicators,
@@ -827,17 +871,18 @@ class AIProcessingOrchestrationService:
 
     @classmethod
     def _resolve_interpretation_input(cls, response):
+        """Prefers the completed translation when one exists, but never
+        blocks interpretation on it - the interpretation LLM understands
+        most supported languages natively, so a missing/failed translation
+        degrades to "interpret the original transcript directly" rather
+        than "can't interpret at all"."""
         transcript = cls._get_source_transcript(response)
         source_language, target_language = cls._resolve_languages(response)
         translation_required = source_language != target_language
-        if translation_required:
-            if response.translation_status != "COMPLETED":
-                raise AIProcessingError(
-                    "Translation must complete before interpretation when languages differ",
-                    code="translation_required_before_interpretation",
-                )
+        if translation_required and response.translation_status == "COMPLETED":
             return response.translated_transcript, target_language, "translated"
-        return transcript, source_language, "original"
+        transcript_type = "original" if not translation_required else "original_untranslated"
+        return transcript, source_language, transcript_type
 
     @classmethod
     @transaction.atomic
@@ -1068,15 +1113,17 @@ class AIProcessingOrchestrationService:
             response=response,
             extra={"idempotency_key": resolved_idempotency_key},
         )
-        translated = cls.translate_response(
+        cls.translate_response(
             response=response,
             actor=actor,
             force=force,
             target_override=target_override,
             idempotency_key=resolved_idempotency_key,
         )
-        if translated.translation_status == "FAILED":
-            return translated
+        # A translation failure no longer stops the pipeline here -
+        # interpret_response falls back to the original-language transcript
+        # via _resolve_interpretation_input, and EvaluationInputBuilderService
+        # flags the resulting artifact for human review instead.
         interpreted = cls.interpret_response(
             response=response,
             actor=actor,

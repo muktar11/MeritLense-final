@@ -3,6 +3,7 @@ import base64
 import hashlib
 import hmac
 import time
+import uuid
 
 from django.conf import settings
 from asgiref.sync import async_to_sync
@@ -15,7 +16,9 @@ from rest_framework.response import Response
 from rest_framework.generics import GenericAPIView
 
 from api.core.public_ids import build_object_identifier_filter
+from api.interviews.voice_services import SpeechToTextService, TextToSpeechService
 from api.sessions.models import InterviewSession
+from api.translation.services import TranslationService
 
 from .auth import OptionalJWTAuthentication, issue_socket_ticket
 from .models import LiveCallParticipant, LiveCallSession
@@ -135,3 +138,80 @@ class LiveCallPreferencesView(GenericAPIView):
             "type": "preferences.changed", "role": participant.role
         })
         return Response(LiveCallSerializer(call).data)
+
+
+class LiveCallSegmentView(GenericAPIView):
+    permission_classes = [AllowAny]
+    authentication_classes = [OptionalJWTAuthentication]
+
+    def post(self, request, session_id):
+        session = _session(session_id)
+        role = _role_for_request(session, request)
+        call = get_object_or_404(LiveCallSession, interview_session=session)
+        participant = get_object_or_404(LiveCallParticipant, call=call, role=role)
+        peer = call.participants.exclude(role=role).first()
+        if not peer:
+            raise ValidationError({"detail": "The other participant is not available yet."})
+
+        audio = request.FILES.get("audio") or request.data.get("audio")
+        if not audio:
+            raise ValidationError({"detail": "An audio recording is required."})
+
+        source_language = (participant.input_language or session.candidate_language or "en-US").strip()
+        target_language = (peer.output_language or participant.output_language or "en-US").strip()
+
+        stt = SpeechToTextService()
+        transcript_payload = stt.transcribe(
+            file_obj=audio,
+            filename=getattr(audio, "name", "segment.webm"),
+            mime_type=getattr(audio, "content_type", "audio/webm"),
+            language_code=source_language,
+        )
+        original_text = (transcript_payload.get("transcript") or "").strip()
+        if not original_text:
+            raise ValidationError({"detail": "No speech was detected in the recording."})
+
+        try:
+            translation = TranslationService.translate(
+                text=original_text,
+                source_language=source_language.split("-", 1)[0].lower(),
+                target_language=target_language.split("-", 1)[0].lower(),
+            )
+            translated_text = (translation.get("translated_text") or "").strip() or original_text
+        except Exception:
+            translated_text = original_text
+
+        try:
+            tts = TextToSpeechService()
+            audio_payload = tts.synthesize(text=translated_text, language_code=target_language)
+            translated_audio = base64.b64encode(audio_payload["audio_bytes"]).decode("ascii")
+            mime_type = audio_payload.get("mime_type", "audio/mpeg")
+        except Exception:
+            translated_audio = ""
+            mime_type = "audio/mpeg"
+
+        payload = {
+            "event": "translation_segment",
+            "id": str(uuid.uuid4()),
+            "speaker_role": role,
+            "recipient_role": peer.role,
+            "source_language": source_language,
+            "target_language": target_language,
+            "original_text": original_text,
+            "translated_text": translated_text,
+            "translated_audio": translated_audio,
+            "mime_type": mime_type,
+            "sent_at": timezone.now().isoformat(),
+        }
+
+        async_to_sync(get_channel_layer().group_send)(f"live_call_{call.public_id}", {
+            "type": "translation.segment",
+            "payload": payload,
+            "recipient_role": peer.role,
+            "sender_role": role,
+        })
+
+        return Response({
+            "status": "translated",
+            "segment": payload,
+        })

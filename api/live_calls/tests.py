@@ -152,6 +152,27 @@ class LiveCallWebSocketTests(TransactionTestCase):
         self.call.refresh_from_db()
         self.assertEqual(self.call.state, LiveCallSession.STATE_RECONNECTING)
 
+    def test_finish_connect_does_not_start_realtime_translation_pipeline(self):
+        async def run_test():
+            consumer = LiveCallConsumer()
+            consumer.role = "EVALUATOR"
+            consumer.channel_name = "test-channel"
+            consumer.participant = Mock(pk=123)
+            consumer.group_name = f"live_call_{self.call.public_id}"
+            consumer.channel_layer = Mock()
+            consumer.channel_layer.group_send = AsyncMock()
+            consumer.send = AsyncMock()
+            consumer._peer_status = AsyncMock(return_value=None)
+            consumer._translation_preferences = AsyncMock(return_value=None)
+            consumer._set_connected = AsyncMock()
+
+            await consumer._finish_connect()
+
+            consumer.channel_layer.group_send.assert_awaited_once()
+            consumer.send.assert_not_called()
+
+        asyncio.run(run_test())
+
     async def _exercise_protocol(self):
         evaluator = LiveCallConsumer()
         evaluator.role = "EVALUATOR"
@@ -169,7 +190,9 @@ class LiveCallWebSocketTests(TransactionTestCase):
         self.assertEqual(relayed["payload"], {"event": "offer", "data": offer})
 
         await evaluator.receive(bytes_data=b"\x01\x00" * 160)
-        evaluator.pipeline.write.assert_called_once_with(b"\x01\x00" * 160)
+        error = json.loads(evaluator.send.await_args.kwargs["text_data"])
+        self.assertEqual(error["event"], "error")
+        self.assertIn("Manual translation mode is active", error["detail"])
 
         evaluator.role = "CANDIDATE"
         await evaluator.translation_audio({

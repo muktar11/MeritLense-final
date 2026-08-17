@@ -4,13 +4,11 @@ from urllib.parse import parse_qs
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
-from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.utils import timezone
 
 from .auth import read_socket_ticket
 from .models import LiveCallParticipant, LiveCallSession
-from .translation import AzureSpeechPipeline
 from .services import update_participant_presence
 
 
@@ -38,7 +36,6 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
             return
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
-        self.pipeline = None
         await self.send_json({"event": "ready", "role": self.role})
 
         if self.role == LiveCallParticipant.ROLE_CANDIDATE and not self.participant.admitted:
@@ -80,26 +77,13 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
             # role == CANDIDATE/connected and the local role is EVALUATOR -
             # no separate signal needed here.
             await self.send_json({"event": "peer_presence", "role": peer_role, "connected": peer_connected})
-        try:
-            preferences = await self._translation_preferences()
-            if preferences:
-                self.pipeline = await sync_to_async(AzureSpeechPipeline, thread_sensitive=False)(
-                    self.channel_layer, self.group_name, self.role,
-                    preferences["input_language"], preferences["target_language"],
-                )
-        except Exception as exc:
-            # Anything here (missing Azure Speech config, a Redis/DB blip on
-            # the preferences lookup, ...) must not escape connect() - once
-            # accept()/_set_connected(True) have already run, an unhandled
-            # exception kills the socket without ever calling disconnect(),
-            # which both drops the call and leaves the participant stuck
-            # showing "connected" in the DB forever. Degrade to no
-            # translation instead of taking the whole call down with it.
-            await self.send_json({"event": "translation_unavailable", "detail": str(exc)})
+        # Manual turn-by-turn translation is the only supported path for this
+        # product: the socket stays open for video signaling and a recorded
+        # segment is submitted via the API, transcribed, translated, and then
+        # delivered back to the peer. No realtime Azure pipeline is started on
+        # connect, and no automatic translation state is broadcast here.
 
     async def disconnect(self, close_code):
-        if getattr(self, "pipeline", None):
-            await sync_to_async(self.pipeline.close, thread_sensitive=False)()
         if hasattr(self, "group_name"):
             await self._set_connected(False)
             await self.channel_layer.group_send(self.group_name, {
@@ -109,11 +93,7 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
 
     async def receive(self, text_data=None, bytes_data=None):
         if bytes_data is not None:
-            if len(bytes_data) > settings.LIVE_CALL_MAX_AUDIO_FRAME_BYTES or len(bytes_data) % 2:
-                await self.send_json({"event": "error", "detail": "Invalid PCM audio frame"})
-                return
-            if self.pipeline:
-                self.pipeline.write(bytes_data)
+            await self.send_json({"event": "error", "detail": "Manual translation mode is active; audio is sent only when you record a turn."})
             return
         try:
             message = json.loads(text_data or "{}")
@@ -154,20 +134,6 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
     async def peer_presence(self, event):
         if event["sender"] != self.channel_name:
             await self.send_json({"event": "peer_presence", "role": event["role"], "connected": event["connected"]})
-            if event["connected"] and self.pipeline is None:
-                try:
-                    preferences = await self._translation_preferences()
-                    if preferences:
-                        self.pipeline = await sync_to_async(AzureSpeechPipeline, thread_sensitive=False)(
-                            self.channel_layer, self.group_name, self.role,
-                            preferences["input_language"], preferences["target_language"],
-                        )
-                except Exception as exc:
-                    # Same reasoning as connect(): this runs inside a
-                    # group-broadcast handler, so an uncaught exception here
-                    # kills THIS participant's own socket in reaction to the
-                    # peer joining - not just theirs.
-                    await self.send_json({"event": "translation_unavailable", "detail": str(exc)})
 
     async def join_requested(self, event):
         if event["sender"] != self.channel_name and self.role == LiveCallParticipant.ROLE_EVALUATOR:
@@ -185,28 +151,16 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
                 "audio": base64.b64encode(event["audio"]).decode("ascii"),
             })
 
+    async def translation_segment(self, event):
+        if event.get("recipient_role") == self.role and event.get("sender_role") != self.role:
+            await self.send_json({"event": "translation_segment", "payload": event["payload"]})
+
     async def translation_error(self, event):
         if event["sender_role"] == self.role:
             await self.send_json({"event": "translation_error", "detail": event["detail"]})
 
     async def call_ended(self, event):
         await self.send_json({"event": "call_ended"})
-
-    async def preferences_changed(self, event):
-        # Either speaker's input or listener's output changes this direction.
-        if self.pipeline:
-            await sync_to_async(self.pipeline.close, thread_sensitive=False)()
-            self.pipeline = None
-        preferences = await self._translation_preferences()
-        if preferences:
-            try:
-                self.pipeline = await sync_to_async(AzureSpeechPipeline, thread_sensitive=False)(
-                    self.channel_layer, self.group_name, self.role,
-                    preferences["input_language"], preferences["target_language"],
-                )
-                await self.send_json({"event": "translation_reconfigured"})
-            except Exception as exc:
-                await self.send_json({"event": "translation_unavailable", "detail": str(exc)})
 
     async def send_json(self, payload):
         await self.send(text_data=json.dumps(payload))
@@ -227,14 +181,6 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
         LiveCallParticipant.objects.filter(
             call_id=self.participant.call_id, role=LiveCallParticipant.ROLE_CANDIDATE
         ).update(admitted=True)
-
-    @database_sync_to_async
-    def _translation_preferences(self):
-        speaker = LiveCallParticipant.objects.get(pk=self.participant.pk)
-        peer = LiveCallParticipant.objects.filter(call_id=speaker.call_id).exclude(role=self.role).first()
-        if not peer:
-            return None
-        return {"input_language": speaker.input_language, "target_language": peer.output_language}
 
     @database_sync_to_async
     def _set_connected(self, connected):

@@ -5,6 +5,8 @@ import tempfile
 from decimal import Decimal
 from unittest.mock import patch
 
+import requests
+
 from asgiref.testing import ApplicationCommunicator
 from django.core.files.base import ContentFile
 from django.core.management import call_command
@@ -2421,6 +2423,95 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(stored.stt_status, "FAILED")
         self.assertEqual(stored.stt_error_code, "stt_timeout")
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.TRANSCRIPTION_FAILED).exists())
+
+    @override_settings(
+        STT_API_URL="https://api.openai.com/v1/audio/transcriptions",
+        STT_API_KEY="test-stt-key",
+        STT_MODEL="whisper-1",
+    )
+    def test_stt_service_retries_without_language_hint_when_provider_rejects_it(self):
+        # Whisper's `language` parameter only accepts a fixed enum - some
+        # codes this app treats as STT-capable (e.g. Amharic) aren't in it,
+        # even though the model can often still transcribe them reasonably
+        # via auto-detection. This reproduces the real rejection body OpenAI
+        # returns for "am" and confirms the service retries once without the
+        # hint instead of failing the whole request.
+        from api.interviews.voice_services import SpeechToTextService
+
+        class FakeRejectedResponse:
+            status_code = 400
+
+            def json(self):
+                return {"error": {"message": "Language 'am' is not supported.", "code": "unsupported_language"}}
+
+            def raise_for_status(self):
+                raise requests.HTTPError(response=self)
+
+        class FakeSuccessResponse:
+            status_code = 200
+            headers = {}
+
+            def json(self):
+                return {"text": "hello", "language": "english", "duration": 2.0, "segments": []}
+
+            def raise_for_status(self):
+                pass
+
+        responses = [FakeRejectedResponse(), FakeSuccessResponse()]
+        calls = []
+
+        def fake_post(*args, **kwargs):
+            calls.append(dict(kwargs.get("data", {})))
+            return responses.pop(0)
+
+        service = SpeechToTextService()
+        with patch("api.interviews.voice_services.requests.post", side_effect=fake_post):
+            result = service.transcribe(
+                file_obj=SimpleUploadedFile("turn.webm", b"audio-bytes", content_type="audio/webm"),
+                filename="turn.webm",
+                mime_type="audio/webm",
+                language_code="am-ET",
+            )
+
+        self.assertEqual(result["transcript"], "hello")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0].get("language"), "am")
+        self.assertNotIn("language", calls[1])
+
+    @override_settings(
+        STT_API_URL="https://api.openai.com/v1/audio/transcriptions",
+        STT_API_KEY="test-stt-key",
+        STT_MODEL="whisper-1",
+    )
+    def test_stt_service_does_not_retry_for_other_400_reasons(self):
+        from api.interviews.voice_services import SpeechToTextService
+
+        class FakeRejectedResponse:
+            status_code = 400
+
+            def json(self):
+                return {"error": {"message": "Invalid file format.", "code": "invalid_file"}}
+
+            def raise_for_status(self):
+                raise requests.HTTPError(response=self)
+
+        calls = []
+
+        def fake_post(*args, **kwargs):
+            calls.append(dict(kwargs.get("data", {})))
+            return FakeRejectedResponse()
+
+        service = SpeechToTextService()
+        with patch("api.interviews.voice_services.requests.post", side_effect=fake_post):
+            with self.assertRaises(VoiceProviderError):
+                service.transcribe(
+                    file_obj=SimpleUploadedFile("turn.webm", b"audio-bytes", content_type="audio/webm"),
+                    filename="turn.webm",
+                    mime_type="audio/webm",
+                    language_code="am-ET",
+                )
+
+        self.assertEqual(len(calls), 1)
 
     def test_question_audio_generation_and_caching(self):
         session = self._create_and_start_session()

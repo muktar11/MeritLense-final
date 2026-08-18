@@ -35,6 +35,9 @@ class SpeechToTextService:
                 code="stt_not_configured",
             )
 
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+        }
         data = {
             "model": self.model,
             "response_format": "verbose_json",
@@ -42,30 +45,27 @@ class SpeechToTextService:
         if language_code:
             data["language"] = language_code.split("-")[0].lower()
 
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-        }
+        response = self._post(data, file_obj, filename, mime_type, headers)
+
+        # The provider's `language` hint only accepts a fixed enum of codes -
+        # some codes this app otherwise treats as STT-capable (e.g. Amharic)
+        # aren't in it, even though the underlying model can often still
+        # transcribe them reasonably via auto-detection. Retry once without
+        # the hint rather than failing the whole request outright, but only
+        # for that specific rejection reason - any other 400 should still
+        # surface as a real error.
+        if data.get("language") and response.status_code == 400 and self._rejected_unsupported_language(response):
+            data.pop("language")
+            file_obj.seek(0)
+            response = self._post(data, file_obj, filename, mime_type, headers)
 
         try:
-            response = requests.post(
-                self.api_url,
-                headers=headers,
-                data=data,
-                files={"file": (filename, file_obj, mime_type)},
-                timeout=self.timeout_seconds,
-            )
             response.raise_for_status()
-        except requests.Timeout as exc:
-            raise VoiceProviderError(
-                "Speech-to-text provider timed out",
-                code="stt_timeout",
-            ) from exc
         except requests.RequestException as exc:
-            status_code = getattr(exc.response, "status_code", None)
             raise VoiceProviderError(
                 "Speech-to-text provider request failed",
                 code="stt_request_failed",
-                metadata={"status_code": status_code},
+                metadata={"status_code": response.status_code},
             ) from exc
 
         payload = response.json()
@@ -86,6 +86,34 @@ class SpeechToTextService:
                 "words": payload.get("words", []),
             },
         }
+
+    def _post(self, data, file_obj, filename, mime_type, headers):
+        try:
+            return requests.post(
+                self.api_url,
+                headers=headers,
+                data=data,
+                files={"file": (filename, file_obj, mime_type)},
+                timeout=self.timeout_seconds,
+            )
+        except requests.Timeout as exc:
+            raise VoiceProviderError(
+                "Speech-to-text provider timed out",
+                code="stt_timeout",
+            ) from exc
+        except requests.RequestException as exc:
+            raise VoiceProviderError(
+                "Speech-to-text provider request failed",
+                code="stt_request_failed",
+            ) from exc
+
+    @staticmethod
+    def _rejected_unsupported_language(response):
+        try:
+            body = response.json()
+        except ValueError:
+            return False
+        return (body.get("error") or {}).get("code") == "unsupported_language"
 
     def _extract_confidence(self, payload):
         confidence = payload.get("confidence")

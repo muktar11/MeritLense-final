@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from rest_framework.generics import GenericAPIView
 
 from api.core.public_ids import build_object_identifier_filter
-from api.interviews.voice_services import SpeechToTextService, TextToSpeechService
+from api.interviews.voice_services import SpeechToTextService, TextToSpeechService, VoiceProviderError
 from api.sessions.models import InterviewSession
 from api.translation.services import TranslationService
 
@@ -161,12 +161,15 @@ class LiveCallSegmentView(GenericAPIView):
         target_language = (peer.output_language or participant.output_language or "en-US").strip()
 
         stt = SpeechToTextService()
-        transcript_payload = stt.transcribe(
-            file_obj=audio,
-            filename=getattr(audio, "name", "segment.webm"),
-            mime_type=getattr(audio, "content_type", "audio/webm"),
-            language_code=source_language,
-        )
+        try:
+            transcript_payload = stt.transcribe(
+                file_obj=audio,
+                filename=getattr(audio, "name", "segment.webm"),
+                mime_type=getattr(audio, "content_type", "audio/webm"),
+                language_code=source_language,
+            )
+        except VoiceProviderError as exc:
+            raise ValidationError({"detail": "Transcription failed. Please try again."}) from exc
         original_text = (transcript_payload.get("transcript") or "").strip()
         if not original_text:
             raise ValidationError({"detail": "No speech was detected in the recording."})

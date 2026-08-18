@@ -203,8 +203,7 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
 
     def candidate_prechecks_complete(self):
         return bool(
-            self.candidate_consent_agreement_id
-            and self.identity_verified
+            self.identity_verified
             and self.face_match_score is not None
             and float(self.face_match_score) >= settings.IDENTITY_VERIFICATION_MATCH_THRESHOLD
             and self.device_check_completed_at

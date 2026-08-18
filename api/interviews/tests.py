@@ -671,6 +671,84 @@ class InterviewSessionApiTests(APITestCase):
         self.assertIsNotNone(session.device_check_completed_at)
         self.assertIsNotNone(session.verbal_confirmation_recorded_at)
 
+    def test_candidate_precheck_flow_completes_without_consent(self):
+        # Consent capture was removed from the required precheck gate as a
+        # deliberate product decision - candidates no longer need to sign
+        # anything before completing the other prechecks and starting.
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        privacy = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/privacy-acknowledgement/",
+            {
+                "token": access_token,
+                "metadata": {"screen": "candidate-start"},
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(privacy.status_code, 200, privacy.data)
+
+        device = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/device-check/",
+            {
+                "token": access_token,
+                "passed": True,
+                "metadata": {"camera": "ok", "microphone": "ok"},
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(device.status_code, 200, device.data)
+
+        verbal = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/verbal-confirmation/",
+            {
+                "token": access_token,
+                "recording_path": "candidate/verbal-confirmation.webm",
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(verbal.status_code, 200, verbal.data)
+
+        identity = token_client.post(
+            f"/api/v1/interviews/{session_id}/prechecks/identity-verify/",
+            {
+                "token": access_token,
+                "face_match_score": "93.50",
+                "single_face_detected": True,
+                "liveness_passed": True,
+                "metadata": {"source": "candidate-ui"},
+            },
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(identity.status_code, 200, identity.data)
+
+        start_response = token_client.post(
+            f"/api/v1/interviews/{session_id}/start/",
+            {"token": access_token},
+            format="json",
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+        self.assertEqual(start_response.status_code, 200, start_response.data)
+        self.assertEqual(start_response.data["status"], "IN_PROGRESS")
+
+        session = InterviewSession.objects.get(public_id=session_id)
+        self.assertTrue(session.candidate_prechecks_complete())
+        self.assertIsNone(session.candidate_consent_agreement_id)
+
     def test_identity_verification_accepts_provider_result_payload(self):
         create_response = self.client.post(
             "/api/v1/interviews/",

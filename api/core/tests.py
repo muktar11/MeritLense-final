@@ -8,7 +8,16 @@ from django.utils import timezone
 
 from api.accounts.models import Company, CompanyEmployerProfile, User
 from api.candidates.models import Candidate
-from api.core.constants import CompanySize, Languages, Roles, SubscriptionStatus, candidateJobRoles
+from api.contracts.models import Agreement
+from api.core.constants import (
+    AgreementStatus,
+    AgreementType,
+    CompanySize,
+    Languages,
+    Roles,
+    SubscriptionStatus,
+    candidateJobRoles,
+)
 from api.payments.models import Customer, Price, Subscription
 
 
@@ -160,6 +169,14 @@ class AnonymizeQaDataCommandTests(TestCase):
             ).count(),
             1,
         )
+        self.assertEqual(
+            Agreement.objects.filter(
+                user__email="qa-b2c@meritlense.com",
+                agreement_type=AgreementType.B2C_AGREEMENT,
+                status=AgreementStatus.SIGNED,
+            ).count(),
+            1,
+        )
 
     def test_anonymize_replaces_real_stripe_ids_so_no_live_call_hits_a_real_object(self):
         call_command("anonymize_qa_data", password="QaTestPass123!", admin_email="qa-admin@meritlense.com")
@@ -184,3 +201,11 @@ class AnonymizeQaDataCommandTests(TestCase):
         # anonymized, so there's nothing real a live API call could reach.
         self.assertTrue(subscription.stripe_subscription_id.startswith("sub_qa_test_b2c"))
         self.assertEqual(subscription.customer.stripe_customer_id, "cus_qa_test_b2c")
+
+        # The frontend's AgreementGuard redirects to /sign-agreements for
+        # any B2C account without a SIGNED B2C_AGREEMENT on file, regardless
+        # of subscription status - the account otherwise looks "unactivated".
+        agreement = Agreement.objects.get(
+            user=b2c_user, agreement_type=AgreementType.B2C_AGREEMENT, status=AgreementStatus.SIGNED
+        )
+        self.assertIsNotNone(agreement.accepted_at)

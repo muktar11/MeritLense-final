@@ -53,7 +53,18 @@ from api.accounts.models import (
     AdminProfile,
 )
 from api.candidates.models import Candidate
-from api.core.constants import JobRoles, Languages, Nationalities, Roles, SubscriptionStatus
+from api.contracts.constants import CURRENT_VERSIONS
+from api.contracts.models import Agreement
+from api.core.constants import (
+    AgreementMethod,
+    AgreementStatus,
+    AgreementType,
+    JobRoles,
+    Languages,
+    Nationalities,
+    Roles,
+    SubscriptionStatus,
+)
 from api.payments.models import Customer, PaymentMethod, Price, Subscription
 
 QA_DOMAIN = "qa.meritlense.test"
@@ -361,4 +372,23 @@ class Command(BaseCommand):
             current_period_start=timezone.now(),
             current_period_end=timezone.now() + timezone.timedelta(days=365),
             current_usage={"candidate_limit": 0},
+        )
+
+        # The B2C dashboard is gated behind a signed B2C_AGREEMENT
+        # (AgreementGuard, MeritLense-ui) - without this, the account looks
+        # "unactivated" and gets redirected to /sign-agreements on every
+        # visit, regardless of subscription status.
+        Agreement.objects.filter(user=user, agreement_type=AgreementType.B2C_AGREEMENT).exclude(
+            status=AgreementStatus.SIGNED
+        ).update(status=AgreementStatus.SUPERSEDED)
+        Agreement.objects.update_or_create(
+            user=user,
+            agreement_type=AgreementType.B2C_AGREEMENT,
+            status=AgreementStatus.SIGNED,
+            defaults={
+                "version": CURRENT_VERSIONS[AgreementType.B2C_AGREEMENT],
+                "method": AgreementMethod.OTP_SIGNATURE,
+                "signatory_name": "QA B2C",
+                "accepted_at": timezone.now(),
+            },
         )

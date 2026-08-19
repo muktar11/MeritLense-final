@@ -1,0 +1,2 @@
+-r production.txt
+Faker==30.8.2

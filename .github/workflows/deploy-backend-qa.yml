@@ -26,7 +26,7 @@ jobs:
             cd /home/azureuser/meritlense-qa
             git fetch origin qa
             git reset --hard origin/qa
-            venv/bin/pip install -r requirements/production.txt
+            venv/bin/pip install -r requirements/qa.txt
             venv/bin/python manage.py migrate --noinput
             sudo -n systemctl restart gunicorn-qa.service
             sleep 2

@@ -95,6 +95,10 @@ class AnonymizeQaDataCommandTests(TestCase):
         self.assertNotEqual(self.candidate.passport_id, "REAL-PASSPORT-1")
         self.assertFalse(self.candidate.passport_document)
         self.assertFalse(self.candidate.profile_photo)
+        # verification_photo is replaced with a synthetic placeholder, not
+        # cleared - the identity-verification precheck step needs *some*
+        # readable reference image to load, real or not.
+        self.assertTrue(self.candidate.verification_photo)
 
         self.company.refresh_from_db()
         self.assertNotEqual(self.company.registration_number, "REAL-REG-123")

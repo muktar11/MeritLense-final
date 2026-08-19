@@ -79,7 +79,10 @@ class LiveCallJoinView(GenericAPIView):
             raise ValidationError({"detail": "This interview session is closed"})
         early = timedelta(minutes=settings.LIVE_CALL_EARLY_JOIN_MINUTES)
         if session.scheduled_start_at and timezone.now() < session.scheduled_start_at - early:
-            raise PermissionDenied("The live call is not open yet")
+            raise PermissionDenied({
+                "detail": "The live call is not open yet",
+                "scheduled_start_at": session.scheduled_start_at.isoformat(),
+            })
         evaluation = getattr(session, "linked_evaluation", None)
         call, _ = LiveCallSession.objects.get_or_create(
             interview_session=session, defaults={"evaluation": evaluation}

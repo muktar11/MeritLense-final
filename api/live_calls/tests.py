@@ -61,6 +61,21 @@ class LiveCallApiTests(APITestCase):
         self.assertEqual(LiveCallSession.objects.count(), 1)
         self.assertEqual(LiveCallParticipant.objects.count(), 2)
 
+    def test_join_before_early_join_window_reports_scheduled_start_time(self):
+        # A join attempt more than LIVE_CALL_EARLY_JOIN_MINUTES before the
+        # scheduled start used to just say "not open yet" with no timing
+        # info at all, leaving the candidate/evaluator with no way to know
+        # when to come back.
+        self.session.scheduled_start_at = timezone.now() + timezone.timedelta(hours=12)
+        self.session.save(update_fields=["scheduled_start_at"])
+
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(f"/api/v1/live-calls/sessions/{self.session.public_id}/join")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data["detail"], "The live call is not open yet")
+        self.assertEqual(response.data["scheduled_start_at"], self.session.scheduled_start_at.isoformat())
+
     def test_join_response_includes_linked_evaluation_id(self):
         evaluation = Evaluation.objects.create(
             session=self.session,

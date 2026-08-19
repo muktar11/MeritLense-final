@@ -4,10 +4,12 @@ import tempfile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from api.accounts.models import Company, CompanyEmployerProfile, User
 from api.candidates.models import Candidate
-from api.core.constants import CompanySize, Languages, Roles, candidateJobRoles
+from api.core.constants import CompanySize, Languages, Roles, SubscriptionStatus, candidateJobRoles
+from api.payments.models import Customer, Price, Subscription
 
 
 def make_file(name="document.pdf", content=b"test-file", content_type="application/pdf"):
@@ -85,6 +87,32 @@ class AnonymizeQaDataCommandTests(TestCase):
             resachetified_license=make_file("license.pdf"),
             company=self.company,
         )
+        # Mirrors a real production subscription: real-looking Stripe IDs
+        # that, on QA, would otherwise round-trip to a real live Stripe
+        # object if left untouched.
+        price = Price.objects.create(
+            name="Real Plan",
+            stripe_price_id="price_real_prod_123",
+            stripe_product_id="prod_real_prod_123",
+            target_user_type="B2C",
+            unit_amount=2999,
+        )
+        self.real_customer = Customer.objects.create(
+            user=self.candidate_owner,
+            stripe_customer_id="cus_REALPRODCUSTOMER123",
+            email="owner@example.com",
+            name="Real Owner",
+            phone="+15551234567",
+        )
+        self.real_subscription = Subscription.objects.create(
+            user=self.candidate_owner,
+            customer=self.real_customer,
+            stripe_subscription_id="sub_REALPRODSUBSCRIPTION123",
+            stripe_price=price,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=timezone.now(),
+            current_period_end=timezone.now() + timezone.timedelta(days=30),
+        )
 
     def test_anonymize_replaces_pii_and_clears_documents(self):
         call_command("anonymize_qa_data", password="QaTestPass123!", admin_email="qa-admin@meritlense.com")
@@ -125,3 +153,34 @@ class AnonymizeQaDataCommandTests(TestCase):
 
         self.assertEqual(Candidate.objects.count(), 1)
         self.assertEqual(User.objects.filter(email="qa-admin@meritlense.com").count(), 1)
+        self.assertEqual(User.objects.filter(email="qa-b2c@meritlense.com").count(), 1)
+        self.assertEqual(
+            Subscription.objects.filter(
+                user__email="qa-b2c@meritlense.com", status=SubscriptionStatus.ACTIVE
+            ).count(),
+            1,
+        )
+
+    def test_anonymize_replaces_real_stripe_ids_so_no_live_call_hits_a_real_object(self):
+        call_command("anonymize_qa_data", password="QaTestPass123!", admin_email="qa-admin@meritlense.com")
+
+        self.real_customer.refresh_from_db()
+        self.assertNotEqual(self.real_customer.stripe_customer_id, "cus_REALPRODCUSTOMER123")
+        self.assertNotEqual(self.real_customer.email, "owner@example.com")
+        self.assertFalse(self.real_customer.default_payment_method_id)
+
+        self.real_subscription.refresh_from_db()
+        self.assertNotEqual(self.real_subscription.stripe_subscription_id, "sub_REALPRODSUBSCRIPTION123")
+
+    def test_anonymize_guarantees_a_known_qa_b2c_paid_account(self):
+        call_command("anonymize_qa_data", password="QaTestPass123!", admin_email="qa-admin@meritlense.com")
+
+        b2c_user = User.objects.get(email="qa-b2c@meritlense.com")
+        self.assertEqual(b2c_user.role, Roles.B2C)
+        self.assertTrue(b2c_user.check_password("QaTestPass123!"))
+
+        subscription = Subscription.objects.get(user=b2c_user, status=SubscriptionStatus.ACTIVE)
+        # Never existed on Stripe at all - not a real object that got
+        # anonymized, so there's nothing real a live API call could reach.
+        self.assertTrue(subscription.stripe_subscription_id.startswith("sub_qa_test_b2c"))
+        self.assertEqual(subscription.customer.stripe_customer_id, "cus_qa_test_b2c")

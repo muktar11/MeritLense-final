@@ -35,7 +35,7 @@ from api.interviews.voice_services import (
 )
 from api.translation.services import AIProcessingError, TranslationService
 from api.questions.models import QuestionTemplate
-from api.questions.skill_tags import normalize_skill_fields, normalize_skill_tag
+from api.questions.skill_tags import FIXED_QUESTION_SKILL_TAGS, normalize_skill_fields, normalize_skill_tag
 from api.storage.services import MediaStorageService
 
 from .models import (
@@ -149,11 +149,11 @@ class QuestionGenerationService:
             queryset = queryset.filter(role_code__iexact=session.role_code)
         else:
             queryset = queryset.filter(role_name__iexact=session.role_name)
-        localized = list(queryset.filter(language=session.candidate_language))
+        localized = cls._question_pool(queryset.filter(language=session.candidate_language))
         if len(localized) < target_count:
-            localized = list(queryset)
+            localized = cls._question_pool(queryset)
         if len(localized) < target_count:
-            localized = list(QuestionTemplate.objects.filter(is_active=True))
+            localized = cls._question_pool(QuestionTemplate.objects.filter(is_active=True))
 
         selected_templates = cls._select_templates(session, localized, target_count)
         questions = []
@@ -184,6 +184,23 @@ class QuestionGenerationService:
         session.save(update_fields=["total_questions", "updated_at"])
         return list(session.questions.order_by("question_order"))
 
+    @staticmethod
+    def _question_pool(templates):
+        """Keep selection strictly within the four question-based pools.
+
+        Normalization keeps legacy aliases working while ensuring the derived
+        Consistency tag can never be selected as an interview question.
+        """
+        allowed = set(FIXED_QUESTION_SKILL_TAGS)
+        return [
+            template
+            for template in templates
+            if normalize_skill_tag(
+                template.skill_tag or template.skill or template.domain,
+                scoring_type=template.scoring_type,
+            ) in allowed
+        ]
+
     @classmethod
     def _select_templates(cls, session, templates, target_count):
         if not templates:
@@ -206,6 +223,18 @@ class QuestionGenerationService:
         }
 
         while len(selected) < target_count and template_pool:
+            covered_skills = selected_context["skills"]
+            uncovered = {
+                label.lower()
+                for label in FIXED_QUESTION_SKILL_TAGS
+                if covered_skills.get(label.lower(), 0) == 0
+            }
+            uncovered_pool = [
+                template
+                for template in template_pool
+                if normalize_skill_tag(template.skill_tag or template.skill or template.domain).lower() in uncovered
+            ]
+            candidate_pool = uncovered_pool or template_pool
             scored = [
                 (
                     cls._score_template(
@@ -218,7 +247,7 @@ class QuestionGenerationService:
                     random.random(),
                     template,
                 )
-                for template in template_pool
+                for template in candidate_pool
             ]
             scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
             chosen = scored[0][2]

@@ -188,6 +188,18 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def _end_call(self):
-        LiveCallSession.objects.filter(pk=self.participant.call_id).update(
+        call = LiveCallSession.objects.select_related("interview_session").get(pk=self.participant.call_id)
+        LiveCallSession.objects.filter(pk=call.pk).update(
             state=LiveCallSession.STATE_ENDED, ended_at=timezone.now()
         )
+        # Ending a live call is also the terminal interview action. Previously
+        # this only updated LiveCallSession, leaving the linked InterviewSession
+        # and Evaluation stuck IN_PROGRESS indefinitely.
+        from api.sessions.services import InterviewSessionService
+
+        session = call.interview_session
+        if not session.is_closed():
+            InterviewSessionService.complete_session(
+                session,
+                actor=self.participant.user,
+            )

@@ -289,12 +289,13 @@ class EvaluationCancelSerializer(serializers.Serializer):
 
 class EvaluatorRatingSerializer(PublicIdModelSerializer):
     rated_by_name = serializers.SerializerMethodField()
+    consistency = serializers.SerializerMethodField()
 
     class Meta:
         model = EvaluatorRating
         fields = [
             'id', 'safety_awareness', 'behavior_integrity',
-            'psych_professional', 'task_execution',
+            'psych_professional', 'task_execution', 'consistency',
             'rated_by', 'rated_by_name', 'rated_at',
             'created_at', 'updated_at',
         ]
@@ -302,6 +303,11 @@ class EvaluatorRatingSerializer(PublicIdModelSerializer):
 
     def get_rated_by_name(self, obj):
         return obj.rated_by.get_full_name() if obj.rated_by else None
+
+    def get_consistency(self, obj):
+        from .evaluator_rating_services import calculate_response_consistency
+
+        return calculate_response_consistency(obj.evaluation)
 
 
 class EvaluatorRatingWriteSerializer(serializers.Serializer):

@@ -123,7 +123,7 @@ def _evaluator_rating_context(evaluation):
         "behavior_integrity": rating.behavior_integrity,
         "psych_professional": rating.psych_professional,
         "task_execution": rating.task_execution,
-        "consistency": calculate_response_consistency(evaluation),
+        "consistency": calculate_response_consistency(evaluation, fallback_rating=rating),
     }
 
 

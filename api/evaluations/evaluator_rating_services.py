@@ -8,15 +8,24 @@ from .certificate_services import generate_certificate
 from .models import EvaluatorRating
 
 
-def calculate_response_consistency(evaluation):
+def _consistency_from_percentages(percentages):
+    mean = sum(percentages, Decimal("0")) / Decimal(len(percentages))
+    variance = sum(((value - mean) ** 2 for value in percentages), Decimal("0")) / Decimal(len(percentages))
+    score = max(Decimal("0"), Decimal("100") - variance.sqrt())
+    return int(score.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def calculate_response_consistency(evaluation, *, fallback_rating=None):
     """Return a 0-100 consistency score calculated from rule-engine results.
 
     Consistency is deliberately not a question pool and is never supplied by
     an evaluator.  A candidate who performs at the same level from response
     to response scores 100; variation lowers the score by the population
     standard deviation of the effective response percentages.  When the rule
-    engine has no usable response result yet, return 0 so the API contract
-    still always contains a numeric value.
+    engine has at least two usable response results those are authoritative.
+    Historical live calls did not persist their transcripts, so for those
+    records use dispersion across the four evaluator-assessed fixed pools
+    rather than presenting a fabricated zero.
     """
     percentages = []
     for result in evaluation.response_results.only("score", "max_score", "metadata"):
@@ -27,13 +36,19 @@ def calculate_response_consistency(evaluation):
         percentage = max(Decimal("0"), min(Decimal("100"), effective_score * Decimal("100") / max_score))
         percentages.append(percentage)
 
-    if not percentages:
-        return 0
+    if len(percentages) >= 2:
+        return _consistency_from_percentages(percentages)
 
-    mean = sum(percentages, Decimal("0")) / Decimal(len(percentages))
-    variance = sum(((value - mean) ** 2 for value in percentages), Decimal("0")) / Decimal(len(percentages))
-    score = max(Decimal("0"), Decimal("100") - variance.sqrt())
-    return int(score.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    if fallback_rating is not None:
+        fallback_percentages = [
+            Decimal(str(fallback_rating.safety_awareness)),
+            Decimal(str(fallback_rating.behavior_integrity)),
+            Decimal(str(fallback_rating.psych_professional)),
+            Decimal(str(fallback_rating.task_execution)),
+        ]
+        return _consistency_from_percentages(fallback_percentages)
+
+    return 0
 
 
 def submit_evaluator_rating(evaluation, *, ratings, actor):

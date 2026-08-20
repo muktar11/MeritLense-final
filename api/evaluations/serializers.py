@@ -65,6 +65,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
     readiness_legal_record = serializers.SerializerMethodField()
     latest_report = serializers.SerializerMethodField()
     evaluator_rating = serializers.SerializerMethodField()
+    assessment_mode = serializers.SerializerMethodField()
 
     class Meta:
         model = Evaluation
@@ -85,6 +86,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
             'readiness_legal_record',
             'latest_report',
             'evaluator_rating',
+            'assessment_mode',
             'readiness_status', 'readiness_override_applied', 'readiness_override_reason',
             'meeting_link', 'meeting_id', 'meeting_password', 'session_id',
             'location',
@@ -142,6 +144,10 @@ class EvaluationSerializer(PublicIdModelSerializer):
         if rating is None:
             return None
         return EvaluatorRatingSerializer(rating).data
+
+    def get_assessment_mode(self, obj):
+        session = getattr(obj, "session", None)
+        return "SCHEDULED_INTERVIEW" if session and session.scheduled_start_at else "AI_INTERVIEW"
 
     def validate_scheduled_date(self, value):
         if value <= timezone.now():
@@ -307,7 +313,7 @@ class EvaluatorRatingSerializer(PublicIdModelSerializer):
     def get_consistency(self, obj):
         from .evaluator_rating_services import calculate_response_consistency
 
-        return calculate_response_consistency(obj.evaluation)
+        return calculate_response_consistency(obj.evaluation, fallback_rating=obj)
 
 
 class EvaluatorRatingWriteSerializer(serializers.Serializer):
@@ -329,6 +335,8 @@ class EvaluationListSerializer(PublicIdModelSerializer):
     # action had nothing to copy and there was no way to link a "Join Live
     # Interview" action to the right call room without an extra request.
     session_id = serializers.SerializerMethodField()
+    evaluator_rating = serializers.SerializerMethodField()
+    assessment_mode = serializers.SerializerMethodField()
 
     class Meta:
         model = Evaluation
@@ -338,6 +346,7 @@ class EvaluationListSerializer(PublicIdModelSerializer):
             'score', 'latest_session_summary', 'readiness_legal_record', 'latest_report',
             'readiness_status', 'readiness_override_applied', 'created_by', 'created_at',
             'meeting_link', 'session_id',
+            'evaluator_rating', 'assessment_mode',
         ]
 
     def get_candidate_name(self, obj):
@@ -345,6 +354,14 @@ class EvaluationListSerializer(PublicIdModelSerializer):
 
     def get_session_id(self, obj):
         return str(obj.session.public_id) if obj.session_id else None
+
+    def get_evaluator_rating(self, obj):
+        rating = getattr(obj, "evaluator_rating", None)
+        return EvaluatorRatingSerializer(rating).data if rating is not None else None
+
+    def get_assessment_mode(self, obj):
+        session = getattr(obj, "session", None)
+        return "SCHEDULED_INTERVIEW" if session and session.scheduled_start_at else "AI_INTERVIEW"
 
     def get_latest_session_summary(self, obj):
         summary = obj.session_summaries.select_related("rule_set").first()

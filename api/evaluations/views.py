@@ -47,7 +47,7 @@ from api.sessions.services import InterviewSessionService
 
 
 def _accessible_evaluations_queryset(user):
-    queryset = Evaluation.objects.all()
+    queryset = Evaluation.objects.select_related("session", "evaluator_rating")
 
     if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
         return queryset
@@ -445,7 +445,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
                 rule_set=rule_set,
             )
         except (ScoringRuleSet.DoesNotExist, Week6ScoringError) as exc:
-            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         serializer = SessionEvaluationSummarySerializer(summary)
         return Response(serializer.data, status=status.HTTP_200_OK)
 

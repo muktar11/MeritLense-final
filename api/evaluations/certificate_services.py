@@ -116,11 +116,14 @@ def _evaluator_rating_context(evaluation):
     rating = getattr(evaluation, "evaluator_rating", None)
     if rating is None:
         return None
+    from .evaluator_rating_services import calculate_response_consistency
+
     return {
         "safety_awareness": rating.safety_awareness,
         "behavior_integrity": rating.behavior_integrity,
         "psych_professional": rating.psych_professional,
         "task_execution": rating.task_execution,
+        "consistency": calculate_response_consistency(evaluation),
     }
 
 

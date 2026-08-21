@@ -560,11 +560,14 @@ class EvaluationReportService:
         rating = getattr(evaluation, "evaluator_rating", None)
         if rating is None:
             return None
+        from api.evaluations.evaluator_rating_services import calculate_response_consistency
+
         return {
             "safety_awareness": rating.safety_awareness,
             "behavior_integrity": rating.behavior_integrity,
             "psych_professional": rating.psych_professional,
             "task_execution": rating.task_execution,
+            "consistency": calculate_response_consistency(evaluation, fallback_rating=rating),
             "rated_by_name": rating.rated_by.get_full_name() if rating.rated_by else None,
             "rated_at": rating.rated_at.isoformat() if rating.rated_at else None,
         }

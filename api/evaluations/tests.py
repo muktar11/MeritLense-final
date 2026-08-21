@@ -1902,6 +1902,7 @@ class EvaluatorRatingTests(TestCase):
         response = self.client.post(self.url, self.VALID_RATINGS, format="json")
 
         self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["consistency"], 89)
         self.assertEqual(EvaluatorRating.objects.count(), 1)
         rating = EvaluatorRating.objects.get(evaluation=self.evaluation)
         self.assertEqual(rating.safety_awareness, 80)
@@ -1998,3 +1999,4 @@ class EvaluatorRatingTests(TestCase):
         self.assertIsNotNone(payload)
         self.assertEqual(payload["safety_awareness"], 80)
         self.assertEqual(payload["task_execution"], 60)
+        self.assertEqual(payload["consistency"], 89)

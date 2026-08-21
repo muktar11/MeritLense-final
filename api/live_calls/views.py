@@ -18,6 +18,7 @@ from rest_framework.generics import GenericAPIView
 from api.core.public_ids import build_object_identifier_filter
 from api.interviews.voice_services import SpeechToTextService, TextToSpeechService, VoiceProviderError
 from api.sessions.models import InterviewSession
+from api.sessions.services import InterviewSessionService
 from api.translation.services import TranslationService
 
 from .auth import OptionalJWTAuthentication, issue_socket_ticket
@@ -177,6 +178,34 @@ class LiveCallSegmentView(GenericAPIView):
         if not original_text:
             raise ValidationError({"detail": "No speech was detected in the recording."})
 
+        segment_id = str(uuid.uuid4())
+        if role == LiveCallParticipant.ROLE_CANDIDATE:
+            # Live-call transcripts used to exist only in the WebSocket
+            # payload. Consequently the rule engine had no CandidateResponse
+            # rows to score and Consistency incorrectly fell back to zero.
+            # Attach each candidate turn to the next active fixed-pool
+            # question so it follows the same AI/rule pipeline as an ordinary
+            # interview response.
+            try:
+                question, completed = InterviewSessionService.get_or_activate_current_question(
+                    session,
+                    actor=None,
+                )
+                if question is not None and not completed:
+                    InterviewSessionService.submit_response(
+                        session,
+                        question,
+                        transcript=original_text,
+                        text_response=original_text,
+                        language_code=source_language,
+                        metadata={
+                            "source": "live_call",
+                            "live_call_segment_id": segment_id,
+                        },
+                    )
+            except ValueError as exc:
+                raise ValidationError({"detail": str(exc)}) from exc
+
         try:
             translation = TranslationService.translate(
                 text=original_text,
@@ -198,7 +227,7 @@ class LiveCallSegmentView(GenericAPIView):
 
         payload = {
             "event": "translation_segment",
-            "id": str(uuid.uuid4()),
+            "id": segment_id,
             "speaker_role": role,
             "recipient_role": peer.role,
             "source_language": source_language,

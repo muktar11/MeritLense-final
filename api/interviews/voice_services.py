@@ -88,7 +88,13 @@ class SpeechToTextService:
     def transcribe(self, *, file_obj, filename, mime_type, language_code=""):
         prefix = (language_code or "").split("-")[0].lower()
         if prefix in self.azure_languages and self.is_azure_configured:
+            # Set before doing any work (not just on success) so a service
+            # instance reused across calls - or an audit log read after a
+            # failed attempt (see sessions/services.py) - never reports a
+            # stale provider from whichever call happened to run last.
+            self.provider = "AZURE"
             return self._transcribe_azure(file_obj=file_obj, language_code=language_code)
+        self.provider = settings.STT_PROVIDER
         return self._transcribe_openai(file_obj=file_obj, filename=filename, mime_type=mime_type, language_code=language_code)
 
     def _transcribe_openai(self, *, file_obj, filename, mime_type, language_code=""):
@@ -232,7 +238,6 @@ class SpeechToTextService:
         transcript = payload.get("DisplayText", "") if payload.get("RecognitionStatus") == "Success" else ""
         best = (payload.get("NBest") or [{}])[0]
 
-        self.provider = "AZURE"
         return {
             "provider": "AZURE",
             "provider_model": "azure-speech-conversation",

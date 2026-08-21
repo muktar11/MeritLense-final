@@ -16,7 +16,12 @@ from rest_framework.response import Response
 from rest_framework.generics import GenericAPIView
 
 from api.core.public_ids import build_object_identifier_filter
-from api.interviews.voice_services import SpeechToTextService, TextToSpeechService, VoiceProviderError
+from api.interviews.voice_services import (
+    SpeechToTextService,
+    TextToSpeechService,
+    VoiceProviderError,
+    detected_language_matches,
+)
 from api.sessions.models import InterviewSession
 from api.sessions.services import InterviewSessionService
 from api.translation.services import TranslationService
@@ -177,6 +182,18 @@ class LiveCallSegmentView(GenericAPIView):
         original_text = (transcript_payload.get("transcript") or "").strip()
         if not original_text:
             raise ValidationError({"detail": "No speech was detected in the recording."})
+
+        if not detected_language_matches(source_language, transcript_payload.get("detected_language")):
+            raise ValidationError(
+                {
+                    "detail": (
+                        "We couldn't reliably transcribe that in the selected language. This can happen "
+                        "with languages our speech-to-text provider doesn't fully support yet. Please try "
+                        "speaking again, or switch to a different language."
+                    ),
+                    "code": "stt_language_mismatch",
+                }
+            )
 
         segment_id = str(uuid.uuid4())
         if role == LiveCallParticipant.ROLE_CANDIDATE:

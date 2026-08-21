@@ -9,7 +9,7 @@ from rest_framework.test import APITestCase
 
 from api.accounts.models import User
 from api.candidates.models import Candidate
-from api.core.constants import EvaluationType
+from api.core.constants import EvaluationType, InterviewSessionStatus
 from api.evaluations.models import Evaluation
 from api.interviews.models import InterviewConfiguration
 from api.sessions.models import InterviewSession
@@ -123,6 +123,91 @@ class LiveCallApiTests(APITestCase):
         turn = response.data["ice_servers"][1]
         self.assertRegex(turn["username"], r"^\d+:[0-9a-f-]+$")
         self.assertNotEqual(turn["credential"], "secret")
+
+
+@override_settings(
+    WEBRTC_STUN_URLS=["stun:stun.example.test:3478"],
+    CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}},
+)
+class LiveCallSegmentViewTests(APITestCase):
+    """The STT provider (Whisper) doesn't recognize every language this app
+    offers - for those, and for languages it genuinely misdetects (e.g.
+    Punjabi as Hindi), it silently returns *a* transcript in the wrong
+    language rather than erroring. A candidate speaking Amharic could get
+    an inconsistent, wrong-language "translation" every single turn with no
+    indication anything was wrong. These tests cover the fix: reject a
+    segment outright when the provider's own detected language doesn't
+    plausibly match what the speaker selected, instead of translating and
+    broadcasting it as if it were reliable."""
+
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            email="segment-owner@example.test", password="pass", first_name="Segment", last_name="Owner"
+        )
+        candidate = Candidate.objects.create(
+            first_name="Segment", last_name="Candidate", email="segment-candidate@example.test",
+            passport_id="LIVE-SEG-1", job_role="NA", core_skills="care",
+            passport_document="candidate/segment.pdf", created_by=self.owner,
+        )
+        config = InterviewConfiguration.objects.create(role_name="Nanny", role_code="nanny")
+        self.session = InterviewSession.objects.create(
+            candidate=candidate, config=config, role_name="Nanny", created_by=self.owner,
+            scheduled_start_at=timezone.now(), expires_at=timezone.now() + timezone.timedelta(hours=2),
+            status=InterviewSessionStatus.IN_PROGRESS,
+        )
+        self.client.force_authenticate(self.owner)
+        self.client.post(f"/api/v1/live-calls/sessions/{self.session.public_id}/join")
+        self.client.force_authenticate(user=None)
+        self.client.post(
+            f"/api/v1/live-calls/sessions/{self.session.public_id}/join",
+            {"token": self.session.access_token}, format="json",
+        )
+        candidate_participant = LiveCallParticipant.objects.get(role="CANDIDATE")
+        candidate_participant.input_language = "am-ET"
+        candidate_participant.output_language = "en-US"
+        candidate_participant.save(update_fields=["input_language", "output_language"])
+
+    def _post_segment_as_candidate(self, *, stt_response):
+        from unittest.mock import patch
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        class FakeSTTResponse:
+            status_code = 200
+            headers = {}
+
+            def json(self):
+                return stt_response
+
+            def raise_for_status(self):
+                pass
+
+        self.client.force_authenticate(user=None)
+        with patch("api.interviews.voice_services.requests.post", return_value=FakeSTTResponse()):
+            return self.client.post(
+                f"/api/v1/live-calls/sessions/{self.session.public_id}/segments",
+                {"audio": SimpleUploadedFile("turn.webm", b"audio-bytes", content_type="audio/webm")},
+                format="multipart",
+                HTTP_AUTHORIZATION="",
+                QUERY_STRING=f"token={self.session.access_token}",
+            )
+
+    def test_segment_is_rejected_when_detected_language_does_not_match(self):
+        response = self._post_segment_as_candidate(
+            stt_response={"text": "sәlam", "language": "arabic", "segments": []}
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["code"], "stt_language_mismatch")
+
+    def test_segment_succeeds_when_detected_language_matches(self):
+        # Amharic itself never matches (see WHISPER_DETECTED_LANGUAGE_NAMES) -
+        # this proves the check isn't just always-rejecting by using a
+        # participant whose selected language the provider does recognize.
+        LiveCallParticipant.objects.filter(role="CANDIDATE").update(input_language="en-US")
+        response = self._post_segment_as_candidate(
+            stt_response={"text": "hello there", "language": "english", "segments": []}
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["segment"]["original_text"], "hello there")
 
 
 @override_settings(

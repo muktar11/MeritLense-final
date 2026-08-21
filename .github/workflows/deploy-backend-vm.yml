@@ -24,7 +24,7 @@ jobs:
           script: |
             set -e
             sudo -n apt-get update -qq
-            sudo -n apt-get install -y poppler-utils -qq
+            sudo -n apt-get install -y poppler-utils ffmpeg -qq
             cd /home/azureuser/meritlense
             git fetch origin main
             git reset --hard origin/main

@@ -2513,6 +2513,128 @@ class InterviewSessionApiTests(APITestCase):
 
         self.assertEqual(len(calls), 1)
 
+    @override_settings(
+        STT_API_URL="https://api.openai.com/v1/audio/transcriptions",
+        STT_API_KEY="test-stt-key",
+        STT_MODEL="whisper-1",
+        AZURE_SPEECH_KEY="test-azure-key",
+        AZURE_SPEECH_REGION="test-region",
+        STT_AZURE_LANGUAGES=["am"],
+    )
+    def test_stt_service_routes_configured_language_to_azure(self):
+        # Whisper can't transcribe Amharic at all (see WHISPER_DETECTED_LANGUAGE_NAMES) -
+        # confirmed languages route to Azure Speech instead. Transcoding
+        # itself (webm -> WAV) is exercised separately below; here we're
+        # confirming the routing decision and response-shape translation.
+        from api.interviews.voice_services import SpeechToTextService
+
+        class FakeAzureResponse:
+            status_code = 200
+            headers = {"x-requestid": "azure-req-1"}
+
+            def json(self):
+                return {
+                    "RecognitionStatus": "Success",
+                    "DisplayText": "hello there",
+                    "NBest": [{"Confidence": 0.84}],
+                }
+
+            def raise_for_status(self):
+                pass
+
+        calls = []
+
+        def fake_post(url, **kwargs):
+            calls.append(url)
+            return FakeAzureResponse()
+
+        service = SpeechToTextService()
+        with patch.object(SpeechToTextService, "_transcode_to_wav", return_value=b"wav-bytes"):
+            with patch("api.interviews.voice_services.requests.post", side_effect=fake_post):
+                result = service.transcribe(
+                    file_obj=SimpleUploadedFile("turn.webm", b"audio-bytes", content_type="audio/webm"),
+                    filename="turn.webm",
+                    mime_type="audio/webm",
+                    language_code="am-ET",
+                )
+
+        self.assertEqual(result["provider"], "AZURE")
+        self.assertEqual(result["transcript"], "hello there")
+        self.assertEqual(result["detected_language"], "am-ET")
+        self.assertEqual(result["confidence"], 0.84)
+        self.assertEqual(service.provider, "AZURE")
+        self.assertEqual(len(calls), 1)
+        self.assertIn("stt.speech.microsoft.com", calls[0])
+
+    @override_settings(
+        STT_API_URL="https://api.openai.com/v1/audio/transcriptions",
+        STT_API_KEY="test-stt-key",
+        STT_MODEL="whisper-1",
+        AZURE_SPEECH_KEY="test-azure-key",
+        AZURE_SPEECH_REGION="test-region",
+        STT_AZURE_LANGUAGES=["am"],
+    )
+    def test_stt_service_does_not_route_unconfigured_language_to_azure(self):
+        # A language not in STT_AZURE_LANGUAGES (e.g. English, which Whisper
+        # already handles correctly) must keep going through Whisper -
+        # regression guard against the routing change affecting anything
+        # that already worked.
+        from api.interviews.voice_services import SpeechToTextService
+
+        class FakeWhisperResponse:
+            status_code = 200
+            headers = {}
+
+            def json(self):
+                return {"text": "hello there", "language": "english", "segments": []}
+
+            def raise_for_status(self):
+                pass
+
+        service = SpeechToTextService()
+        with patch.object(SpeechToTextService, "_transcode_to_wav") as fake_transcode:
+            with patch("api.interviews.voice_services.requests.post", return_value=FakeWhisperResponse()):
+                result = service.transcribe(
+                    file_obj=SimpleUploadedFile("turn.webm", b"audio-bytes", content_type="audio/webm"),
+                    filename="turn.webm",
+                    mime_type="audio/webm",
+                    language_code="en-US",
+                )
+
+        self.assertEqual(result["provider"], "OPENAI")
+        fake_transcode.assert_not_called()
+
+    @override_settings(AZURE_SPEECH_KEY="test-azure-key", AZURE_SPEECH_REGION="test-region", STT_AZURE_LANGUAGES=["am"])
+    def test_stt_service_azure_transcode_failure_raises_voice_provider_error(self):
+        from api.interviews.voice_services import SpeechToTextService
+
+        service = SpeechToTextService()
+        with patch.object(
+            SpeechToTextService,
+            "_transcode_to_wav",
+            side_effect=VoiceProviderError("Audio conversion failed", code="stt_transcode_failed"),
+        ):
+            with self.assertRaises(VoiceProviderError) as ctx:
+                service.transcribe(
+                    file_obj=SimpleUploadedFile("turn.webm", b"audio-bytes", content_type="audio/webm"),
+                    filename="turn.webm",
+                    mime_type="audio/webm",
+                    language_code="am-ET",
+                )
+        self.assertEqual(ctx.exception.code, "stt_transcode_failed")
+
+    def test_transcode_to_wav_wraps_ffmpeg_failure(self):
+        # Exercises the real _transcode_to_wav implementation (not mocked)
+        # against a genuinely invalid input, confirming subprocess/file
+        # errors surface as VoiceProviderError rather than an unhandled
+        # exception - independent of whether ffmpeg itself is installed
+        # here (FileNotFoundError is caught the same way).
+        from api.interviews.voice_services import SpeechToTextService
+
+        with self.assertRaises(VoiceProviderError) as ctx:
+            SpeechToTextService._transcode_to_wav(b"not-real-audio-bytes")
+        self.assertEqual(ctx.exception.code, "stt_transcode_failed")
+
     def test_question_audio_generation_and_caching(self):
         session = self._create_and_start_session()
 

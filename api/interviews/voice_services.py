@@ -1,4 +1,7 @@
 import base64
+import os
+import subprocess
+import tempfile
 from decimal import Decimal, InvalidOperation
 
 import requests
@@ -65,12 +68,30 @@ class SpeechToTextService:
         self.api_key = settings.STT_API_KEY
         self.model = settings.STT_MODEL
         self.timeout_seconds = settings.STT_TIMEOUT_SECONDS
+        # Whisper (the OpenAI provider above) can't reliably transcribe these
+        # languages at all - confirmed directly against the provider, see
+        # WHISPER_DETECTED_LANGUAGE_NAMES. Route just these to Azure Speech
+        # instead of switching providers wholesale, so every other language
+        # that already works via Whisper stays untouched.
+        self.azure_languages = set(settings.STT_AZURE_LANGUAGES)
+        self.azure_key = settings.AZURE_SPEECH_KEY
+        self.azure_region = settings.AZURE_SPEECH_REGION
 
     @property
     def is_configured(self):
         return bool(self.api_url and self.api_key and self.model)
 
+    @property
+    def is_azure_configured(self):
+        return bool(self.azure_key and self.azure_region)
+
     def transcribe(self, *, file_obj, filename, mime_type, language_code=""):
+        prefix = (language_code or "").split("-")[0].lower()
+        if prefix in self.azure_languages and self.is_azure_configured:
+            return self._transcribe_azure(file_obj=file_obj, language_code=language_code)
+        return self._transcribe_openai(file_obj=file_obj, filename=filename, mime_type=mime_type, language_code=language_code)
+
+    def _transcribe_openai(self, *, file_obj, filename, mime_type, language_code=""):
         if not self.is_configured:
             raise VoiceProviderConfigurationError(
                 "Speech-to-text provider is not configured",
@@ -171,6 +192,88 @@ class SpeechToTextService:
             return Decimal(str(confidence)).quantize(Decimal("0.0001"))
         except (InvalidOperation, TypeError, ValueError):
             return None
+
+    def _transcribe_azure(self, *, file_obj, language_code):
+        file_obj.seek(0)
+        wav_bytes = self._transcode_to_wav(file_obj.read())
+
+        try:
+            response = requests.post(
+                f"https://{self.azure_region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1",
+                params={"language": language_code, "format": "detailed"},
+                headers={
+                    "Ocp-Apim-Subscription-Key": self.azure_key,
+                    "Content-Type": "audio/wav; codecs=audio/pcm; samplerate=16000",
+                    "Accept": "application/json",
+                },
+                data=wav_bytes,
+                timeout=self.timeout_seconds,
+            )
+        except requests.Timeout as exc:
+            raise VoiceProviderError("Speech-to-text provider timed out", code="stt_timeout") from exc
+        except requests.RequestException as exc:
+            raise VoiceProviderError("Speech-to-text provider request failed", code="stt_request_failed") from exc
+
+        try:
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            raise VoiceProviderError(
+                "Speech-to-text provider request failed",
+                code="stt_request_failed",
+                metadata={"status_code": response.status_code},
+            ) from exc
+
+        payload = response.json()
+        # Azure's conversation endpoint is told the language rather than
+        # guessing one - RecognitionStatus already tells us definitively
+        # whether it found speech matching that language, so an empty
+        # transcript here is an honest "couldn't recognize this", not a
+        # wrong-language guess to validate against (unlike the Whisper path).
+        transcript = payload.get("DisplayText", "") if payload.get("RecognitionStatus") == "Success" else ""
+        best = (payload.get("NBest") or [{}])[0]
+
+        self.provider = "AZURE"
+        return {
+            "provider": "AZURE",
+            "provider_model": "azure-speech-conversation",
+            "request_id": response.headers.get("x-requestid", ""),
+            "detected_language": language_code,
+            "confidence": best.get("Confidence"),
+            "processing_status": "COMPLETED",
+            "transcript": transcript.strip(),
+            "metadata": {
+                "recognition_status": payload.get("RecognitionStatus"),
+                "offset": payload.get("Offset"),
+                "duration": payload.get("Duration"),
+            },
+        }
+
+    @staticmethod
+    def _transcode_to_wav(raw_bytes):
+        """ffmpeg sniffs the input container itself, so this works regardless
+        of which format a given browser's MediaRecorder actually produced -
+        no explicit format hint needed. Azure's short-audio endpoint returns
+        empty results (no error) for our native webm/opus recordings, so
+        this conversion is required before Azure can transcribe anything."""
+        src_fd, src_path = tempfile.mkstemp(suffix=".input")
+        dst_path = src_path + ".wav"
+        try:
+            with os.fdopen(src_fd, "wb") as src_file:
+                src_file.write(raw_bytes)
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", src_path, "-ar", "16000", "-ac", "1", "-f", "wav", dst_path],
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+            with open(dst_path, "rb") as dst_file:
+                return dst_file.read()
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            raise VoiceProviderError("Audio conversion failed", code="stt_transcode_failed") from exc
+        finally:
+            os.unlink(src_path)
+            if os.path.exists(dst_path):
+                os.unlink(dst_path)
 
 
 class TextToSpeechService:

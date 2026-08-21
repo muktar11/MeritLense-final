@@ -183,7 +183,13 @@ class LiveCallSegmentView(GenericAPIView):
         if not original_text:
             raise ValidationError({"detail": "No speech was detected in the recording."})
 
-        if not detected_language_matches(source_language, transcript_payload.get("detected_language")):
+        # detected_language_matches() encodes Whisper's specific naming
+        # quirks - meaningless for an Azure-routed result, which either
+        # succeeds as the requested language or comes back empty (already
+        # caught by the check above).
+        if transcript_payload.get("provider") == "OPENAI" and not detected_language_matches(
+            source_language, transcript_payload.get("detected_language")
+        ):
             raise ValidationError(
                 {
                     "detail": (

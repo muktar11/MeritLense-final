@@ -283,6 +283,9 @@ STT_API_URL = os.getenv("STT_API_URL", "https://api.openai.com/v1/audio/transcri
 STT_API_KEY = os.getenv("STT_API_KEY", "")
 STT_MODEL = os.getenv("STT_MODEL", "whisper-1")
 STT_TIMEOUT_SECONDS = int(os.getenv("STT_TIMEOUT_SECONDS", "60"))
+# Languages Whisper (the provider above) can't reliably transcribe - routed
+# to Azure Speech instead. See voice_services.py's SpeechToTextService.
+STT_AZURE_LANGUAGES = env_list("STT_AZURE_LANGUAGES", ["am", "pa", "km", "my", "fil"])
 
 TTS_PROVIDER = os.getenv("TTS_PROVIDER", "GOOGLE").upper()
 TTS_API_URL = os.getenv("TTS_API_URL", "https://texttospeech.googleapis.com/v1/text:synthesize")

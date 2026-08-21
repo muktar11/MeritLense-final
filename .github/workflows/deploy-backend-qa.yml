@@ -24,7 +24,7 @@ jobs:
           script: |
             set -e
             sudo -n apt-get update -qq
-            sudo -n apt-get install -y ffmpeg -qq
+            sudo -n apt-get install -y poppler-utils ffmpeg -qq
             cd /home/azureuser/meritlense-qa
             git fetch origin qa
             git reset --hard origin/qa

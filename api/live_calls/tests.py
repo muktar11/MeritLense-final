@@ -209,6 +209,26 @@ class LiveCallSegmentViewTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["segment"]["original_text"], "hello there")
 
+    @override_settings(AZURE_SPEECH_KEY="test-azure-key", AZURE_SPEECH_REGION="test-region", STT_AZURE_LANGUAGES=["am"])
+    def test_segment_succeeds_for_azure_routed_language_without_mismatch_check(self):
+        # detected_language_matches() is Whisper-specific and must not apply
+        # to an Azure-routed transcript - the candidate's am-ET language
+        # (set in setUp) is one of the languages Whisper can't handle, so
+        # this only succeeds if the segment view correctly skips the
+        # mismatch check for provider == "AZURE".
+        from unittest.mock import patch
+
+        with patch("api.interviews.voice_services.SpeechToTextService._transcode_to_wav", return_value=b"wav-bytes"):
+            response = self._post_segment_as_candidate(
+                stt_response={
+                    "RecognitionStatus": "Success",
+                    "DisplayText": "selam endet neh",
+                    "NBest": [{"Confidence": 0.84}],
+                }
+            )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["segment"]["original_text"], "selam endet neh")
+
 
 @override_settings(
     CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}},

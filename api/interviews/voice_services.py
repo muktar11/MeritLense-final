@@ -16,6 +16,48 @@ class VoiceProviderConfigurationError(VoiceProviderError):
     pass
 
 
+# Names OpenAI Whisper's `language` field (verbose_json response) actually
+# uses for languages it recognizes, keyed by this app's BCP-47 language
+# code prefix. Confirmed directly against the provider (language audit run
+# 2026-08-19): a handful of our supported UI languages either aren't in
+# Whisper's vocabulary at all (e.g. Amharic - it silently guesses a
+# phonetically-similar language instead, inconsistently per clip) or use a
+# different name than our own display label (Burmese -> "myanmar"), and
+# Punjabi genuinely misdetects as Hindi. Anything not listed here has no
+# way to ever self-report correctly, so a transcript in that language
+# should never be trusted just because *a* label came back with it.
+WHISPER_DETECTED_LANGUAGE_NAMES = {
+    "en": "english",
+    "ar": "arabic",
+    "zh": "chinese",
+    "hi": "hindi",
+    "ur": "urdu",
+    "bn": "bengali",
+    "ta": "tamil",
+    "te": "telugu",
+    "ml": "malayalam",
+    "si": "sinhala",
+    "id": "indonesian",
+    "ne": "nepali",
+    "sw": "swahili",
+    "vi": "vietnamese",
+    "km": "khmer",
+    "my": "myanmar",
+}
+
+
+def detected_language_matches(language_code, detected_language):
+    """True if the STT provider's own reported language plausibly matches
+    what the speaker actually selected - False for a genuine mismatch
+    (wrong language guessed), and also False for languages the provider
+    has no reliable way to self-report at all."""
+    prefix = (language_code or "").split("-")[0].lower()
+    expected = WHISPER_DETECTED_LANGUAGE_NAMES.get(prefix)
+    if not expected:
+        return False
+    return (detected_language or "").strip().lower() == expected
+
+
 class SpeechToTextService:
     def __init__(self):
         self.provider = settings.STT_PROVIDER

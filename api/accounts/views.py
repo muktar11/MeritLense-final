@@ -1152,7 +1152,147 @@ class ProfileDocumentUploadView(APIView):
             'message': f'{document_type} uploaded successfully',
             'profile': serializer.data
         }, status=status.HTTP_200_OK)
-        
+
+
+PROFILE_PICTURE_MAX_BYTES = 5 * 1024 * 1024
+PROFILE_PICTURE_EXTENSIONS = ('jpg', 'jpeg', 'png', 'webp')
+
+
+class ProfilePictureView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    parser_classes = [MultiPartParser, FormParser]
+
+    @extend_schema(
+        summary="Upload or replace my profile picture",
+        request=inline_serializer(
+            name="ProfilePictureUploadRequest",
+            fields={"profile_picture": serializers.ImageField()},
+        ),
+        responses={
+            200: inline_serializer(
+                name="ProfilePictureUploadResponse",
+                fields={"profile_picture": serializers.URLField()},
+            ),
+            400: error_response_serializer,
+        },
+    )
+    def post(self, request):
+        user = request.user
+        picture_file = request.FILES.get('profile_picture')
+        if not picture_file:
+            return Response({'error': 'No image provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+        extension = picture_file.name.rsplit('.', 1)[-1].lower() if '.' in picture_file.name else ''
+        if extension not in PROFILE_PICTURE_EXTENSIONS:
+            return Response(
+                {'error': f'Unsupported file type. Allowed: {", ".join(PROFILE_PICTURE_EXTENSIONS)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if picture_file.size > PROFILE_PICTURE_MAX_BYTES:
+            return Response(
+                {'error': 'Image must be smaller than 5MB'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        old_picture = user.profile_picture
+        user.profile_picture = picture_file
+        user.save(update_fields=['profile_picture'])
+        if old_picture:
+            old_picture.storage.delete(old_picture.name)
+
+        AuditLogService.log(
+            user=user,
+            action=AuditLogAction.USER_UPDATED,
+            category=AuditLogCategory.USER,
+            description=f"Profile picture updated for user: {user.email}",
+            resource=user,
+            data={'changes': {'profile_picture': getattr(picture_file, 'name', None)}},
+            request=request,
+        )
+
+        return Response({
+            'profile_picture': request.build_absolute_uri(user.profile_picture.url),
+        }, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="Remove my profile picture",
+        responses={200: OpenApiResponse(description="Profile picture removed.")},
+    )
+    def delete(self, request):
+        user = request.user
+        if user.profile_picture:
+            user.profile_picture.storage.delete(user.profile_picture.name)
+            user.profile_picture = None
+            user.save(update_fields=['profile_picture'])
+        return Response({'message': 'Profile picture removed'}, status=status.HTTP_200_OK)
+
+
+class DeleteAccountView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Delete my account",
+        description=(
+            "B2C only. Requires the current password as confirmation. Cancels any active "
+            "Stripe subscription immediately, deactivates the account (blocks login and "
+            "invalidates any active session on the next request), and soft-deletes the "
+            "employer profile. Candidates, evaluations, and payment records created under "
+            "this account are kept for audit purposes and are not deleted."
+        ),
+        request=inline_serializer(
+            name="DeleteAccountRequest",
+            fields={"password": serializers.CharField()},
+        ),
+        responses={
+            200: OpenApiResponse(description="Account deleted."),
+            400: error_response_serializer,
+        },
+    )
+    def post(self, request):
+        user = request.user
+
+        if user.role != Roles.B2C:
+            return Response(
+                {'error': 'Self-service account deletion is only available for individual accounts'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        password = request.data.get('password')
+        if not password or not user.check_password(password):
+            return Response({'error': 'Incorrect password'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from api.payments.models import Subscription
+
+        for subscription in Subscription.objects.filter(user=user):
+            if subscription.is_active():
+                subscription.cancel(at_period_end=False)
+
+        profile = getattr(user, 'individual_profile', None)
+        if profile:
+            profile.is_deleted = True
+            profile.save(update_fields=['is_deleted'])
+
+        AuditLogService.log(
+            user=user,
+            action=AuditLogAction.USER_DELETED,
+            category=AuditLogCategory.USER,
+            severity=AuditLogSeverity.WARNING,
+            description=f"Account deleted by user: {user.email}",
+            resource=user,
+            request=request,
+        )
+
+        # is_active=False both blocks future logins and - via SimpleJWT's
+        # default_user_authentication_rule, which re-checks is_active from
+        # the DB on every request - immediately invalidates any
+        # already-issued access token too, with no separate blacklist step
+        # needed.
+        user.is_active = False
+        user.save(update_fields=['is_active'])
+
+        return Response({'message': 'Account deleted'}, status=status.HTTP_200_OK)
+
 
 class AdminStatsView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]

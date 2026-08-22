@@ -1,13 +1,16 @@
 import shutil
 import tempfile
+from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from api.accounts.models import Company, CompanyEmployerProfile, IndividualEmployerProfile, User
-from api.core.constants import AdminPermissions, JobRoles, Languages, Nationalities, Roles
+from api.core.constants import AdminPermissions, JobRoles, Languages, Nationalities, Roles, SubscriptionStatus
+from api.payments.models import Customer, Subscription
 
 
 def make_file(name="document.pdf", content=b"test-file", content_type="application/pdf"):
@@ -527,3 +530,152 @@ class AccountsWeek2Tests(APITestCase):
 
         allowed_response = self.client.get("/api/v1/auth/admin/employers/pending-verification")
         self.assertEqual(allowed_response.status_code, status.HTTP_200_OK, allowed_response.data)
+
+    def test_profile_picture_upload_replace_and_remove(self):
+        user = self.create_verified_b2c_user()
+        self.authenticate(user.email, "Password123!")
+
+        # 1x1 transparent PNG - ImageField validates real decodable image
+        # bytes via Pillow, not just an extension, so a fake payload would
+        # fail even with a ".png" filename.
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+            b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+        get_response = self.client.get("/api/v1/auth/me")
+        self.assertIsNone(get_response.data["profile_picture"])
+
+        upload_response = self.client.post(
+            "/api/v1/auth/me/profile-picture",
+            {"profile_picture": make_file("avatar.png", png_bytes, "image/png")},
+            format="multipart",
+        )
+        self.assertEqual(upload_response.status_code, status.HTTP_200_OK, upload_response.data)
+        self.assertIn("avatar", upload_response.data["profile_picture"])
+
+        user.refresh_from_db()
+        self.assertTrue(bool(user.profile_picture))
+        first_name = user.profile_picture.name
+
+        get_after_upload = self.client.get("/api/v1/auth/me")
+        self.assertIsNotNone(get_after_upload.data["profile_picture"])
+
+        # Uploading again replaces the old file rather than accumulating one
+        # per upload.
+        second_upload = self.client.post(
+            "/api/v1/auth/me/profile-picture",
+            {"profile_picture": make_file("avatar2.png", png_bytes, "image/png")},
+            format="multipart",
+        )
+        self.assertEqual(second_upload.status_code, status.HTTP_200_OK, second_upload.data)
+        user.refresh_from_db()
+        self.assertNotEqual(user.profile_picture.name, first_name)
+
+        delete_response = self.client.delete("/api/v1/auth/me/profile-picture")
+        self.assertEqual(delete_response.status_code, status.HTTP_200_OK, delete_response.data)
+        user.refresh_from_db()
+        self.assertFalse(bool(user.profile_picture))
+
+    def test_profile_picture_rejects_unsupported_extension(self):
+        user = self.create_verified_b2c_user()
+        self.authenticate(user.email, "Password123!")
+
+        response = self.client.post(
+            "/api/v1/auth/me/profile-picture",
+            {"profile_picture": make_file("resume.pdf", b"not-an-image", "application/pdf")},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
+
+        user.refresh_from_db()
+        self.assertFalse(bool(user.profile_picture))
+
+    def test_delete_account_rejects_wrong_password_without_changing_anything(self):
+        user = self.create_verified_b2c_user()
+        self.authenticate(user.email, "Password123!")
+
+        response = self.client.post(
+            "/api/v1/auth/me/delete",
+            {"password": "WrongPassword!"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
+
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
+
+    def test_delete_account_rejects_non_b2c_role(self):
+        user = User.objects.create_user(
+            email="admin-delete@example.com",
+            password="Password123!",
+            first_name="Admin",
+            last_name="User",
+            role=Roles.ADMIN,
+            is_verified=True,
+            is_staff=True,
+        )
+        self.authenticate(user.email, "Password123!")
+
+        response = self.client.post(
+            "/api/v1/auth/me/delete",
+            {"password": "Password123!"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
+
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
+
+    @patch("stripe.Subscription.modify")
+    def test_delete_account_cancels_subscription_deactivates_user_and_blocks_reuse(self, mock_modify):
+        user = self.create_verified_b2c_user()
+
+        customer = Customer.objects.create(
+            user=user,
+            stripe_customer_id=f"cus_{user.id}",
+            email=user.email,
+        )
+        subscription = Subscription.objects.create(
+            user=user,
+            customer=customer,
+            stripe_subscription_id=f"sub_{user.id}",
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=timezone.now(),
+            current_period_end=timezone.now() + timezone.timedelta(days=30),
+        )
+
+        login = self.authenticate(user.email, "Password123!")
+        access_token = login.data["access"]
+
+        response = self.client.post(
+            "/api/v1/auth/me/delete",
+            {"password": "Password123!"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        mock_modify.assert_called_once()
+
+        user.refresh_from_db()
+        self.assertFalse(user.is_active)
+
+        user.individual_profile.refresh_from_db()
+        self.assertTrue(user.individual_profile.is_deleted)
+
+        subscription.refresh_from_db()
+        self.assertEqual(subscription.status, SubscriptionStatus.CANCELED)
+
+        # Login is blocked going forward...
+        login_after_delete = self.client.post(
+            "/api/v1/auth/login",
+            {"email": user.email, "password": "Password123!"},
+            format="json",
+        )
+        self.assertEqual(login_after_delete.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        # ...and the access token issued before deletion stops working too,
+        # since SimpleJWT re-checks is_active from the DB on every request.
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access_token}")
+        stale_token_response = self.client.get("/api/v1/auth/me")
+        self.assertEqual(stale_token_response.status_code, status.HTTP_401_UNAUTHORIZED)

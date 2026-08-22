@@ -68,7 +68,14 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
     rejection_reason = models.TextField(null=True, blank=True)
     
     admin_permissions = models.JSONField(default=list, blank=True)
-    
+
+    profile_picture = models.ImageField(
+        upload_to='profile_pictures/',
+        null=True,
+        blank=True,
+        validators=[FileExtensionValidator(['jpg', 'jpeg', 'png', 'webp'])],
+    )
+
     company = models.ForeignKey(
         'Company',
         on_delete=models.CASCADE,

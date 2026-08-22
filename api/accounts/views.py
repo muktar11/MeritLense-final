@@ -1228,6 +1228,72 @@ class ProfilePictureView(APIView):
         return Response({'message': 'Profile picture removed'}, status=status.HTTP_200_OK)
 
 
+class DeleteAccountView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Delete my account",
+        description=(
+            "B2C only. Requires the current password as confirmation. Cancels any active "
+            "Stripe subscription immediately, deactivates the account (blocks login and "
+            "invalidates any active session on the next request), and soft-deletes the "
+            "employer profile. Candidates, evaluations, and payment records created under "
+            "this account are kept for audit purposes and are not deleted."
+        ),
+        request=inline_serializer(
+            name="DeleteAccountRequest",
+            fields={"password": serializers.CharField()},
+        ),
+        responses={
+            200: OpenApiResponse(description="Account deleted."),
+            400: error_response_serializer,
+        },
+    )
+    def post(self, request):
+        user = request.user
+
+        if user.role != Roles.B2C:
+            return Response(
+                {'error': 'Self-service account deletion is only available for individual accounts'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        password = request.data.get('password')
+        if not password or not user.check_password(password):
+            return Response({'error': 'Incorrect password'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from api.payments.models import Subscription
+
+        for subscription in Subscription.objects.filter(user=user):
+            if subscription.is_active():
+                subscription.cancel(at_period_end=False)
+
+        profile = getattr(user, 'individual_profile', None)
+        if profile:
+            profile.is_deleted = True
+            profile.save(update_fields=['is_deleted'])
+
+        AuditLogService.log(
+            user=user,
+            action=AuditLogAction.USER_DELETED,
+            category=AuditLogCategory.USER,
+            severity=AuditLogSeverity.WARNING,
+            description=f"Account deleted by user: {user.email}",
+            resource=user,
+            request=request,
+        )
+
+        # is_active=False both blocks future logins and - via SimpleJWT's
+        # default_user_authentication_rule, which re-checks is_active from
+        # the DB on every request - immediately invalidates any
+        # already-issued access token too, with no separate blacklist step
+        # needed.
+        user.is_active = False
+        user.save(update_fields=['is_active'])
+
+        return Response({'message': 'Account deleted'}, status=status.HTTP_200_OK)
+
+
 class AdminStatsView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 

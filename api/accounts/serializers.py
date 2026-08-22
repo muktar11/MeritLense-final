@@ -343,29 +343,38 @@ class TeamMemberProfileSerializer(PublicIdModelSerializer):
         perm_dict = dict(CompanyTeamPermissions.CHOICES)
         return [perm_dict.get(p, p) for p in obj.permissions]
 class ProfileSerializer(serializers.Serializer):
-    
+
     def to_representation(self, instance):
-        if isinstance(instance, User):
-            user = instance
-        else:
-            user = instance
-        
+        user = instance
+        # profile_picture lives on User, not any of the per-role profile
+        # models below, so it's injected here once rather than duplicated
+        # as a field on every branch's serializer.
+        picture_url = user.profile_picture.url if user.profile_picture else None
+
         if user.role == Roles.B2C:
             profile = getattr(user, 'individual_profile', None)
             if profile:
-                return IndividualProfileSerializer(profile).data
+                data = IndividualProfileSerializer(profile).data
+                data['profile_picture'] = picture_url
+                return data
         elif user.role == Roles.B2B:
             profile = getattr(user, 'company_profile', None)
             if profile:
-                return CompanyProfileSerializer(profile).data
+                data = CompanyProfileSerializer(profile).data
+                data['profile_picture'] = picture_url
+                return data
         elif user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
             profile = getattr(user, 'admin_profile', None)
             if profile:
-                return AdminProfileSerializer(profile).data
+                data = AdminProfileSerializer(profile).data
+                data['profile_picture'] = picture_url
+                return data
         elif user.role == Roles.B2B_TEAM_MEMBER:
             profile = getattr(user, 'team_member_profile', None)
             if profile:
-                return TeamMemberProfileSerializer(profile).data
+                data = TeamMemberProfileSerializer(profile).data
+                data['profile_picture'] = picture_url
+                return data
             else:
                 return {
                     'id': str(user.public_id),
@@ -375,16 +384,18 @@ class ProfileSerializer(serializers.Serializer):
                     'role': user.role,
                     'is_verified': user.is_verified,
                     'department': '',
-                    'phone_number': ''
+                    'phone_number': '',
+                    'profile_picture': picture_url,
                 }
-        
+
         return {
             'id': str(user.public_id),
             'email': user.email,
             'first_name': user.first_name,
             'last_name': user.last_name,
             'role': user.role,
-            'is_verified': user.is_verified
+            'is_verified': user.is_verified,
+            'profile_picture': picture_url,
         }
 
 class AdminUserSerializer(PublicIdModelSerializer):

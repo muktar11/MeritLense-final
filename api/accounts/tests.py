@@ -527,3 +527,64 @@ class AccountsWeek2Tests(APITestCase):
 
         allowed_response = self.client.get("/api/v1/auth/admin/employers/pending-verification")
         self.assertEqual(allowed_response.status_code, status.HTTP_200_OK, allowed_response.data)
+
+    def test_profile_picture_upload_replace_and_remove(self):
+        user = self.create_verified_b2c_user()
+        self.authenticate(user.email, "Password123!")
+
+        # 1x1 transparent PNG - ImageField validates real decodable image
+        # bytes via Pillow, not just an extension, so a fake payload would
+        # fail even with a ".png" filename.
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+            b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+        get_response = self.client.get("/api/v1/auth/me")
+        self.assertIsNone(get_response.data["profile_picture"])
+
+        upload_response = self.client.post(
+            "/api/v1/auth/me/profile-picture",
+            {"profile_picture": make_file("avatar.png", png_bytes, "image/png")},
+            format="multipart",
+        )
+        self.assertEqual(upload_response.status_code, status.HTTP_200_OK, upload_response.data)
+        self.assertIn("avatar", upload_response.data["profile_picture"])
+
+        user.refresh_from_db()
+        self.assertTrue(bool(user.profile_picture))
+        first_name = user.profile_picture.name
+
+        get_after_upload = self.client.get("/api/v1/auth/me")
+        self.assertIsNotNone(get_after_upload.data["profile_picture"])
+
+        # Uploading again replaces the old file rather than accumulating one
+        # per upload.
+        second_upload = self.client.post(
+            "/api/v1/auth/me/profile-picture",
+            {"profile_picture": make_file("avatar2.png", png_bytes, "image/png")},
+            format="multipart",
+        )
+        self.assertEqual(second_upload.status_code, status.HTTP_200_OK, second_upload.data)
+        user.refresh_from_db()
+        self.assertNotEqual(user.profile_picture.name, first_name)
+
+        delete_response = self.client.delete("/api/v1/auth/me/profile-picture")
+        self.assertEqual(delete_response.status_code, status.HTTP_200_OK, delete_response.data)
+        user.refresh_from_db()
+        self.assertFalse(bool(user.profile_picture))
+
+    def test_profile_picture_rejects_unsupported_extension(self):
+        user = self.create_verified_b2c_user()
+        self.authenticate(user.email, "Password123!")
+
+        response = self.client.post(
+            "/api/v1/auth/me/profile-picture",
+            {"profile_picture": make_file("resume.pdf", b"not-an-image", "application/pdf")},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
+
+        user.refresh_from_db()
+        self.assertFalse(bool(user.profile_picture))

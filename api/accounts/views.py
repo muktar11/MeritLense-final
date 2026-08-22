@@ -1152,7 +1152,81 @@ class ProfileDocumentUploadView(APIView):
             'message': f'{document_type} uploaded successfully',
             'profile': serializer.data
         }, status=status.HTTP_200_OK)
-        
+
+
+PROFILE_PICTURE_MAX_BYTES = 5 * 1024 * 1024
+PROFILE_PICTURE_EXTENSIONS = ('jpg', 'jpeg', 'png', 'webp')
+
+
+class ProfilePictureView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    parser_classes = [MultiPartParser, FormParser]
+
+    @extend_schema(
+        summary="Upload or replace my profile picture",
+        request=inline_serializer(
+            name="ProfilePictureUploadRequest",
+            fields={"profile_picture": serializers.ImageField()},
+        ),
+        responses={
+            200: inline_serializer(
+                name="ProfilePictureUploadResponse",
+                fields={"profile_picture": serializers.URLField()},
+            ),
+            400: error_response_serializer,
+        },
+    )
+    def post(self, request):
+        user = request.user
+        picture_file = request.FILES.get('profile_picture')
+        if not picture_file:
+            return Response({'error': 'No image provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+        extension = picture_file.name.rsplit('.', 1)[-1].lower() if '.' in picture_file.name else ''
+        if extension not in PROFILE_PICTURE_EXTENSIONS:
+            return Response(
+                {'error': f'Unsupported file type. Allowed: {", ".join(PROFILE_PICTURE_EXTENSIONS)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if picture_file.size > PROFILE_PICTURE_MAX_BYTES:
+            return Response(
+                {'error': 'Image must be smaller than 5MB'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        old_picture = user.profile_picture
+        user.profile_picture = picture_file
+        user.save(update_fields=['profile_picture'])
+        if old_picture:
+            old_picture.storage.delete(old_picture.name)
+
+        AuditLogService.log(
+            user=user,
+            action=AuditLogAction.USER_UPDATED,
+            category=AuditLogCategory.USER,
+            description=f"Profile picture updated for user: {user.email}",
+            resource=user,
+            data={'changes': {'profile_picture': getattr(picture_file, 'name', None)}},
+            request=request,
+        )
+
+        return Response({
+            'profile_picture': request.build_absolute_uri(user.profile_picture.url),
+        }, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="Remove my profile picture",
+        responses={200: OpenApiResponse(description="Profile picture removed.")},
+    )
+    def delete(self, request):
+        user = request.user
+        if user.profile_picture:
+            user.profile_picture.storage.delete(user.profile_picture.name)
+            user.profile_picture = None
+            user.save(update_fields=['profile_picture'])
+        return Response({'message': 'Profile picture removed'}, status=status.HTTP_200_OK)
+
 
 class AdminStatsView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]

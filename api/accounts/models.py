@@ -285,6 +285,14 @@ class Company(TimeStampedModel):
         help_text="Company logo shown on the Company Profile page.",
     )
 
+    roles = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Free-text self-described business roles/categories (e.g. 'Agency', "
+                   "'Staffing') shown as badges on the Company Profile page. Not related "
+                   "to Candidate.job_role or the interview role_code taxonomy.",
+    )
+
     class Meta:
         verbose_name = "Company"
         verbose_name_plural = "Companies"

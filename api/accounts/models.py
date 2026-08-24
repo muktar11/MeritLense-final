@@ -276,7 +276,15 @@ class Company(TimeStampedModel):
         blank=True,
         help_text="Company stamp/seal, applied automatically to signed B2B agreement PDFs.",
     )
-    
+
+    logo = models.ImageField(
+        upload_to='companies/logos/',
+        null=True,
+        blank=True,
+        validators=[FileExtensionValidator(['jpg', 'jpeg', 'png', 'webp'])],
+        help_text="Company logo shown on the Company Profile page.",
+    )
+
     class Meta:
         verbose_name = "Company"
         verbose_name_plural = "Companies"

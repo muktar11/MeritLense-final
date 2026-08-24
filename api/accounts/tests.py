@@ -9,7 +9,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from api.accounts.models import Company, CompanyEmployerProfile, IndividualEmployerProfile, User
-from api.core.constants import AdminPermissions, JobRoles, Languages, Nationalities, Roles, SubscriptionStatus
+from api.core.constants import AdminPermissions, CompanySize, JobRoles, Languages, Nationalities, Roles, SubscriptionStatus
 from api.payments.models import Customer, Subscription
 
 
@@ -51,6 +51,41 @@ class AccountsWeek2Tests(APITestCase):
             resume_document=make_file(f"resume-{user.id}.pdf"),
         )
         return user
+
+    def create_verified_b2b_owner(self, email="owner@example.com", password="Password123!"):
+        user = User.objects.create_user(
+            email=email,
+            password=password,
+            first_name="Company",
+            last_name="Owner",
+            role=Roles.B2B,
+            is_verified=True,
+        )
+        profile = CompanyEmployerProfile.objects.create(
+            user=user,
+            company_name="Test Company",
+            company_registration_number=f"REG-{user.id}",
+            company_size=CompanySize.SMALL,
+            country="United States",
+            city="San Francisco",
+            preferred_language=Languages.ENGLISH,
+            phone_number="+15550000002",
+            registration_certificate=make_file(f"cert-{user.id}.pdf"),
+            resachetified_license=make_file(f"license-{user.id}.pdf"),
+        )
+        company = Company.objects.create(
+            name=profile.company_name,
+            registration_number=profile.company_registration_number,
+            company_size=profile.company_size,
+            phone_number=profile.phone_number,
+            country=profile.country,
+            city=profile.city,
+            admin_user=user,
+            registration_certificate=make_file(f"company-cert-{user.id}.pdf"),
+        )
+        profile.company = company
+        profile.save(update_fields=["company"])
+        return user, company
 
     def authenticate(self, email, password):
         login_response = self.client.post(
@@ -591,6 +626,57 @@ class AccountsWeek2Tests(APITestCase):
 
         user.refresh_from_db()
         self.assertFalse(bool(user.profile_picture))
+
+    def test_company_logo_upload_by_owner(self):
+        user, company = self.create_verified_b2b_owner()
+        self.authenticate(user.email, "Password123!")
+
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+            b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+        get_response = self.client.get("/api/v1/auth/companies/profile")
+        self.assertEqual(get_response.status_code, status.HTTP_200_OK, get_response.data)
+        self.assertIsNone(get_response.data["logo"])
+
+        upload_response = self.client.patch(
+            "/api/v1/auth/companies/profile",
+            {"logo": make_file("logo.png", png_bytes, "image/png")},
+            format="multipart",
+        )
+        self.assertEqual(upload_response.status_code, status.HTTP_200_OK, upload_response.data)
+        self.assertIn("logo", upload_response.data["logo"])
+
+        company.refresh_from_db()
+        self.assertTrue(bool(company.logo))
+
+        get_after_upload = self.client.get("/api/v1/auth/companies/profile")
+        self.assertIsNotNone(get_after_upload.data["logo"])
+
+    def test_company_logo_upload_rejected_for_team_member(self):
+        _owner, company = self.create_verified_b2b_owner()
+        team_member = User.objects.create_user(
+            email="teammate@example.com",
+            password="Password123!",
+            first_name="Team",
+            last_name="Member",
+            role=Roles.B2B_TEAM_MEMBER,
+            is_verified=True,
+            company=company,
+        )
+        self.authenticate(team_member.email, "Password123!")
+
+        response = self.client.patch(
+            "/api/v1/auth/companies/profile",
+            {"logo": make_file("logo.png", b"fake-bytes", "image/png")},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN, response.data)
+
+        company.refresh_from_db()
+        self.assertFalse(bool(company.logo))
 
     def test_delete_account_rejects_wrong_password_without_changing_anything(self):
         user = self.create_verified_b2c_user()

@@ -616,18 +616,34 @@ class CompanySerializer(PublicIdModelSerializer):
             'industry', 'phone_number', 'country', 'city',
             'address', 'website', 'admin_user', 'admin_user_email', 'admin_name',
             'is_verified', 'verified_at', 'team_member_count', 'stamp_image', 'logo',
-            'created_at', 'updated_at'
+            'roles', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'admin_user', 'is_verified', 'verified_at', 'created_at', 'updated_at']
-    
+
     def get_admin_name(self, obj):
         if obj.admin_user:
             return obj.admin_user.get_full_name()
         return None
-    
+
     def get_team_member_count(self, obj):
         from api.accounts.models import User
         return User.objects.filter(company=obj, role=Roles.B2B_TEAM_MEMBER).count()
+
+    def validate_roles(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("roles must be a list of strings.")
+        if len(value) > 8:
+            raise serializers.ValidationError("A company can have at most 8 roles.")
+        cleaned = []
+        for role in value:
+            if not isinstance(role, str) or not role.strip():
+                raise serializers.ValidationError("Each role must be a non-empty string.")
+            role = role.strip()
+            if len(role) > 30:
+                raise serializers.ValidationError("Each role must be 30 characters or fewer.")
+            if role not in cleaned:
+                cleaned.append(role)
+        return cleaned
 
 
 class TeamMemberProfileSerializer(PublicIdModelSerializer):

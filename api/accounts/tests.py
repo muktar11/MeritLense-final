@@ -678,6 +678,46 @@ class AccountsWeek2Tests(APITestCase):
         company.refresh_from_db()
         self.assertFalse(bool(company.logo))
 
+    def test_company_roles_add_and_remove(self):
+        user, company = self.create_verified_b2b_owner()
+        self.authenticate(user.email, "Password123!")
+
+        self.assertEqual(company.roles, [])
+
+        add_response = self.client.patch(
+            "/api/v1/auth/companies/profile",
+            {"roles": ["Agency", "Staffing"]},
+            format="json",
+        )
+        self.assertEqual(add_response.status_code, status.HTTP_200_OK, add_response.data)
+        self.assertEqual(add_response.data["roles"], ["Agency", "Staffing"])
+
+        company.refresh_from_db()
+        self.assertEqual(company.roles, ["Agency", "Staffing"])
+
+        remove_response = self.client.patch(
+            "/api/v1/auth/companies/profile",
+            {"roles": ["Agency"]},
+            format="json",
+        )
+        self.assertEqual(remove_response.status_code, status.HTTP_200_OK, remove_response.data)
+        company.refresh_from_db()
+        self.assertEqual(company.roles, ["Agency"])
+
+    def test_company_roles_rejects_more_than_eight(self):
+        user, company = self.create_verified_b2b_owner()
+        self.authenticate(user.email, "Password123!")
+
+        response = self.client.patch(
+            "/api/v1/auth/companies/profile",
+            {"roles": [f"Role {i}" for i in range(9)]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
+
+        company.refresh_from_db()
+        self.assertEqual(company.roles, [])
+
     def test_delete_account_rejects_wrong_password_without_changing_anything(self):
         user = self.create_verified_b2c_user()
         self.authenticate(user.email, "Password123!")

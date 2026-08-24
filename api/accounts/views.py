@@ -1950,12 +1950,12 @@ class CompanyProfileView(APIView):
         try:
             if hasattr(request.user, 'managed_company'):
                 company = request.user.managed_company
-                serializer = CompanySerializer(company)
+                serializer = CompanySerializer(company, context={'request': request})
                 return Response(serializer.data)
-            
+
             if hasattr(request.user, 'company_profile') and request.user.company_profile.company:
                 company = request.user.company_profile.company
-                serializer = CompanySerializer(company)
+                serializer = CompanySerializer(company, context={'request': request})
                 return Response(serializer.data)
             
             return Response(
@@ -1998,8 +1998,8 @@ class CompanyProfileView(APIView):
                     status=status.HTTP_404_NOT_FOUND
                 )
             
-            serializer = CompanySerializer(company, data=request.data, partial=True)
-            
+            serializer = CompanySerializer(company, data=request.data, partial=True, context={'request': request})
+
             if serializer.is_valid():
                 serializer.save()
                 

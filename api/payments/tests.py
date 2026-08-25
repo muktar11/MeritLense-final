@@ -1,4 +1,5 @@
 from decimal import Decimal
+from unittest.mock import MagicMock, patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
@@ -317,6 +318,41 @@ class EntitlementServiceTests(TestCase):
     def test_spend_points_rejects_unknown_addon_code(self):
         with self.assertRaises(ValueError):
             EntitlementService.spend_points(user=self.b2c_user, addon_code="not_a_real_addon")
+
+
+class RetireAndReplacePriceTests(TestCase):
+    """Editing a package's amount/currency/interval retires the old Stripe
+    Price and mints a new local Price row (Stripe Prices are immutable) -
+    slot_grant/points_grant must carry over, or every price edit would
+    silently strip a package's entitlements back to unenforced."""
+
+    def setUp(self):
+        self.old_price = make_price(name="Growth", target_user_type="B2B", slot_grant=200, points_grant=2000)
+        self.service = StripeService()
+
+    @patch("api.payments.services.stripe")
+    def test_carries_forward_slot_and_points_grant_when_not_overridden(self, mock_stripe):
+        mock_stripe.Product.create.return_value = MagicMock(id="prod_new")
+        mock_stripe.Price.create.return_value = MagicMock(id="price_new")
+
+        new_price = self.service.retire_and_replace_price(self.old_price, {"unit_amount": Decimal("2500.00")})
+
+        self.assertEqual(new_price.slot_grant, 200)
+        self.assertEqual(new_price.points_grant, 2000)
+        self.old_price.refresh_from_db()
+        self.assertFalse(self.old_price.is_active)
+
+    @patch("api.payments.services.stripe")
+    def test_explicit_override_wins_over_old_price(self, mock_stripe):
+        mock_stripe.Product.create.return_value = MagicMock(id="prod_new")
+        mock_stripe.Price.create.return_value = MagicMock(id="price_new")
+
+        new_price = self.service.retire_and_replace_price(
+            self.old_price, {"unit_amount": Decimal("2500.00"), "slot_grant": 300}
+        )
+
+        self.assertEqual(new_price.slot_grant, 300)
+        self.assertEqual(new_price.points_grant, 2000)
 
 
 class SpendPointsEndpointTests(APITestCase):

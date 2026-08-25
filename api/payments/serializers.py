@@ -20,7 +20,7 @@ class PriceSerializer(PublicIdModelSerializer):
             'unit_amount', 'currency', 'formatted_price',
             'interval', 'interval_count', 'billing_type',
             'evaluation_tier', 'task_observation_enabled',
-            'features', 'feature_limits',
+            'features', 'feature_limits', 'slot_grant', 'points_grant',
             'is_active', 'metadata', 'created_at'
         ]
 
@@ -48,7 +48,7 @@ class PriceAdminSerializer(PublicIdModelSerializer):
             'unit_amount', 'currency', 'formatted_price',
             'billing_type', 'interval', 'interval_count',
             'evaluation_tier', 'task_observation_enabled',
-            'features', 'feature_limits',
+            'features', 'feature_limits', 'slot_grant', 'points_grant',
             'is_active', 'metadata', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'stripe_price_id', 'stripe_product_id', 'created_at', 'updated_at']

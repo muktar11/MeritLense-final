@@ -214,9 +214,13 @@ class StripeService:
         if data.get('max_company_size'):
             metadata['max_company_size'] = data['max_company_size']
         feature_limits = data.get('feature_limits') or {}
-        for key in ('candidate_limit', 'evaluation_limit', 'team_member_limit', 'points_granted'):
+        for key in ('candidate_limit', 'evaluation_limit', 'team_member_limit'):
             if feature_limits.get(key) is not None:
                 metadata[key] = str(feature_limits[key])
+        if data.get('slot_grant') is not None:
+            metadata['slot_grant'] = str(data['slot_grant'])
+        if data.get('points_grant') is not None:
+            metadata['points_grant'] = str(data['points_grant'])
         return metadata
 
     def create_price_and_product(self, data):
@@ -303,6 +307,8 @@ class StripeService:
             'interval': data.get('interval', old_price.interval),
             'interval_count': data.get('interval_count', old_price.interval_count),
             'feature_limits': data.get('feature_limits', old_price.feature_limits),
+            'slot_grant': data.get('slot_grant', old_price.slot_grant),
+            'points_grant': data.get('points_grant', old_price.points_grant),
             'metadata': data.get('metadata', old_price.metadata),
         }
 
@@ -324,6 +330,8 @@ class StripeService:
             task_observation_enabled=data.get('task_observation_enabled', old_price.task_observation_enabled),
             features=data.get('features', old_price.features),
             feature_limits=merged['feature_limits'],
+            slot_grant=merged['slot_grant'],
+            points_grant=merged['points_grant'],
             is_active=True,
             metadata=merged['metadata'],
         )

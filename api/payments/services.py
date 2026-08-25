@@ -615,6 +615,9 @@ class StripeService:
         payment.subscription = subscription
         payment.save(update_fields=['subscription'])
 
+        from .entitlement_services import EntitlementService
+        EntitlementService.grant_b2c_balances(payment, price)
+
         logger.info(f"Granted one-time package '{price.name}' to user {payment.user.id} via payment {payment.id}")
     
     def handle_payment_failed(self, payment_intent):
@@ -789,6 +792,9 @@ class StripeService:
                 subscription.status = 'ACTIVE'
                 subscription.save()
                 logger.info(f"Subscription {subscription.id} status updated to active after payment")
+
+            from .entitlement_services import EntitlementService
+            EntitlementService.reset_b2b_balances(subscription)
 
             logger.info(f"Invoice paid: {invoice_data['id']}")
             return invoice

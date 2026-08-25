@@ -27,6 +27,7 @@ from api.evaluations.models import Evaluation
 from api.evaluations.scoring_services import Week6ScoringError, Week6ScoringService
 from api.evaluations.certificate_services import generate_certificate
 from api.interviews.package_services import PackageArchitectureService
+from api.payments.entitlement_services import EntitlementService
 from api.interviews.voice_services import (
     SpeechToTextService,
     TextToSpeechService,
@@ -621,6 +622,7 @@ class InterviewSessionService:
             events.append(("SESSION_READY", AuditLogAction.SESSION_READY))
 
         session.start()
+        EntitlementService.consume_slot(session, actor=actor)
         cls._ensure_linked_evaluation(session, status=EvaluationStatus.IN_PROGRESS)
         events.append(("SESSION_STARTED", AuditLogAction.SESSION_STARTED))
         cls._log_and_broadcast(actor, session, events)

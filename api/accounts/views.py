@@ -1363,7 +1363,7 @@ class CreateAdminView(APIView):
     permission_classes = [IsAuthenticated, IsSuperAdmin]
 
     @extend_schema(
-        summary="Create or promote an admin user",
+        summary="Create a new admin user",
         request=CreateAdminSerializer,
         responses={
             201: inline_serializer(
@@ -1468,7 +1468,18 @@ class AdminUserDetailView(APIView):
         
         allowed_fields = ['first_name', 'last_name', 'is_active', 'admin_permissions']
         update_data = {k: v for k, v in request.data.items() if k in allowed_fields}
-        
+
+        if update_data.get('is_active') is False:
+            if user.id == request.user.id:
+                return Response({'error': 'Cannot disable your own account'}, status=status.HTTP_400_BAD_REQUEST)
+            if user.role == Roles.SUPERADMIN and not User.objects.filter(
+                role=Roles.SUPERADMIN, is_active=True
+            ).exclude(pk=user.pk).exists():
+                return Response(
+                    {'error': 'Cannot disable the last active Super Admin'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         serializer = AdminUserSerializer(user, data=update_data, partial=True)
         if serializer.is_valid():
             serializer.save()
@@ -1498,7 +1509,15 @@ class AdminUserDetailView(APIView):
         
         if user.id == request.user.id:
             return Response({'error': 'Cannot delete your own account'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
+        if user.role == Roles.SUPERADMIN and not User.objects.filter(
+            role=Roles.SUPERADMIN
+        ).exclude(pk=user.pk).exists():
+            return Response(
+                {'error': 'Cannot delete the last Super Admin'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         user.delete()
         AuditLogService.log(
             user=request.user,
@@ -1528,7 +1547,7 @@ class EmployerListView(APIView):
         
         verification_status = request.query_params.get('verification_status')
         if verification_status:
-            employers = employers.filter(documents_verification_status=verification_status)
+            employers = employers.filter(documents_verification_status=verification_status.upper())
         
         is_verified = request.query_params.get('is_verified')
         if is_verified is not None:
@@ -1569,7 +1588,10 @@ class EmployerDetailView(APIView):
     
     def get_object(self, user_id):
         try:
-            return User.objects.get(id=user_id, role__in=[Roles.B2B, Roles.B2C])
+            return User.objects.get(
+                public_id=user_id,
+                role__in=[Roles.B2B, Roles.B2C, Roles.B2B_TEAM_MEMBER],
+            )
         except User.DoesNotExist:
             return None
     

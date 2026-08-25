@@ -566,6 +566,113 @@ class AccountsWeek2Tests(APITestCase):
         allowed_response = self.client.get("/api/v1/auth/admin/employers/pending-verification")
         self.assertEqual(allowed_response.status_code, status.HTTP_200_OK, allowed_response.data)
 
+    def create_verified_superadmin(self, email="superadmin@example.com"):
+        return User.objects.create_user(
+            email=email,
+            password="Password123!",
+            first_name="Super",
+            last_name="Admin",
+            role=Roles.SUPERADMIN,
+            is_verified=True,
+            is_staff=True,
+        )
+
+    def test_create_admin_rejects_email_of_an_existing_user_instead_of_taking_it_over(self):
+        """Regression test: CreateAdminSerializer used to silently promote
+        ANY existing user (any role) to ADMIN on email match - including
+        overwriting their name/permissions. It must now reject instead."""
+        superadmin = self.create_verified_superadmin()
+        self.authenticate(superadmin.email, "Password123!")
+
+        existing_b2c = self.create_verified_b2c_user(email="targetable@example.com")
+
+        response = self.client.post(
+            "/api/v1/auth/admin/users/create",
+            {
+                "email": existing_b2c.email,
+                "first_name": "Hijacked",
+                "last_name": "Name",
+                "password": "Password123!",
+                "confirm_password": "Password123!",
+                "permissions": [AdminPermissions.USER_MANAGEMENT],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
+
+        existing_b2c.refresh_from_db()
+        self.assertEqual(existing_b2c.role, Roles.B2C)
+        self.assertEqual(existing_b2c.first_name, "Verified")
+        self.assertFalse(existing_b2c.is_staff)
+
+    def test_admin_cannot_disable_own_account_via_patch(self):
+        superadmin = self.create_verified_superadmin()
+        self.authenticate(superadmin.email, "Password123!")
+
+        response = self.client.patch(
+            f"/api/v1/auth/admin/users/{superadmin.public_id}",
+            {"is_active": False},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        superadmin.refresh_from_db()
+        self.assertTrue(superadmin.is_active)
+
+    def test_admin_can_disable_a_different_admin(self):
+        superadmin = self.create_verified_superadmin()
+        self.authenticate(superadmin.email, "Password123!")
+
+        other_admin = User.objects.create_user(
+            email="other-admin@example.com",
+            password="Password123!",
+            first_name="Other",
+            last_name="Admin",
+            role=Roles.ADMIN,
+            is_verified=True,
+            is_staff=True,
+        )
+
+        response = self.client.patch(
+            f"/api/v1/auth/admin/users/{other_admin.public_id}",
+            {"is_active": False},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+        other_admin.refresh_from_db()
+        self.assertFalse(other_admin.is_active)
+
+    def test_employer_detail_resolves_by_public_id(self):
+        """Regression test: EmployerListSerializer returns public_id as `id`,
+        but the detail route used to require an integer PK and 404 on any
+        UUID - making the detail endpoint unreachable from the frontend."""
+        superadmin = self.create_verified_superadmin()
+        self.authenticate(superadmin.email, "Password123!")
+
+        employer = self.create_verified_b2c_user(email="employer-detail@example.com")
+
+        response = self.client.get(f"/api/v1/auth/admin/employers/{employer.public_id}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["email"], employer.email)
+
+    def test_employer_list_verification_status_filter_matches_lowercase_input(self):
+        """Regression test: the frontend sends lowercase values (pending/
+        approved/rejected) but the stored status is uppercase - the filter
+        used to be an exact case-sensitive match and always returned zero
+        results."""
+        superadmin = self.create_verified_superadmin()
+        self.authenticate(superadmin.email, "Password123!")
+
+        employer = self.create_verified_b2c_user(email="pending-filter@example.com")
+        employer.documents_verification_status = "PENDING"
+        employer.save(update_fields=["documents_verification_status"])
+
+        response = self.client.get("/api/v1/auth/admin/employers?verification_status=pending")
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        returned_emails = [row["email"] for row in response.data["results"]]
+        self.assertIn(employer.email, returned_emails)
+
     def test_profile_picture_upload_replace_and_remove(self):
         user = self.create_verified_b2c_user()
         self.authenticate(user.email, "Password123!")

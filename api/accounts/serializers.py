@@ -438,84 +438,47 @@ class CreateAdminSerializer(serializers.Serializer):
     department = serializers.CharField(required=False, allow_blank=True, max_length=100)
     phone_number = serializers.CharField(required=False, allow_blank=True, max_length=20)
     
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.existing_user = None
-    
     def validate_email(self, value):
-        try:
-            self.existing_user = User.objects.get(email=value)
-        except User.DoesNotExist:
-            self.existing_user = None
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError(
+                "A user with this email already exists. Admin accounts cannot be created over an existing account."
+            )
         return value
-    
+
     def validate(self, data):
-        if not self.existing_user:
-            if not data.get('password'):
-                raise serializers.ValidationError({"password": "Password is required for new users."})
-            if data['password'] != data['confirm_password']:
-                raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
+        if not data.get('password'):
+            raise serializers.ValidationError({"password": "Password is required for new users."})
+        if data['password'] != data['confirm_password']:
+            raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
         return data
-    
+
     def create(self, validated_data):
         permissions = validated_data.pop('permissions', [])
         department = validated_data.pop('department', '')
         phone_number = validated_data.pop('phone_number', '')
         validated_data.pop('confirm_password', None)
         password = validated_data.pop('password', None)
-        
-        if self.existing_user:
-            user = self.existing_user
-            
-            user.first_name = validated_data.get('first_name', user.first_name)
-            user.last_name = validated_data.get('last_name', user.last_name)
-            user.role = Roles.ADMIN
-            user.is_staff = True
-            user.is_verified = True
-            user.admin_permissions = permissions
-            
-            if password:
-                user.set_password(password)
-            
+
+        user = User.objects.create_user(
+            **validated_data,
+            role=Roles.ADMIN,
+            is_staff=True,
+            is_verified=True,
+            admin_permissions=permissions
+        )
+
+        if password:
+            user.set_password(password)
             user.save()
-            
-            from api.accounts.models import AdminProfile
-            
-            try:
-                profile = AdminProfile.objects.get(user=user)
-                profile.department = department
-                profile.phone_number = phone_number
-                profile.save()
-            except AdminProfile.DoesNotExist:
-                AdminProfile.objects.create(
-                    user=user,
-                    department=department,
-                    phone_number=phone_number
-                )
-            
-            return user
-        
-        else:
-            user = User.objects.create_user(
-                **validated_data,
-                role=Roles.ADMIN,
-                is_staff=True,
-                is_verified=True,
-                admin_permissions=permissions
-            )
-            
-            if password:
-                user.set_password(password)
-                user.save()
-            
-            from api.accounts.models import AdminProfile
-            AdminProfile.objects.create(
-                user=user,
-                department=department,
-                phone_number=phone_number
-            )
-            
-            return user
+
+        from api.accounts.models import AdminProfile
+        AdminProfile.objects.create(
+            user=user,
+            department=department,
+            phone_number=phone_number
+        )
+
+        return user
 
 class EmployerListSerializer(PublicIdModelSerializer):
     full_name = serializers.SerializerMethodField()

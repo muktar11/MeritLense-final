@@ -1643,3 +1643,24 @@ def sync_all_subscriptions(request):
         'message': f'Synced {synced_count} subscriptions',
         'total': subscriptions.count()
     })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def spend_points(request):
+    from .entitlement_serializers import AddonSpendSerializer
+    from .entitlement_services import EntitlementService
+
+    serializer = AddonSpendSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    addon_code = serializer.validated_data['addon_code']
+
+    try:
+        balance = EntitlementService.spend_points(user=request.user, addon_code=addon_code, actor=request.user)
+    except ValueError as exc:
+        return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({
+        'addon_code': addon_code,
+        'remaining_points': balance.current_balance if balance else None,
+    })

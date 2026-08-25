@@ -81,11 +81,23 @@ class Price(TimeStampedModel):
     features = models.JSONField(default=dict, blank=True)
     
     feature_limits = models.JSONField(
-        default=dict, 
+        default=dict,
         blank=True,
         help_text="Feature limits like candidate_limit, evaluation_limit, team_member_limit"
     )
-    
+
+    slot_grant = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Candidate Assessment Slots granted per period (one-time for B2C, reset on each renewal for B2B). Null = no automated enforcement (e.g. Starter/Enterprise, per-agreement)."
+    )
+
+    points_grant = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Points balance granted per period, spent only on optional add-ons, never on the core assessment. Null = no automated enforcement (e.g. Starter/Enterprise, per-agreement)."
+    )
+
     is_active = models.BooleanField(default=True)
     metadata = models.JSONField(default=dict, blank=True)
     
@@ -459,6 +471,132 @@ class Payment(TimeStampedModel):
     
     def __str__(self):
         return f"Payment {self.stripe_payment_intent_id} - {self.amount} {self.currency}"
+
+
+class PackageBalance(TimeStampedModel):
+    """
+    Tracks a Candidate Assessment Slots or Points balance for a package owner
+    (a B2C user or a B2B company). Slots and points are two fully independent
+    balances - never converted between each other.
+
+    B2B: one row per (owner_company, balance_type), reset in place to the
+    plan's fixed amount on every renewal - no rollover.
+    B2C: one row per one-time purchase (source_payment set), never expires;
+    multiple purchases accumulate as separate rows, consumed oldest-first.
+    """
+    SLOTS = 'SLOTS'
+    POINTS = 'POINTS'
+    BALANCE_TYPE_CHOICES = [
+        (SLOTS, 'Assessment Slots'),
+        (POINTS, 'Points'),
+    ]
+
+    owner_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='package_balances'
+    )
+    owner_company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='package_balances'
+    )
+    balance_type = models.CharField(max_length=10, choices=BALANCE_TYPE_CHOICES)
+
+    source_subscription = models.ForeignKey(
+        Subscription,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='package_balances'
+    )
+    source_payment = models.ForeignKey(
+        Payment,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='package_balances'
+    )
+
+    fixed_amount = models.PositiveIntegerField(
+        help_text="The grant/reset amount from Price at the time this row was created or last reset."
+    )
+    current_balance = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        verbose_name = "Package Balance"
+        verbose_name_plural = "Package Balances"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(owner_user__isnull=False) | models.Q(owner_company__isnull=False),
+                name='package_balance_has_owner'
+            ),
+            models.UniqueConstraint(
+                fields=['owner_company', 'balance_type'],
+                condition=models.Q(owner_company__isnull=False),
+                name='uniq_b2b_balance_per_company_type'
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['owner_user', 'balance_type']),
+            models.Index(fields=['owner_company', 'balance_type']),
+        ]
+
+    def __str__(self):
+        owner = self.owner_company.name if self.owner_company else self.owner_user.email
+        return f"{owner} - {self.balance_type} - {self.current_balance}/{self.fixed_amount}"
+
+
+class BalanceTransaction(TimeStampedModel):
+    """Audit ledger for every PackageBalance change (grant/consume/reset/admin adjustment)."""
+    GRANT = 'GRANT'
+    CONSUME = 'CONSUME'
+    RESET = 'RESET'
+    ADMIN_ADJUST = 'ADMIN_ADJUST'
+    TRANSACTION_TYPE_CHOICES = [
+        (GRANT, 'Grant'),
+        (CONSUME, 'Consume'),
+        (RESET, 'Reset'),
+        (ADMIN_ADJUST, 'Admin Adjustment'),
+    ]
+
+    balance = models.ForeignKey(
+        PackageBalance,
+        on_delete=models.CASCADE,
+        related_name='transactions'
+    )
+    transaction_type = models.CharField(max_length=15, choices=TRANSACTION_TYPE_CHOICES)
+    amount = models.IntegerField(help_text="Signed: positive for GRANT/RESET, negative for CONSUME")
+    balance_after = models.PositiveIntegerField()
+    reference = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='e.g. "session:<public_id>", "addon:<addon_code>", "subscription:<stripe_subscription_id>"'
+    )
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+'
+    )
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "Balance Transaction"
+        verbose_name_plural = "Balance Transactions"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['balance', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.transaction_type} {self.amount} -> {self.balance_after}"
+
 
 class Invoice(TimeStampedModel):
     user = models.ForeignKey(

@@ -255,6 +255,20 @@ PACKAGE_ORDER = {
 }
 
 
+# Candidate Assessment Slots per package (MeritLense Package Architecture v1.2,
+# Section 6). None = no automated enforcement (per-agreement/custom tiers).
+SLOT_GRANTS = {
+    "basic": 3,
+    "essential": 5,
+    "advanced": 10,
+    "premium": 20,
+    "starter": None,
+    "growth": 200,
+    "business": 500,
+    "enterprise": None,
+}
+
+
 class Command(BaseCommand):
     help = "Seed package session configs and role coverage mappings from MeritLense Package Architecture v1.2."
 
@@ -293,6 +307,7 @@ class Command(BaseCommand):
                     )
 
         self._sync_price_metadata()
+        self._sync_price_entitlements()
         self.stdout.write(self.style.SUCCESS("Seeded package architecture v1.2"))
 
     def _coverage_to_tier(self, coverage_level):
@@ -318,6 +333,20 @@ class Command(BaseCommand):
             price.metadata = metadata
             price.features = features
             price.save(update_fields=["metadata", "features", "updated_at"])
+
+    def _sync_price_entitlements(self):
+        if Price is None:
+            return
+
+        points_grants = {config["package_code"]: config["points_balance"] for config in PACKAGE_CONFIGS}
+
+        for price in Price.objects.all():
+            package_code = self._infer_package_code_from_price_name(price.name)
+            if not package_code:
+                continue
+            price.slot_grant = SLOT_GRANTS.get(package_code)
+            price.points_grant = points_grants.get(package_code)
+            price.save(update_fields=["slot_grant", "points_grant", "updated_at"])
 
     def _infer_package_code_from_price_name(self, price_name):
         normalized = (price_name or "").strip().lower()

@@ -11,6 +11,8 @@ from api.candidates.models import Candidate
 from api.core.permisssions import IsB2BTeamMember, IsB2BUser
 from api.evaluations.models import Evaluation
 from api.accounts.models import User
+from api.payments.entitlement_services import EntitlementService
+from api.payments.models import PackageBalance
 from .comparison_services import build_candidate_comparison_entry
 from .serializers import (
     DashboardStatsSerializer, RecentCandidateSerializer, RecentEvaluationSerializer,
@@ -55,6 +57,8 @@ class B2BDashboardStatsView(APIView):
             is_active=True
         ).count()
         
+        balances = EntitlementService.get_balance_summary("COMPANY", company)
+
         stats = {
             'total_candidates': candidates.count(),
             'total_evaluations': evaluations.count(),
@@ -62,8 +66,14 @@ class B2BDashboardStatsView(APIView):
             'certificates_issued': certificates_issued,
             'success_rate': round(success_rate, 2),
             'team_members_count': team_members,
+            'remaining_slots': balances[PackageBalance.SLOTS]['remaining'],
+            'slot_limit': balances[PackageBalance.SLOTS]['limit'],
+            'slots_unlimited': balances[PackageBalance.SLOTS]['unlimited'],
+            'remaining_points': balances[PackageBalance.POINTS]['remaining'],
+            'points_limit': balances[PackageBalance.POINTS]['limit'],
+            'points_unlimited': balances[PackageBalance.POINTS]['unlimited'],
         }
-        
+
         serializer = DashboardStatsSerializer(stats)
         return Response(serializer.data)
 

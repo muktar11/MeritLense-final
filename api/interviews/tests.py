@@ -21,6 +21,7 @@ from api.candidates.models import Candidate
 from api.core.constants import AuditLogAction, CoverageLevel, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, Roles
 from api.interviews.models import InterviewConfiguration, InterviewRubric, PackageSessionConfig, RolePackageCoverage
 from api.interviews.voice_services import VoiceProviderError
+from api.payments.models import PackageBalance
 from api.questions.models import QuestionTemplate
 from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionArtifact, SessionObservedTask, TaskObservationResult
 from api.sessions.services import InterviewSessionService
@@ -84,6 +85,12 @@ class InterviewSessionApiTests(APITestCase):
             preferred_language="EN",
             passport_document=make_file(),
             created_by=self.user,
+        )
+        PackageBalance.objects.create(
+            owner_user=self.user,
+            balance_type=PackageBalance.SLOTS,
+            fixed_amount=1000,
+            current_balance=1000,
         )
         self.config = InterviewConfiguration.objects.create(
             role_name="Nanny",
@@ -393,6 +400,54 @@ class InterviewSessionApiTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_starting_session_blocks_when_no_slots_remain(self):
+        PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(current_balance=0)
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201)
+        session_id = create_response.data["id"]
+
+        start_response = self.client.post(
+            f"/api/v1/interviews/{session_id}/start/",
+            {},
+            format="json",
+        )
+        self.assertEqual(start_response.status_code, 400)
+        self.assertIn("slots remaining", str(start_response.data["detail"]).lower())
+
+        session = InterviewSession.objects.get(public_id=session_id)
+        self.assertNotEqual(session.status, "IN_PROGRESS")
+
+    def test_starting_session_consumes_exactly_one_slot(self):
+        PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(current_balance=1)
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        session_id = create_response.data["id"]
+
+        start_response = self.client.post(
+            f"/api/v1/interviews/{session_id}/start/",
+            {},
+            format="json",
+        )
+        self.assertEqual(start_response.status_code, 200)
+
+        balance = PackageBalance.objects.get(owner_user=self.user, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 0)
 
     def test_create_start_answer_and_complete_interview_session(self):
         create_response = self.client.post(
@@ -3378,6 +3433,12 @@ class InterviewSessionWebSocketTests(TransactionTestCase):
             preferred_language="EN",
             passport_document=make_file("socket-passport.pdf"),
             created_by=self.user,
+        )
+        PackageBalance.objects.create(
+            owner_user=self.user,
+            balance_type=PackageBalance.SLOTS,
+            fixed_amount=1000,
+            current_balance=1000,
         )
         self.config = InterviewConfiguration.objects.create(
             role_name="Nanny",

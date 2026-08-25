@@ -10,6 +10,12 @@ class DashboardStatsSerializer(serializers.Serializer):
     certificates_issued = serializers.IntegerField()
     success_rate = serializers.FloatField()
     team_members_count = serializers.IntegerField(required=False)
+    remaining_slots = serializers.IntegerField(required=False, allow_null=True)
+    slot_limit = serializers.IntegerField(required=False, allow_null=True)
+    slots_unlimited = serializers.BooleanField(required=False)
+    remaining_points = serializers.IntegerField(required=False, allow_null=True)
+    points_limit = serializers.IntegerField(required=False, allow_null=True)
+    points_unlimited = serializers.BooleanField(required=False)
 
 
 class RecentCandidateSerializer(PublicIdModelSerializer):

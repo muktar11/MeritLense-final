@@ -1088,7 +1088,7 @@ class AdminSubscriptionViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSe
         plan_details = []
         
         for sub in active_subs:
-            if sub.stripe_price and sub.stripe_price.currency == 'eur':
+            if sub.stripe_price and sub.stripe_price.currency.lower() == 'eur':
                 plan_name = sub.stripe_price.name if sub.stripe_price else 'Unknown'
                 
                 by_plan[plan_name] = by_plan.get(plan_name, 0) + 1

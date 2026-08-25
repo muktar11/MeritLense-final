@@ -102,23 +102,27 @@ class PaymentMethodSerializer(PublicIdModelSerializer):
 class SubscriptionSerializer(PublicIdModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)
     user_name = serializers.SerializerMethodField()
+    company_name = serializers.SerializerMethodField()
     price_details = PriceSerializer(source='stripe_price', read_only=True)
     is_active_subscription = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = Subscription
         fields = [
             'id', 'user', 'user_email', 'user_name',
-            'company', 'customer', 'stripe_subscription_id',
+            'company', 'company_name', 'customer', 'stripe_subscription_id',
             'stripe_price', 'price_details', 'status',
             'current_period_start', 'current_period_end',
             'trial_start', 'trial_end', 'canceled_at',
             'quantity', 'is_active_subscription',
             'metadata', 'created_at', 'updated_at'
         ]
-    
+
     def get_user_name(self, obj):
         return obj.user.get_full_name()
+
+    def get_company_name(self, obj):
+        return obj.company.name if obj.company else None
     
     def get_is_active_subscription(self, obj):
         active_statuses = ['active', 'trialing', 'ACTIVE', 'TRIALING']

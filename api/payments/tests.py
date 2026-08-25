@@ -392,3 +392,58 @@ class SpendPointsEndpointTests(APITestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("points remaining", response.data["detail"])
+
+
+class AdminSubscriptionStatsAndSerializerTests(APITestCase):
+    """Covers the admin Billing & Subscriptions page (/dashboard/admin/billing/)."""
+
+    def setUp(self):
+        self.superadmin = User.objects.create_user(
+            email="billing-superadmin@example.com",
+            password="Password123!",
+            first_name="Billing",
+            last_name="Super",
+            role=Roles.SUPERADMIN,
+            is_verified=True,
+            is_staff=True,
+        )
+        login = self.client.post(
+            "/api/v1/auth/login",
+            {"email": self.superadmin.email, "password": "Password123!"},
+            format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        self.b2b_owner = User.objects.create_user(
+            email="billing-b2b-owner@example.com",
+            password="Password123!",
+            first_name="B2B",
+            last_name="Owner",
+            role=Roles.B2B,
+            is_verified=True,
+        )
+        self.company = make_company(self.b2b_owner, name="Acme Corp")
+
+    def test_stats_counts_revenue_regardless_of_currency_case(self):
+        """Regression test: stats() did an exact-match `currency == 'eur'`
+        check, the same class of bug already fixed elsewhere this session -
+        a Price stored as 'EUR' silently dropped out of monthly_revenue."""
+        price_lower = make_price(name="Growth Lower", target_user_type="B2B", currency="eur", unit_amount=Decimal("2000.00"))
+        price_upper = make_price(name="Growth Upper", target_user_type="B2B", currency="EUR", unit_amount=Decimal("3500.00"))
+        make_subscription(self.b2b_owner, price_lower, company=self.company, status="ACTIVE")
+        make_subscription(self.b2b_owner, price_upper, company=self.company, status="ACTIVE")
+
+        response = self.client.get("/api/v1/payments/admin/subscriptions/stats")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["monthly_revenue"], 5500.0)
+
+    def test_subscription_list_exposes_company_name(self):
+        """Regression test: the admin billing page could only show a raw
+        company id ("Company ID: 47") because the serializer never exposed
+        a name at all."""
+        price = make_price(target_user_type="B2B")
+        make_subscription(self.b2b_owner, price, company=self.company, status="ACTIVE")
+
+        response = self.client.get("/api/v1/payments/admin/subscriptions")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["results"][0]["company_name"], "Acme Corp")

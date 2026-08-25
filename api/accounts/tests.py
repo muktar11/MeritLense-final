@@ -6,7 +6,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient, APITestCase
 
 from api.accounts.models import Company, CompanyEmployerProfile, IndividualEmployerProfile, User
 from api.core.constants import AdminPermissions, CompanySize, JobRoles, Languages, Nationalities, Roles, SubscriptionStatus
@@ -541,6 +541,69 @@ class AccountsWeek2Tests(APITestCase):
             format="json",
         )
         self.assertEqual(valid_change.status_code, status.HTTP_200_OK, valid_change.data)
+
+    def test_change_password_invalidates_every_prior_session(self):
+        """Regression test: previously, changing a password only stopped
+        future logins - any access/refresh token already issued (from this
+        session or any other device) kept working for its full remaining
+        lifetime, contradicting the "please log in again" message."""
+        user = self.create_verified_b2c_user()
+
+        session_a = self.client.post(
+            "/api/v1/auth/login",
+            {"email": user.email, "password": "Password123!"},
+            format="json",
+        )
+        self.assertEqual(session_a.status_code, status.HTTP_200_OK)
+
+        other_client = APIClient()
+        session_b = other_client.post(
+            "/api/v1/auth/login",
+            {"email": user.email, "password": "Password123!"},
+            format="json",
+        )
+        self.assertEqual(session_b.status_code, status.HTTP_200_OK)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {session_a.data['access']}")
+        change_response = self.client.post(
+            "/api/v1/auth/change-password",
+            {
+                "current_password": "Password123!",
+                "new_password": "BrandNewPassword1!",
+                "confirm_new_password": "BrandNewPassword1!",
+            },
+            format="json",
+        )
+        self.assertEqual(change_response.status_code, status.HTTP_200_OK, change_response.data)
+
+        # The very token used to make the change is itself invalidated for
+        # any subsequent request...
+        stale_a_response = self.client.get("/api/v1/auth/me")
+        self.assertEqual(stale_a_response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        # ...and so is a completely separate session's access token...
+        other_client.credentials(HTTP_AUTHORIZATION=f"Bearer {session_b.data['access']}")
+        stale_b_response = other_client.get("/api/v1/auth/me")
+        self.assertEqual(stale_b_response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        # ...and its refresh token can no longer mint a fresh access token.
+        stale_refresh_response = other_client.post(
+            "/api/v1/auth/refresh",
+            {"refresh": session_b.data["refresh"]},
+            format="json",
+        )
+        self.assertEqual(stale_refresh_response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        # A fresh login with the new password works normally.
+        relogin = self.client.post(
+            "/api/v1/auth/login",
+            {"email": user.email, "password": "BrandNewPassword1!"},
+            format="json",
+        )
+        self.assertEqual(relogin.status_code, status.HTTP_200_OK)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {relogin.data['access']}")
+        fresh_me_response = self.client.get("/api/v1/auth/me")
+        self.assertEqual(fresh_me_response.status_code, status.HTTP_200_OK)
 
     def test_profile_me_get_and_patch_updates_user_and_profile_fields(self):
         user = self.create_verified_b2c_user(email="profile@example.com")

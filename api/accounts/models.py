@@ -56,7 +56,13 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
     
     password_reset_token = models.CharField(max_length=255, null=True, blank=True, unique=True)
     password_reset_token_created_at = models.DateTimeField(null=True, blank=True)
-    
+
+    password_changed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Set whenever the password is changed or reset. Access tokens issued before this are rejected.",
+    )
+
     documents_verified = models.BooleanField(default=False)
     documents_verified_at = models.DateTimeField(null=True, blank=True)
     documents_verification_status = models.CharField(

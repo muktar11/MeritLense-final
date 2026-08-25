@@ -1,3 +1,7 @@
+import re
+
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -191,20 +195,36 @@ class ChangePasswordSerializer(serializers.Serializer):
     current_password = serializers.CharField(write_only=True)
     new_password = serializers.CharField(write_only=True, min_length=8)
     confirm_new_password = serializers.CharField(write_only=True, min_length=8)
-    
+
     def validate_current_password(self, value):
         user = self.context['request'].user
         if not user.check_password(value):
             raise serializers.ValidationError("Current password is incorrect.")
         return value
-    
+
+    def validate_new_password(self, value):
+        # Mirrors the policy the frontend displays and gates submission on -
+        # min_length=8 alone let a password through that satisfies neither
+        # of the two other requirements shown to the user.
+        if not re.search(r'\d', value):
+            raise serializers.ValidationError("Password must contain at least one number.")
+        if not re.search(r'[!@#$%^&*(),.?":{}|<>]', value):
+            raise serializers.ValidationError('Password must contain at least one symbol.')
+
+        try:
+            validate_password(value, user=self.context['request'].user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(list(exc.messages))
+
+        return value
+
     def validate(self, data):
         if data['new_password'] != data['confirm_new_password']:
             raise serializers.ValidationError({"confirm_new_password": "New passwords do not match."})
-        
+
         if data['current_password'] == data['new_password']:
             raise serializers.ValidationError({"new_password": "New password must be different from current password."})
-        
+
         return data
 
 class IndividualProfileSerializer(PublicIdModelSerializer):

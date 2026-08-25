@@ -501,6 +501,47 @@ class AccountsWeek2Tests(APITestCase):
         )
         self.assertEqual(relogin_response.status_code, status.HTTP_200_OK, relogin_response.data)
 
+    def test_change_password_enforces_number_and_symbol_requirement(self):
+        """Regression test: ChangePasswordSerializer only enforced min_length=8
+        server-side while the frontend displayed (and gated submission on) a
+        stricter policy requiring a digit and a symbol - a direct API call
+        could set a password satisfying neither."""
+        user = self.create_verified_b2c_user()
+        self.authenticate(user.email, "Password123!")
+
+        no_digit_or_symbol = self.client.post(
+            "/api/v1/auth/change-password",
+            {
+                "current_password": "Password123!",
+                "new_password": "aaaaaaaa",
+                "confirm_new_password": "aaaaaaaa",
+            },
+            format="json",
+        )
+        self.assertEqual(no_digit_or_symbol.status_code, status.HTTP_400_BAD_REQUEST)
+
+        no_symbol = self.client.post(
+            "/api/v1/auth/change-password",
+            {
+                "current_password": "Password123!",
+                "new_password": "aaaaaaaa1",
+                "confirm_new_password": "aaaaaaaa1",
+            },
+            format="json",
+        )
+        self.assertEqual(no_symbol.status_code, status.HTTP_400_BAD_REQUEST)
+
+        valid_change = self.client.post(
+            "/api/v1/auth/change-password",
+            {
+                "current_password": "Password123!",
+                "new_password": "aaaaaaaa1!",
+                "confirm_new_password": "aaaaaaaa1!",
+            },
+            format="json",
+        )
+        self.assertEqual(valid_change.status_code, status.HTTP_200_OK, valid_change.data)
+
     def test_profile_me_get_and_patch_updates_user_and_profile_fields(self):
         user = self.create_verified_b2c_user(email="profile@example.com")
         self.authenticate(user.email, "Password123!")

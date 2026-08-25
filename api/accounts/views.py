@@ -42,7 +42,7 @@ from .serializers import (
     TeamMemberUpdateSerializer,
     UserStatusUpdateSerializer
 )
-from .utils import send_password_reset_email, send_verification_email, send_team_invitation_email, send_admin_credentials_email, send_employer_welcome_email
+from .utils import send_password_reset_email, send_verification_email, send_team_invitation_email, send_admin_credentials_email, send_employer_welcome_email, invalidate_user_sessions
 import random
 
 
@@ -843,14 +843,16 @@ class ResetPasswordView(APIView):
                     }, status=status.HTTP_400_BAD_REQUEST)
                 
                 user.set_password(new_password)
-                
+
                 user.password_reset_token = None
                 user.password_reset_token_created_at = None
-                
+
                 user.last_login = None
-                
+
                 user.save()
-                
+
+                invalidate_user_sessions(user)
+
                 AuditLogService.log(
                     user=user,
                     action=AuditLogAction.PASSWORD_CHANGE,
@@ -901,10 +903,11 @@ class ChangePasswordView(APIView):
             new_password = serializer.validated_data['new_password']
             
             user.set_password(new_password)
-            
-            
+
             user.save()
-            
+
+            invalidate_user_sessions(user)
+
             AuditLogService.log(
                 user=user,
                 action=AuditLogAction.PASSWORD_CHANGE,

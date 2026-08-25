@@ -294,4 +294,21 @@ Meritlense Team
 """
     
     safe_send_mail(subject, message, [invitation.email])
+
+
+def invalidate_user_sessions(user):
+    """Call whenever a password is changed or reset.
+
+    Stamps password_changed_at (checked by PasswordChangeAwareJWTAuthentication
+    to reject any already-issued access token) and blacklists every
+    outstanding refresh token for the user (stops a stale refresh token from
+    minting a fresh access token afterwards).
+    """
+    from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+
+    user.password_changed_at = timezone.now()
+    user.save(update_fields=["password_changed_at"])
+
+    for outstanding in OutstandingToken.objects.filter(user=user):
+        BlacklistedToken.objects.get_or_create(token=outstanding)
         

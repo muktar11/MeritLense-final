@@ -4,7 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncDate, TruncMonth
 from django.utils import timezone
-from datetime import timedelta, datetime
+from datetime import timedelta
 
 from api.audit.services import AuditLogService
 from api.core.constants import AuditLogCategory, Roles, EvaluationStatus
@@ -12,7 +12,7 @@ from api.accounts.models import User, Company
 from api.candidates.models import Candidate
 from api.core.permisssions import IsAdminOrSuperAdmin
 from api.evaluations.models import Evaluation
-from api.payments.models import Subscription, Payment
+from api.payments.models import Subscription, Payment, Invoice
 
 class AdminDashboardStatsView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
@@ -38,25 +38,37 @@ class AdminDashboardStatsView(APIView):
         
         active_subscriptions = Subscription.objects.filter(
             Q(status__iexact='active') | Q(status__iexact='trialing')
-        )
-        
-        total_revenue = 0
-        active_count = 0
-        
+        ).select_related('stripe_price')
+
+        # A true headcount of active/trialing subscriptions, independent of
+        # whether we can price them below - a subscription whose Price was
+        # since deleted (stripe_price -> NULL via on_delete=SET_NULL) is
+        # still a real active subscription and must still be counted here,
+        # even though it can't contribute to the revenue sum below.
+        active_count = active_subscriptions.count()
+
+        # Monthly Recurring Revenue: the normalized monthly value of
+        # currently active subscriptions - a snapshot of "if nothing
+        # changes, what should renew next month", not a record of money
+        # already collected (that's AdminRevenueTrendView, sourced from
+        # real Payment/Invoice rows instead of this projection).
+        mrr = 0
         for sub in active_subscriptions:
-            if sub.stripe_price and sub.stripe_price.currency == 'eur':
-                active_count += 1
-                if sub.stripe_price.interval == 'MONTH' or sub.stripe_price.interval == 'MONTHLY':
-                    total_revenue += float(sub.stripe_price.unit_amount) * sub.quantity
-                elif sub.stripe_price.interval == 'YEAR' or sub.stripe_price.interval == 'YEARLY':
-                    total_revenue += (float(sub.stripe_price.unit_amount) / 12) * sub.quantity
-                elif sub.stripe_price.interval == 'QUARTER' or sub.stripe_price.interval == 'QUARTERLY':
-                    total_revenue += (float(sub.stripe_price.unit_amount) / 3) * sub.quantity
-                else:
-                    total_revenue += float(sub.stripe_price.unit_amount) * sub.quantity
-        
-        mrr = total_revenue
-        
+            if not sub.stripe_price or sub.stripe_price.currency.lower() != 'eur':
+                # No price to read (deleted Price), or a currency this
+                # summary doesn't convert/aggregate across - skip pricing
+                # only, the subscription is still counted in active_count.
+                continue
+            interval = (sub.stripe_price.interval or '').upper()
+            if interval in ('MONTH', 'MONTHLY'):
+                mrr += float(sub.stripe_price.unit_amount) * sub.quantity
+            elif interval in ('YEAR', 'YEARLY'):
+                mrr += (float(sub.stripe_price.unit_amount) / 12) * sub.quantity
+            elif interval in ('QUARTER', 'QUARTERLY'):
+                mrr += (float(sub.stripe_price.unit_amount) / 3) * sub.quantity
+            else:
+                mrr += float(sub.stripe_price.unit_amount) * sub.quantity
+
         return Response({
             'active_candidates': active_candidates,
             'total_users': total_users,
@@ -65,7 +77,6 @@ class AdminDashboardStatsView(APIView):
             'active_agencies': active_agencies,
             'total_evaluations': total_evaluations,
             'completed_evaluations': completed_evaluations,
-            'total_revenue': round(total_revenue, 2),
             'monthly_recurring_revenue': round(mrr, 2),
             'active_subscriptions_count': active_count,
             'average_success_rate': self.get_average_success_rate(),
@@ -224,27 +235,32 @@ class AdminPackageContributionView(APIView):
         package_stats = {}
         
         for sub in active_subs:
-            if sub.stripe_price:
-                price_name = sub.stripe_price.name
-                if price_name not in package_stats:
-                    package_stats[price_name] = {
-                        'package_name': price_name,
-                        'subscriber_count': 0,
-                        'revenue': 0,
-                        'target_user_type': sub.stripe_price.target_user_type,
-                    }
-                
-                package_stats[price_name]['subscriber_count'] += sub.quantity
-                
-                if sub.stripe_price.currency == 'eur':
-                    if sub.stripe_price.interval in ['MONTH', 'MONTHLY']:
-                        package_stats[price_name]['revenue'] += float(sub.stripe_price.unit_amount) * sub.quantity
-                    elif sub.stripe_price.interval in ['YEAR', 'YEARLY']:
-                        package_stats[price_name]['revenue'] += (float(sub.stripe_price.unit_amount) / 12) * sub.quantity
-                    elif sub.stripe_price.interval in ['QUARTER', 'QUARTERLY']:
-                        package_stats[price_name]['revenue'] += (float(sub.stripe_price.unit_amount) / 3) * sub.quantity
-                    else:
-                        package_stats[price_name]['revenue'] += float(sub.stripe_price.unit_amount) * sub.quantity
+            # A subscription whose Price was since deleted (stripe_price ->
+            # NULL via on_delete=SET_NULL) is still a real active
+            # subscriber - bucket it under a clearly-labeled placeholder
+            # instead of silently dropping it from the chart entirely.
+            price_name = sub.stripe_price.name if sub.stripe_price else "Unknown Package"
+            target_user_type = sub.stripe_price.target_user_type if sub.stripe_price else None
+            if price_name not in package_stats:
+                package_stats[price_name] = {
+                    'package_name': price_name,
+                    'subscriber_count': 0,
+                    'revenue': 0,
+                    'target_user_type': target_user_type,
+                }
+
+            package_stats[price_name]['subscriber_count'] += sub.quantity
+
+            if sub.stripe_price and sub.stripe_price.currency.lower() == 'eur':
+                interval = (sub.stripe_price.interval or '').upper()
+                if interval in ('MONTH', 'MONTHLY'):
+                    package_stats[price_name]['revenue'] += float(sub.stripe_price.unit_amount) * sub.quantity
+                elif interval in ('YEAR', 'YEARLY'):
+                    package_stats[price_name]['revenue'] += (float(sub.stripe_price.unit_amount) / 12) * sub.quantity
+                elif interval in ('QUARTER', 'QUARTERLY'):
+                    package_stats[price_name]['revenue'] += (float(sub.stripe_price.unit_amount) / 3) * sub.quantity
+                else:
+                    package_stats[price_name]['revenue'] += float(sub.stripe_price.unit_amount) * sub.quantity
         
         total_subscribers = sum(stat['subscriber_count'] for stat in package_stats.values())
         total_revenue = sum(stat['revenue'] for stat in package_stats.values())
@@ -344,44 +360,50 @@ class AdminRevenueTrendView(APIView):
             next_month = current_date.replace(day=28) + timedelta(days=4)
             current_date = next_month.replace(day=1)
         
+        # payment_revenue: one-time (B2C package) purchases only.
+        # subscription-linked Payment rows are excluded here because they'd
+        # double-count real subscription billing already captured by
+        # Invoice below (a subscription's first invoice creates both a
+        # Payment, at signup, and later an Invoice, via the
+        # invoice.payment_succeeded webhook - see StripeService.
+        # handle_invoice_paid/create_subscription).
         payments = Payment.objects.filter(
             status='SUCCEEDED',
-            created_at__gte=start_date
-        ).select_related('subscription', 'subscription__stripe_price')
-        
+            subscription__isnull=True,
+            currency__iexact='eur',
+            created_at__gte=start_date,
+        )
+
         for payment in payments:
             month_key = payment.created_at.strftime('%Y-%m')
             if month_key in months_data:
                 months_data[month_key]['payment_revenue'] += float(payment.amount)
                 months_data[month_key]['payment_count'] += 1
-        
-        active_subs = Subscription.objects.filter(
-            Q(status__iexact='active') | Q(status__iexact='trialing')
-        ).select_related('stripe_price')
-        
-        for sub in active_subs:
-            if not (sub.stripe_price and sub.stripe_price.currency == 'eur'):
-                continue
-            
-            if sub.stripe_price.interval in ['MONTH', 'MONTHLY']:
-                monthly_amount = float(sub.stripe_price.unit_amount) * sub.quantity
-            elif sub.stripe_price.interval in ['YEAR', 'YEARLY']:
-                monthly_amount = (float(sub.stripe_price.unit_amount) / 12) * sub.quantity
-            elif sub.stripe_price.interval in ['QUARTER', 'QUARTERLY']:
-                monthly_amount = (float(sub.stripe_price.unit_amount) / 3) * sub.quantity
-            else:
-                monthly_amount = float(sub.stripe_price.unit_amount) * sub.quantity
-            
-            sub_start = sub.created_at.date()
-            sub_end = sub.current_period_end.date() if sub.current_period_end else end_date.date()
-            
-            for month_key in months_data.keys():
-                month_start = datetime.strptime(month_key + '-01', '%Y-%m-%d').date()
-                month_end = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
-                
-                if sub_start <= month_end and (not sub_end or sub_end >= month_start):
-                    months_data[month_key]['subscription_revenue'] += monthly_amount
-            
+
+        # subscription_revenue: real subscription billing history (initial
+        # + renewal invoices), not a retroactive projection - this is what
+        # actually happened each month, so a canceled subscription's past
+        # invoices still count for the months they were really paid, and a
+        # currently-active subscription doesn't get credited for months it
+        # never actually renewed in.
+        invoices = Invoice.objects.filter(
+            status='PAID',
+            currency__iexact='eur',
+            created_at__gte=start_date,
+        )
+
+        for invoice in invoices:
+            reference_date = invoice.paid_at or invoice.created_at
+            month_key = reference_date.strftime('%Y-%m')
+            if month_key in months_data:
+                months_data[month_key]['subscription_revenue'] += float(invoice.amount_paid)
+                months_data[month_key]['payment_count'] += 1
+
+        # New subscriptions, by creation month, regardless of current
+        # status - a subscription created in March and canceled in June
+        # should still count as a new subscription in March.
+        all_subs_in_window = Subscription.objects.filter(created_at__gte=start_date)
+        for sub in all_subs_in_window:
             creation_month = sub.created_at.strftime('%Y-%m')
             if creation_month in months_data:
                 months_data[creation_month]['new_subscriptions'] += 1

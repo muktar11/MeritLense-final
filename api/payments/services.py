@@ -744,11 +744,35 @@ class StripeService:
             return None
     
     def handle_invoice_paid(self, invoice_data):
-        """Handle invoice paid - this should trigger subscription status update"""
+        """Handle invoice paid - records the invoice (the source of truth for
+        subscription billing history, including renewals - see
+        AdminRevenueTrendView) and updates the subscription status.
+
+        Invoice.user/customer are required (not nullable), so they must come
+        from the subscription this invoice belongs to - an invoice with no
+        resolvable subscription is skipped rather than raising an
+        IntegrityError, since there's no other way to know who it's for.
+        """
         try:
+            subscription = None
+            if invoice_data.get('subscription'):
+                subscription = Subscription.objects.filter(
+                    stripe_subscription_id=invoice_data['subscription']
+                ).first()
+
+            if not subscription:
+                logger.warning(
+                    f"Invoice {invoice_data.get('id')} has no resolvable subscription - skipping "
+                    f"(Invoice.user/customer can't be set without one)"
+                )
+                return None
+
             invoice, created = Invoice.objects.update_or_create(
                 stripe_invoice_id=invoice_data['id'],
                 defaults={
+                    'user': subscription.user,
+                    'customer': subscription.customer,
+                    'subscription': subscription,
                     'number': invoice_data['number'],
                     'status': 'PAID',
                     'amount_due': Decimal(invoice_data['amount_due']) / 100,
@@ -760,20 +784,12 @@ class StripeService:
                     'hosted_invoice_url': invoice_data.get('hosted_invoice_url', ''),
                 }
             )
-            
-            if invoice_data.get('subscription'):
-                subscription = Subscription.objects.filter(
-                    stripe_subscription_id=invoice_data['subscription']
-                ).first()
-                if subscription:
-                    invoice.subscription = subscription
-                    invoice.save()
-                    
-                    if subscription.status == 'INCOMPLETE':
-                        subscription.status = 'ACTIVE'
-                        subscription.save()
-                        logger.info(f"Subscription {subscription.id} status updated to active after payment")
-            
+
+            if subscription.status == 'INCOMPLETE':
+                subscription.status = 'ACTIVE'
+                subscription.save()
+                logger.info(f"Subscription {subscription.id} status updated to active after payment")
+
             logger.info(f"Invoice paid: {invoice_data['id']}")
             return invoice
         except Exception as e:

@@ -9,6 +9,7 @@ from api.candidates.models import Candidate
 from api.core.constants import EvaluationType, InterviewEvaluationTier, Roles
 from api.evaluations.models import Evaluation, ScoringRuleSet, SessionEvaluationSummary
 from api.interviews.models import InterviewConfiguration
+from api.payments.models import Customer, Invoice, Payment, Price, Subscription
 from api.sessions.models import InterviewSession
 
 
@@ -278,3 +279,148 @@ class CandidateComparisonApiTests(TestCase):
         by_id = {item["candidate_id"]: item for item in response.data}
         self.assertEqual(set(by_id.keys()), {scored_id, unscored_id})
         self.assertEqual(by_id[scored_id]["scores_by_area"]["Teamwork"], 77.0)
+
+
+class AdminRevenueAccuracyTests(TestCase):
+    """Regression coverage for the admin dashboard's revenue/subscription
+    stats - previously a subscription's real Stripe payment (recorded as a
+    Payment row at signup) and its normalized monthly price (re-projected
+    across every month it overlapped) were both added to the same total,
+    double-counting real revenue; subscriptions whose Price had since been
+    deleted (stripe_price -> NULL) were silently dropped from every count."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            email="admin@example.com",
+            password="Password123!",
+            first_name="Admin",
+            last_name="User",
+            role=Roles.ADMIN,
+            is_verified=True,
+            is_staff=True,
+        )
+        self.client.force_authenticate(self.admin)
+
+        self.owner = User.objects.create_user(
+            email="owner@example.com",
+            password="Password123!",
+            first_name="Company",
+            last_name="Owner",
+            role=Roles.B2B,
+            is_verified=True,
+        )
+        self.customer = Customer.objects.create(
+            user=self.owner, stripe_customer_id="cus_1", email=self.owner.email
+        )
+        self.price = Price.objects.create(
+            name="Growth Package",
+            stripe_price_id="price_growth",
+            stripe_product_id="prod_growth",
+            target_user_type="B2B",
+            unit_amount=Decimal("2000.00"),
+            currency="eur",
+            interval="MONTHLY",
+            interval_count=1,
+            billing_type="RECURRING",
+        )
+
+    def test_revenue_trend_does_not_double_count_a_subscriptions_first_invoice(self):
+        subscription = Subscription.objects.create(
+            user=self.owner,
+            customer=self.customer,
+            stripe_price=self.price,
+            stripe_subscription_id="sub_1",
+            status="ACTIVE",
+            current_period_start=timezone.now(),
+            current_period_end=timezone.now() + timezone.timedelta(days=30),
+            quantity=1,
+        )
+        # The legacy signup-time record (still written by
+        # StripeService.create_subscription) - must NOT be double-counted
+        # against the Invoice below, which represents the same real charge.
+        Payment.objects.create(
+            user=self.owner,
+            customer=self.customer,
+            subscription=subscription,
+            stripe_payment_intent_id="pi_1",
+            amount=Decimal("2000.00"),
+            currency="eur",
+            status="SUCCEEDED",
+        )
+        Invoice.objects.create(
+            user=self.owner,
+            customer=self.customer,
+            subscription=subscription,
+            stripe_invoice_id="in_1",
+            number="INV-001",
+            status="PAID",
+            amount_due=Decimal("2000.00"),
+            amount_paid=Decimal("2000.00"),
+            amount_remaining=Decimal("0.00"),
+            currency="eur",
+            paid_at=timezone.now(),
+        )
+
+        response = self.client.get("/api/v1/dashboard/admin/revenue-trend", {"months": 1})
+
+        self.assertEqual(response.status_code, 200)
+        current_month = response.data[-1]
+        self.assertEqual(current_month["payment_revenue"], 0)
+        self.assertEqual(current_month["subscription_revenue"], 2000.0)
+        self.assertEqual(current_month["total_revenue"], 2000.0)
+
+    def test_revenue_trend_includes_one_time_payments(self):
+        Payment.objects.create(
+            user=self.owner,
+            customer=self.customer,
+            subscription=None,
+            stripe_payment_intent_id="pi_onetime",
+            amount=Decimal("150.00"),
+            currency="eur",
+            status="SUCCEEDED",
+        )
+
+        response = self.client.get("/api/v1/dashboard/admin/revenue-trend", {"months": 1})
+
+        current_month = response.data[-1]
+        self.assertEqual(current_month["payment_revenue"], 150.0)
+        self.assertEqual(current_month["subscription_revenue"], 0)
+
+    def test_stats_counts_subscription_with_deleted_price_but_excludes_it_from_mrr(self):
+        Subscription.objects.create(
+            user=self.owner,
+            customer=self.customer,
+            stripe_price=None,  # simulates a Price that was later deleted
+            stripe_subscription_id="sub_orphan",
+            status="ACTIVE",
+            current_period_start=timezone.now(),
+            current_period_end=timezone.now() + timezone.timedelta(days=30),
+            quantity=1,
+        )
+
+        response = self.client.get("/api/v1/dashboard/admin/stats")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["active_subscriptions_count"], 1)
+        self.assertEqual(response.data["monthly_recurring_revenue"], 0)
+
+    def test_package_contribution_buckets_deleted_price_subscriptions_separately(self):
+        Subscription.objects.create(
+            user=self.owner,
+            customer=self.customer,
+            stripe_price=None,
+            stripe_subscription_id="sub_orphan_2",
+            status="ACTIVE",
+            current_period_start=timezone.now(),
+            current_period_end=timezone.now() + timezone.timedelta(days=30),
+            quantity=1,
+        )
+
+        response = self.client.get("/api/v1/dashboard/admin/package-contribution")
+
+        self.assertEqual(response.status_code, 200)
+        names = {item["package_name"] for item in response.data}
+        self.assertIn("Unknown Package", names)
+        unknown = next(item for item in response.data if item["package_name"] == "Unknown Package")
+        self.assertEqual(unknown["subscriber_count"], 1)

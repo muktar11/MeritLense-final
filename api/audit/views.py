@@ -31,50 +31,50 @@ class AuditLogViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
         queryset = AuditLog.objects.all()
         
         filters = AuditLogFilterSerializer(data=self.request.query_params)
-        if filters.is_valid():
-            data = filters.validated_data
-            
-            if data.get('user_id'):
-                try:
-                    queryset = queryset.filter(user=get_by_identifier(User.objects.all(), data['user_id']))
-                except User.DoesNotExist:
-                    return queryset.none()
-            
-            if data.get('company_id'):
-                try:
-                    queryset = queryset.filter(company=get_by_identifier(Company.objects.all(), data['company_id']))
-                except Company.DoesNotExist:
-                    return queryset.none()
-            
-            if data.get('category'):
-                queryset = queryset.filter(category=data['category'])
-            
-            if data.get('action'):
-                queryset = queryset.filter(action=data['action'])
-            
-            if data.get('severity'):
-                queryset = queryset.filter(severity=data['severity'])
-            
-            if data.get('resource_type'):
-                queryset = queryset.filter(resource_type_name__icontains=data['resource_type'])
-            
-            if data.get('resource_id'):
-                queryset = queryset.filter(resource_id=data['resource_id'])
-            
-            if data.get('date_from'):
-                queryset = queryset.filter(created_at__gte=data['date_from'])
-            
-            if data.get('date_to'):
-                queryset = queryset.filter(created_at__lte=data['date_to'])
-            
-            if data.get('search'):
-                queryset = queryset.filter(
-                    Q(description__icontains=data['search']) |
-                    Q(user_email__icontains=data['search']) |
-                    Q(user_name__icontains=data['search']) |
-                    Q(resource_name__icontains=data['search'])
-                )
-        
+        filters.is_valid(raise_exception=True)
+        data = filters.validated_data
+
+        if data.get('user_id'):
+            try:
+                queryset = queryset.filter(user=get_by_identifier(User.objects.all(), data['user_id']))
+            except User.DoesNotExist:
+                return queryset.none()
+
+        if data.get('company_id'):
+            try:
+                queryset = queryset.filter(company=get_by_identifier(Company.objects.all(), data['company_id']))
+            except Company.DoesNotExist:
+                return queryset.none()
+
+        if data.get('category'):
+            queryset = queryset.filter(category=data['category'])
+
+        if data.get('action'):
+            queryset = queryset.filter(action=data['action'])
+
+        if data.get('severity'):
+            queryset = queryset.filter(severity=data['severity'])
+
+        if data.get('resource_type'):
+            queryset = queryset.filter(resource_type_name__icontains=data['resource_type'])
+
+        if data.get('resource_id'):
+            queryset = queryset.filter(resource_id=data['resource_id'])
+
+        if data.get('date_from'):
+            queryset = queryset.filter(created_at__gte=data['date_from'])
+
+        if data.get('date_to'):
+            queryset = queryset.filter(created_at__lte=data['date_to'])
+
+        if data.get('search'):
+            queryset = queryset.filter(
+                Q(description__icontains=data['search']) |
+                Q(user_email__icontains=data['search']) |
+                Q(user_name__icontains=data['search']) |
+                Q(resource_name__icontains=data['search'])
+            )
+
         return queryset
     
     @action(detail=False, methods=['get'])

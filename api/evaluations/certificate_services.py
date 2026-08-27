@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import io
+from decimal import Decimal
 from pathlib import Path
 
 from django.conf import settings
@@ -12,6 +13,20 @@ from .models import Certificate
 from .readiness_record_services import EvaluationReadinessRecordService
 
 READINESS_FRAMEWORK_VERSION = "v1.0"
+MINIMUM_CERTIFICATE_QUALITY = "Good"
+MINIMUM_REQUIRED_DIMENSIONS = 4
+REQUIRED_DIMENSIONS = (
+    "SAFETY",
+    "HYGIENE",
+    "COMMUNICATION",
+    "PRACTICAL_TASKS",
+    "BEHAVIORAL",
+)
+QUALITY_RANK = {
+    "Limited": 1,
+    "Good": 2,
+    "Excellent": 3,
+}
 
 _LOGO_PATH = Path(__file__).resolve().parent / "assets" / "meritlense-logo.png"
 _logo_data_uri_cache = None
@@ -49,6 +64,60 @@ READINESS_GAUGE = {
 
 class CertificateGenerationError(Exception):
     pass
+
+
+def _revoke_existing_certificate(evaluation, reason):
+    from api.core.constants import CertificateStatus
+
+    if not hasattr(evaluation, "certificate"):
+        evaluation.certificate_status = CertificateStatus.NOT_ISSUED
+        evaluation.certificate_issued_at = None
+        evaluation.save(update_fields=["certificate_status", "certificate_issued_at"])
+        return
+
+    evaluation.certificate_status = CertificateStatus.REVOKED
+    evaluation.save(update_fields=["certificate_status"])
+
+
+def _canonical_dimension(*values):
+    haystack = " ".join(str(value or "").lower() for value in values)
+    if any(token in haystack for token in ("safety", "hazard", "patient safety")):
+        return "SAFETY"
+    if any(token in haystack for token in ("hygiene", "clean", "sanitation")):
+        return "HYGIENE"
+    if any(token in haystack for token in ("communication", "language")):
+        return "COMMUNICATION"
+    if any(token in haystack for token in ("practical", "task execution", "task")):
+        return "PRACTICAL_TASKS"
+    if any(token in haystack for token in ("behavior", "integrity", "reliability")):
+        return "BEHAVIORAL"
+    return None
+
+
+def _assessed_dimensions(summary):
+    dimensions = set()
+    for item in summary.competencies_summary or []:
+        response_count = int(item.get("completed_response_count") or 0)
+        percentage = item.get("percentage")
+        status = str(item.get("status") or "").upper()
+        if response_count <= 0 and percentage in (None, ""):
+            continue
+        if status in {"NOT_STARTED", "INCOMPLETE"} and response_count <= 0:
+            continue
+        dimension = _canonical_dimension(item.get("competency_code"), item.get("competency_name"))
+        if dimension:
+            dimensions.add(dimension)
+    return dimensions
+
+
+def _human_review_pending(summary):
+    return summary.status == summary.STATUS_REQUIRES_HUMAN_REVIEW
+
+
+def _minimum_quality_met(assessment_quality):
+    actual_rank = QUALITY_RANK.get(str(assessment_quality or ""), 0)
+    required_rank = QUALITY_RANK.get(MINIMUM_CERTIFICATE_QUALITY, 0)
+    return actual_rank >= required_rank
 
 
 def _generate_sequential_id(field_name, prefix):
@@ -158,13 +227,41 @@ def certificate_eligibility(evaluation, summary):
     readiness_record = EvaluationReadinessRecordService.get_existing(evaluation)
     indicator = EvaluationReportService._resolve_readiness_indicator(evaluation, readiness_record)
     assessment_completeness = EvaluationReportService._derive_assessment_completeness(summary)
+    response_results = list(
+        evaluation.response_results.select_related("response").only(
+            "requires_human_review",
+            "response__stt_confidence",
+        )
+    )
+    human_review_flags = EvaluationReportService._build_human_review_flags(
+        evaluation=evaluation,
+        summary=summary,
+        response_results=response_results,
+        competency_results=[],
+    )
+    assessment_quality = EvaluationReportService._derive_assessment_quality(
+        session=evaluation.session,
+        summary=summary,
+        human_review_flags=human_review_flags,
+        response_evidence_summary=EvaluationReportService._build_response_evidence(response_results),
+    )
+    covered_dimensions = _assessed_dimensions(summary)
     session = evaluation.session
     identity_verified = bool(session and session.identity_verified)
+    completion_verified = bool(evaluation.status == "COMPLETED" and session and session.status == "COMPLETED")
 
     if not identity_verified:
         return False, "VERIFICATION_FAILED"
+    if not completion_verified:
+        return False, "COMPLETION_UNVERIFIED"
     if assessment_completeness < 100:
         return False, "INCOMPLETE"
+    if not _minimum_quality_met(assessment_quality):
+        return False, "QUALITY_BELOW_THRESHOLD"
+    if len(covered_dimensions) < min(MINIMUM_REQUIRED_DIMENSIONS, len(REQUIRED_DIMENSIONS)):
+        return False, "INSUFFICIENT_COMPETENCY_COVERAGE"
+    if human_review_flags or _human_review_pending(summary):
+        return False, "HUMAN_REVIEW_PENDING"
     if indicator["code"] == "NOT_READY":
         return False, "NOT_READY"
     return True, indicator["code"]
@@ -189,8 +286,7 @@ def generate_certificate(evaluation, summary):
 
     eligible, reason = certificate_eligibility(evaluation, summary)
     if not eligible:
-        evaluation.certificate_status = CertificateStatus.NOT_ISSUED
-        evaluation.save(update_fields=["certificate_status"])
+        _revoke_existing_certificate(evaluation, reason)
         return None
 
     from weasyprint import HTML
@@ -220,6 +316,7 @@ def generate_certificate(evaluation, summary):
         "role_name": session.role_name if session else evaluation.candidate.job_role,
         "role_profile_version": _role_profile_version(session),
         "candidate_photo_data_uri": _candidate_photo_data_uri(evaluation.candidate),
+        "candidate_photo_verified": bool(getattr(evaluation.candidate, "verification_photo", None)),
         "readiness_label": readiness["label"],
         "readiness_position": readiness["position"],
         "issue_date": certificate.issued_at.strftime("%Y-%m-%d"),

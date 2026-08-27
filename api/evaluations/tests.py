@@ -22,6 +22,43 @@ from api.interviews.models import InterviewConfiguration
 from api.translation.models import EvaluationInputArtifact
 
 
+def covered_competencies():
+    return [
+        {
+            "competency_code": "safety_awareness",
+            "competency_name": "Safety Awareness",
+            "percentage": 82.0,
+            "response_count": 1,
+            "completed_response_count": 1,
+            "status": "MEETS_THRESHOLD",
+        },
+        {
+            "competency_code": "hygiene_standards",
+            "competency_name": "Hygiene Standards",
+            "percentage": 78.0,
+            "response_count": 1,
+            "completed_response_count": 1,
+            "status": "MEETS_THRESHOLD",
+        },
+        {
+            "competency_code": "communication_ability",
+            "competency_name": "Communication Ability",
+            "percentage": 80.0,
+            "response_count": 1,
+            "completed_response_count": 1,
+            "status": "MEETS_THRESHOLD",
+        },
+        {
+            "competency_code": "practical_task_execution",
+            "competency_name": "Practical Task Execution",
+            "percentage": 75.0,
+            "response_count": 1,
+            "completed_response_count": 1,
+            "status": "MEETS_THRESHOLD",
+        },
+    ]
+
+
 class EvaluationRuleEngineTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -1132,8 +1169,15 @@ class CandidateScoreSummaryApiTests(TestCase):
         from api.evaluations.certificate_services import generate_certificate
 
         self.session.identity_verified = True
-        self.session.save(update_fields=["identity_verified"])
+        self.session.status = "COMPLETED"
+        self.session.ended_at = timezone.now()
+        self.session.save(update_fields=["identity_verified", "status", "ended_at"])
+        self.evaluation.status = EvaluationStatus.COMPLETED
+        self.evaluation.completed_at = timezone.now()
+        self.evaluation.save(update_fields=["status", "completed_at"])
         summary = SessionEvaluationSummary.objects.get(evaluation=self.evaluation)
+        summary.competencies_summary = covered_competencies()
+        summary.save(update_fields=["competencies_summary"])
         generate_certificate(self.evaluation, summary)
 
         self.client.force_authenticate(self.user)
@@ -1382,7 +1426,7 @@ class AutomaticScoringOnCompletionTests(TestCase):
         summary = SessionEvaluationSummary.objects.get(session=self.session)
         self.assertEqual(float(summary.overall_percentage), 100.0)
 
-    def test_completion_auto_generates_a_certificate_when_certificate_enabled(self):
+    def test_completion_does_not_issue_a_certificate_when_coverage_is_insufficient(self):
         from api.sessions.services import InterviewSessionService
 
         template = QuestionTemplate.objects.create(
@@ -1479,12 +1523,8 @@ class AutomaticScoringOnCompletionTests(TestCase):
 
         evaluation = Evaluation.objects.get(session=self.session)
         self.assertTrue(evaluation.certificate_enabled)
-        certificate = Certificate.objects.get(evaluation=evaluation)
-        self.assertTrue(certificate.certificate_id.startswith("ML-"))
-        self.assertTrue(certificate.pdf_file.name)
-        self.assertTrue(certificate.pdf_hash)
-        self.assertIsNotNone(certificate.issued_at)
-        self.assertIsNone(certificate.expires_at)
+        self.assertEqual(evaluation.certificate_status, "NOT_ISSUED")
+        self.assertFalse(Certificate.objects.filter(evaluation=evaluation).exists())
 
 
 class CertificateGenerationTests(TestCase):
@@ -1564,9 +1604,13 @@ class CertificateGenerationTests(TestCase):
         self.candidate.save()
         from api.core.constants import ReadinessStatus
         self.evaluation.readiness_status = ReadinessStatus.READY
-        self.evaluation.save(update_fields=["readiness_status"])
+        self.evaluation.status = EvaluationStatus.COMPLETED
+        self.evaluation.completed_at = timezone.now()
+        self.evaluation.save(update_fields=["readiness_status", "status", "completed_at"])
         self.session.identity_verified = True
-        self.session.save(update_fields=["identity_verified"])
+        self.session.status = "COMPLETED"
+        self.session.ended_at = timezone.now()
+        self.session.save(update_fields=["identity_verified", "status", "ended_at"])
         summary = SessionEvaluationSummary.objects.create(
             evaluation=self.evaluation,
             session=self.session,
@@ -1584,7 +1628,7 @@ class CertificateGenerationTests(TestCase):
                 "TASK_EXECUTION": {"percentage": 90.0, "weight": 20},
             },
             competencies_summary=[
-                {"competency_code": "safety_awareness", "competency_name": "Safety Awareness", "percentage": 70.0, "response_count": 1},
+                *covered_competencies(),
             ],
             total_response_count=1,
             evaluated_response_count=1,
@@ -1640,7 +1684,12 @@ class CertificateGenerationTests(TestCase):
 
     def test_regenerating_keeps_the_same_certificate_id(self):
         self.session.identity_verified = True
-        self.session.save(update_fields=["identity_verified"])
+        self.session.status = "COMPLETED"
+        self.session.ended_at = timezone.now()
+        self.session.save(update_fields=["identity_verified", "status", "ended_at"])
+        self.evaluation.status = EvaluationStatus.COMPLETED
+        self.evaluation.completed_at = timezone.now()
+        self.evaluation.save(update_fields=["status", "completed_at"])
         summary = SessionEvaluationSummary.objects.create(
             evaluation=self.evaluation,
             session=self.session,
@@ -1650,7 +1699,7 @@ class CertificateGenerationTests(TestCase):
                 evaluation_tier=InterviewEvaluationTier.FULL, is_active=True, created_by=self.user,
             ),
             total_score=Decimal("70"), max_score=Decimal("100"), overall_percentage=Decimal("70.00"),
-            competencies_summary=[], status=SessionEvaluationSummary.STATUS_EVALUATED,
+            competencies_summary=covered_competencies(), status=SessionEvaluationSummary.STATUS_EVALUATED,
             total_response_count=1, evaluated_response_count=1,
         )
 
@@ -1726,7 +1775,12 @@ class CertificateEligibilityTests(TestCase):
             scheduled_date=timezone.now() + timezone.timedelta(days=1),
             duration_minutes=45,
             created_by=self.user,
+            status=EvaluationStatus.COMPLETED,
+            completed_at=timezone.now(),
         )
+        self.session.status = "COMPLETED"
+        self.session.ended_at = timezone.now()
+        self.session.save(update_fields=["status", "ended_at"])
 
     def _summary(self, total_response_count=1, evaluated_response_count=1):
         return SessionEvaluationSummary.objects.create(
@@ -1738,7 +1792,7 @@ class CertificateEligibilityTests(TestCase):
                 evaluation_tier=InterviewEvaluationTier.FULL, is_active=True, created_by=self.user,
             ),
             total_score=Decimal("70"), max_score=Decimal("100"), overall_percentage=Decimal("70.00"),
-            competencies_summary=[], status=SessionEvaluationSummary.STATUS_EVALUATED,
+            competencies_summary=covered_competencies(), status=SessionEvaluationSummary.STATUS_EVALUATED,
             total_response_count=total_response_count,
             evaluated_response_count=evaluated_response_count,
         )
@@ -1867,6 +1921,8 @@ class EvaluatorRatingTests(TestCase):
             expires_at=InterviewSession.build_expiry(30),
             created_by=self.user,
             identity_verified=True,
+            status="COMPLETED",
+            ended_at=timezone.now(),
         )
         self.evaluation = Evaluation.objects.create(
             session=self.session,
@@ -1875,6 +1931,8 @@ class EvaluatorRatingTests(TestCase):
             scheduled_date=timezone.now() + timezone.timedelta(days=1),
             duration_minutes=45,
             created_by=self.user,
+            status=EvaluationStatus.COMPLETED,
+            completed_at=timezone.now(),
         )
         self.url = f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/evaluator-rating"
         self.client = APIClient()
@@ -1890,7 +1948,7 @@ class EvaluatorRatingTests(TestCase):
                 evaluation_tier=InterviewEvaluationTier.FULL, is_active=True, created_by=self.user,
             ),
             total_score=Decimal("70"), max_score=Decimal("100"), overall_percentage=Decimal("70.00"),
-            competencies_summary=[], status=SessionEvaluationSummary.STATUS_EVALUATED,
+            competencies_summary=covered_competencies(), status=SessionEvaluationSummary.STATUS_EVALUATED,
             total_response_count=1, evaluated_response_count=1,
         )
 

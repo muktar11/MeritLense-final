@@ -28,9 +28,11 @@
 
   /* ---------- Body: photo + statement ---------- */
   .body-row { display: flex; align-items: center; gap: 22px; margin-top: 14px; padding: 0 10mm; }
-  .photo-frame { width: 96px; height: 126px; border-radius: 10px; overflow: hidden; border: 2px solid #dbe4f7; background: #eef2fb; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .photo-block { display: flex; flex-direction: column; align-items: center; gap: 8px; flex-shrink: 0; }
+  .photo-frame { width: 96px; height: 126px; border-radius: 10px; overflow: hidden; border: 2px solid #dbe4f7; background: #eef2fb; display: flex; align-items: center; justify-content: center; }
   .photo-frame img { width: 100%; height: 100%; object-fit: cover; }
   .photo-placeholder { font-size: 26pt; font-weight: 700; color: #93aee0; }
+  .photo-verified { font-size: 7pt; font-weight: 700; color: #14532d; background: #dcfce7; border: 1px solid #86efac; border-radius: 999px; padding: 4px 8px; }
   .statement-col { flex: 1; text-align: center; }
   .statement-intro { font-size: 9.5pt; color: #666; }
   .candidate-name { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 20pt; font-weight: 700; color: #1e2a3a; margin: 3px 0; }
@@ -46,7 +48,7 @@
   .info-item span:last-child { font-weight: 700; color: #1e2a3a; text-align: right; }
 
   .readiness-card { text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; }
-  .readiness-label { font-size: 7.8pt; text-transform: uppercase; letter-spacing: 0.05em; color: #888; margin-bottom: 8px; }
+  .readiness-label { font-size: 7.8pt; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; margin-bottom: 8px; }
   .readiness-badge { display: inline-block; font-size: 11pt; font-weight: 800; padding: 7px 16px; border-radius: 100px; }
   .readiness-badge.level-1 { background: #fee2e2; color: #b91c1c; }
   .readiness-badge.level-2 { background: #fef3c7; color: #b45309; }
@@ -73,7 +75,7 @@
   .issued-by { font-size: 7.5pt; color: #888; line-height: 1.4; flex-shrink: 0; }
   .issued-by b { color: #1e2a3a; }
   .signature { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 13pt; color: #1e3a8a; flex-shrink: 0; }
-  .seal { width: 54px; height: 54px; border-radius: 50%; border: 2px solid #1e3a8a; text-align: center; font-size: 5pt; font-weight: 700; color: #1e3a8a; line-height: 1.5; overflow: hidden; flex-shrink: 0; padding-top: 18px; }
+  .issuer-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; height: 54px; border-radius: 999px; background: #dbeafe; border: 1px solid #93c5fd; color: #1d4ed8; font-size: 6pt; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; padding: 0 10px; }
 
   .disclaimer { font-size: 6.6pt; color: #999; text-align: center; margin-top: 12px; line-height: 1.5; }
   .cert-id-footer { text-align: center; font-size: 7pt; color: #bbb; margin-top: 4px; }
@@ -98,20 +100,24 @@
     </div>
 
     <div class="title-block">
-      <div class="title-word">MeritLense</div>
       <div class="title-sub">Workforce Readiness Certificate</div>
     </div>
 
     <div class="body-row">
-      <div class="photo-frame">
-        {% if candidate_photo_data_uri %}
-        <img src="{{ candidate_photo_data_uri }}" alt="{{ candidate_name }}" />
-        {% else %}
-        <span class="photo-placeholder">{{ candidate_name|first|upper }}</span>
+      <div class="photo-block">
+        <div class="photo-frame">
+          {% if candidate_photo_data_uri %}
+          <img src="{{ candidate_photo_data_uri }}" alt="{{ candidate_name }}" />
+          {% else %}
+          <span class="photo-placeholder">{{ candidate_name|first|upper }}</span>
+          {% endif %}
+        </div>
+        {% if candidate_photo_verified %}
+        <div class="photo-verified">Verified ID Photo</div>
         {% endif %}
       </div>
       <div class="statement-col">
-        <div class="statement-intro">MeritLense certifies that</div>
+        <div class="statement-intro">This certificate confirms that</div>
         <div class="candidate-name">{{ candidate_name }}</div>
         <div class="statement-body">
           has completed the MeritLense Workforce Readiness Assessment for the {{ role_name }} role, evaluated against the MeritLense Workforce Readiness Standard.
@@ -162,7 +168,7 @@
       <div class="sign-col">
         <div class="issued-by">Issued by:<br /><b>MeritLense Workforce Assessment Platform</b></div>
         <div class="signature">MeritLense</div>
-        <div class="seal"><div>MERITLENSE</div><div>ASSESSED</div></div>
+        <div class="issuer-badge">Assessed</div>
       </div>
     </div>
 

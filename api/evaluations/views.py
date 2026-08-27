@@ -39,6 +39,7 @@ from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_b
 from .models import Certificate, EvaluationReadinessDecisionRecord, ScoringRuleSet, SessionEvaluationSummary
 from .scoring_services import Week6ScoringError, Week6ScoringService
 from .evaluator_rating_services import submit_evaluator_rating
+from .certificate_services import generate_certificate
 from api.reports.models import EvaluationReport
 from api.reports.serializers import EvaluationReportSerializer
 from api.reports.services import EvaluationReportError, EvaluationReportService
@@ -397,15 +398,23 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             certificate_info = {}
             if 'certificate_status' in serializer.validated_data:
                 requested_certificate_status = serializer.validated_data['certificate_status']
-                evaluation.certificate_status = requested_certificate_status if evaluation.certificate_enabled else 'NOT_ISSUED'
-                if evaluation.certificate_status == 'ISSUED':
-                    evaluation.certificate_issued_at = timezone.now()
-                    evaluation.certificate_url = serializer.validated_data.get('certificate_url', '')
+                if requested_certificate_status == CertificateStatus.ISSUED and evaluation.certificate_enabled:
+                    summary = evaluation.session_summaries.select_related("rule_set").first()
+                    generated_certificate = generate_certificate(evaluation, summary) if summary is not None else None
                     certificate_info = {
-                        'certificate_issued': True,
-                        'certificate_url': evaluation.certificate_url
+                        'certificate_issued': generated_certificate is not None,
+                        'certificate_url': serializer.validated_data.get('certificate_url', ''),
                     }
-                evaluation.save()
+                else:
+                    evaluation.certificate_status = requested_certificate_status if evaluation.certificate_enabled else 'NOT_ISSUED'
+                    if evaluation.certificate_status == 'ISSUED':
+                        evaluation.certificate_issued_at = timezone.now()
+                        evaluation.certificate_url = serializer.validated_data.get('certificate_url', '')
+                        certificate_info = {
+                            'certificate_issued': True,
+                            'certificate_url': evaluation.certificate_url
+                        }
+                    evaluation.save()
             
             AuditLogService.log(
                 user=request.user,
@@ -780,13 +789,14 @@ class CertificateVerifyView(APIView):
         if certificate is None or not certificate.pdf_file:
             return Response({"detail": "No certificate found for this ID."}, status=status.HTTP_404_NOT_FOUND)
 
+        certificate_status = certificate.evaluation.certificate_status
         is_expired = bool(certificate.expires_at and certificate.expires_at < timezone.now())
         return Response({
             "certificate_id": certificate.certificate_id,
             "candidate_name": certificate.candidate.get_full_name(),
             "issued_at": certificate.issued_at,
             "expires_at": certificate.expires_at,
-            "status": "EXPIRED" if is_expired else "VALID",
+            "status": "REVOKED" if certificate_status == CertificateStatus.REVOKED else ("EXPIRED" if is_expired else "VALID"),
             "pdf_hash": certificate.pdf_hash,
         })
 

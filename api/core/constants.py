@@ -512,12 +512,14 @@ class CertificateStatus:
     NOT_ISSUED = "NOT_ISSUED"
     PENDING = "PENDING"
     ISSUED = "ISSUED"
+    REVOKED = "REVOKED"
     EXPIRED = "EXPIRED"
     
     CHOICES = [
         (NOT_ISSUED, "Not Issued"),
         (PENDING, "Pending"),
         (ISSUED, "Issued"),
+        (REVOKED, "Revoked"),
         (EXPIRED, "Expired"),
     ]
 

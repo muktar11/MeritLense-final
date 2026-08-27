@@ -58,6 +58,12 @@ class EvaluationReportService:
     REPORT_NAME = "MeritLense Workforce Readiness Assessment Report"
     GENERATED_BY = "MeritLense Platform"
     GENERIC_COMPETENCY_LABEL = "Overall Workforce Readiness"
+    MINIMUM_ASSESSED_COMPETENCIES = 4
+    """Of the 5 canonical dimensions in _build_critical_competency_status - matches
+    the certificate eligibility gate's MINIMUM_REQUIRED_DIMENSIONS. A report whose
+    evidence covers fewer than this can't produce a meaningful overall score even
+    if every response that WAS submitted got scored (assessment_completeness=100%
+    only measures the latter, not per-competency coverage)."""
     PUBLIC_VERIFY_FRONTEND_URL = "https://www.meritlense.com"
     LOGO_PATH = Path(__file__).resolve().parents[1] / "evaluations" / "assets" / "meritlense-logo.png"
     _logo_data_uri_cache = None
@@ -814,6 +820,11 @@ class EvaluationReportService:
             competency_breakdown=competency_breakdown,
             risk_indicators=risk_indicators,
         )
+        competency_coverage = cls._derive_competency_coverage(critical_competency_status)
+        overall_score_available = (
+            assessment_completeness >= 100
+            and competency_coverage >= cls.MINIMUM_ASSESSED_COMPETENCIES
+        )
         role_fit = cls._build_role_fit_summary(
             evaluation=evaluation,
             overall_percentage=summary.overall_percentage,
@@ -856,15 +867,19 @@ class EvaluationReportService:
                 "assessment_completeness": assessment_completeness,
                 "assessment_quality": assessment_quality,
                 "assessment_coverage": cls._derive_assessment_coverage(session),
+                "competencies_assessed_count": competency_coverage,
+                "competencies_required_count": len(critical_competency_status),
+                "competencies_minimum_required": cls.MINIMUM_ASSESSED_COMPETENCIES,
+                "human_review_required": bool(human_review_flags),
             },
             "executive_summary": {
                 "readiness_indicator": readiness_indicator,
                 "overall_score": cls._rounded_whole(summary.overall_percentage),
                 "overall_score_display": cls._derive_overall_score_display(
                     overall_percentage=summary.overall_percentage,
-                    assessment_completeness=assessment_completeness,
+                    overall_score_available=overall_score_available,
                 ),
-                "overall_score_available": assessment_completeness >= 100,
+                "overall_score_available": overall_score_available,
                 "readiness_reason": {
                     "employer_message": employer_message,
                     "internal_reason": readiness_reason,
@@ -1420,6 +1435,7 @@ class EvaluationReportService:
             ("Safety", ["safety"]),
             ("Hygiene", ["hygiene", "clean", "sanitation"]),
             ("Communication", ["communication", "language"]),
+            ("Practical Tasks", ["practical", "task"]),
             ("Integrity", ["integrity", "reliability", "behavior"]),
         ]
         items = []
@@ -1936,19 +1952,22 @@ class EvaluationReportService:
         return int(round((summary.evaluated_response_count / summary.total_response_count) * 100))
 
     @classmethod
-    def _derive_overall_score_display(cls, *, overall_percentage, assessment_completeness):
-        if assessment_completeness < 100:
+    def _derive_overall_score_display(cls, *, overall_percentage, overall_score_available):
+        if not overall_score_available:
             return "Not fully available"
         return str(cls._rounded_whole(overall_percentage))
 
     @classmethod
     def _derive_assessment_coverage(cls, session):
-        coverage = ["Safety", "Hygiene", "Communication", "Behavioral Indicators"]
-        if session.task_observation_enabled:
-            coverage.insert(3, "Practical Tasks")
-        else:
-            coverage.insert(3, "Practical Tasks")
-        return coverage
+        return ["Safety", "Hygiene", "Communication", "Practical Tasks", "Behavioral Indicators"]
+
+    @classmethod
+    def _derive_competency_coverage(cls, critical_competency_status):
+        """How many of the 5 canonical dimensions actually have evidence -
+        distinct from assessment_completeness (which only measures whether
+        submitted responses were scored, not whether enough competencies
+        were administered at all)."""
+        return sum(1 for item in critical_competency_status if item.get("tone") != "neutral")
 
     @classmethod
     def _rounded_whole(cls, value):

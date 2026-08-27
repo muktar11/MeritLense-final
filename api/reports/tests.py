@@ -288,11 +288,18 @@ class EvaluationReportApiTests(TestCase):
             list(response.data["report_payload"]["executive_summary"].keys())[:2],
             ["readiness_indicator", "overall_score"],
         )
+        # Only one of the five canonical competencies (Safety) has any
+        # evidence in this fixture - exactly the scenario a plain response-
+        # scoring completeness check misses (all submitted responses WERE
+        # scored, so completeness reads 100%), so the overall score must
+        # stay withheld until enough competencies are actually covered.
         self.assertEqual(
             response.data["report_payload"]["executive_summary"]["overall_score_display"],
-            "70",
+            "Not fully available",
         )
-        self.assertTrue(response.data["report_payload"]["executive_summary"]["overall_score_available"])
+        self.assertFalse(response.data["report_payload"]["executive_summary"]["overall_score_available"])
+        self.assertEqual(response.data["report_payload"]["assessment_context"]["competencies_assessed_count"], 1)
+        self.assertEqual(response.data["report_payload"]["assessment_context"]["competencies_required_count"], 5)
         self.assertEqual(
             response.data["report_payload"]["executive_summary"]["assessment_scope"],
             "Pre-employment Workforce Readiness Only",
@@ -553,6 +560,30 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(strengths, ["No significant strengths identified in this assessment."])
         self.assertEqual(risks, ["Readiness gap identified in patient safety awareness"])
 
+    def test_critical_competency_status_always_includes_all_five_dimensions(self):
+        """Regression test: Practical Tasks was structurally excluded from
+        this hardcoded category list, so it could never appear in the
+        Competency Overview even when described elsewhere in the report."""
+        status = EvaluationReportService._build_critical_competency_status(
+            competency_breakdown=[],
+            risk_indicators={},
+        )
+        labels = [item["label"] for item in status]
+        self.assertEqual(
+            labels,
+            ["Safety", "Hygiene", "Communication", "Practical Tasks", "Integrity"],
+        )
+
+    def test_competency_coverage_counts_only_dimensions_with_evidence(self):
+        status = [
+            {"label": "Safety", "tone": "good"},
+            {"label": "Hygiene", "tone": "neutral"},
+            {"label": "Communication", "tone": "good"},
+            {"label": "Practical Tasks", "tone": "warn"},
+            {"label": "Integrity", "tone": "neutral"},
+        ]
+        self.assertEqual(EvaluationReportService._derive_competency_coverage(status), 3)
+
     def test_empty_competency_scores_are_reported_as_not_assessed(self):
         risks = EvaluationReportService._build_risk_indicators(
             competency_breakdown=[],
@@ -587,7 +618,7 @@ class EvaluationReportApiTests(TestCase):
             competency_breakdown=[],
             risk_indicators=risk_indicators,
         )
-        integrity_summary = status[3]["summary"]
+        integrity_summary = next(item for item in status if item["label"] == "Integrity")["summary"]
 
         self.assertNotIn(".,", integrity_summary)
         self.assertEqual(

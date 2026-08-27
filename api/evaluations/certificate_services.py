@@ -262,6 +262,8 @@ def certificate_eligibility(evaluation, summary):
         return False, "INSUFFICIENT_COMPETENCY_COVERAGE"
     if human_review_flags or _human_review_pending(summary):
         return False, "HUMAN_REVIEW_PENDING"
+    if session and session.is_scheduled_interview and getattr(evaluation, "evaluator_rating", None) is None:
+        return False, "EVALUATOR_RATING_PENDING"
     if indicator["code"] == "NOT_READY":
         return False, "NOT_READY"
     return True, indicator["code"]

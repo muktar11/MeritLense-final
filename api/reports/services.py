@@ -579,6 +579,57 @@ class EvaluationReportService:
         }
 
     @classmethod
+    def _derive_authoritative_score(cls, *, is_scheduled_interview, summary, evaluator_rating_payload, base_score_available):
+        """Which score is headline for the report. AI Interview mode is
+        unchanged - the rule-engine score is always authoritative. Scheduled
+        Interview mode requires an evaluator rating to have a headline score
+        at all (certificate_eligibility enforces the same gate before a
+        certificate can issue) - the AI score is still always surfaced
+        alongside it as supporting evidence, per EvaluatorRating's own
+        "never blended, always both visible" design principle."""
+        ai_value = cls._rounded_whole(summary.overall_percentage)
+        ai_secondary = {
+            "source": "AI_ASSESSMENT",
+            "value": ai_value,
+            "display": f"{ai_value}%",
+            "label": "AI Assessment Score (supporting evidence)",
+        }
+        if not is_scheduled_interview:
+            return {
+                "value": ai_value,
+                "available": base_score_available,
+                "source": "AI_ASSESSMENT",
+                "unavailable_reason": None if base_score_available else "ASSESSMENT_INCOMPLETE",
+                "secondary": None,
+            }
+        if evaluator_rating_payload is None:
+            return {
+                "value": None,
+                "available": False,
+                "source": None,
+                "unavailable_reason": "EVALUATOR_RATING_PENDING",
+                "secondary": ai_secondary if base_score_available else None,
+            }
+        pools = evaluator_rating_payload
+        average = round(
+            (
+                pools["safety_awareness"]
+                + pools["behavior_integrity"]
+                + pools["psych_professional"]
+                + pools["task_execution"]
+                + pools["consistency"]
+            )
+            / 5
+        )
+        return {
+            "value": average,
+            "available": base_score_available,
+            "source": "EVALUATOR_ASSESSMENT",
+            "unavailable_reason": None if base_score_available else "ASSESSMENT_INCOMPLETE",
+            "secondary": ai_secondary,
+        }
+
+    @classmethod
     def _build_response_evidence(cls, response_results):
         rows = []
         for result in response_results:
@@ -757,6 +808,8 @@ class EvaluationReportService:
     ):
         candidate = evaluation.candidate
         session = evaluation.session
+        is_scheduled_interview = bool(session and session.is_scheduled_interview)
+        evaluator_rating_payload = cls._build_evaluator_rating(evaluation)
         readiness_record = cls._get_readiness_record(evaluation)
         readiness_indicator = cls._resolve_readiness_indicator(evaluation, readiness_record)
         readiness_reason = cls._get_readiness_reason(evaluation, readiness_record)
@@ -825,6 +878,12 @@ class EvaluationReportService:
             assessment_completeness >= 100
             and competency_coverage >= cls.MINIMUM_ASSESSED_COMPETENCIES
         )
+        score_result = cls._derive_authoritative_score(
+            is_scheduled_interview=is_scheduled_interview,
+            summary=summary,
+            evaluator_rating_payload=evaluator_rating_payload,
+            base_score_available=overall_score_available,
+        )
         role_fit = cls._build_role_fit_summary(
             evaluation=evaluation,
             overall_percentage=summary.overall_percentage,
@@ -861,7 +920,11 @@ class EvaluationReportService:
                 "role_profile_version": cls._derive_role_profile_version(session),
                 "assessment_type": "Pre-Employment Readiness",
                 "assessment_language": cls._display_language(session.ui_language or evaluation.candidate_preferred_language),
-                "assessment_mode": "Guided Digital Simulation",
+                "assessment_mode": (
+                    "Scheduled Interview (Evaluator-Conducted)"
+                    if is_scheduled_interview
+                    else "Guided Digital Simulation"
+                ),
                 "assessment_date": (session.ended_at or generated_at).date().isoformat(),
                 "assessment_duration_minutes": cls._derive_assessment_duration_minutes(session),
                 "assessment_completeness": assessment_completeness,
@@ -874,12 +937,16 @@ class EvaluationReportService:
             },
             "executive_summary": {
                 "readiness_indicator": readiness_indicator,
-                "overall_score": cls._rounded_whole(summary.overall_percentage),
+                "overall_score": score_result["value"],
                 "overall_score_display": cls._derive_overall_score_display(
-                    overall_percentage=summary.overall_percentage,
-                    overall_score_available=overall_score_available,
+                    overall_percentage=score_result["value"],
+                    overall_score_available=score_result["available"],
+                    unavailable_reason=score_result["unavailable_reason"],
                 ),
-                "overall_score_available": overall_score_available,
+                "overall_score_available": score_result["available"],
+                "score_source": score_result["source"],
+                "overall_score_unavailable_reason": score_result["unavailable_reason"],
+                "secondary_score": score_result["secondary"],
                 "readiness_reason": {
                     "employer_message": employer_message,
                     "internal_reason": readiness_reason,
@@ -918,7 +985,7 @@ class EvaluationReportService:
             "candidate_id": str(candidate.public_id),
             "overall_score": cls._decimal(summary.overall_percentage),
             "competency_breakdown": competency_breakdown,
-            "evaluator_rating": cls._build_evaluator_rating(evaluation),
+            "evaluator_rating": evaluator_rating_payload,
             "critical_failures": summary.critical_failures,
             "human_review_flags": human_review_flags,
             "audit_log": audit_log,
@@ -1952,8 +2019,10 @@ class EvaluationReportService:
         return int(round((summary.evaluated_response_count / summary.total_response_count) * 100))
 
     @classmethod
-    def _derive_overall_score_display(cls, *, overall_percentage, overall_score_available):
+    def _derive_overall_score_display(cls, *, overall_percentage, overall_score_available, unavailable_reason=None):
         if not overall_score_available:
+            if unavailable_reason == "EVALUATOR_RATING_PENDING":
+                return "Pending Evaluator Rating"
             return "Not fully available"
         return str(cls._rounded_whole(overall_percentage))
 

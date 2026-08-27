@@ -147,7 +147,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
 
     def get_assessment_mode(self, obj):
         session = getattr(obj, "session", None)
-        return "SCHEDULED_INTERVIEW" if session and session.scheduled_start_at else "AI_INTERVIEW"
+        return "SCHEDULED_INTERVIEW" if session and session.is_scheduled_interview else "AI_INTERVIEW"
 
     def validate_scheduled_date(self, value):
         if value <= timezone.now():
@@ -361,7 +361,7 @@ class EvaluationListSerializer(PublicIdModelSerializer):
 
     def get_assessment_mode(self, obj):
         session = getattr(obj, "session", None)
-        return "SCHEDULED_INTERVIEW" if session and session.scheduled_start_at else "AI_INTERVIEW"
+        return "SCHEDULED_INTERVIEW" if session and session.is_scheduled_interview else "AI_INTERVIEW"
 
     def get_latest_session_summary(self, obj):
         summary = obj.session_summaries.select_related("rule_set").first()

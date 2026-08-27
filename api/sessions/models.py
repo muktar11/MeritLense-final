@@ -163,6 +163,10 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
     def is_expired(self):
         return timezone.now() >= self.expires_at
 
+    @property
+    def is_scheduled_interview(self):
+        return bool(self.scheduled_start_at)
+
     def is_closed(self):
         return self.status in {
             InterviewSessionStatus.COMPLETED,

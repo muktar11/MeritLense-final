@@ -13,7 +13,7 @@ from api.candidates.models import Candidate
 from api.core.constants import AuditLogAction, CandidateResponseType, CoverageLevel, EvaluationLayer, EvaluationStatus, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles, SubscriptionStatus, BillingInterval
 from api.evaluations.models import Certificate, CompetencyEvaluationResult, Evaluation, EvaluationReadinessDecisionRecord, EvaluatorRating, ResponseEvaluationResult, ScoringRule, ScoringRuleSet, SessionEvaluationSummary
 from api.evaluations.scoring_services import Week6ScoringService
-from api.evaluations.certificate_services import generate_certificate
+from api.evaluations.certificate_services import certificate_eligibility, generate_certificate
 from api.payments.models import Customer, Price, Subscription
 from api.questions.models import QuestionTemplate
 from api.scores.models import CandidateScore, ScoreSet
@@ -1846,6 +1846,55 @@ class CertificateEligibilityTests(TestCase):
 
         certificate = generate_certificate(self.evaluation, summary)
 
+        self.assertIsNotNone(certificate)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.certificate_status, CertificateStatus.ISSUED)
+
+    def test_scheduled_interview_without_rating_gets_no_certificate(self):
+        from api.core.constants import CertificateStatus
+        self.session.scheduled_start_at = timezone.now() - timezone.timedelta(days=1)
+        self.session.save(update_fields=["scheduled_start_at"])
+        summary = self._summary()
+
+        eligible, reason = certificate_eligibility(self.evaluation, summary)
+        certificate = generate_certificate(self.evaluation, summary)
+
+        self.assertFalse(eligible)
+        self.assertEqual(reason, "EVALUATOR_RATING_PENDING")
+        self.assertIsNone(certificate)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.certificate_status, CertificateStatus.NOT_ISSUED)
+
+    def test_scheduled_interview_with_rating_gets_a_certificate(self):
+        from api.core.constants import CertificateStatus
+        self.session.scheduled_start_at = timezone.now() - timezone.timedelta(days=1)
+        self.session.save(update_fields=["scheduled_start_at"])
+        EvaluatorRating.objects.create(
+            evaluation=self.evaluation,
+            safety_awareness=80, behavior_integrity=70, psych_professional=90, task_execution=60,
+            rated_by=self.user,
+        )
+        summary = self._summary()
+
+        eligible, reason = certificate_eligibility(self.evaluation, summary)
+        certificate = generate_certificate(self.evaluation, summary)
+
+        self.assertTrue(eligible)
+        self.assertIsNotNone(certificate)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.certificate_status, CertificateStatus.ISSUED)
+
+    def test_ai_interview_without_rating_still_gets_a_certificate(self):
+        # Regression guard: the new evaluator-rating gate must not affect
+        # AI Interview mode (no scheduled_start_at) evaluations at all.
+        from api.core.constants import CertificateStatus
+        summary = self._summary()
+
+        eligible, reason = certificate_eligibility(self.evaluation, summary)
+        certificate = generate_certificate(self.evaluation, summary)
+
+        self.assertTrue(eligible)
+        self.assertNotEqual(reason, "EVALUATOR_RATING_PENDING")
         self.assertIsNotNone(certificate)
         self.evaluation.refresh_from_db()
         self.assertEqual(self.evaluation.certificate_status, CertificateStatus.ISSUED)

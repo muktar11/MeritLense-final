@@ -1170,12 +1170,22 @@
                 <div class="metric-copy">
                   {% if summary.overall_score_available %}
                     {{ assessment.assessment_completeness }}% session completeness, {{ assessment.competencies_assessed_count }} of {{ assessment.competencies_required_count }} competencies assessed.
+                  {% elif summary.overall_score_unavailable_reason == "EVALUATOR_RATING_PENDING" %}
+                    Awaiting the evaluator's rating for this scheduled interview. The overall score becomes available once the evaluator submits their assessment.
                   {% else %}
                     Overall score is withheld until the session is fully scored and at least {{ assessment.competencies_minimum_required }} of {{ assessment.competencies_required_count }} competencies have sufficient evidence.
                   {% endif %}
                 </div>
               </div>
             </div>
+
+            {% if summary.secondary_score %}
+              <div class="metric-card">
+                <div class="metric-title">{{ summary.secondary_score.label }}</div>
+                <div class="metric-value">{{ summary.secondary_score.display }}</div>
+                <div class="metric-copy">Shown for reference alongside the evaluator's rating; it is not blended into the headline score.</div>
+              </div>
+            {% endif %}
 
             <div class="metric-card">
               <div class="metric-title">Public Verification</div>
@@ -1185,6 +1195,12 @@
           </div>
         </div>
       </div>
+
+      {% if assessment.assessment_mode == "Scheduled Interview (Evaluator-Conducted)" %}
+        <div class="metric-copy" style="margin-bottom: 8px;">
+          Top Strengths and Top Risks below reflect the AI's automated competency scoring, independent of the evaluator's rating above.
+        </div>
+      {% endif %}
 
       <div class="list-grid">
         <div class="list-card card">

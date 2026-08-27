@@ -21,6 +21,7 @@ from api.core.constants import (
 )
 from api.evaluations.models import (
     Evaluation,
+    EvaluatorRating,
     ResponseEvaluationResult,
     ScoringRule,
     ScoringRuleSet,
@@ -735,6 +736,156 @@ class EvaluationReportApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    def _add_full_competency_coverage(self):
+        """Adds hygiene/communication/practical-task evidence on top of the
+        single safety_awareness question setUp already builds, so the
+        fixture clears MINIMUM_ASSESSED_COMPETENCIES (4) and can reach
+        overall_score_available=True - required to exercise the
+        scheduled-interview authoritative-score logic, which only kicks in
+        once a headline score would otherwise be computable."""
+        competencies = [
+            ("hygiene_standards", "Hygiene Standards", "HK-HYG-001",
+             ["clear surface", "apply sanitizer", "wipe dry"]),
+            ("communication_ability", "Communication Ability", "HK-COM-001",
+             ["listen first", "restate clearly", "confirm understanding"]),
+            ("practical_task_execution", "Practical Task Execution", "HK-TASK-001",
+             ["set temperature", "iron collar first", "hang immediately"]),
+        ]
+        for i, (code, name, question_code, indicators) in enumerate(competencies, start=2):
+            template = QuestionTemplate.objects.create(
+                role_name="Housekeeper", role_code="domestic_worker", question_code=question_code,
+                question_version="1.0", question_status=QuestionLifecycleStatus.ACTIVE,
+                domain="Household Operations", skill_tag=code, skill=name, sequence_number=i,
+                difficulty=QuestionDifficulty.MEDIUM, question_text=f"Describe {name}.",
+                question_type="scenario", question_format="SCENARIO", language="EN",
+                scoring_type="0/3/5", difficulty_score=2, estimated_time_seconds=60,
+                expected_answer_type="multi_step", evaluation_tier=InterviewEvaluationTier.FULL,
+                rubric_version="v2.0", question_set_version="v1.2", critical_question=False, is_active=True,
+            )
+            session_question = SessionQuestion.objects.create(
+                session=self.session, question_template=template, question_text=template.question_text,
+                domain=template.domain, skill=template.skill_tag, difficulty=template.difficulty,
+                question_order=i, status="ANSWERED", is_mandatory=True,
+                asked_at=timezone.now(), answered_at=timezone.now(),
+            )
+            answer_text = f"I would {', '.join(indicators)}."
+            response = CandidateResponse.objects.create(
+                session=self.session, question=session_question, response_type=CandidateResponseType.TEXT,
+                transcript=answer_text, original_transcript=answer_text, transcript_language="en",
+                translated_transcript=answer_text, translation_status="COMPLETED", text_response=answer_text,
+                interpretation_status="COMPLETED", processing_status="RULE_INPUT_PREPARED",
+                stt_status="COMPLETED", stt_confidence="0.9500",
+            )
+            CandidateResponseTranslation.objects.create(
+                response=response, session=self.session, question=session_question,
+                source_language="EN", target_language="EN", original_transcript=answer_text,
+                translated_transcript=answer_text, provider="fake-translate", provider_model="v1",
+                status="COMPLETED",
+            )
+            CandidateResponseInterpretation.objects.create(
+                response=response, session=self.session, question=session_question,
+                provider="fake-interpret", model="v1", status="COMPLETED", confidence_score="0.950",
+                structured_output={"transcript_issues": []},
+            )
+            EvaluationInputArtifact.objects.create(
+                response=response, session=self.session, question=session_question,
+                competency_code=code, expected_indicators=indicators, observed_indicators=indicators,
+                missing_indicators=[], risk_flags=[], source_interpretation_status="COMPLETED",
+                requires_human_review=False,
+            )
+            ScoringRule.objects.create(
+                rule_set=self.rule_set, competency_code=code, competency_name=name,
+                question_template=template, question_code=question_code, expected_indicators=indicators,
+                required_indicators=indicators[:1], weighted_indicators={ind: "3" for ind in indicators},
+                max_score="10.00", pass_threshold="7.00",
+                scoring_method=ScoringRule.SCORING_METHOD_WEIGHTED_MATCH, is_active=True,
+            )
+        Week6ScoringService.run_for_evaluation(evaluation=self.evaluation, actor=self.user, rule_set=self.rule_set)
+
+    def test_scheduled_interview_report_shows_ai_score_as_secondary_when_rating_pending(self):
+        self._add_full_competency_coverage()
+        self.session.scheduled_start_at = timezone.now() - timezone.timedelta(days=1)
+        self.session.save(update_fields=["scheduled_start_at"])
+
+        response = self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        summary = response.data["report_payload"]["executive_summary"]
+        self.assertIsNone(summary["overall_score"])
+        self.assertFalse(summary["overall_score_available"])
+        self.assertEqual(summary["overall_score_unavailable_reason"], "EVALUATOR_RATING_PENDING")
+        self.assertEqual(summary["overall_score_display"], "Pending Evaluator Rating")
+        self.assertEqual(summary["score_source"], None)
+        self.assertIsNotNone(summary["secondary_score"])
+        self.assertEqual(summary["secondary_score"]["source"], "AI_ASSESSMENT")
+
+    def test_scheduled_interview_report_uses_evaluator_average_once_rated(self):
+        self._add_full_competency_coverage()
+        self.session.scheduled_start_at = timezone.now() - timezone.timedelta(days=1)
+        self.session.save(update_fields=["scheduled_start_at"])
+        EvaluatorRating.objects.create(
+            evaluation=self.evaluation,
+            safety_awareness=80, behavior_integrity=70, psych_professional=90, task_execution=60,
+            rated_by=self.user,
+        )
+
+        response = self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        summary = response.data["report_payload"]["executive_summary"]
+        evaluator_rating = response.data["report_payload"]["evaluator_rating"]
+        expected = round((80 + 70 + 90 + 60 + evaluator_rating["consistency"]) / 5)
+        self.assertEqual(summary["overall_score"], expected)
+        self.assertTrue(summary["overall_score_available"])
+        self.assertEqual(summary["score_source"], "EVALUATOR_ASSESSMENT")
+        self.assertIsNotNone(summary["secondary_score"])
+        self.assertEqual(summary["secondary_score"]["source"], "AI_ASSESSMENT")
+
+    def test_ai_interview_report_score_source_unchanged(self):
+        response = self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        summary = response.data["report_payload"]["executive_summary"]
+        self.assertEqual(summary["score_source"], "AI_ASSESSMENT")
+        self.assertIsNone(summary["secondary_score"])
+        self.assertEqual(summary["overall_score_display"], "Not fully available")
+        self.assertFalse(summary["overall_score_available"])
+
+    def test_assessment_mode_reflects_real_session_mode(self):
+        default_response = self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+        self.assertEqual(
+            default_response.data["report_payload"]["assessment_context"]["assessment_mode"],
+            "Guided Digital Simulation",
+        )
+
+        self.session.scheduled_start_at = timezone.now() - timezone.timedelta(days=1)
+        self.session.save(update_fields=["scheduled_start_at"])
+        scheduled_response = self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+        self.assertEqual(
+            scheduled_response.data["report_payload"]["assessment_context"]["assessment_mode"],
+            "Scheduled Interview (Evaluator-Conducted)",
+        )
 
 
 class TopStrengthsAndRisksTests(TestCase):

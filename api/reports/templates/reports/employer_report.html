@@ -1169,9 +1169,9 @@
                 <div class="metric-value">{{ assessment.assessment_quality }}</div>
                 <div class="metric-copy">
                   {% if summary.overall_score_available %}
-                    {{ assessment.assessment_completeness }}% completeness recorded.
+                    {{ assessment.assessment_completeness }}% session completeness, {{ assessment.competencies_assessed_count }} of {{ assessment.competencies_required_count }} competencies assessed.
                   {% else %}
-                    Overall score is withheld until assessment completeness reaches 100%.
+                    Overall score is withheld until the session is fully scored and at least {{ assessment.competencies_minimum_required }} of {{ assessment.competencies_required_count }} competencies have sufficient evidence.
                   {% endif %}
                 </div>
               </div>
@@ -1263,6 +1263,10 @@
                 <div class="context-value">{{ assessment.assessment_status }}</div>
               </div>
               <div class="context-block">
+                <div class="context-label">Human Review Required</div>
+                <div class="context-value">{% if assessment.human_review_required %}Yes{% else %}No{% endif %}</div>
+              </div>
+              <div class="context-block">
                 <div class="context-label">Assessment Type</div>
                 <div class="context-value">{{ assessment.assessment_type }}</div>
               </div>
@@ -1279,8 +1283,12 @@
                 <div class="context-value">{{ assessment.assessment_duration_minutes }} minutes</div>
               </div>
               <div class="context-block">
-                <div class="context-label">Completeness</div>
+                <div class="context-label">Session Completeness</div>
                 <div class="context-value">{{ assessment.assessment_completeness }}%</div>
+              </div>
+              <div class="context-block">
+                <div class="context-label">Competencies Assessed</div>
+                <div class="context-value">{{ assessment.competencies_assessed_count }} of {{ assessment.competencies_required_count }}</div>
               </div>
               <div class="context-block">
                 <div class="context-label">Candidate Reference</div>

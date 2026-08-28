@@ -572,7 +572,7 @@ class EvaluationReportApiTests(TestCase):
         labels = [item["label"] for item in status]
         self.assertEqual(
             labels,
-            ["Safety", "Hygiene", "Communication", "Practical Tasks", "Integrity"],
+            ["Safety", "Hygiene", "Communication", "Practical Tasks", "Behavioral Indicators"],
         )
 
     def test_competency_coverage_counts_only_dimensions_with_evidence(self):
@@ -619,7 +619,7 @@ class EvaluationReportApiTests(TestCase):
             competency_breakdown=[],
             risk_indicators=risk_indicators,
         )
-        integrity_summary = next(item for item in status if item["label"] == "Integrity")["summary"]
+        integrity_summary = next(item for item in status if item["label"] == "Behavioral Indicators")["summary"]
 
         self.assertNotIn(".,", integrity_summary)
         self.assertEqual(
@@ -627,6 +627,35 @@ class EvaluationReportApiTests(TestCase):
             "Response interpretation requires manual review. The response is unclear and does not relate to "
             "patient confidentiality or response protocol. Insufficient detail to provide a comprehensive answer.",
         )
+
+    def test_assessment_quality_requires_real_evidence_for_excellent(self):
+        # Regression test: "Excellent" quality was reachable with zero real
+        # evidence, because avg_stt silently defaulted to a passing 0.9 when
+        # there were no STT-confidence scores to average - completeness and
+        # duration alone were enough, with no check that any evidence exists.
+        from types import SimpleNamespace
+        self.session.started_at = timezone.now() - timezone.timedelta(minutes=45)
+        self.session.ended_at = timezone.now()
+        self.session.save(update_fields=["started_at", "ended_at"])
+        summary = SimpleNamespace(total_response_count=1, evaluated_response_count=1)
+
+        empty_evidence_quality = EvaluationReportService._derive_assessment_quality(
+            session=self.session,
+            summary=summary,
+            human_review_flags=[],
+            response_evidence_summary=[],
+        )
+        self.assertNotIn(empty_evidence_quality, ("Excellent", "Good"))
+
+        real_evidence_quality = EvaluationReportService._derive_assessment_quality(
+            session=self.session,
+            summary=summary,
+            human_review_flags=[],
+            response_evidence_summary=[
+                {"traceability": {"transcript_reference": {"confidence": "0.95"}}},
+            ],
+        )
+        self.assertEqual(real_evidence_quality, "Excellent")
 
     def test_regenerate_report_marks_previous_one_stale_and_keeps_history(self):
         first = self.client.post(
@@ -646,6 +675,22 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(EvaluationReport.objects.filter(evaluation=self.evaluation).count(), 2)
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.PREVIOUS_REPORT_MARKED_STALE).exists())
         self.assertTrue(AuditLog.objects.filter(action=AuditLogAction.REPORT_REGENERATED).exists())
+
+    def test_report_verify_reflects_stale_status_live(self):
+        first = self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+        first_report = EvaluationReport.objects.get(public_id=first.data["id"])
+
+        before = self.client.get(f"/api/v1/evaluations/reports/verify/{first_report.report_number}")
+        self.assertEqual(before.json()["verification_status"], "Authentic")
+
+        self.client.post(f"/api/v1/evaluations/reports/{first_report.public_id}/regenerate", {}, format="json")
+
+        after = self.client.get(f"/api/v1/evaluations/reports/verify/{first_report.report_number}")
+        self.assertEqual(after.json()["verification_status"], "Superseded")
 
     def test_report_is_immutable_except_for_controlled_stale_transition(self):
         generate = self.client.post(

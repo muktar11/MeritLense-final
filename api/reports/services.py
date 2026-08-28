@@ -64,6 +64,19 @@ class EvaluationReportService:
     evidence covers fewer than this can't produce a meaningful overall score even
     if every response that WAS submitted got scored (assessment_completeness=100%
     only measures the latter, not per-competency coverage)."""
+    CANONICAL_COMPETENCY_DIMENSIONS = (
+        "Safety Awareness",
+        "Hygiene & Standards",
+        "Communication Ability",
+        "Practical Task Execution",
+        "Behavioral Indicators",
+    )
+    """The 5 approved report-facing competency dimensions - the single source
+    every report-layer surface (methodology, coverage checklist, competency
+    cards) should use for the 5th dimension's label, so it can't drift into
+    an unapproved name (e.g. "Integrity") in one place while another says
+    "Behavioral Indicators". Report-layer only - does not touch the separate
+    skill_tags.py taxonomy the AI scoring pipeline itself normalizes into."""
     PUBLIC_VERIFY_FRONTEND_URL = "https://www.meritlense.com"
     LOGO_PATH = Path(__file__).resolve().parents[1] / "evaluations" / "assets" / "meritlense-logo.png"
     _logo_data_uri_cache = None
@@ -367,9 +380,9 @@ class EvaluationReportService:
             (["sanitation"], "Hygiene Standards"),
             (["communication"], "Communication Ability"),
             (["language"], "Communication Ability"),
-            (["integrity"], "Integrity & Reliability"),
-            (["reliability"], "Integrity & Reliability"),
-            (["behavior"], "Integrity & Reliability"),
+            (["integrity"], "Behavioral Indicators"),
+            (["reliability"], "Behavioral Indicators"),
+            (["behavior"], "Behavioral Indicators"),
             (["practical", "task"], "Practical Task Execution"),
             (["task", "execution"], "Practical Task Execution"),
             (["task"], "Practical Task Execution"),
@@ -1459,54 +1472,39 @@ class EvaluationReportService:
             if item.get("traceability", {}).get("transcript_reference", {}).get("confidence") is not None
         ]
         avg_stt = sum(float(score) for score in stt_scores) / len(stt_scores) if stt_scores else 0.9
+        has_evidence = bool(response_evidence_summary)
 
-        if completeness >= 90 and avg_stt >= 0.85 and duration_ratio >= 0.5 and not human_review_flags:
+        if completeness >= 90 and has_evidence and avg_stt >= 0.85 and duration_ratio >= 0.5 and not human_review_flags:
             return "Excellent"
-        if completeness >= 75 and avg_stt >= 0.7 and duration_ratio >= 0.35:
+        if completeness >= 75 and has_evidence and avg_stt >= 0.7 and duration_ratio >= 0.35:
             return "Good"
         return "Limited"
 
     @classmethod
     def _build_assessment_methodology(cls):
+        evaluated_and_method = [
+            ("Emergency response, hazard identification, protocol knowledge", "Scenario-based Q&A + Simulation"),
+            ("Cleanliness procedures, cross-contamination prevention", "Scenario-based Q&A"),
+            ("Language clarity, instruction following, response quality", "Communication Assessment Module + Speech Processing"),
+            ("Step sequence, completion rate, time management", "Task Observation Module"),
+            ("Integrity, reliability, consistency under pressure", "Behavioral Assessment Module"),
+        ]
         return [
-            {
-                "domain": "Safety Awareness",
-                "evaluated": "Emergency response, hazard identification, protocol knowledge",
-                "method": "Scenario-based Q&A + Simulation",
-            },
-            {
-                "domain": "Hygiene & Standards",
-                "evaluated": "Cleanliness procedures, cross-contamination prevention",
-                "method": "Scenario-based Q&A",
-            },
-            {
-                "domain": "Communication Ability",
-                "evaluated": "Language clarity, instruction following, response quality",
-                "method": "Communication Assessment Module + Speech Processing",
-            },
-            {
-                "domain": "Practical Task Execution",
-                "evaluated": "Step sequence, completion rate, time management",
-                "method": "Task Observation Module",
-            },
-            {
-                "domain": "Behavioral Indicators",
-                "evaluated": "Integrity, reliability, consistency under pressure",
-                "method": "Behavioral Assessment Module",
-            },
+            {"domain": domain, "evaluated": evaluated, "method": method}
+            for domain, (evaluated, method) in zip(cls.CANONICAL_COMPETENCY_DIMENSIONS, evaluated_and_method)
         ]
 
     @classmethod
     def _build_critical_competency_status(cls, *, competency_breakdown, risk_indicators):
         categories = [
-            ("Safety", ["safety"]),
-            ("Hygiene", ["hygiene", "clean", "sanitation"]),
-            ("Communication", ["communication", "language"]),
-            ("Practical Tasks", ["practical", "task"]),
-            ("Integrity", ["integrity", "reliability", "behavior"]),
+            ("Safety", ["safety"], "safety_risk"),
+            ("Hygiene", ["hygiene", "clean", "sanitation"], "hygiene_risk"),
+            ("Communication", ["communication", "language"], "communication_risk"),
+            ("Practical Tasks", ["practical", "task"], "practical_tasks_risk"),
+            ("Behavioral Indicators", ["integrity", "reliability", "behavior"], "integrity_risk"),
         ]
         items = []
-        for label, tokens in categories:
+        for label, tokens, risk_key in categories:
             competency = None
             for item in competency_breakdown:
                 haystack = " ".join(
@@ -1518,7 +1516,7 @@ class EvaluationReportService:
                 if any(token in haystack for token in tokens):
                     competency = item
                     break
-            risk = risk_indicators.get(f"{label.lower()}_risk", {}) if isinstance(risk_indicators, dict) else {}
+            risk = risk_indicators.get(risk_key, {}) if isinstance(risk_indicators, dict) else {}
             risk_level = risk.get("level", "Low")
             assessment_status = competency.get("assessment_status") if competency else "NOT_ASSESSED"
             if assessment_status in {"NOT_ASSESSED", "INSUFFICIENT_EVIDENCE"}:

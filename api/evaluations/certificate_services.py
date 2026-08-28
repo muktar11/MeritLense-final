@@ -250,10 +250,14 @@ def certificate_eligibility(evaluation, summary):
     identity_verified = bool(session and session.identity_verified)
     completion_verified = bool(evaluation.status == "COMPLETED" and session and session.status == "COMPLETED")
 
+    consent_agreement = session.candidate_consent_agreement if session else None
+
     if not identity_verified:
         return False, "VERIFICATION_FAILED"
     if not completion_verified:
         return False, "COMPLETION_UNVERIFIED"
+    if not (consent_agreement and consent_agreement.status == "SIGNED"):
+        return False, "CONSENT_REQUIRED"
     if assessment_completeness < 100:
         return False, "INCOMPLETE"
     if not _minimum_quality_met(assessment_quality):

@@ -141,23 +141,6 @@
       background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
     }
 
-    .meta-title {
-      font-size: 9px;
-      font-weight: 700;
-      line-height: 1.35;
-      color: #1e3561;
-    }
-
-    .meta-points {
-      margin-top: 7px;
-      display: flex;
-      gap: 8px;
-      font-size: 6.8px;
-      color: #4b78d5;
-      font-weight: 700;
-      flex-wrap: wrap;
-    }
-
     .meta-grid {
       margin-top: 8px;
       display: grid;
@@ -1038,12 +1021,6 @@
           </div>
         </div>
         <div class="meta-card">
-          <div class="meta-title">Trusted by Employers. Built for Compliance.</div>
-          <div class="meta-points">
-            <span>Secure</span>
-            <span>Transparent</span>
-            <span>Reliable</span>
-          </div>
           <div class="meta-grid">
             <div class="meta-block">
               <div class="meta-label">Classification</div>
@@ -1507,6 +1484,7 @@
               <div class="status-card-score">{{ report.evaluator_rating.consistency }}/100</div>
             </div>
           </div>
+          <p class="tiny-copy">Consistency reflects response reliability across the session and is not a rated competency.</p>
         {% else %}
           <p class="tiny-copy">Not yet rated by an evaluator.</p>
         {% endif %}

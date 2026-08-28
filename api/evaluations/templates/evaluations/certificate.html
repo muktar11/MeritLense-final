@@ -50,9 +50,9 @@
   .readiness-card { text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; }
   .readiness-label { font-size: 7.8pt; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; margin-bottom: 8px; }
   .readiness-badge { display: inline-block; font-size: 11pt; font-weight: 800; padding: 7px 16px; border-radius: 100px; }
-  .readiness-badge.level-1 { background: #fee2e2; color: #b91c1c; }
-  .readiness-badge.level-2 { background: #fef3c7; color: #b45309; }
-  .readiness-badge.level-3 { background: #dcfce7; color: #15803d; }
+  .readiness-badge.level-1 { background: #fee2e2; color: #991b1b; }
+  .readiness-badge.level-2 { background: #fef3c7; color: #92400e; }
+  .readiness-badge.level-3 { background: #dcfce7; color: #166534; }
   .readiness-caption { font-size: 7.4pt; color: #888; margin-top: 8px; }
 
   /* ---------- Evaluator rating row ---------- */
@@ -62,6 +62,7 @@
   .evaluator-chip { flex: 1; text-align: center; background: #fff; border: 1px solid #e7ecf9; border-radius: 8px; padding: 4px 6px; }
   .evaluator-chip span { display: block; font-size: 6.2pt; color: #888; }
   .evaluator-chip b { font-size: 10pt; color: #1e2a3a; }
+  .evaluator-row-note { font-size: 5.6pt; color: #9aa4b8; margin-top: 4px; }
 
   /* ---------- Footer ---------- */
   .footer-row { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; padding-top: 14px; border-top: 1px solid #e7ecf9; }
@@ -94,13 +95,13 @@
         </div>
       </div>
       <div>
-        <div class="ribbon">CERTIFICATE OF WORKFORCE<br />READINESS ASSESSMENT</div>
+        <div class="ribbon">MERITLENSE WORKFORCE READINESS<br />ASSESSMENT CERTIFICATE</div>
         <div class="ribbon-tail"><span></span><span></span></div>
       </div>
     </div>
 
     <div class="title-block">
-      <div class="title-sub">Workforce Readiness Certificate</div>
+      <div class="title-sub">MeritLense Workforce Readiness Assessment Certificate</div>
     </div>
 
     <div class="body-row">
@@ -154,6 +155,7 @@
         <div class="evaluator-chip"><span>Consistency</span><b>{{ evaluator_rating.consistency }}</b></div>
       </div>
     </div>
+    <div class="evaluator-row-note">Consistency reflects response reliability across the session and is not a rated competency.</div>
     {% endif %}
 
     <div class="footer-row">
@@ -168,7 +170,7 @@
       <div class="sign-col">
         <div class="issued-by">Issued by:<br /><b>MeritLense Workforce Assessment Platform</b></div>
         <div class="signature">MeritLense</div>
-        <div class="issuer-badge">Assessed</div>
+        <div class="issuer-badge">Digital Record</div>
       </div>
     </div>
 

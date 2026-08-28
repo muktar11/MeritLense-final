@@ -10,7 +10,8 @@ from urllib.parse import parse_qs, urlsplit
 from api.accounts.models import Company, CompanyEmployerProfile, User
 from api.audit.models import AuditLog
 from api.candidates.models import Candidate
-from api.core.constants import AuditLogAction, CandidateResponseType, CoverageLevel, EvaluationLayer, EvaluationStatus, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles, SubscriptionStatus, BillingInterval
+from api.core.constants import AgreementMethod, AgreementStatus, AgreementType, AuditLogAction, CandidateResponseType, CoverageLevel, EvaluationLayer, EvaluationStatus, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles, SubscriptionStatus, BillingInterval
+from api.contracts.models import Agreement
 from api.evaluations.models import Certificate, CompetencyEvaluationResult, Evaluation, EvaluationReadinessDecisionRecord, EvaluatorRating, ResponseEvaluationResult, ScoringRule, ScoringRuleSet, SessionEvaluationSummary
 from api.evaluations.scoring_services import Week6ScoringService
 from api.evaluations.certificate_services import certificate_eligibility, generate_certificate
@@ -57,6 +58,61 @@ def covered_competencies():
             "status": "MEETS_THRESHOLD",
         },
     ]
+
+
+def add_minimal_response_evidence(*, evaluation, session, candidate, user):
+    """Creates one real, minimal ResponseEvaluationResult (with a backing
+    CandidateResponse/SessionQuestion/ScoringRule) so _build_response_evidence
+    has something to return. Several lightweight test fixtures fabricate a
+    SessionEvaluationSummary directly, without ever running real responses
+    through Week6ScoringService - _derive_assessment_quality now requires
+    real evidence (not just a claimed evaluated_response_count) before
+    "Excellent"/"Good" is reachable, so those fixtures need at least one
+    real response on record to stay eligible for a certificate."""
+    template = QuestionTemplate.objects.create(
+        role_name="Housekeeper", role_code="domestic_worker",
+        question_code=f"EVIDENCE-{evaluation.pk}", question_version="1.0",
+        question_status=QuestionLifecycleStatus.ACTIVE, domain="Safety & Hygiene",
+        skill_tag="safety_awareness", skill="Safety Awareness", sequence_number=1,
+        difficulty=QuestionDifficulty.MEDIUM, question_text="What do you do when you see a spill?",
+        question_type="safety", question_format="SCENARIO", language="EN",
+        scoring_type="0/3/5", difficulty_score=2, estimated_time_seconds=60,
+        expected_answer_type="multi_step", evaluation_tier=InterviewEvaluationTier.FULL,
+        rubric_version="v2.0", question_set_version="v1.2", critical_question=False, is_active=True,
+    )
+    session_question = SessionQuestion.objects.create(
+        session=session, question_template=template, question_text=template.question_text,
+        domain=template.domain, skill=template.skill_tag, difficulty=template.difficulty,
+        question_order=1, status="ANSWERED", is_mandatory=True,
+        asked_at=timezone.now(), answered_at=timezone.now(),
+    )
+    response = CandidateResponse.objects.create(
+        session=session, question=session_question, response_type=CandidateResponseType.TEXT,
+        transcript="I would identify the hazard and clean the spill.",
+        text_response="I would identify the hazard and clean the spill.",
+        interpretation_status="COMPLETED", processing_status="RULE_INPUT_PREPARED",
+        stt_status="COMPLETED", stt_confidence="0.9500",
+    )
+    rule_set = ScoringRuleSet.objects.create(
+        name=f"Evidence Rules {evaluation.pk}", version="v1", role_code="domestic_worker", role_name="Housekeeper",
+        evaluation_tier=InterviewEvaluationTier.FULL, is_active=True, created_by=user,
+    )
+    rule = ScoringRule.objects.create(
+        rule_set=rule_set, competency_code="safety_awareness", competency_name="Safety Awareness",
+        question_template=template, question_code=template.question_code,
+        expected_indicators=["identify hazard", "clean spill"], required_indicators=["identify hazard"],
+        weighted_indicators={"identify hazard": "4", "clean spill": "3"},
+        max_score="10.00", pass_threshold="7.00",
+        scoring_method=ScoringRule.SCORING_METHOD_WEIGHTED_MATCH, is_active=True,
+    )
+    ResponseEvaluationResult.objects.create(
+        evaluation=evaluation, session=session, candidate=candidate, response=response, question=session_question,
+        rule_set=rule_set, rule=rule, competency_code="safety_awareness", competency_name="Safety Awareness",
+        score=Decimal("7"), max_score=Decimal("10"), percentage=Decimal("70.00"),
+        passed_required_indicators=True, critical_failure=False, requires_human_review=False,
+        matched_indicators=["identify hazard", "clean spill"], observed_indicators=["identify hazard", "clean spill"],
+        missing_indicators=[],
+    )
 
 
 class EvaluationRuleEngineTests(TestCase):
@@ -1168,10 +1224,19 @@ class CandidateScoreSummaryApiTests(TestCase):
     def test_certificate_is_included_once_generated(self):
         from api.evaluations.certificate_services import generate_certificate
 
+        consent_agreement = Agreement.objects.create(
+            user=self.user,
+            agreement_type=AgreementType.CANDIDATE_CONSENT,
+            version="v1",
+            method=AgreementMethod.CHECKBOX,
+            status=AgreementStatus.SIGNED,
+            accepted_at=timezone.now(),
+        )
         self.session.identity_verified = True
         self.session.status = "COMPLETED"
         self.session.ended_at = timezone.now()
-        self.session.save(update_fields=["identity_verified", "status", "ended_at"])
+        self.session.candidate_consent_agreement = consent_agreement
+        self.session.save(update_fields=["identity_verified", "status", "ended_at", "candidate_consent_agreement"])
         self.evaluation.status = EvaluationStatus.COMPLETED
         self.evaluation.completed_at = timezone.now()
         self.evaluation.save(update_fields=["status", "completed_at"])
@@ -1589,6 +1654,16 @@ class CertificateGenerationTests(TestCase):
             duration_minutes=45,
             created_by=self.user,
         )
+        consent_agreement = Agreement.objects.create(
+            user=self.user,
+            agreement_type=AgreementType.CANDIDATE_CONSENT,
+            version="v1",
+            method=AgreementMethod.CHECKBOX,
+            status=AgreementStatus.SIGNED,
+            accepted_at=timezone.now(),
+        )
+        self.session.candidate_consent_agreement = consent_agreement
+        self.session.save(update_fields=["candidate_consent_agreement"])
 
     def test_generate_certificate_uses_real_data(self):
         import base64
@@ -1633,6 +1708,9 @@ class CertificateGenerationTests(TestCase):
             total_response_count=1,
             evaluated_response_count=1,
             status=SessionEvaluationSummary.STATUS_EVALUATED,
+        )
+        add_minimal_response_evidence(
+            evaluation=self.evaluation, session=self.session, candidate=self.candidate, user=self.user,
         )
 
         certificate = generate_certificate(self.evaluation, summary)
@@ -1701,6 +1779,9 @@ class CertificateGenerationTests(TestCase):
             total_score=Decimal("70"), max_score=Decimal("100"), overall_percentage=Decimal("70.00"),
             competencies_summary=covered_competencies(), status=SessionEvaluationSummary.STATUS_EVALUATED,
             total_response_count=1, evaluated_response_count=1,
+        )
+        add_minimal_response_evidence(
+            evaluation=self.evaluation, session=self.session, candidate=self.candidate, user=self.user,
         )
 
         first = generate_certificate(self.evaluation, summary)
@@ -1778,9 +1859,21 @@ class CertificateEligibilityTests(TestCase):
             status=EvaluationStatus.COMPLETED,
             completed_at=timezone.now(),
         )
+        self.consent_agreement = Agreement.objects.create(
+            user=self.user,
+            agreement_type=AgreementType.CANDIDATE_CONSENT,
+            version="v1",
+            method=AgreementMethod.CHECKBOX,
+            status=AgreementStatus.SIGNED,
+            accepted_at=timezone.now(),
+        )
         self.session.status = "COMPLETED"
         self.session.ended_at = timezone.now()
-        self.session.save(update_fields=["status", "ended_at"])
+        self.session.candidate_consent_agreement = self.consent_agreement
+        self.session.save(update_fields=["status", "ended_at", "candidate_consent_agreement"])
+        add_minimal_response_evidence(
+            evaluation=self.evaluation, session=self.session, candidate=self.candidate, user=self.user,
+        )
 
     def _summary(self, total_response_count=1, evaluated_response_count=1):
         return SessionEvaluationSummary.objects.create(
@@ -1835,6 +1928,46 @@ class CertificateEligibilityTests(TestCase):
         self.assertIsNone(certificate)
         self.evaluation.refresh_from_db()
         self.assertEqual(self.evaluation.certificate_status, CertificateStatus.NOT_ISSUED)
+
+    def test_certificate_requires_signed_consent(self):
+        from api.core.constants import CertificateStatus
+        self.session.candidate_consent_agreement = None
+        self.session.save(update_fields=["candidate_consent_agreement"])
+        summary = self._summary()
+
+        eligible, reason = certificate_eligibility(self.evaluation, summary)
+        certificate = generate_certificate(self.evaluation, summary)
+
+        self.assertFalse(eligible)
+        self.assertEqual(reason, "CONSENT_REQUIRED")
+        self.assertIsNone(certificate)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.certificate_status, CertificateStatus.NOT_ISSUED)
+
+    def test_unsigned_consent_gets_no_certificate(self):
+        from api.core.constants import CertificateStatus
+        self.consent_agreement.status = AgreementStatus.PENDING
+        self.consent_agreement.save(update_fields=["status"])
+        summary = self._summary()
+
+        eligible, reason = certificate_eligibility(self.evaluation, summary)
+        certificate = generate_certificate(self.evaluation, summary)
+
+        self.assertFalse(eligible)
+        self.assertEqual(reason, "CONSENT_REQUIRED")
+        self.assertIsNone(certificate)
+
+    def test_signed_consent_allows_certificate(self):
+        from api.core.constants import CertificateStatus
+        summary = self._summary()
+
+        eligible, reason = certificate_eligibility(self.evaluation, summary)
+        certificate = generate_certificate(self.evaluation, summary)
+
+        self.assertTrue(eligible)
+        self.assertIsNotNone(certificate)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.certificate_status, CertificateStatus.ISSUED)
 
     def test_partially_ready_complete_and_verified_gets_a_certificate(self):
         # PARTIALLY_READY isn't a stored readiness_status value (only READY/
@@ -1898,6 +2031,20 @@ class CertificateEligibilityTests(TestCase):
         self.assertIsNotNone(certificate)
         self.evaluation.refresh_from_db()
         self.assertEqual(self.evaluation.certificate_status, CertificateStatus.ISSUED)
+
+    def test_certificate_verify_reflects_revocation_live(self):
+        from api.evaluations.certificate_services import _revoke_existing_certificate
+        summary = self._summary()
+        certificate = generate_certificate(self.evaluation, summary)
+        client = APIClient()
+
+        before = client.get(f"/api/v1/evaluations/certificates/verify/{certificate.certificate_id}")
+        self.assertEqual(before.data["status"], "VALID")
+
+        _revoke_existing_certificate(self.evaluation, "test revocation")
+
+        after = client.get(f"/api/v1/evaluations/certificates/verify/{certificate.certificate_id}")
+        self.assertEqual(after.data["status"], "REVOKED")
 
 
 class EvaluatorRatingTests(TestCase):
@@ -1983,6 +2130,16 @@ class EvaluatorRatingTests(TestCase):
             status=EvaluationStatus.COMPLETED,
             completed_at=timezone.now(),
         )
+        consent_agreement = Agreement.objects.create(
+            user=self.user,
+            agreement_type=AgreementType.CANDIDATE_CONSENT,
+            version="v1",
+            method=AgreementMethod.CHECKBOX,
+            status=AgreementStatus.SIGNED,
+            accepted_at=timezone.now(),
+        )
+        self.session.candidate_consent_agreement = consent_agreement
+        self.session.save(update_fields=["candidate_consent_agreement"])
         self.url = f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/evaluator-rating"
         self.client = APIClient()
         self.client.force_authenticate(self.user)
@@ -2084,6 +2241,9 @@ class EvaluatorRatingTests(TestCase):
 
     def test_submitting_a_rating_regenerates_an_already_issued_certificate(self):
         summary = self._summary()
+        add_minimal_response_evidence(
+            evaluation=self.evaluation, session=self.session, candidate=self.candidate, user=self.user,
+        )
         certificate = generate_certificate(self.evaluation, summary)
         self.assertIsNotNone(certificate)
         original_hash = certificate.pdf_hash

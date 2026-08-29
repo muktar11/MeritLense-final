@@ -20,7 +20,7 @@ from django.template.loader import render_to_string
 from django.utils import timezone
 
 from api.audit.services import AuditLogService
-from api.core.constants import AuditLogAction, AuditLogCategory, AuditLogSeverity
+from api.core.constants import AgreementStatus, AuditLogAction, AuditLogCategory, AuditLogSeverity
 from api.evaluations.models import (
     CompetencyEvaluationResult,
     ResponseEvaluationResult,
@@ -310,6 +310,9 @@ class EvaluationReportService:
     def _get_summary(cls, evaluation):
         if evaluation.session_id is None:
             raise EvaluationReportError("Report generation requires an evaluation linked to an interview session.")
+        consent_agreement = evaluation.session.candidate_consent_agreement
+        if not (consent_agreement and consent_agreement.status == AgreementStatus.SIGNED):
+            raise EvaluationReportError("Report generation requires the candidate's consent to be signed.")
         assessment_status = cls._derive_assessment_status(evaluation)
         if assessment_status != "COMPLETED":
             raise EvaluationReportError(
@@ -942,7 +945,7 @@ class EvaluationReportService:
                 "assessment_duration_minutes": cls._derive_assessment_duration_minutes(session),
                 "assessment_completeness": assessment_completeness,
                 "assessment_quality": assessment_quality,
-                "assessment_coverage": cls._derive_assessment_coverage(session),
+                "assessment_coverage": cls._derive_assessment_coverage(critical_competency_status),
                 "competencies_assessed_count": competency_coverage,
                 "competencies_required_count": len(critical_competency_status),
                 "competencies_minimum_required": cls.MINIMUM_ASSESSED_COMPETENCIES,
@@ -2025,8 +2028,17 @@ class EvaluationReportService:
         return str(cls._rounded_whole(overall_percentage))
 
     @classmethod
-    def _derive_assessment_coverage(cls, session):
-        return ["Safety", "Hygiene", "Communication", "Practical Tasks", "Behavioral Indicators"]
+    def _derive_assessment_coverage(cls, critical_competency_status):
+        """Per-dimension coverage for the Assessment Coverage panel - must
+        reflect each dimension's real assessed/not-assessed status (same
+        "tone != neutral" signal _derive_competency_coverage counts with),
+        not a fixed all-5-covered list. A dimension with no evidence has to
+        render as not covered here, or it visually contradicts its own
+        "Not Assessed" status shown elsewhere in the same report."""
+        return [
+            {"label": item["label"], "covered": item.get("tone") != "neutral"}
+            for item in critical_competency_status
+        ]
 
     @classmethod
     def _derive_competency_coverage(cls, critical_competency_status):
@@ -2298,7 +2310,7 @@ class EvaluationReportService:
             f"{'%' if summary.get('overall_score_available', True) else ''}",
             f"Assessment Scope: {summary.get('assessment_scope', '')}",
             f"Suggested Action: {summary.get('suggested_action_display', '')}",
-            f"Assessment Coverage: {', '.join(context.get('assessment_coverage', []))}",
+            f"Assessment Coverage: {', '.join(item['label'] + ('' if item['covered'] else ' (Not Assessed)') for item in context.get('assessment_coverage', []))}",
             f"Evaluation Reliability: {summary.get('evaluation_reliability', '')}",
         ]
         for factor in summary.get("reliability_factors", []):

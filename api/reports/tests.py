@@ -10,7 +10,11 @@ from rest_framework.test import APIClient
 from api.accounts.models import User
 from api.audit.models import AuditLog
 from api.candidates.models import Candidate
+from api.contracts.models import Agreement
 from api.core.constants import (
+    AgreementMethod,
+    AgreementStatus,
+    AgreementType,
     AuditLogAction,
     CandidateResponseType,
     EvaluationType,
@@ -121,6 +125,16 @@ class EvaluationReportApiTests(TestCase):
             created_by=self.user,
             status="COMPLETED",
         )
+        consent_agreement = Agreement.objects.create(
+            user=self.user,
+            agreement_type=AgreementType.CANDIDATE_CONSENT,
+            version="v1",
+            method=AgreementMethod.CHECKBOX,
+            status=AgreementStatus.SIGNED,
+            accepted_at=timezone.now(),
+        )
+        self.session.candidate_consent_agreement = consent_agreement
+        self.session.save(update_fields=["candidate_consent_agreement"])
         self.template = QuestionTemplate.objects.create(
             role_name="Housekeeper",
             role_code="domestic_worker",
@@ -339,7 +353,9 @@ class EvaluationReportApiTests(TestCase):
             response.data["report_payload"]["candidate_snapshot"]["full_name"],
             self.candidate.get_full_name(),
         )
-        self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_coverage"][0], "Safety")
+        self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_coverage"][0]["label"], "Safety")
+        self.assertTrue(response.data["report_payload"]["assessment_context"]["assessment_coverage"][0]["covered"])
+        self.assertFalse(response.data["report_payload"]["assessment_context"]["assessment_coverage"][-1]["covered"])
         self.assertIn("transcript_report", response.data["report_payload"])
         self.assertEqual(
             response.data["report_payload"]["transcript_report"]["evaluation_bands"][0]["code"],
@@ -575,6 +591,30 @@ class EvaluationReportApiTests(TestCase):
             ["Safety", "Hygiene", "Communication", "Practical Tasks", "Behavioral Indicators"],
         )
 
+    def test_assessment_coverage_reflects_real_per_dimension_status(self):
+        # Regression test: the Assessment Coverage panel used to be a fixed
+        # 5-item list, always rendered with a green checkmark, regardless of
+        # whether a dimension actually had any evidence - contradicting the
+        # same dimension's "Not Assessed" status shown elsewhere.
+        status = [
+            {"label": "Safety", "tone": "good"},
+            {"label": "Hygiene", "tone": "good"},
+            {"label": "Communication", "tone": "good"},
+            {"label": "Practical Tasks", "tone": "good"},
+            {"label": "Behavioral Indicators", "tone": "neutral"},
+        ]
+        coverage = EvaluationReportService._derive_assessment_coverage(status)
+        self.assertEqual(
+            coverage,
+            [
+                {"label": "Safety", "covered": True},
+                {"label": "Hygiene", "covered": True},
+                {"label": "Communication", "covered": True},
+                {"label": "Practical Tasks", "covered": True},
+                {"label": "Behavioral Indicators", "covered": False},
+            ],
+        )
+
     def test_competency_coverage_counts_only_dimensions_with_evidence(self):
         status = [
             {"label": "Safety", "tone": "good"},
@@ -715,6 +755,20 @@ class EvaluationReportApiTests(TestCase):
         with self.assertRaises(DatabaseError):
             EvaluationReport.objects.filter(pk=report.pk).delete()
 
+    def test_generate_report_fails_when_consent_not_signed(self):
+        self.session.candidate_consent_agreement = None
+        self.session.save(update_fields=["candidate_consent_agreement"])
+
+        response = self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("consent", response.data["detail"].lower())
+        self.assertFalse(EvaluationReport.objects.filter(evaluation=self.evaluation).exists())
+
     def test_generate_report_fails_when_scoring_summary_missing(self):
         new_session = InterviewSession.objects.create(
             candidate=self.candidate,
@@ -741,9 +795,18 @@ class EvaluationReportApiTests(TestCase):
             status="COMPLETED",
             completed_at=timezone.now(),
         )
+        new_consent_agreement = Agreement.objects.create(
+            user=self.user,
+            agreement_type=AgreementType.CANDIDATE_CONSENT,
+            version="v1",
+            method=AgreementMethod.CHECKBOX,
+            status=AgreementStatus.SIGNED,
+            accepted_at=timezone.now(),
+        )
         new_session.status = "COMPLETED"
         new_session.ended_at = timezone.now()
-        new_session.save(update_fields=["status", "ended_at", "updated_at"])
+        new_session.candidate_consent_agreement = new_consent_agreement
+        new_session.save(update_fields=["status", "ended_at", "updated_at", "candidate_consent_agreement"])
 
         response = self.client.post(
             f"/api/v1/evaluations/evaluations/{new_evaluation.public_id}/generate-report",

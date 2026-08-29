@@ -149,13 +149,13 @@
       <div class="evaluator-row-label">Evaluator<br />Assessment</div>
       <div class="evaluator-chips">
         <div class="evaluator-chip"><span>Safety Awareness</span><b>{{ evaluator_rating.safety_awareness }}</b></div>
-        <div class="evaluator-chip"><span>Behavior &amp; Integrity</span><b>{{ evaluator_rating.behavior_integrity }}</b></div>
-        <div class="evaluator-chip"><span>Psych &amp; Professional</span><b>{{ evaluator_rating.psych_professional }}</b></div>
-        <div class="evaluator-chip"><span>Task Execution</span><b>{{ evaluator_rating.task_execution }}</b></div>
-        <div class="evaluator-chip"><span>Consistency</span><b>{{ evaluator_rating.consistency }}</b></div>
+        <div class="evaluator-chip"><span>Hygiene &amp; Standards</span><b>{{ evaluator_rating.hygiene|default:"N/A" }}</b></div>
+        <div class="evaluator-chip"><span>Communication Ability</span><b>{{ evaluator_rating.communication|default:"N/A" }}</b></div>
+        <div class="evaluator-chip"><span>Practical Task Execution</span><b>{{ evaluator_rating.task_execution }}</b></div>
+        <div class="evaluator-chip"><span>Behavioral Indicators</span><b>{{ evaluator_rating.behavioral_risk_level }}</b></div>
       </div>
     </div>
-    <div class="evaluator-row-note">Consistency reflects response reliability across the session and is not a rated competency.</div>
+    <div class="evaluator-row-note">Behavioral Indicators is shown as a risk level (High/Medium/Low), not a numeric score, per the MeritLense Workforce Readiness Standard. Response Consistency ({{ evaluator_rating.consistency }}/100) is a supporting reliability metric, not a rated competency, and is not one of the 5 dimensions above.</div>
     {% endif %}
 
     <div class="footer-row">
@@ -177,7 +177,7 @@
     <div class="disclaimer">
       This certificate confirms the candidate's assessment completion and workforce readiness level based on the MeritLense Workforce Readiness Standard. It provides assessment evidence only and does not constitute a professional license, employment authorization, or guarantee of employment. Final hiring decisions remain solely with the employer.
     </div>
-    <div class="cert-id-footer">Generated {{ generated_at }} &middot; MeritLense Readiness Intelligence Framework {{ system_version }}</div>
+    <div class="cert-id-footer">Generated {{ generated_at }} &middot; MeritLense Workforce Readiness Standard {{ system_version }}</div>
 
   </div>
 

@@ -1492,23 +1492,23 @@
               <div class="status-card-score">{{ report.evaluator_rating.safety_awareness }}/100</div>
             </div>
             <div class="status-card">
-              <div class="status-card-title">Behavior &amp; Integrity</div>
-              <div class="status-card-score">{{ report.evaluator_rating.behavior_integrity }}/100</div>
+              <div class="status-card-title">Hygiene &amp; Standards</div>
+              <div class="status-card-score">{% if report.evaluator_rating.hygiene %}{{ report.evaluator_rating.hygiene }}/100{% else %}N/A{% endif %}</div>
             </div>
             <div class="status-card">
-              <div class="status-card-title">Psych &amp; Professional</div>
-              <div class="status-card-score">{{ report.evaluator_rating.psych_professional }}/100</div>
+              <div class="status-card-title">Communication Ability</div>
+              <div class="status-card-score">{% if report.evaluator_rating.communication %}{{ report.evaluator_rating.communication }}/100{% else %}N/A{% endif %}</div>
             </div>
             <div class="status-card">
-              <div class="status-card-title">Task Execution</div>
+              <div class="status-card-title">Practical Task Execution</div>
               <div class="status-card-score">{{ report.evaluator_rating.task_execution }}/100</div>
             </div>
             <div class="status-card">
-              <div class="status-card-title">Consistency</div>
-              <div class="status-card-score">{{ report.evaluator_rating.consistency }}/100</div>
+              <div class="status-card-title">Behavioral Indicators</div>
+              <div class="status-card-score">{{ report.evaluator_rating.behavioral_risk_level }} Risk</div>
             </div>
           </div>
-          <p class="tiny-copy">Consistency reflects response reliability across the session and is not a rated competency.</p>
+          <p class="tiny-copy">Behavioral Indicators is shown as a risk level, per Report Specification Section 4, not a numeric score. Response Consistency ({{ report.evaluator_rating.consistency }}/100) is a supporting reliability metric, not a rated competency, and is not one of the 5 approved dimensions above.</p>
         {% else %}
           <p class="tiny-copy">Not yet rated by an evaluator.</p>
         {% endif %}

@@ -708,13 +708,24 @@ class Certificate(TimeStampedModel):
 
 
 class EvaluatorRating(TimeStampedModel):
-    """Evaluator's manual 0-100 rating on the 4 fixed pools (see
-    api/questions/skill_tags.py's SKILL_TAG_CODES). Separate from, and
-    never blended into, Evaluation.score/readiness_status or
-    certificate_eligibility() - purely an additional, evaluator-entered
-    signal. One mutable row per evaluation, updated in place on
-    resubmission (unlike EvaluationReadinessDecisionRecord, which is
-    immutable, or EvaluationReport, which is snapshotted per version)."""
+    """Evaluator's manual 0-100 rating on the 5 approved report dimensions
+    (EvaluationReportService.CANONICAL_COMPETENCY_DIMENSIONS in
+    api/reports/services.py - Safety, Hygiene, Communication, Practical
+    Tasks, Behavioral Indicators). Separate from, and never blended into,
+    Evaluation.score/readiness_status or certificate_eligibility() - purely
+    an additional, evaluator-entered signal. One mutable row per
+    evaluation, updated in place on resubmission (unlike
+    EvaluationReadinessDecisionRecord, which is immutable, or
+    EvaluationReport, which is snapshotted per version).
+
+    psych_professional is deprecated: it isn't one of the 5 approved
+    dimensions and its use raises legal/compliance questions (implied
+    psychological/psychometric scoring) that haven't been reviewed. It's
+    kept nullable, write-disabled (EvaluatorRatingWriteSerializer no longer
+    accepts it), and hidden from every display surface, purely to preserve
+    historical rows already in production pending that review - do not
+    reintroduce it to any serializer or template without that review
+    happening first."""
 
     evaluation = models.OneToOneField(
         Evaluation, on_delete=models.CASCADE, related_name="evaluator_rating"
@@ -722,11 +733,23 @@ class EvaluatorRating(TimeStampedModel):
     safety_awareness = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(0), MaxValueValidator(100)]
     )
+    hygiene = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    communication = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
     behavior_integrity = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(0), MaxValueValidator(100)]
     )
     psych_professional = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(0), MaxValueValidator(100)]
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
     )
     task_execution = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(0), MaxValueValidator(100)]

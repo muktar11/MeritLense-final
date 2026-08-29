@@ -148,21 +148,29 @@ def _build_qr_data_uri(verification_url):
     return f"data:image/png;base64,{encoded}"
 
 
-def _candidate_photo_data_uri(candidate):
-    """A plain portrait for the certificate - the candidate's own uploaded
-    photo (see the registration flow's photo-upload + passport-match
-    check), not a face-match crop or verification artifact. None if the
-    candidate never uploaded one, rather than substituting some other image
-    and implying it's the same thing."""
-    if not candidate.profile_photo:
-        return None
-    try:
-        candidate.profile_photo.open("rb")
-        content = candidate.profile_photo.read()
-    finally:
-        candidate.profile_photo.close()
-    encoded = base64.b64encode(content).decode()
-    return f"data:image/jpeg;base64,{encoded}"
+def _candidate_photo_context(candidate):
+    """The certificate photo, preferring verification_photo (the AI-cropped,
+    candidate/staff-confirmed face used as the identity verification
+    reference - see its docstring in api/candidates/models.py) and falling
+    back to profile_photo when absent, exactly as verification_photo's own
+    fallback semantics describe. Returns (data_uri, verified) as a single
+    pair so the "Verified ID Photo" badge can never be shown next to a
+    different, unverified image than the one it's describing - the
+    previous version derived the badge from verification_photo existing
+    while always rendering profile_photo, so a candidate with only a
+    verification_photo got the badge over a blank placeholder."""
+    for field, verified in (("verification_photo", True), ("profile_photo", False)):
+        image_field = getattr(candidate, field)
+        if not image_field:
+            continue
+        try:
+            image_field.open("rb")
+            content = image_field.read()
+        finally:
+            image_field.close()
+        encoded = base64.b64encode(content).decode()
+        return f"data:image/jpeg;base64,{encoded}", verified
+    return None, False
 
 
 def _readiness_gauge_context(evaluation):
@@ -179,19 +187,24 @@ def _readiness_gauge_context(evaluation):
 
 
 def _evaluator_rating_context(evaluation):
-    """The evaluator's manual 0-100 ratings on the 4 fixed pools, if any
-    have been submitted (see EvaluatorRating in models.py) - purely
-    additional display data, never a factor in certificate_eligibility()."""
+    """The evaluator's manual 0-100 ratings on the 5 approved report
+    dimensions, if any have been submitted (see EvaluatorRating in
+    models.py) - purely additional display data, never a factor in
+    certificate_eligibility(). Behavioral Indicators is surfaced only as a
+    Risk Level (High/Medium/Low), per Report Specification Section 4 - see
+    behavioral_risk_level(). psych_professional is deliberately omitted -
+    see EvaluatorRating's docstring."""
     rating = getattr(evaluation, "evaluator_rating", None)
     if rating is None:
         return None
-    from .evaluator_rating_services import calculate_response_consistency
+    from .evaluator_rating_services import behavioral_risk_level, calculate_response_consistency
 
     return {
         "safety_awareness": rating.safety_awareness,
-        "behavior_integrity": rating.behavior_integrity,
-        "psych_professional": rating.psych_professional,
+        "hygiene": rating.hygiene,
+        "communication": rating.communication,
         "task_execution": rating.task_execution,
+        "behavioral_risk_level": behavioral_risk_level(rating.behavior_integrity),
         "consistency": calculate_response_consistency(evaluation, fallback_rating=rating),
     }
 
@@ -314,6 +327,7 @@ def generate_certificate(evaluation, summary):
     session = evaluation.session
     verification_url = f"{settings.FRONTEND_URL}/en/verify-certificate?id={certificate.certificate_id}"
     readiness = _readiness_gauge_context(evaluation)
+    candidate_photo_data_uri, candidate_photo_verified = _candidate_photo_context(evaluation.candidate)
 
     context = {
         "logo_data_uri": _logo_data_uri(),
@@ -321,8 +335,8 @@ def generate_certificate(evaluation, summary):
         "candidate_name": evaluation.candidate.get_full_name().title(),
         "role_name": session.role_name if session else evaluation.candidate.job_role,
         "role_profile_version": _role_profile_version(session),
-        "candidate_photo_data_uri": _candidate_photo_data_uri(evaluation.candidate),
-        "candidate_photo_verified": bool(getattr(evaluation.candidate, "verification_photo", None)),
+        "candidate_photo_data_uri": candidate_photo_data_uri,
+        "candidate_photo_verified": candidate_photo_verified,
         "readiness_label": readiness["label"],
         "readiness_position": readiness["position"],
         "issue_date": certificate.issued_at.strftime("%Y-%m-%d"),

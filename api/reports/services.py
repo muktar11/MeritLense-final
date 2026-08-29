@@ -573,21 +573,28 @@ class EvaluationReportService:
 
     @classmethod
     def _build_evaluator_rating(cls, evaluation):
-        """The evaluator's manual 0-100 ratings on the 4 fixed pools, pulled
-        live at generation time (same idiom as identity_verified being
-        pulled live from the session) - None if no rating has been
-        submitted yet. Snapshotted into report_payload like everything
-        else here, so a later rating/resubmission only shows up on a
-        freshly generated report, consistent with report immutability."""
+        """The evaluator's manual 0-100 ratings on the 5 approved
+        CANONICAL_COMPETENCY_DIMENSIONS, pulled live at generation time
+        (same idiom as identity_verified being pulled live from the
+        session) - None if no rating has been submitted yet. Snapshotted
+        into report_payload like everything else here, so a later
+        rating/resubmission only shows up on a freshly generated report,
+        consistent with report immutability. psych_professional is
+        deliberately omitted - see EvaluatorRating's docstring in
+        api/evaluations/models.py. behavior_integrity is kept here (raw
+        score, used by _derive_authoritative_score) alongside its derived
+        Risk Level for display - see behavioral_risk_level()."""
         rating = getattr(evaluation, "evaluator_rating", None)
         if rating is None:
             return None
-        from api.evaluations.evaluator_rating_services import calculate_response_consistency
+        from api.evaluations.evaluator_rating_services import behavioral_risk_level, calculate_response_consistency
 
         return {
             "safety_awareness": rating.safety_awareness,
+            "hygiene": rating.hygiene,
+            "communication": rating.communication,
             "behavior_integrity": rating.behavior_integrity,
-            "psych_professional": rating.psych_professional,
+            "behavioral_risk_level": behavioral_risk_level(rating.behavior_integrity),
             "task_execution": rating.task_execution,
             "consistency": calculate_response_consistency(evaluation, fallback_rating=rating),
             "rated_by_name": rating.rated_by.get_full_name() if rating.rated_by else None,
@@ -627,16 +634,17 @@ class EvaluationReportService:
                 "secondary": ai_secondary if base_score_available else None,
             }
         pools = evaluator_rating_payload
-        average = round(
-            (
-                pools["safety_awareness"]
-                + pools["behavior_integrity"]
-                + pools["psych_professional"]
-                + pools["task_execution"]
-                + pools["consistency"]
-            )
-            / 5
-        )
+        # Average of the 5 approved dimensions only - psych_professional
+        # (not an approved dimension) and consistency (a reliability
+        # metric, not a competency) are deliberately excluded. hygiene and
+        # communication can be None on ratings submitted before those
+        # dimensions were collected; skip rather than crash on those.
+        dimension_scores = [
+            pools[key]
+            for key in ("safety_awareness", "hygiene", "communication", "task_execution", "behavior_integrity")
+            if pools.get(key) is not None
+        ]
+        average = round(sum(dimension_scores) / len(dimension_scores)) if dimension_scores else 0
         return {
             "value": average,
             "available": base_score_available,

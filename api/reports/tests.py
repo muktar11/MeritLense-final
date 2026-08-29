@@ -938,7 +938,7 @@ class EvaluationReportApiTests(TestCase):
         self.session.save(update_fields=["scheduled_start_at"])
         EvaluatorRating.objects.create(
             evaluation=self.evaluation,
-            safety_awareness=80, behavior_integrity=70, psych_professional=90, task_execution=60,
+            safety_awareness=80, hygiene=75, communication=85, behavior_integrity=70, task_execution=60,
             rated_by=self.user,
         )
 
@@ -950,8 +950,9 @@ class EvaluationReportApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         summary = response.data["report_payload"]["executive_summary"]
-        evaluator_rating = response.data["report_payload"]["evaluator_rating"]
-        expected = round((80 + 70 + 90 + 60 + evaluator_rating["consistency"]) / 5)
+        # Average of the 5 approved dimensions only - consistency is a
+        # reliability metric, not a competency, and is excluded.
+        expected = round((80 + 75 + 85 + 70 + 60) / 5)
         self.assertEqual(summary["overall_score"], expected)
         self.assertTrue(summary["overall_score_available"])
         self.assertEqual(summary["score_source"], "EVALUATOR_ASSESSMENT")

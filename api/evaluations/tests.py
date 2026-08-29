@@ -1727,8 +1727,10 @@ class CertificateGenerationTests(TestCase):
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
         self.assertIsNone(certificate.expires_at)
 
-        from api.evaluations.certificate_services import _candidate_photo_data_uri, _readiness_gauge_context
-        self.assertTrue(_candidate_photo_data_uri(self.candidate).startswith("data:image/jpeg;base64,"))
+        from api.evaluations.certificate_services import _candidate_photo_context, _readiness_gauge_context
+        photo_data_uri, photo_verified = _candidate_photo_context(self.candidate)
+        self.assertTrue(photo_data_uri.startswith("data:image/jpeg;base64,"))
+        self.assertFalse(photo_verified)
         readiness = _readiness_gauge_context(self.evaluation)
         self.assertEqual(readiness["label"], "Ready")
         self.assertEqual(readiness["position"], 3)
@@ -1738,9 +1740,35 @@ class CertificateGenerationTests(TestCase):
         self.assertIsNotNone(self.evaluation.certificate_issued_at)
 
     def test_candidate_photo_is_none_when_never_uploaded(self):
-        from api.evaluations.certificate_services import _candidate_photo_data_uri
+        from api.evaluations.certificate_services import _candidate_photo_context
 
-        self.assertIsNone(_candidate_photo_data_uri(self.candidate))
+        photo_data_uri, photo_verified = _candidate_photo_context(self.candidate)
+        self.assertIsNone(photo_data_uri)
+        self.assertFalse(photo_verified)
+
+    def test_candidate_photo_prefers_verification_photo_and_marks_verified(self):
+        # Regression guard: the "Verified ID Photo" badge must describe the
+        # same image actually shown, not a different field's presence -
+        # see _candidate_photo_context's docstring.
+        import base64
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from api.evaluations.certificate_services import _candidate_photo_context
+
+        tiny_jpeg = base64.b64decode(
+            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a"
+            "HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIy"
+            "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEB"
+            "AxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAA"
+            "AAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k="
+        )
+        self.candidate.verification_photo = SimpleUploadedFile(
+            "verify.jpg", tiny_jpeg, content_type="image/jpeg"
+        )
+        self.candidate.save(update_fields=["verification_photo"])
+
+        photo_data_uri, photo_verified = _candidate_photo_context(self.candidate)
+        self.assertTrue(photo_data_uri.startswith("data:image/jpeg;base64,"))
+        self.assertTrue(photo_verified)
 
     def test_readiness_gauge_reflects_real_evaluation_status(self):
         from api.core.constants import ReadinessStatus
@@ -2004,7 +2032,7 @@ class CertificateEligibilityTests(TestCase):
         self.session.save(update_fields=["scheduled_start_at"])
         EvaluatorRating.objects.create(
             evaluation=self.evaluation,
-            safety_awareness=80, behavior_integrity=70, psych_professional=90, task_execution=60,
+            safety_awareness=80, hygiene=75, communication=85, behavior_integrity=70, task_execution=60,
             rated_by=self.user,
         )
         summary = self._summary()
@@ -2048,15 +2076,16 @@ class CertificateEligibilityTests(TestCase):
 
 
 class EvaluatorRatingTests(TestCase):
-    """The evaluator's manual 0-100 rating on the 4 fixed pools is purely
-    additive: it must never change Evaluation.score/readiness_status, and
-    must only trigger certificate regeneration when a certificate was
+    """The evaluator's manual 0-100 rating on the 5 approved dimensions is
+    purely additive: it must never change Evaluation.score/readiness_status,
+    and must only trigger certificate regeneration when a certificate was
     already issued - never first-issue one on its own."""
 
     VALID_RATINGS = {
         "safety_awareness": 80,
+        "hygiene": 75,
+        "communication": 85,
         "behavior_integrity": 70,
-        "psych_professional": 90,
         "task_execution": 60,
     }
 
@@ -2166,7 +2195,7 @@ class EvaluatorRatingTests(TestCase):
         response = self.client.post(self.url, self.VALID_RATINGS, format="json")
 
         self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["consistency"], 89)
+        self.assertEqual(response.data["consistency"], 91)
         self.assertEqual(EvaluatorRating.objects.count(), 1)
         rating = EvaluatorRating.objects.get(evaluation=self.evaluation)
         self.assertEqual(rating.safety_awareness, 80)
@@ -2265,5 +2294,8 @@ class EvaluatorRatingTests(TestCase):
         payload = EvaluationReportService._build_evaluator_rating(self.evaluation)
         self.assertIsNotNone(payload)
         self.assertEqual(payload["safety_awareness"], 80)
+        self.assertEqual(payload["hygiene"], 75)
+        self.assertEqual(payload["communication"], 85)
         self.assertEqual(payload["task_execution"], 60)
-        self.assertEqual(payload["consistency"], 89)
+        self.assertEqual(payload["behavioral_risk_level"], "Medium")
+        self.assertEqual(payload["consistency"], 91)

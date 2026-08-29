@@ -296,12 +296,18 @@ class EvaluationCancelSerializer(serializers.Serializer):
 class EvaluatorRatingSerializer(PublicIdModelSerializer):
     rated_by_name = serializers.SerializerMethodField()
     consistency = serializers.SerializerMethodField()
+    behavioral_risk_level = serializers.SerializerMethodField()
 
     class Meta:
         model = EvaluatorRating
+        # psych_professional is deliberately excluded - see the model's
+        # docstring in api/evaluations/models.py. It must never reach any
+        # API consumer (frontend, certificate, report) until the
+        # legal/compliance review it's pending has happened.
         fields = [
-            'id', 'safety_awareness', 'behavior_integrity',
-            'psych_professional', 'task_execution', 'consistency',
+            'id', 'safety_awareness', 'hygiene', 'communication',
+            'behavior_integrity', 'behavioral_risk_level',
+            'task_execution', 'consistency',
             'rated_by', 'rated_by_name', 'rated_at',
             'created_at', 'updated_at',
         ]
@@ -315,11 +321,17 @@ class EvaluatorRatingSerializer(PublicIdModelSerializer):
 
         return calculate_response_consistency(obj.evaluation, fallback_rating=obj)
 
+    def get_behavioral_risk_level(self, obj):
+        from .evaluator_rating_services import behavioral_risk_level
+
+        return behavioral_risk_level(obj.behavior_integrity)
+
 
 class EvaluatorRatingWriteSerializer(serializers.Serializer):
     safety_awareness = serializers.IntegerField(min_value=0, max_value=100)
+    hygiene = serializers.IntegerField(min_value=0, max_value=100)
+    communication = serializers.IntegerField(min_value=0, max_value=100)
     behavior_integrity = serializers.IntegerField(min_value=0, max_value=100)
-    psych_professional = serializers.IntegerField(min_value=0, max_value=100)
     task_execution = serializers.IntegerField(min_value=0, max_value=100)
 
 

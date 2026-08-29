@@ -24,8 +24,8 @@ def calculate_response_consistency(evaluation, *, fallback_rating=None):
     standard deviation of the effective response percentages.  When the rule
     engine has at least two usable response results those are authoritative.
     Historical live calls did not persist their transcripts, so for those
-    records use dispersion across the four evaluator-assessed fixed pools
-    rather than presenting a fabricated zero.
+    records use dispersion across the five evaluator-assessed approved
+    dimensions rather than presenting a fabricated zero.
     """
     percentages = []
     for result in evaluation.response_results.only("score", "max_score", "metadata"):
@@ -42,13 +42,34 @@ def calculate_response_consistency(evaluation, *, fallback_rating=None):
     if fallback_rating is not None:
         fallback_percentages = [
             Decimal(str(fallback_rating.safety_awareness)),
+            Decimal(str(fallback_rating.hygiene)),
+            Decimal(str(fallback_rating.communication)),
             Decimal(str(fallback_rating.behavior_integrity)),
-            Decimal(str(fallback_rating.psych_professional)),
             Decimal(str(fallback_rating.task_execution)),
         ]
         return _consistency_from_percentages(fallback_percentages)
 
     return 0
+
+
+# Mirrors EvaluationReportService._risk_block's own thresholds (see
+# api/reports/services.py) - a score below 40 is High risk, up to 70 is
+# Medium, above that is Low - so the evaluator-entered Behavioral
+# Indicators rating buckets the same way the AI-led competency risk
+# indicators already do, rather than inventing a second scale.
+def behavioral_risk_level(behavior_integrity_score):
+    """Per Report Specification Section 4: Behavioral Indicators is shown
+    as an evidence-based Risk Indicator (High/Medium/Low), never as a raw
+    0-100 score, on any candidate/employer-facing surface (certificate,
+    report). The raw score itself is still stored and used in scoring -
+    this only controls how it's presented."""
+    if behavior_integrity_score is None:
+        return "Not Assessed"
+    if behavior_integrity_score < 40:
+        return "High"
+    if behavior_integrity_score <= 70:
+        return "Medium"
+    return "Low"
 
 
 def submit_evaluator_rating(evaluation, *, ratings, actor):

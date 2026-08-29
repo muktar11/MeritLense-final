@@ -512,6 +512,26 @@
       flex: 0 0 auto;
     }
 
+    .coverage-item-pending {
+      color: var(--muted);
+      border-color: var(--line);
+      background: var(--soft);
+    }
+
+    .pending-mark {
+      width: 15px;
+      height: 15px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #d9e2f2;
+      color: #5c7198;
+      font-size: 9px;
+      line-height: 1;
+      flex: 0 0 auto;
+    }
+
     .qr-card {
       padding: 10px 11px;
       display: flex;
@@ -1097,7 +1117,7 @@
               <div class="summary-label">Assessment Coverage</div>
               <div class="summary-value">
                 {% for item in assessment.assessment_coverage %}
-                  {{ item }}{% if not forloop.last %} | {% endif %}
+                  {{ item.label }}{% if not item.covered %} (Not Assessed){% endif %}{% if not forloop.last %} | {% endif %}
                 {% endfor %}
               </div>
             </div>
@@ -1207,7 +1227,11 @@
           <div class="list-card-title">Assessment Coverage</div>
           <ul class="coverage-list">
             {% for item in assessment.assessment_coverage %}
-              <li class="coverage-item"><span class="check-mark">&#10003;</span>{{ item }}</li>
+              {% if item.covered %}
+                <li class="coverage-item"><span class="check-mark">&#10003;</span>{{ item.label }}</li>
+              {% else %}
+                <li class="coverage-item coverage-item-pending"><span class="pending-mark">&#8212;</span>{{ item.label }} (Not Assessed)</li>
+              {% endif %}
             {% endfor %}
           </ul>
         </div>

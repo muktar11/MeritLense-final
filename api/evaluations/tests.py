@@ -2191,6 +2191,23 @@ class EvaluatorRatingTests(TestCase):
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 404)
 
+    def test_get_does_not_crash_on_pre_migration_rating_with_null_dimensions(self):
+        # Regression test: a production incident where GET (and any list
+        # endpoint serializing EvaluatorRating) 500'd for every rating
+        # submitted before hygiene/communication existed, because the
+        # consistency fallback did Decimal(str(None)) on those None
+        # fields. hygiene/communication are left unset here to reproduce
+        # a pre-migration row.
+        EvaluatorRating.objects.create(
+            evaluation=self.evaluation,
+            safety_awareness=80, behavior_integrity=70, task_execution=60,
+            rated_by=self.user,
+        )
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIsNone(response.data["hygiene"])
+        self.assertIsNone(response.data["communication"])
+
     def test_post_creates_a_rating(self):
         response = self.client.post(self.url, self.VALID_RATINGS, format="json")
 

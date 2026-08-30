@@ -40,14 +40,19 @@ def calculate_response_consistency(evaluation, *, fallback_rating=None):
         return _consistency_from_percentages(percentages)
 
     if fallback_rating is not None:
-        fallback_percentages = [
-            Decimal(str(fallback_rating.safety_awareness)),
-            Decimal(str(fallback_rating.hygiene)),
-            Decimal(str(fallback_rating.communication)),
-            Decimal(str(fallback_rating.behavior_integrity)),
-            Decimal(str(fallback_rating.task_execution)),
+        # hygiene/communication are None on any rating submitted before
+        # those dimensions were added (see EvaluatorRating's docstring) -
+        # skip rather than crash on Decimal(str(None)).
+        fallback_values = [
+            fallback_rating.safety_awareness,
+            fallback_rating.hygiene,
+            fallback_rating.communication,
+            fallback_rating.behavior_integrity,
+            fallback_rating.task_execution,
         ]
-        return _consistency_from_percentages(fallback_percentages)
+        fallback_percentages = [Decimal(str(value)) for value in fallback_values if value is not None]
+        if len(fallback_percentages) >= 2:
+            return _consistency_from_percentages(fallback_percentages)
 
     return 0
 

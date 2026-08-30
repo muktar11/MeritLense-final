@@ -615,7 +615,7 @@ class EvaluationReportService:
             "source": "AI_ASSESSMENT",
             "value": ai_value,
             "display": f"{ai_value}%",
-            "label": "AI Assessment Score (supporting evidence)",
+            "label": "AI Assessment Score (Reference)",
         }
         if not is_scheduled_interview:
             return {
@@ -1507,12 +1507,20 @@ class EvaluationReportService:
 
     @classmethod
     def _build_critical_competency_status(cls, *, competency_breakdown, risk_indicators):
+        # Labels come from CANONICAL_COMPETENCY_DIMENSIONS - not hardcoded
+        # short names - so this section can't drift out of sync with the
+        # full names Assessment Methodology and Full Competency Breakdown
+        # already use.
+        matchers = (
+            (["safety"], "safety_risk"),
+            (["hygiene", "clean", "sanitation"], "hygiene_risk"),
+            (["communication", "language"], "communication_risk"),
+            (["practical", "task"], "practical_tasks_risk"),
+            (["integrity", "reliability", "behavior"], "integrity_risk"),
+        )
         categories = [
-            ("Safety", ["safety"], "safety_risk"),
-            ("Hygiene", ["hygiene", "clean", "sanitation"], "hygiene_risk"),
-            ("Communication", ["communication", "language"], "communication_risk"),
-            ("Practical Tasks", ["practical", "task"], "practical_tasks_risk"),
-            ("Behavioral Indicators", ["integrity", "reliability", "behavior"], "integrity_risk"),
+            (label, tokens, risk_key)
+            for label, (tokens, risk_key) in zip(cls.CANONICAL_COMPETENCY_DIMENSIONS, matchers)
         ]
         items = []
         for label, tokens, risk_key in categories:
@@ -1558,7 +1566,7 @@ class EvaluationReportService:
                     "score": competency.get("score") if competency else 0,
                     "max_score": competency.get("max_score") if competency else 0,
                     "pass_threshold": competency.get("pass_threshold") if competency else 0,
-                    "summary": cls._join_evidence_sentences(risk.get("evidence") or []) or "No supporting evidence recorded.",
+                    "summary": cls._join_evidence_sentences(risk.get("evidence") or []) or "No risk factors identified for this dimension.",
                 }
             )
         return items
@@ -2369,7 +2377,7 @@ class EvaluationReportService:
                     lines.append(f"- {risk_name}: {risk}")
                     continue
                 title = risk_name.replace("_", " ").replace("risk", "risk").title()
-                detail = cls._join_evidence_sentences(risk.get("evidence") or []) or "No supporting evidence recorded."
+                detail = cls._join_evidence_sentences(risk.get("evidence") or []) or "No risk factors identified for this dimension."
                 lines.extend(
                     [
                         f"- {title}: {risk.get('level', '')} ({risk.get('risk_score_display', risk.get('risk_score', ''))})",

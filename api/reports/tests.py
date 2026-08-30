@@ -353,7 +353,7 @@ class EvaluationReportApiTests(TestCase):
             response.data["report_payload"]["candidate_snapshot"]["full_name"],
             self.candidate.get_full_name(),
         )
-        self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_coverage"][0]["label"], "Safety")
+        self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_coverage"][0]["label"], "Safety Awareness")
         self.assertTrue(response.data["report_payload"]["assessment_context"]["assessment_coverage"][0]["covered"])
         self.assertFalse(response.data["report_payload"]["assessment_context"]["assessment_coverage"][-1]["covered"])
         self.assertIn("transcript_report", response.data["report_payload"])
@@ -588,7 +588,7 @@ class EvaluationReportApiTests(TestCase):
         labels = [item["label"] for item in status]
         self.assertEqual(
             labels,
-            ["Safety", "Hygiene", "Communication", "Practical Tasks", "Behavioral Indicators"],
+            ["Safety Awareness", "Hygiene & Standards", "Communication Ability", "Practical Task Execution", "Behavioral Indicators"],
         )
 
     def test_assessment_coverage_reflects_real_per_dimension_status(self):

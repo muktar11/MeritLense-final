@@ -103,7 +103,10 @@ class LiveCallConsumer(AsyncWebsocketConsumer):
         action = message.get("action")
         if action == "ping":
             await self.send_json({"event": "pong"})
-        elif action in {"offer", "answer", "ice_candidate", "renegotiate"}:
+        elif action in {
+            "offer", "answer", "ice_candidate", "renegotiate",
+            "turn_recording_started", "turn_recording_ended",
+        }:
             await self.channel_layer.group_send(self.group_name, {
                 "type": "signal.message", "sender": self.channel_name, "sender_role": self.role,
                 "payload": {"event": action, "data": message.get("data")},

@@ -10,6 +10,7 @@ from api.accounts.models import Company, User
 from api.core.constants import Roles
 from api.payments.entitlement_services import ADDON_POINTS_CATALOG, EntitlementService
 from api.payments.models import BalanceTransaction, Customer, Invoice, PackageBalance, Payment, Price, Subscription
+from api.payments.serializers import CreateSubscriptionSerializer
 from api.payments.services import StripeService
 
 
@@ -447,3 +448,37 @@ class AdminSubscriptionStatsAndSerializerTests(APITestCase):
         response = self.client.get("/api/v1/payments/admin/subscriptions")
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["results"][0]["company_name"], "Acme Corp")
+
+
+class CreateSubscriptionSerializerPaymentMethodTests(TestCase):
+    """payment_method_id is optional on the serializer (a genuine $0 plan
+    has nothing to charge), but that must not let a paid plan be
+    subscribed to for free by simply omitting it."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="free-tier-subscriber@example.com", password="Password123!",
+            first_name="Free", last_name="Tier", role=Roles.B2C, is_verified=True,
+        )
+
+    def _serializer(self, price, payment_method_id=None):
+        data = {"price_id": str(price.pk)}
+        if payment_method_id is not None:
+            data["payment_method_id"] = payment_method_id
+        return CreateSubscriptionSerializer(data=data, context={"request": MagicMock(user=self.user)})
+
+    def test_paid_plan_without_payment_method_is_rejected(self):
+        price = make_price(unit_amount=Decimal("2000.00"), target_user_type="BOTH")
+        serializer = self._serializer(price)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("payment_method_id", serializer.errors)
+
+    def test_paid_plan_with_payment_method_is_accepted(self):
+        price = make_price(unit_amount=Decimal("2000.00"), target_user_type="BOTH")
+        serializer = self._serializer(price, payment_method_id="pm_test123")
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_free_plan_without_payment_method_is_accepted(self):
+        price = make_price(unit_amount=Decimal("0.00"), target_user_type="BOTH")
+        serializer = self._serializer(price)
+        self.assertTrue(serializer.is_valid(), serializer.errors)

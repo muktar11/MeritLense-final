@@ -482,3 +482,54 @@ class CreateSubscriptionSerializerPaymentMethodTests(TestCase):
         price = make_price(unit_amount=Decimal("0.00"), target_user_type="BOTH")
         serializer = self._serializer(price)
         self.assertTrue(serializer.is_valid(), serializer.errors)
+
+
+class AdminPackagePermanentDeleteTests(APITestCase):
+    """Covers the admin Package Management page's permanent-delete action -
+    only ever allowed for a package with zero subscription history, since
+    Subscription.stripe_price is SET_NULL on delete (safe from a DB
+    integrity standpoint) but would silently erase which plan a real
+    subscriber was on."""
+
+    def setUp(self):
+        self.superadmin = User.objects.create_user(
+            email="pkg-delete-superadmin@example.com", password="Password123!",
+            first_name="Pkg", last_name="Super", role=Roles.SUPERADMIN, is_verified=True, is_staff=True,
+        )
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": self.superadmin.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+    def test_deletes_a_package_with_no_subscription_history(self):
+        price = make_price(name="Unused Pilot", target_user_type="B2B")
+
+        response = self.client.delete(f"/api/v1/payments/admin/prices/{price.id}?permanent=true")
+
+        self.assertEqual(response.status_code, 204, response.data)
+        self.assertFalse(Price.objects.filter(id=price.id).exists())
+
+    def test_rejects_deleting_a_package_with_subscription_history(self):
+        b2b_owner = User.objects.create_user(
+            email="pkg-delete-b2b-owner@example.com", password="Password123!",
+            first_name="B2B", last_name="Owner", role=Roles.B2B, is_verified=True,
+        )
+        price = make_price(name="Growth In Use", target_user_type="B2B")
+        make_subscription(b2b_owner, price, status="ACTIVE")
+
+        response = self.client.delete(f"/api/v1/payments/admin/prices/{price.id}?permanent=true")
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertTrue(Price.objects.filter(id=price.id).exists())
+
+    def test_deactivate_without_permanent_flag_is_unaffected(self):
+        """Regression guard: the existing soft-deactivate action must keep
+        working exactly as before - it's the default when ?permanent isn't
+        passed at all."""
+        price = make_price(name="Still Deactivatable", target_user_type="B2B")
+
+        response = self.client.delete(f"/api/v1/payments/admin/prices/{price.id}")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        price.refresh_from_db()
+        self.assertFalse(price.is_active)

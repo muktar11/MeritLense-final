@@ -212,12 +212,22 @@ class CreateSubscriptionSerializer(serializers.Serializer):
         user = request.user
         
         price = self.context.get('price')
-        
+
         if price and not price.is_available_for_user(user):
             raise serializers.ValidationError(
                 "This plan is not available for your account type"
             )
-        
+
+        # payment_method_id is otherwise optional (a genuine $0 plan has
+        # nothing to charge, so StripeService.create_subscription skips
+        # default_payment_method entirely when it's absent - see there).
+        # Without this check, any paid plan could be subscribed to for
+        # free by simply omitting payment_method_id from the request.
+        if price and price.unit_amount > 0 and not data.get('payment_method_id'):
+            raise serializers.ValidationError(
+                {"payment_method_id": "A payment method is required for this plan."}
+            )
+
         if hasattr(user, 'company_profile') and user.company_profile:
             existing = Subscription.objects.filter(
                 company=user.company_profile.company,

@@ -982,6 +982,38 @@ class AdminPriceViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
 
+        # Permanent delete is only offered for packages nobody was ever
+        # subscribed to - Subscription.stripe_price is SET_NULL on delete,
+        # so it wouldn't crash on a package with real history, but it
+        # would silently erase which plan those subscriptions were on.
+        # Deactivation (the default) is the only safe path once a package
+        # has ever actually had a subscriber.
+        permanent = request.query_params.get('permanent', '').lower() == 'true'
+        if permanent:
+            if instance.subscriptions.exists():
+                return Response(
+                    {'error': 'This package has subscription history and cannot be permanently deleted - deactivate it instead.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                stripe.api_key = settings.STRIPE_SECRET_KEY
+                stripe.Price.modify(instance.stripe_price_id, active=False)
+                stripe.Product.modify(instance.stripe_product_id, active=False)
+            except stripe.error.StripeError as e:
+                logger.warning(f"Could not archive Stripe price/product for {instance.stripe_price_id}: {e}")
+
+            AuditLogService.log(
+                user=request.user,
+                action='PACKAGE_DELETED',
+                category=AuditLogCategory.SUBSCRIPTION,
+                description=f"Package permanently deleted: {instance.name}",
+                resource=instance,
+                request=request
+            )
+            instance.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
         try:
             stripe.api_key = settings.STRIPE_SECRET_KEY
             stripe.Price.modify(instance.stripe_price_id, active=False)

@@ -533,3 +533,92 @@ class AdminPackagePermanentDeleteTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         price.refresh_from_db()
         self.assertFalse(price.is_active)
+
+
+class ChangePlanEntitlementTests(APITestCase):
+    """change_plan() must not leave PackageBalance stale until an unrelated
+    future renewal (see the memo comment above it in views.py). Per the
+    Package Architecture memo: an upgrade gets its new entitlement
+    immediately upon confirmed payment of the proration; a downgrade (or
+    an upgrade nobody actually paid extra for) leaves the current balance
+    untouched - "No automatic entitlement reduction... without an approved
+    package-change rule" - until the next natural renewal applies it."""
+
+    def setUp(self):
+        self.superadmin = User.objects.create_user(
+            email="change-plan-superadmin@example.com", password="Password123!",
+            first_name="Change", last_name="Super", role=Roles.SUPERADMIN, is_verified=True, is_staff=True,
+        )
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": self.superadmin.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        self.owner = User.objects.create_user(
+            email="change-plan-owner@example.com", password="Password123!",
+            first_name="B2B", last_name="Owner", role=Roles.B2B, is_verified=True,
+        )
+        self.company = make_company(self.owner)
+        self.growth = make_price(name="growth package", target_user_type="BOTH", unit_amount=Decimal("2000.00"), slot_grant=200, points_grant=2000)
+        self.business = make_price(name="business package", target_user_type="BOTH", unit_amount=Decimal("3500.00"), slot_grant=500, points_grant=3500)
+        self.subscription = make_subscription(self.owner, self.growth, company=self.company, status="ACTIVE")
+
+    def _mock_subscription_retrieve(self, mock_stripe):
+        mock_stripe.Subscription.retrieve.return_value = {"items": {"data": [{"id": "si_test123"}]}}
+
+    @patch("api.payments.views.stripe")
+    def test_upgrade_grants_new_entitlement_immediately_on_confirmed_payment(self, mock_stripe):
+        self._mock_subscription_retrieve(mock_stripe)
+        mock_invoice = MagicMock()
+        mock_invoice.finalize_invoice.return_value = mock_invoice
+        mock_invoice.pay.return_value = MagicMock(status="paid")
+        mock_stripe.Invoice.create.return_value = mock_invoice
+
+        response = self.client.post(
+            f"/api/v1/payments/subscriptions/{self.subscription.public_id}/change_plan",
+            {"price_id": str(self.business.id), "prorate": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        mock_stripe.Invoice.create.assert_called_once()
+        balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 500)
+
+    @patch("api.payments.views.stripe")
+    def test_downgrade_does_not_touch_existing_balance(self, mock_stripe):
+        self._mock_subscription_retrieve(mock_stripe)
+        self.subscription.stripe_price = self.business
+        self.subscription.save(update_fields=["stripe_price"])
+        PackageBalance.objects.create(
+            owner_company=self.company, balance_type=PackageBalance.SLOTS, fixed_amount=500, current_balance=17,
+        )
+
+        response = self.client.post(
+            f"/api/v1/payments/subscriptions/{self.subscription.public_id}/change_plan",
+            {"price_id": str(self.growth.id), "prorate": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        mock_stripe.Invoice.create.assert_not_called()
+        balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 17)
+
+    @patch("api.payments.views.stripe")
+    def test_upgrade_without_prorate_does_not_immediately_grant(self, mock_stripe):
+        self._mock_subscription_retrieve(mock_stripe)
+        PackageBalance.objects.create(
+            owner_company=self.company, balance_type=PackageBalance.SLOTS, fixed_amount=200, current_balance=200,
+        )
+
+        response = self.client.post(
+            f"/api/v1/payments/subscriptions/{self.subscription.public_id}/change_plan",
+            {"price_id": str(self.business.id), "prorate": False},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        mock_stripe.Invoice.create.assert_not_called()
+        balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 200)

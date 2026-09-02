@@ -533,20 +533,21 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
     @action(detail=True, methods=['post'])
     def change_plan(self, request, id=None):
         subscription = self.get_object()
-        old_plan = subscription.stripe_price.name if subscription.stripe_price else 'Unknown'
-        
+        old_price = subscription.stripe_price
+        old_plan = old_price.name if old_price else 'Unknown'
+
         serializer = ChangePlanSerializer(
-            data=request.data, 
+            data=request.data,
             context={'request': request}
         )
-        
+
         if serializer.is_valid():
             price_id = serializer.validated_data['price_id']
             prorate = serializer.validated_data['prorate']
-            
+
             try:
                 new_price = get_by_identifier(Price.objects.filter(is_active=True), price_id)
-                
+
                 stripe.api_key = settings.STRIPE_SECRET_KEY
 
                 # Stripe's items[].id must be the Subscription Item ID (si_...),
@@ -564,11 +565,62 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
                     items=items,
                     proration_behavior='create_prorations' if prorate else 'none'
                 )
-                
+
                 subscription.stripe_price = new_price
                 subscription.save()
                 subscription.refresh_from_db()
-                
+
+                # Per the Package Architecture memo (Section 5): "Creating an
+                # invoice, Checkout Session, or Stripe Subscription does not
+                # by itself grant or renew Points or Slots. Entitlements are
+                # activated only according to the confirmed-payment rules of
+                # the applicable billing model." The subscription-item swap
+                # above only takes effect on Stripe's side - by itself it
+                # never touched PackageBalance, so an upgrade silently gave
+                # the new plan's price with none of its entitlement until
+                # the next unrelated monthly renewal.
+                #
+                # Upgrade (strictly more expensive, and actually prorated -
+                # otherwise there's no new payment to confirm): invoice and
+                # collect the proration immediately, and on confirmed
+                # payment, grant the new plan's entitlement right away via
+                # the same reset_b2b_balances() the normal renewal webhook
+                # uses - not a bespoke "credit only the difference" path,
+                # which the memo explicitly flags as ambiguous/undefined.
+                # Calling it here is safe even if the eventual invoice.paid
+                # webhook also fires for the same invoice - both the
+                # Invoice upsert and reset_b2b_balances are idempotent.
+                #
+                # Downgrade (or an upgrade with prorate=False, so nothing
+                # new was actually charged): per the memo's explicit
+                # instruction, "No automatic entitlement reduction should
+                # occur without an approved package-change rule" - leave
+                # the current balance untouched. It naturally rolls over to
+                # the new (lower) plan's amount at the next regular renewal,
+                # which is the "next billing cycle" effective date the memo
+                # lists as one of the allowed options.
+                is_upsized = prorate and old_price is not None and new_price.unit_amount > old_price.unit_amount
+                if is_upsized and subscription.company:
+                    try:
+                        pending_invoice = stripe.Invoice.create(
+                            customer=subscription.customer.stripe_customer_id,
+                            subscription=subscription.stripe_subscription_id,
+                            auto_advance=False,
+                        )
+                        pending_invoice = pending_invoice.finalize_invoice()
+                        paid_invoice = pending_invoice.pay()
+                        if paid_invoice.status == 'paid':
+                            from .entitlement_services import EntitlementService
+                            EntitlementService.reset_b2b_balances(subscription)
+                    except stripe.error.StripeError as e:
+                        # The plan change on Stripe's side already succeeded
+                        # (matches Stripe's own behavior: a failed proration
+                        # invoice doesn't revert the subscription price) -
+                        # entitlements simply stay at the old amount until
+                        # payment is actually confirmed, via Stripe's normal
+                        # invoice retry/dunning firing invoice.paid later.
+                        logger.warning(f"Could not immediately invoice upgrade proration for subscription {subscription.id}: {e}")
+
                 AuditLogService.log(
                     user=request.user,
                     action='SUBSCRIPTION_PLAN_CHANGED',
@@ -582,9 +634,9 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
                     },
                     request=request
                 )
-                
+
                 return Response(SubscriptionSerializer(subscription).data)
-                
+
             except stripe.error.StripeError as e:
                 return Response(
                     {'error': str(e)},
@@ -595,7 +647,7 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
                     {'error': 'New price not found'},
                     status=status.HTTP_404_NOT_FOUND
                 )
-        
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     @action(detail=True, methods=['post'])

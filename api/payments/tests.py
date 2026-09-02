@@ -9,7 +9,7 @@ from rest_framework.test import APIClient, APITestCase
 from api.accounts.models import Company, User
 from api.core.constants import Roles
 from api.payments.entitlement_services import ADDON_POINTS_CATALOG, EntitlementService
-from api.payments.models import BalanceTransaction, Customer, Invoice, PackageBalance, Payment, Price, Subscription
+from api.payments.models import BalanceTransaction, Customer, Invoice, PackageBalance, Payment, Price, ProcessedStripeEvent, Subscription
 from api.payments.serializers import CreateSubscriptionSerializer
 from api.payments.services import StripeService
 
@@ -622,3 +622,63 @@ class ChangePlanEntitlementTests(APITestCase):
         mock_stripe.Invoice.create.assert_not_called()
         balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
         self.assertEqual(balance.current_balance, 200)
+
+
+class WebhookIdempotencyTests(APITestCase):
+    """A redelivered Stripe webhook (retries, manual replays - Stripe
+    explicitly documents this can happen) must not be reprocessed, since
+    e.g. reset_b2b_balances() would otherwise wipe out consumption that
+    happened between the first delivery and a later redelivery of the
+    same event."""
+
+    def _fake_event(self, event_id="evt_test123", event_type="invoice.payment_succeeded"):
+        return {"id": event_id, "type": event_type, "data": {"object": {}}}
+
+    @patch("api.payments.views.StripeService")
+    @patch("api.payments.views.stripe.Webhook.construct_event")
+    def test_duplicate_event_id_is_not_reprocessed(self, mock_construct_event, mock_service_cls):
+        mock_construct_event.return_value = self._fake_event()
+        mock_service_cls.return_value.handle_webhook_event.return_value = {"ok": True}
+
+        first = self.client.post(
+            "/api/v1/payments/webhook", data=b"{}", content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="sig",
+        )
+        second = self.client.post(
+            "/api/v1/payments/webhook", data=b"{}", content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="sig",
+        )
+
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertTrue(second.json().get("duplicate"))
+        self.assertEqual(mock_service_cls.return_value.handle_webhook_event.call_count, 1)
+        self.assertEqual(ProcessedStripeEvent.objects.filter(stripe_event_id="evt_test123").count(), 1)
+
+    @patch("api.payments.views.StripeService")
+    @patch("api.payments.views.stripe.Webhook.construct_event")
+    def test_different_event_ids_both_process(self, mock_construct_event, mock_service_cls):
+        mock_construct_event.side_effect = [
+            self._fake_event(event_id="evt_a"),
+            self._fake_event(event_id="evt_b"),
+        ]
+        mock_service_cls.return_value.handle_webhook_event.return_value = {"ok": True}
+
+        self.client.post("/api/v1/payments/webhook", data=b"{}", content_type="application/json", HTTP_STRIPE_SIGNATURE="sig")
+        self.client.post("/api/v1/payments/webhook", data=b"{}", content_type="application/json", HTTP_STRIPE_SIGNATURE="sig")
+
+        self.assertEqual(mock_service_cls.return_value.handle_webhook_event.call_count, 2)
+
+    @patch("api.payments.views.StripeService")
+    @patch("api.payments.views.stripe.Webhook.construct_event")
+    def test_processing_failure_removes_marker_so_retry_can_reprocess(self, mock_construct_event, mock_service_cls):
+        mock_construct_event.return_value = self._fake_event(event_id="evt_fail")
+        mock_service_cls.return_value.handle_webhook_event.side_effect = RuntimeError("boom")
+
+        response = self.client.post(
+            "/api/v1/payments/webhook", data=b"{}", content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="sig",
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertFalse(ProcessedStripeEvent.objects.filter(stripe_event_id="evt_fail").exists())

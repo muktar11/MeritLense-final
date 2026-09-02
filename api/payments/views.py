@@ -18,7 +18,7 @@ from api.audit.services import AuditLogService
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.public_ids import PublicIdLookupMixin, get_by_identifier
 
-from .models import Price, Customer, PaymentMethod, Subscription, Payment, Invoice
+from .models import Price, Customer, PaymentMethod, Subscription, Payment, Invoice, ProcessedStripeEvent
 from .serializers import (
     PriceSerializer, PriceAdminSerializer, CustomerSerializer, PaymentMethodSerializer,
     SubscriptionSerializer, PaymentSerializer, InvoiceSerializer,
@@ -1390,12 +1390,36 @@ class StripeWebhookView(viewsets.GenericViewSet):
             event = stripe.Webhook.construct_event(
                 payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
             )
-            
+
             logger.info(f"Webhook verified: {event['type']}")
-            
-            service = StripeService()
-            result = service.handle_webhook_event(event)
-            
+
+            # Stripe explicitly documents that a webhook may be delivered
+            # more than once for the same event (retries, manual replays) -
+            # handlers like EntitlementService.reset_b2b_balances() reset a
+            # balance to the full grant amount unconditionally, so
+            # reprocessing the same event would wipe out whatever was
+            # already consumed since the first delivery. get_or_create is
+            # the atomic check-and-insert; only a genuinely new event
+            # proceeds to handle_webhook_event.
+            processed_event, created = ProcessedStripeEvent.objects.get_or_create(
+                stripe_event_id=event['id'],
+                defaults={'event_type': event['type']},
+            )
+            if not created:
+                logger.info(f"Skipping already-processed webhook event: {event['id']} ({event['type']})")
+                return JsonResponse({'received': True, 'type': event['type'], 'duplicate': True})
+
+            try:
+                service = StripeService()
+                result = service.handle_webhook_event(event)
+            except Exception:
+                # A genuine processing failure must not be mistaken for an
+                # already-handled duplicate - remove the marker so Stripe's
+                # automatic retry actually reprocesses this event, then let
+                # the existing outer except Exception below log/500 it.
+                processed_event.delete()
+                raise
+
             AuditLogService.log_system(
                 action='STRIPE_WEBHOOK_RECEIVED',
                 category=AuditLogCategory.SYSTEM,

@@ -658,3 +658,30 @@ class Invoice(TimeStampedModel):
     
     def __str__(self):
         return f"Invoice {self.number} - {self.status}"
+
+
+class ProcessedStripeEvent(TimeStampedModel):
+    """Dedup record for inbound Stripe webhooks. Stripe explicitly documents
+    that a webhook may be delivered more than once for the same event
+    (retries, manual replays from the dashboard) - handlers like
+    EntitlementService.reset_b2b_balances() reset a balance to the plan's
+    full grant amount unconditionally, so reprocessing the same
+    invoice.payment_succeeded event would wipe out whatever the company
+    had already consumed since the first delivery. StripeWebhookView
+    checks this table before calling into StripeService.handle_webhook_event,
+    and removes the row again if that call raises, so a genuine failure
+    (as opposed to a harmless redelivery of an already-handled event)
+    still allows Stripe's automatic retry to actually reprocess."""
+
+    stripe_event_id = models.CharField(max_length=255, unique=True)
+    event_type = models.CharField(max_length=100)
+
+    class Meta:
+        verbose_name = "Processed Stripe Event"
+        verbose_name_plural = "Processed Stripe Events"
+        indexes = [
+            models.Index(fields=['stripe_event_id']),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} ({self.stripe_event_id})"

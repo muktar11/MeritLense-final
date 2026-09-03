@@ -180,6 +180,63 @@ class EntitlementService:
                 )
 
     @classmethod
+    def apply_upgrade_grant(cls, subscription):
+        """Additive top-up for a mid-cycle B2B upgrade: the new plan's full
+        entitlement is granted on top of any unused balance, capped at one
+        full grant per billing cycle (Package Architecture memo, Section 3).
+
+        Unlike reset_b2b_balances() (used on normal renewal, which resets to
+        the plan amount with no rollover), this must not overwrite an unused
+        balance - it only ever adds to it. The once-per-cycle cap is enforced
+        via the BalanceTransaction ledger itself: a reference scoped to
+        (subscription, current_period_start) is unique per cycle since
+        Stripe does not move the period on a mid-cycle plan swap, only on an
+        actual renewal.
+        """
+        if not subscription.stripe_price or not subscription.company:
+            return
+        period_key = subscription.current_period_start.isoformat()
+        for balance_type, grant in (
+            (PackageBalance.SLOTS, subscription.stripe_price.slot_grant),
+            (PackageBalance.POINTS, subscription.stripe_price.points_grant),
+        ):
+            if grant is None:
+                continue
+            reference = f"upgrade:{subscription.stripe_subscription_id}:{period_key}"
+            with transaction.atomic():
+                balance, created = PackageBalance.objects.select_for_update().get_or_create(
+                    owner_company=subscription.company,
+                    balance_type=balance_type,
+                    defaults={
+                        "source_subscription": subscription,
+                        "fixed_amount": grant,
+                        "current_balance": grant,
+                    },
+                )
+                if created:
+                    BalanceTransaction.objects.create(
+                        balance=balance,
+                        transaction_type=BalanceTransaction.GRANT,
+                        amount=grant,
+                        balance_after=balance.current_balance,
+                        reference=reference,
+                    )
+                    continue
+                if BalanceTransaction.objects.filter(balance=balance, reference=reference).exists():
+                    continue
+                balance.source_subscription = subscription
+                balance.fixed_amount += grant
+                balance.current_balance += grant
+                balance.save(update_fields=["source_subscription", "fixed_amount", "current_balance", "updated_at"])
+                BalanceTransaction.objects.create(
+                    balance=balance,
+                    transaction_type=BalanceTransaction.GRANT,
+                    amount=grant,
+                    balance_after=balance.current_balance,
+                    reference=reference,
+                )
+
+    @classmethod
     def get_balance_summary(cls, owner_type, owner):
         """Read-only snapshot for dashboard display. Returns a dict per balance_type."""
         summary = {}

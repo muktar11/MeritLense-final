@@ -574,6 +574,12 @@ class ChangePlanEntitlementTests(APITestCase):
         mock_invoice.pay.return_value = MagicMock(status="paid")
         mock_stripe.Invoice.create.return_value = mock_invoice
 
+        # Unused balance from the old (growth) plan must be added to, not
+        # overwritten by, the new plan's full grant (Sign-Off Section 3).
+        PackageBalance.objects.create(
+            owner_company=self.company, balance_type=PackageBalance.SLOTS, fixed_amount=200, current_balance=30,
+        )
+
         response = self.client.post(
             f"/api/v1/payments/subscriptions/{self.subscription.public_id}/change_plan",
             {"price_id": str(self.business.id), "prorate": True},
@@ -583,6 +589,37 @@ class ChangePlanEntitlementTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         mock_stripe.Invoice.create.assert_called_once()
         balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 530)
+
+    @patch("api.payments.views.stripe")
+    def test_repeated_upgrade_in_same_billing_cycle_does_not_double_grant(self, mock_stripe):
+        self._mock_subscription_retrieve(mock_stripe)
+        mock_invoice = MagicMock()
+        mock_invoice.finalize_invoice.return_value = mock_invoice
+        mock_invoice.pay.return_value = MagicMock(status="paid")
+        mock_stripe.Invoice.create.return_value = mock_invoice
+
+        enterprise = make_price(name="enterprise-like package", target_user_type="BOTH", unit_amount=Decimal("5000.00"), slot_grant=1000, points_grant=5000)
+
+        first = self.client.post(
+            f"/api/v1/payments/subscriptions/{self.subscription.public_id}/change_plan",
+            {"price_id": str(self.business.id), "prorate": True},
+            format="json",
+        )
+        self.assertEqual(first.status_code, 200, first.data)
+        balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 500)
+
+        # Stripe does not move current_period_start/end for a mid-cycle plan
+        # swap - only a real renewal does - so this second upgrade lands in
+        # the same billing cycle as the first and must not grant again.
+        second = self.client.post(
+            f"/api/v1/payments/subscriptions/{self.subscription.public_id}/change_plan",
+            {"price_id": str(enterprise.id), "prorate": True},
+            format="json",
+        )
+        self.assertEqual(second.status_code, 200, second.data)
+        balance.refresh_from_db()
         self.assertEqual(balance.current_balance, 500)
 
     @patch("api.payments.views.stripe")

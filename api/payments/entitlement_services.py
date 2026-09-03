@@ -132,10 +132,15 @@ class EntitlementService:
 
     @classmethod
     def _active_recurring_subscription(cls, company):
+        """PAST_DUE counts as the payment-failure grace period - Stripe is
+        still retrying, and existing entitlements stay usable exactly like
+        ACTIVE (Package Architecture Sign-Off). Anything else (UNPAID,
+        CANCELED, INCOMPLETE_EXPIRED, or no subscription at all) is treated
+        as suspended by _consume_b2b below."""
         return (
             Subscription.objects.filter(
                 company=company,
-                status__in=["ACTIVE", "TRIALING"],
+                status__in=["ACTIVE", "TRIALING", "PAST_DUE"],
                 stripe_price__billing_type="RECURRING",
             )
             .select_related("stripe_price")
@@ -147,7 +152,7 @@ class EntitlementService:
     def _consume_b2b(cls, company, balance_type, reference, actor=None, amount=1, transaction_type=BalanceTransaction.CONSUME):
         subscription = cls._active_recurring_subscription(company)
         if not subscription or not subscription.stripe_price:
-            return None
+            raise ValueError("No active subscription for this company - it may be suspended due to a failed payment")
 
         grant = subscription.stripe_price.slot_grant if balance_type == PackageBalance.SLOTS else subscription.stripe_price.points_grant
         if grant is None:

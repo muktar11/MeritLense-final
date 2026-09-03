@@ -310,6 +310,66 @@ class EntitlementServiceTests(TestCase):
 
         self.assertEqual(PackageBalance.objects.filter(owner_company=self.company).count(), 0)
 
+    def test_b2b_consume_blocks_when_subscription_is_suspended(self):
+        price = make_price(target_user_type="B2B", slot_grant=200, points_grant=2000)
+        subscription = make_subscription(self.b2b_owner, price, company=self.company, status="CANCELED")
+        PackageBalance.objects.create(
+            owner_company=self.company, balance_type=PackageBalance.SLOTS,
+            source_subscription=subscription, fixed_amount=200, current_balance=50,
+        )
+
+        session = self._FakeSession(organization_id=self.company.id, organization=self.company)
+        with self.assertRaises(ValueError):
+            EntitlementService.consume_slot(session)
+
+        balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 50)
+
+    def test_b2b_consume_allowed_during_past_due_grace_period(self):
+        price = make_price(target_user_type="B2B", slot_grant=200, points_grant=2000)
+        subscription = make_subscription(self.b2b_owner, price, company=self.company, status="PAST_DUE")
+        PackageBalance.objects.create(
+            owner_company=self.company, balance_type=PackageBalance.SLOTS,
+            source_subscription=subscription, fixed_amount=200, current_balance=50,
+        )
+
+        session = self._FakeSession(organization_id=self.company.id, organization=self.company)
+        EntitlementService.consume_slot(session)  # should not raise - grace period is still usable
+
+        balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 49)
+
+    def test_no_renewal_grant_while_subscription_is_past_due(self):
+        price = make_price(target_user_type="B2B", slot_grant=200, points_grant=2000)
+        subscription = make_subscription(self.b2b_owner, price, company=self.company, status="ACTIVE")
+        PackageBalance.objects.create(
+            owner_company=self.company, balance_type=PackageBalance.SLOTS,
+            source_subscription=subscription, fixed_amount=200, current_balance=17,
+        )
+
+        StripeService().handle_subscription_updated({"id": subscription.stripe_subscription_id, "status": "past_due"})
+
+        balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 17)
+
+    def test_reactivation_after_suspension_restores_access_to_remaining_balance(self):
+        price = make_price(target_user_type="B2B", slot_grant=200, points_grant=2000)
+        subscription = make_subscription(self.b2b_owner, price, company=self.company, status="CANCELED")
+        PackageBalance.objects.create(
+            owner_company=self.company, balance_type=PackageBalance.SLOTS,
+            source_subscription=subscription, fixed_amount=200, current_balance=50,
+        )
+        session = self._FakeSession(organization_id=self.company.id, organization=self.company)
+
+        with self.assertRaises(ValueError):
+            EntitlementService.consume_slot(session)
+
+        StripeService().handle_subscription_updated({"id": subscription.stripe_subscription_id, "status": "active"})
+        EntitlementService.consume_slot(session)  # should not raise now
+
+        balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 49)  # decremented from the 50 that was already there, not reset
+
     def test_spend_points_deducts_addon_cost(self):
         PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=50, current_balance=50)
 

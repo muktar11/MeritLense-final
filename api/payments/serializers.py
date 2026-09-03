@@ -1,9 +1,10 @@
+from django.db.models import Q
 from rest_framework import serializers
 from api.core.serializers import PublicIdModelSerializer
 from api.core.public_ids import get_by_identifier
 from .models import (
     Price, Customer, PaymentMethod,
-    Subscription, Payment, Invoice
+    Subscription, Payment, Invoice, DealRecord
 )
 from .refund_services import OVERRIDE_REASON_CODES
 
@@ -65,6 +66,45 @@ class PriceAdminSerializer(PublicIdModelSerializer):
             data.pop('interval', None)
             data.pop('interval_count', None)
         return data
+
+
+class DealRecordSerializer(PublicIdModelSerializer):
+    """Ops/Sales-facing serializer for a negotiated Custom Enterprise /
+    Starter / Trial deal. Enforces the two hard, documented Free Trial
+    rules - everything else about a deal's terms is Sales' judgment, not
+    something the system validates."""
+    company_name = serializers.CharField(source='company.name', read_only=True)
+
+    class Meta:
+        model = DealRecord
+        fields = [
+            'id', 'company', 'company_name', 'price', 'deal_type',
+            'slot_grant', 'points_grant', 'unit_amount', 'currency',
+            'rollover_allowed', 'addendum_reference', 'confirmation_note',
+            'is_active', 'created_by', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+
+    def validate(self, data):
+        deal_type = data.get('deal_type', getattr(self.instance, 'deal_type', None))
+        if deal_type == DealRecord.FREE_TRIAL:
+            slot_grant = data.get('slot_grant', getattr(self.instance, 'slot_grant', None))
+            unit_amount = data.get('unit_amount', getattr(self.instance, 'unit_amount', None))
+            if slot_grant != 2:
+                raise serializers.ValidationError("A Free Trial must grant exactly 2 Assessment Slots.")
+            if unit_amount != 0:
+                raise serializers.ValidationError("A Free Trial must be priced at 0.")
+
+            company = data.get('company', getattr(self.instance, 'company', None))
+            existing = DealRecord.objects.filter(deal_type=DealRecord.FREE_TRIAL)
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+            if company and existing.filter(
+                Q(company=company) | Q(company__admin_user__email=company.admin_user.email)
+            ).exists():
+                raise serializers.ValidationError("This company (or its admin email) has already used a Free Trial.")
+        return data
+
 
 class CustomerSerializer(PublicIdModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)

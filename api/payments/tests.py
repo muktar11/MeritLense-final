@@ -9,7 +9,8 @@ from rest_framework.test import APIClient, APITestCase
 from api.accounts.models import Company, User
 from api.core.constants import Roles
 from api.payments.entitlement_services import ADDON_POINTS_CATALOG, EntitlementService
-from api.payments.models import AddonRequest, BalanceTransaction, Customer, Invoice, PackageBalance, Payment, Price, ProcessedStripeEvent, Subscription
+from api.payments.models import AddonRequest, BalanceTransaction, Customer, DealRecord, Invoice, PackageBalance, Payment, Price, ProcessedStripeEvent, Subscription
+from api.payments.serializers import DealRecordSerializer
 from api.payments.refund_services import CONFIRMED_BILLING_ERROR, PLATFORM_ERROR, RefundEligibilityService, RefundService
 from api.payments.serializers import CreateSubscriptionSerializer
 from api.payments.services import StripeService
@@ -191,6 +192,144 @@ class HandleInvoicePaidTests(TestCase):
         })
 
         self.assertEqual(PackageBalance.objects.filter(owner_company=company).count(), 0)
+
+    def test_grant_resolution_prefers_deal_record_over_price(self):
+        """self.price defaults to slot_grant/points_grant = None (unset) -
+        a linked, active DealRecord must still grant its own terms."""
+        company = make_company(self.user)
+        self.subscription.company = company
+        self.subscription.save(update_fields=["company"])
+        DealRecord.objects.create(
+            company=company, price=self.price, deal_type=DealRecord.ENTERPRISE,
+            slot_grant=50, points_grant=None, unit_amount=Decimal("5000.00"),
+        )
+
+        self.service.handle_invoice_paid({
+            "id": "in_deal", "number": "INV-DEAL", "amount_due": 500000, "amount_paid": 500000,
+            "amount_remaining": 0, "currency": "eur", "subscription": self.subscription.stripe_subscription_id,
+        })
+
+        balance = PackageBalance.objects.get(owner_company=company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 50)
+
+    def test_renewal_rolls_over_unused_balance_when_deal_allows_it(self):
+        company = make_company(self.user)
+        self.subscription.company = company
+        self.subscription.save(update_fields=["company"])
+        DealRecord.objects.create(
+            company=company, price=self.price, deal_type=DealRecord.ENTERPRISE,
+            slot_grant=50, unit_amount=Decimal("5000.00"), rollover_allowed=True,
+        )
+
+        self.service.handle_invoice_paid({
+            "id": "in_first", "number": "INV-001", "amount_due": 500000, "amount_paid": 500000,
+            "amount_remaining": 0, "currency": "eur", "subscription": self.subscription.stripe_subscription_id,
+        })
+        balance = PackageBalance.objects.get(owner_company=company, balance_type=PackageBalance.SLOTS)
+        balance.current_balance = 30  # 20 consumed since the first grant
+        balance.save(update_fields=["current_balance"])
+
+        self.service.handle_invoice_paid({
+            "id": "in_second", "number": "INV-002", "amount_due": 500000, "amount_paid": 500000,
+            "amount_remaining": 0, "currency": "eur", "subscription": self.subscription.stripe_subscription_id,
+        })
+
+        balance.refresh_from_db()
+        self.assertEqual(balance.current_balance, 80)  # 30 unused + 50 new grant, not overwritten
+
+    def test_renewal_does_not_rollover_by_default(self):
+        company = make_company(self.user)
+        self.subscription.company = company
+        self.subscription.save(update_fields=["company"])
+        DealRecord.objects.create(
+            company=company, price=self.price, deal_type=DealRecord.ENTERPRISE,
+            slot_grant=50, unit_amount=Decimal("5000.00"),  # rollover_allowed defaults to False
+        )
+
+        self.service.handle_invoice_paid({
+            "id": "in_first", "number": "INV-001", "amount_due": 500000, "amount_paid": 500000,
+            "amount_remaining": 0, "currency": "eur", "subscription": self.subscription.stripe_subscription_id,
+        })
+        balance = PackageBalance.objects.get(owner_company=company, balance_type=PackageBalance.SLOTS)
+        balance.current_balance = 30
+        balance.save(update_fields=["current_balance"])
+
+        self.service.handle_invoice_paid({
+            "id": "in_second", "number": "INV-002", "amount_due": 500000, "amount_paid": 500000,
+            "amount_remaining": 0, "currency": "eur", "subscription": self.subscription.stripe_subscription_id,
+        })
+
+        balance.refresh_from_db()
+        self.assertEqual(balance.current_balance, 50)  # hard reset, matches today's default behavior
+
+
+class DealRecordSerializerTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            email="deal-owner@example.com", password="Password123!", first_name="Deal", last_name="Owner",
+            role=Roles.B2B, is_verified=True,
+        )
+        self.company = make_company(self.owner)
+
+    def _free_trial_data(self, **overrides):
+        data = dict(company=self.company.id, deal_type=DealRecord.FREE_TRIAL, slot_grant=2, unit_amount="0.00")
+        data.update(overrides)
+        return data
+
+    def test_free_trial_requires_exactly_two_slots_and_zero_price(self):
+        self.assertFalse(DealRecordSerializer(data=self._free_trial_data(slot_grant=3)).is_valid())
+        self.assertFalse(DealRecordSerializer(data=self._free_trial_data(unit_amount="10.00")).is_valid())
+        self.assertTrue(DealRecordSerializer(data=self._free_trial_data()).is_valid())
+
+    def test_free_trial_rejects_duplicate_for_same_company(self):
+        DealRecord.objects.create(company=self.company, deal_type=DealRecord.FREE_TRIAL, slot_grant=2, unit_amount=Decimal("0.00"))
+
+        serializer = DealRecordSerializer(data=self._free_trial_data())
+        self.assertFalse(serializer.is_valid())
+
+
+class AdminDealRecordEndpointTests(APITestCase):
+    def setUp(self):
+        self.superadmin = User.objects.create_user(
+            email="deal-endpoint-superadmin@example.com", password="Password123!",
+            first_name="Deal", last_name="Super", role=Roles.SUPERADMIN, is_verified=True, is_staff=True,
+        )
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": self.superadmin.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        self.owner = User.objects.create_user(
+            email="deal-endpoint-owner@example.com", password="Password123!", first_name="Deal", last_name="Endpoint",
+            role=Roles.B2B, is_verified=True,
+        )
+        self.company = make_company(self.owner)
+
+    def test_superadmin_can_create_a_deal_record(self):
+        response = self.client.post(
+            "/api/v1/payments/admin/deal-records",
+            {"company": self.company.id, "deal_type": DealRecord.ENTERPRISE, "slot_grant": 40, "unit_amount": "4000.00"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        deal = DealRecord.objects.get(company=self.company)
+        self.assertEqual(deal.created_by, self.superadmin)
+
+    def test_non_superadmin_cannot_create_a_deal_record(self):
+        self.client.credentials()
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": self.owner.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        response = self.client.post(
+            "/api/v1/payments/admin/deal-records",
+            {"company": self.company.id, "deal_type": DealRecord.ENTERPRISE, "slot_grant": 40, "unit_amount": "4000.00"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
 
 
 class GrantB2COneTimePackageTests(TestCase):

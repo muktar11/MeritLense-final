@@ -670,6 +670,76 @@ class AddonRequest(TimeStampedModel):
         return f"{owner} - {self.addon_code} - {self.status}"
 
 
+class DealRecord(TimeStampedModel):
+    """The source of truth for a negotiated Custom Enterprise / Starter /
+    Trial deal ("How Custom / Per Agreement Works" memo). Ops/Sales creates
+    this with the agreed Slots/Points/price BEFORE any Stripe setup exists -
+    Stripe is never the source of entitlement volume for a custom deal.
+
+    One-to-one with Price rather than linked from Subscription: Ops always
+    mints a dedicated Product+Price per customer for a custom deal, so this
+    is the real-world cardinality, and it means entitlement resolution only
+    needs to follow the existing subscription.stripe_price relationship
+    (see EntitlementService._resolve_grant) - no schema change needed on
+    Subscription or Company.
+    """
+    ENTERPRISE = 'ENTERPRISE'
+    STARTER = 'STARTER'
+    FREE_TRIAL = 'FREE_TRIAL'
+    CUSTOM_PAID_TRIAL = 'CUSTOM_PAID_TRIAL'
+    DEAL_TYPE_CHOICES = [
+        (ENTERPRISE, 'Enterprise'),
+        (STARTER, 'Starter (Per Agreement)'),
+        (FREE_TRIAL, 'Free Trial'),
+        (CUSTOM_PAID_TRIAL, 'Custom Paid Trial'),
+    ]
+
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name='deal_records'
+    )
+    price = models.OneToOneField(
+        Price,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='deal_record',
+        help_text="Set once Ops has created the companion Stripe Product/Price for this deal."
+    )
+    deal_type = models.CharField(max_length=20, choices=DEAL_TYPE_CHOICES)
+
+    slot_grant = models.PositiveIntegerField(null=True, blank=True, help_text="None = still undefined, no default assumed")
+    points_grant = models.PositiveIntegerField(null=True, blank=True)
+    unit_amount = models.DecimalField(max_digits=10, decimal_places=2, help_text="Agreed price - 0 for a Free Trial")
+    currency = models.CharField(max_length=3, default='eur')
+    rollover_allowed = models.BooleanField(
+        default=False,
+        help_text="Whether unused Slots/Points carry forward on renewal - default no rollover unless the Addendum states rollover"
+    )
+
+    addendum_reference = models.CharField(max_length=255, blank=True, help_text="Signed Addendum / contract reference")
+    confirmation_note = models.TextField(blank=True, help_text="Lightweight internal confirmation record (e.g. for a Free Trial, no formal Addendum required)")
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+'
+    )
+
+    class Meta:
+        verbose_name = "Deal Record"
+        verbose_name_plural = "Deal Records"
+        indexes = [
+            models.Index(fields=['company', 'deal_type']),
+        ]
+
+    def __str__(self):
+        return f"{self.company.name} - {self.deal_type} - {self.slot_grant} slots"
+
+
 class Invoice(TimeStampedModel):
     user = models.ForeignKey(
         User,

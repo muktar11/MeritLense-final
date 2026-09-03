@@ -18,12 +18,12 @@ from api.audit.services import AuditLogService
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.public_ids import PublicIdLookupMixin, get_by_identifier
 
-from .models import Price, Customer, PaymentMethod, Subscription, Payment, Invoice, ProcessedStripeEvent
+from .models import Price, Customer, PaymentMethod, Subscription, Payment, Invoice, ProcessedStripeEvent, DealRecord
 from .serializers import (
     PriceSerializer, PriceAdminSerializer, CustomerSerializer, PaymentMethodSerializer,
     SubscriptionSerializer, PaymentSerializer, InvoiceSerializer,
     CreatePaymentIntentSerializer, AttachPaymentMethodSerializer, CreateSubscriptionSerializer,
-    RefundPaymentSerializer
+    RefundPaymentSerializer, DealRecordSerializer
 )
 from .services import StripeService
 
@@ -1118,6 +1118,51 @@ class AdminPaymentViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(PaymentSerializer(payment).data)
+
+
+class AdminDealRecordViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
+    """SuperAdmin-only CRUD for negotiated Custom Enterprise/Starter/Trial
+    deals ("How Custom / Per Agreement Works" memo). SuperAdmin-only for
+    the same reason as AdminPriceViewSet and CreateAdminView - defining a
+    company's negotiated entitlements is at least as sensitive as either.
+
+    No in-place immutability enforcement on financial fields: unlike Price
+    (which has a live Stripe object to keep in sync), a DealRecord is our
+    own record - "changes require a new signed Addendum" is a process rule
+    Ops must follow, not something the system can verify since addendum
+    content itself isn't stored. Every write is audit-logged instead.
+    """
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
+    serializer_class = DealRecordSerializer
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return DealRecord.objects.none()
+        return DealRecord.objects.select_related('company', 'price').order_by('-created_at')
+
+    def perform_create(self, serializer):
+        deal = serializer.save(created_by=self.request.user)
+        AuditLogService.log(
+            user=self.request.user,
+            action='DEAL_RECORD_CREATED',
+            category=AuditLogCategory.SUBSCRIPTION,
+            description=f"Deal Record created: {deal.company.name} ({deal.deal_type})",
+            resource=deal,
+            data={'deal_type': deal.deal_type, 'slot_grant': deal.slot_grant, 'points_grant': deal.points_grant},
+            request=self.request,
+        )
+
+    def perform_update(self, serializer):
+        deal = serializer.save()
+        AuditLogService.log(
+            user=self.request.user,
+            action='DEAL_RECORD_UPDATED',
+            category=AuditLogCategory.SUBSCRIPTION,
+            description=f"Deal Record updated: {deal.company.name} ({deal.deal_type})",
+            resource=deal,
+            data={'changes': list(serializer.validated_data.keys())},
+            request=self.request,
+        )
 
 
 class AdminSubscriptionPagination(PageNumberPagination):

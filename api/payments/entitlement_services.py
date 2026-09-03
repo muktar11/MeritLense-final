@@ -149,12 +149,24 @@ class EntitlementService:
         )
 
     @classmethod
+    def _resolve_grant(cls, price, balance_type):
+        """A linked Deal Record's terms take priority over the Price's own
+        grant when a custom deal exists - Stripe/the Price row is never the
+        source of entitlement volume for a custom deal ("How Custom / Per
+        Agreement Works" memo). Falls back to the Price's own grant when no
+        deal is linked, so Growth/Business/self-serve plans are unaffected."""
+        deal = getattr(price, 'deal_record', None)
+        if deal is not None and deal.is_active:
+            return deal.slot_grant if balance_type == PackageBalance.SLOTS else deal.points_grant
+        return price.slot_grant if balance_type == PackageBalance.SLOTS else price.points_grant
+
+    @classmethod
     def _consume_b2b(cls, company, balance_type, reference, actor=None, amount=1, transaction_type=BalanceTransaction.CONSUME):
         subscription = cls._active_recurring_subscription(company)
         if not subscription or not subscription.stripe_price:
             raise ValueError("No active subscription for this company - it may be suspended due to a failed payment")
 
-        grant = subscription.stripe_price.slot_grant if balance_type == PackageBalance.SLOTS else subscription.stripe_price.points_grant
+        grant = cls._resolve_grant(subscription.stripe_price, balance_type)
         if grant is None:
             return None
 
@@ -240,14 +252,14 @@ class EntitlementService:
     def reset_b2b_balances(cls, subscription):
         if not subscription.stripe_price or not subscription.company:
             return
-        for balance_type, grant in (
-            (PackageBalance.SLOTS, subscription.stripe_price.slot_grant),
-            (PackageBalance.POINTS, subscription.stripe_price.points_grant),
-        ):
+        deal = getattr(subscription.stripe_price, 'deal_record', None)
+        rollover = deal is not None and deal.is_active and deal.rollover_allowed
+        for balance_type in (PackageBalance.SLOTS, PackageBalance.POINTS):
+            grant = cls._resolve_grant(subscription.stripe_price, balance_type)
             if grant is None:
                 continue
             with transaction.atomic():
-                balance, _ = PackageBalance.objects.select_for_update().get_or_create(
+                balance, created = PackageBalance.objects.select_for_update().get_or_create(
                     owner_company=subscription.company,
                     balance_type=balance_type,
                     defaults={
@@ -257,14 +269,22 @@ class EntitlementService:
                     },
                 )
                 balance.source_subscription = subscription
-                balance.fixed_amount = grant
-                balance.current_balance = grant
+                if rollover and not created:
+                    # Deal Record's Addendum allows rollover: unused balance
+                    # carries forward, on top of this period's grant, rather
+                    # than being overwritten (Sign-Off Section 9's default-no
+                    # -rollover exception).
+                    balance.fixed_amount += grant
+                    balance.current_balance += grant
+                else:
+                    balance.fixed_amount = grant
+                    balance.current_balance = grant
                 balance.save(update_fields=["source_subscription", "fixed_amount", "current_balance", "updated_at"])
                 BalanceTransaction.objects.create(
                     balance=balance,
                     transaction_type=BalanceTransaction.RESET,
                     amount=grant,
-                    balance_after=grant,
+                    balance_after=balance.current_balance,
                     reference=f"subscription:{subscription.stripe_subscription_id}",
                 )
 
@@ -285,10 +305,8 @@ class EntitlementService:
         if not subscription.stripe_price or not subscription.company:
             return
         period_key = subscription.current_period_start.isoformat()
-        for balance_type, grant in (
-            (PackageBalance.SLOTS, subscription.stripe_price.slot_grant),
-            (PackageBalance.POINTS, subscription.stripe_price.points_grant),
-        ):
+        for balance_type in (PackageBalance.SLOTS, PackageBalance.POINTS):
+            grant = cls._resolve_grant(subscription.stripe_price, balance_type)
             if grant is None:
                 continue
             reference = f"upgrade:{subscription.stripe_subscription_id}:{period_key}"
@@ -339,7 +357,7 @@ class EntitlementService:
                 subscription = cls._active_recurring_subscription(owner)
                 grant = None
                 if subscription and subscription.stripe_price:
-                    grant = subscription.stripe_price.slot_grant if balance_type == PackageBalance.SLOTS else subscription.stripe_price.points_grant
+                    grant = cls._resolve_grant(subscription.stripe_price, balance_type)
                 summary[balance_type] = {"remaining": None, "limit": None, "unlimited": subscription is not None and grant is None}
             else:
                 rows = PackageBalance.objects.filter(owner_user=owner, balance_type=balance_type)

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AddonRequest, BalanceTransaction, PackageBalance, Payment, Subscription
+from .models import AddonRequest, BalanceTransaction, DealRecord, PackageBalance, Payment, Subscription
 
 
 @admin.register(Subscription)
@@ -41,3 +41,11 @@ class AddonRequestAdmin(admin.ModelAdmin):
     list_filter = ("status", "addon_code")
     search_fields = ("owner_user__email", "owner_company__name", "public_id")
     raw_id_fields = ("owner_user", "owner_company", "actor")
+
+
+@admin.register(DealRecord)
+class DealRecordAdmin(admin.ModelAdmin):
+    list_display = ("id", "company", "deal_type", "price", "slot_grant", "points_grant", "unit_amount", "rollover_allowed", "is_active")
+    list_filter = ("deal_type", "is_active", "rollover_allowed")
+    search_fields = ("company__name", "addendum_reference", "public_id")
+    raw_id_fields = ("company", "price", "created_by")

@@ -326,8 +326,10 @@ class Command(BaseCommand):
             metadata = price.metadata or {}
             features = price.features or {}
             metadata["package_code"] = package_code
-            if "personality_report" in features and "behavioral_indicators_report" not in features:
-                features["behavioral_indicators_report"] = features.pop("personality_report")
+            if "personality_report" in features and "extended_assessment_insights" not in features:
+                features["extended_assessment_insights"] = features.pop("personality_report")
+            if "behavioral_indicators_report" in features and "extended_assessment_insights" not in features:
+                features["extended_assessment_insights"] = features.pop("behavioral_indicators_report")
             if "motivation_report" in features and "role_readiness_indicators" not in features:
                 features["role_readiness_indicators"] = features.pop("motivation_report")
             price.metadata = metadata

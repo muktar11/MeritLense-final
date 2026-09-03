@@ -2,9 +2,10 @@ from rest_framework import serializers
 from api.core.serializers import PublicIdModelSerializer
 from api.core.public_ids import get_by_identifier
 from .models import (
-    Price, Customer, PaymentMethod, 
+    Price, Customer, PaymentMethod,
     Subscription, Payment, Invoice
 )
+from .refund_services import OVERRIDE_REASON_CODES
 
 
 class PriceSerializer(PublicIdModelSerializer):
@@ -148,6 +149,11 @@ class PaymentSerializer(PublicIdModelSerializer):
         if obj.stripe_payment_method:
             return str(obj.stripe_payment_method)
         return obj.payment_method_type
+
+
+class RefundPaymentSerializer(serializers.Serializer):
+    override_reason_code = serializers.ChoiceField(choices=list(OVERRIDE_REASON_CODES), required=False, allow_null=True)
+
 
 class InvoiceSerializer(PublicIdModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)

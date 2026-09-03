@@ -9,7 +9,8 @@ from rest_framework.test import APIClient, APITestCase
 from api.accounts.models import Company, User
 from api.core.constants import Roles
 from api.payments.entitlement_services import ADDON_POINTS_CATALOG, EntitlementService
-from api.payments.models import BalanceTransaction, Customer, Invoice, PackageBalance, Payment, Price, ProcessedStripeEvent, Subscription
+from api.payments.models import AddonRequest, BalanceTransaction, Customer, Invoice, PackageBalance, Payment, Price, ProcessedStripeEvent, Subscription
+from api.payments.refund_services import CONFIRMED_BILLING_ERROR, PLATFORM_ERROR, RefundEligibilityService, RefundService
 from api.payments.serializers import CreateSubscriptionSerializer
 from api.payments.services import StripeService
 
@@ -309,6 +310,66 @@ class EntitlementServiceTests(TestCase):
 
         self.assertEqual(PackageBalance.objects.filter(owner_company=self.company).count(), 0)
 
+    def test_b2b_consume_blocks_when_subscription_is_suspended(self):
+        price = make_price(target_user_type="B2B", slot_grant=200, points_grant=2000)
+        subscription = make_subscription(self.b2b_owner, price, company=self.company, status="CANCELED")
+        PackageBalance.objects.create(
+            owner_company=self.company, balance_type=PackageBalance.SLOTS,
+            source_subscription=subscription, fixed_amount=200, current_balance=50,
+        )
+
+        session = self._FakeSession(organization_id=self.company.id, organization=self.company)
+        with self.assertRaises(ValueError):
+            EntitlementService.consume_slot(session)
+
+        balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 50)
+
+    def test_b2b_consume_allowed_during_past_due_grace_period(self):
+        price = make_price(target_user_type="B2B", slot_grant=200, points_grant=2000)
+        subscription = make_subscription(self.b2b_owner, price, company=self.company, status="PAST_DUE")
+        PackageBalance.objects.create(
+            owner_company=self.company, balance_type=PackageBalance.SLOTS,
+            source_subscription=subscription, fixed_amount=200, current_balance=50,
+        )
+
+        session = self._FakeSession(organization_id=self.company.id, organization=self.company)
+        EntitlementService.consume_slot(session)  # should not raise - grace period is still usable
+
+        balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 49)
+
+    def test_no_renewal_grant_while_subscription_is_past_due(self):
+        price = make_price(target_user_type="B2B", slot_grant=200, points_grant=2000)
+        subscription = make_subscription(self.b2b_owner, price, company=self.company, status="ACTIVE")
+        PackageBalance.objects.create(
+            owner_company=self.company, balance_type=PackageBalance.SLOTS,
+            source_subscription=subscription, fixed_amount=200, current_balance=17,
+        )
+
+        StripeService().handle_subscription_updated({"id": subscription.stripe_subscription_id, "status": "past_due"})
+
+        balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 17)
+
+    def test_reactivation_after_suspension_restores_access_to_remaining_balance(self):
+        price = make_price(target_user_type="B2B", slot_grant=200, points_grant=2000)
+        subscription = make_subscription(self.b2b_owner, price, company=self.company, status="CANCELED")
+        PackageBalance.objects.create(
+            owner_company=self.company, balance_type=PackageBalance.SLOTS,
+            source_subscription=subscription, fixed_amount=200, current_balance=50,
+        )
+        session = self._FakeSession(organization_id=self.company.id, organization=self.company)
+
+        with self.assertRaises(ValueError):
+            EntitlementService.consume_slot(session)
+
+        StripeService().handle_subscription_updated({"id": subscription.stripe_subscription_id, "status": "active"})
+        EntitlementService.consume_slot(session)  # should not raise now
+
+        balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 49)  # decremented from the 50 that was already there, not reset
+
     def test_spend_points_deducts_addon_cost(self):
         PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=50, current_balance=50)
 
@@ -319,6 +380,290 @@ class EntitlementServiceTests(TestCase):
     def test_spend_points_rejects_unknown_addon_code(self):
         with self.assertRaises(ValueError):
             EntitlementService.spend_points(user=self.b2c_user, addon_code="not_a_real_addon")
+
+
+class AddonReservationTests(TestCase):
+    """Points spent on add-ons go through a real Reserve -> Consume/Release
+    lifecycle (Package Architecture Sign-Off, Section 5), not an immediate
+    irreversible deduction."""
+
+    def setUp(self):
+        self.b2c_user = User.objects.create_user(
+            email="addon-reservation@example.com", password="Password123!", first_name="Addon", last_name="User",
+            role=Roles.B2C, is_verified=True,
+        )
+
+    def test_reserve_points_deducts_immediately_and_creates_reserved_addon_request(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=50, current_balance=50)
+
+        addon_request = EntitlementService.reserve_points(user=self.b2c_user, addon_code="practical_simulation_test")
+
+        self.assertEqual(addon_request.status, AddonRequest.RESERVED)
+        balance = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS)
+        self.assertEqual(balance.current_balance, 50 - ADDON_POINTS_CATALOG["practical_simulation_test"])
+        reference = f"addon-reservation:{addon_request.public_id}"
+        self.assertTrue(BalanceTransaction.objects.filter(reference=reference, transaction_type=BalanceTransaction.RESERVE).exists())
+
+    def test_confirm_addon_marks_consumed_without_further_balance_change(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=50, current_balance=50)
+        addon_request = EntitlementService.reserve_points(user=self.b2c_user, addon_code="practical_simulation_test")
+        balance_after_reserve = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS).current_balance
+
+        EntitlementService.confirm_addon(addon_request=addon_request)
+
+        addon_request.refresh_from_db()
+        self.assertEqual(addon_request.status, AddonRequest.CONSUMED)
+        self.assertIsNotNone(addon_request.resolved_at)
+        balance = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS)
+        self.assertEqual(balance.current_balance, balance_after_reserve)
+
+    def test_release_points_credits_balance_back_and_marks_released(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=50, current_balance=50)
+        addon_request = EntitlementService.reserve_points(user=self.b2c_user, addon_code="practical_simulation_test")
+
+        EntitlementService.release_points(addon_request=addon_request)
+
+        addon_request.refresh_from_db()
+        self.assertEqual(addon_request.status, AddonRequest.RELEASED)
+        balance = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS)
+        self.assertEqual(balance.current_balance, 50)
+        reference = f"addon-reservation:{addon_request.public_id}"
+        self.assertTrue(BalanceTransaction.objects.filter(reference=reference, transaction_type=BalanceTransaction.RELEASE).exists())
+
+    def test_release_is_idempotent(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=50, current_balance=50)
+        addon_request = EntitlementService.reserve_points(user=self.b2c_user, addon_code="practical_simulation_test")
+
+        EntitlementService.release_points(addon_request=addon_request)
+        EntitlementService.release_points(addon_request=addon_request)
+
+        balance = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS)
+        self.assertEqual(balance.current_balance, 50)
+
+    def test_cannot_release_a_confirmed_addon_request(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=50, current_balance=50)
+        addon_request = EntitlementService.reserve_points(user=self.b2c_user, addon_code="practical_simulation_test")
+        EntitlementService.confirm_addon(addon_request=addon_request)
+
+        with self.assertRaises(ValueError):
+            EntitlementService.release_points(addon_request=addon_request)
+
+        balance = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS)
+        self.assertEqual(balance.current_balance, 50 - ADDON_POINTS_CATALOG["practical_simulation_test"])
+
+    def test_release_reverses_b2c_multi_row_fifo_reservation(self):
+        older = PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=10, current_balance=10)
+        newer = PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=40, current_balance=40)
+
+        addon_request = EntitlementService.reserve_points(user=self.b2c_user, addon_code="practical_simulation_test")  # costs 30
+
+        older.refresh_from_db()
+        newer.refresh_from_db()
+        self.assertEqual(older.current_balance, 0)
+        self.assertEqual(newer.current_balance, 20)
+
+        EntitlementService.release_points(addon_request=addon_request)
+
+        older.refresh_from_db()
+        newer.refresh_from_db()
+        self.assertEqual(older.current_balance, 10)
+        self.assertEqual(newer.current_balance, 40)
+
+
+class RefundEligibilityTests(TestCase):
+    """Refund Eligibility Policy: B2C is refundable only with zero Slots/
+    Points consumed on that specific purchase; B2B's current billing
+    period is never refundable by default."""
+
+    def setUp(self):
+        self.b2c_user = User.objects.create_user(
+            email="refund-b2c@example.com", password="Password123!", first_name="Refund", last_name="User",
+            role=Roles.B2C, is_verified=True,
+        )
+        self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_refund_b2c", email=self.b2c_user.email)
+        self.payment = Payment.objects.create(
+            user=self.b2c_user, customer=self.customer, stripe_payment_intent_id="pi_refund_test",
+            amount=Decimal("50.00"), status="SUCCEEDED",
+        )
+
+    def test_b2c_eligible_when_nothing_consumed(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, source_payment=self.payment, fixed_amount=3, current_balance=3)
+
+        eligible, reason = RefundEligibilityService.check(self.payment)
+
+        self.assertTrue(eligible)
+        self.assertEqual(reason, "ELIGIBLE")
+
+    def test_b2c_ineligible_when_slots_consumed(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, source_payment=self.payment, fixed_amount=3, current_balance=2)
+
+        eligible, reason = RefundEligibilityService.check(self.payment)
+
+        self.assertFalse(eligible)
+        self.assertEqual(reason, "ALREADY_CONSUMED")
+
+    def test_b2b_current_period_not_refundable_by_default(self):
+        owner = User.objects.create_user(
+            email="refund-b2b@example.com", password="Password123!", first_name="Refund", last_name="B2B",
+            role=Roles.B2B, is_verified=True,
+        )
+        company = make_company(owner)
+        price = make_price(target_user_type="B2B", slot_grant=200, points_grant=2000)
+        subscription = make_subscription(owner, price, company=company, status="ACTIVE")
+        b2b_payment = Payment.objects.create(
+            user=owner, customer=subscription.customer, subscription=subscription, stripe_payment_intent_id="pi_refund_b2b",
+            amount=Decimal("2000.00"), status="SUCCEEDED",
+        )
+
+        eligible, reason = RefundEligibilityService.check(b2b_payment)
+
+        self.assertFalse(eligible)
+        self.assertEqual(reason, "B2B_CURRENT_PERIOD_NOT_REFUNDABLE")
+
+
+class RefundServiceTests(TestCase):
+    def setUp(self):
+        self.b2c_user = User.objects.create_user(
+            email="refund-service-b2c@example.com", password="Password123!", first_name="Refund", last_name="Service",
+            role=Roles.B2C, is_verified=True,
+        )
+        self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_refund_service", email=self.b2c_user.email)
+        self.payment = Payment.objects.create(
+            user=self.b2c_user, customer=self.customer, stripe_payment_intent_id="pi_refund_service_test",
+            amount=Decimal("50.00"), status="SUCCEEDED",
+        )
+        self.balance = PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, source_payment=self.payment, fixed_amount=3, current_balance=3,
+        )
+
+    @patch("api.payments.refund_services.stripe")
+    def test_successful_refund_revokes_unused_balance_and_marks_payment_refunded(self, mock_stripe):
+        RefundService.refund_payment(payment=self.payment, actor=self.b2c_user)
+
+        mock_stripe.Refund.create.assert_called_once_with(payment_intent="pi_refund_service_test")
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "REFUNDED")
+        self.assertIsNotNone(self.payment.refunded_at)
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 0)
+        self.assertTrue(
+            BalanceTransaction.objects.filter(
+                balance=self.balance, transaction_type=BalanceTransaction.REFUND,
+                reference=f"refund:{self.payment.stripe_payment_intent_id}",
+            ).exists()
+        )
+
+    @patch("api.payments.refund_services.stripe")
+    def test_refund_requires_override_reason_code_when_ineligible(self, mock_stripe):
+        self.balance.current_balance = 2
+        self.balance.save(update_fields=["current_balance"])
+
+        with self.assertRaises(ValueError):
+            RefundService.refund_payment(payment=self.payment, actor=self.b2c_user)
+
+        mock_stripe.Refund.create.assert_not_called()
+
+    @patch("api.payments.refund_services.stripe")
+    def test_refund_rejects_invalid_override_reason_code(self, mock_stripe):
+        self.balance.current_balance = 2
+        self.balance.save(update_fields=["current_balance"])
+
+        with self.assertRaises(ValueError):
+            RefundService.refund_payment(payment=self.payment, actor=self.b2c_user, override_reason_code="NOT_A_REAL_CODE")
+
+        mock_stripe.Refund.create.assert_not_called()
+
+    @patch("api.payments.refund_services.stripe")
+    def test_refund_never_restores_already_consumed_entitlement_even_with_override(self, mock_stripe):
+        self.balance.current_balance = 1  # 2 of 3 slots already consumed
+        self.balance.save(update_fields=["current_balance"])
+
+        RefundService.refund_payment(payment=self.payment, actor=self.b2c_user, override_reason_code=PLATFORM_ERROR)
+
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "REFUNDED")
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 0)  # never restored above what was left unused
+
+    @patch("api.payments.refund_services.stripe")
+    def test_cannot_refund_already_refunded_payment(self, mock_stripe):
+        RefundService.refund_payment(payment=self.payment, actor=self.b2c_user)
+        mock_stripe.Refund.create.reset_mock()
+
+        with self.assertRaises(ValueError):
+            RefundService.refund_payment(payment=self.payment, actor=self.b2c_user)
+
+        mock_stripe.Refund.create.assert_not_called()
+
+
+class ChargeRefundedWebhookTests(TestCase):
+    """Covers a refund issued directly from the Stripe Dashboard (not
+    through our admin action) - the webhook must still sync the local
+    entitlement state, and must not double-process a redelivered event."""
+
+    def setUp(self):
+        self.b2c_user = User.objects.create_user(
+            email="refund-webhook-b2c@example.com", password="Password123!", first_name="Refund", last_name="Webhook",
+            role=Roles.B2C, is_verified=True,
+        )
+        self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_refund_webhook", email=self.b2c_user.email)
+        self.payment = Payment.objects.create(
+            user=self.b2c_user, customer=self.customer, stripe_payment_intent_id="pi_refund_webhook_test",
+            amount=Decimal("50.00"), status="SUCCEEDED",
+        )
+        self.balance = PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, source_payment=self.payment, fixed_amount=3, current_balance=3,
+        )
+        self.service = StripeService()
+
+    def test_charge_refunded_webhook_syncs_entitlement_and_is_idempotent(self):
+        charge_data = {"payment_intent": "pi_refund_webhook_test"}
+
+        self.service.handle_charge_refunded(charge_data)
+
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "REFUNDED")
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 0)
+
+        # Redelivery, or the admin path already having processed this
+        # payment - must not double-process.
+        self.service.handle_charge_refunded(charge_data)
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 0)
+
+
+class AdminPaymentRefundEndpointTests(APITestCase):
+    def setUp(self):
+        self.superadmin = User.objects.create_user(
+            email="refund-endpoint-superadmin@example.com", password="Password123!",
+            first_name="Refund", last_name="Super", role=Roles.SUPERADMIN, is_verified=True, is_staff=True,
+        )
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": self.superadmin.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        self.b2c_user = User.objects.create_user(
+            email="refund-endpoint-b2c@example.com", password="Password123!", first_name="Refund", last_name="Endpoint",
+            role=Roles.B2C, is_verified=True,
+        )
+        self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_refund_endpoint", email=self.b2c_user.email)
+        self.payment = Payment.objects.create(
+            user=self.b2c_user, customer=self.customer, stripe_payment_intent_id="pi_refund_endpoint_test",
+            amount=Decimal("50.00"), status="SUCCEEDED",
+        )
+        PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, source_payment=self.payment, fixed_amount=3, current_balance=3,
+        )
+
+    @patch("api.payments.refund_services.stripe")
+    def test_admin_can_refund_an_eligible_payment(self, mock_stripe):
+        response = self.client.post(f"/api/v1/payments/admin/payments/{self.payment.id}/refund", {}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "REFUNDED")
 
 
 class RetireAndReplacePriceTests(TestCase):
@@ -574,6 +919,12 @@ class ChangePlanEntitlementTests(APITestCase):
         mock_invoice.pay.return_value = MagicMock(status="paid")
         mock_stripe.Invoice.create.return_value = mock_invoice
 
+        # Unused balance from the old (growth) plan must be added to, not
+        # overwritten by, the new plan's full grant (Sign-Off Section 3).
+        PackageBalance.objects.create(
+            owner_company=self.company, balance_type=PackageBalance.SLOTS, fixed_amount=200, current_balance=30,
+        )
+
         response = self.client.post(
             f"/api/v1/payments/subscriptions/{self.subscription.public_id}/change_plan",
             {"price_id": str(self.business.id), "prorate": True},
@@ -583,6 +934,37 @@ class ChangePlanEntitlementTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         mock_stripe.Invoice.create.assert_called_once()
         balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 530)
+
+    @patch("api.payments.views.stripe")
+    def test_repeated_upgrade_in_same_billing_cycle_does_not_double_grant(self, mock_stripe):
+        self._mock_subscription_retrieve(mock_stripe)
+        mock_invoice = MagicMock()
+        mock_invoice.finalize_invoice.return_value = mock_invoice
+        mock_invoice.pay.return_value = MagicMock(status="paid")
+        mock_stripe.Invoice.create.return_value = mock_invoice
+
+        enterprise = make_price(name="enterprise-like package", target_user_type="BOTH", unit_amount=Decimal("5000.00"), slot_grant=1000, points_grant=5000)
+
+        first = self.client.post(
+            f"/api/v1/payments/subscriptions/{self.subscription.public_id}/change_plan",
+            {"price_id": str(self.business.id), "prorate": True},
+            format="json",
+        )
+        self.assertEqual(first.status_code, 200, first.data)
+        balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 500)
+
+        # Stripe does not move current_period_start/end for a mid-cycle plan
+        # swap - only a real renewal does - so this second upgrade lands in
+        # the same billing cycle as the first and must not grant again.
+        second = self.client.post(
+            f"/api/v1/payments/subscriptions/{self.subscription.public_id}/change_plan",
+            {"price_id": str(enterprise.id), "prorate": True},
+            format="json",
+        )
+        self.assertEqual(second.status_code, 200, second.data)
+        balance.refresh_from_db()
         self.assertEqual(balance.current_balance, 500)
 
     @patch("api.payments.views.stripe")

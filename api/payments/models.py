@@ -557,11 +557,17 @@ class BalanceTransaction(TimeStampedModel):
     CONSUME = 'CONSUME'
     RESET = 'RESET'
     ADMIN_ADJUST = 'ADMIN_ADJUST'
+    RESERVE = 'RESERVE'
+    RELEASE = 'RELEASE'
+    REFUND = 'REFUND'
     TRANSACTION_TYPE_CHOICES = [
         (GRANT, 'Grant'),
         (CONSUME, 'Consume'),
         (RESET, 'Reset'),
         (ADMIN_ADJUST, 'Admin Adjustment'),
+        (RESERVE, 'Reserve'),
+        (RELEASE, 'Release'),
+        (REFUND, 'Refund'),
     ]
 
     balance = models.ForeignKey(
@@ -596,6 +602,72 @@ class BalanceTransaction(TimeStampedModel):
 
     def __str__(self):
         return f"{self.transaction_type} {self.amount} -> {self.balance_after}"
+
+
+class AddonRequest(TimeStampedModel):
+    """A Points reservation for one add-on request (Package Architecture
+    Sign-Off, Section 5): Reserve on request, Consume only on successful
+    delivery, Release on cancel/reject/fail/timeout.
+
+    A reservation deducts PackageBalance.current_balance immediately (via
+    the same _consume_b2b/_consume_b2c path as any other spend, tagged with
+    a RESERVE BalanceTransaction), so current_balance already reflects
+    Total - Consumed - Reserved at all times. Confirming just marks this
+    request CONSUMED (no further balance change - the deduction already
+    happened). Releasing credits that deduction back and marks it RELEASED.
+    """
+    RESERVED = 'RESERVED'
+    CONSUMED = 'CONSUMED'
+    RELEASED = 'RELEASED'
+    STATUS_CHOICES = [
+        (RESERVED, 'Reserved'),
+        (CONSUMED, 'Consumed'),
+        (RELEASED, 'Released'),
+    ]
+
+    owner_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='addon_requests'
+    )
+    owner_company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='addon_requests'
+    )
+    addon_code = models.CharField(max_length=64)
+    points_cost = models.PositiveIntegerField()
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=RESERVED)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+'
+    )
+
+    class Meta:
+        verbose_name = "Add-on Request"
+        verbose_name_plural = "Add-on Requests"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(owner_user__isnull=False) | models.Q(owner_company__isnull=False),
+                name='addon_request_has_owner'
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['owner_user', 'status']),
+            models.Index(fields=['owner_company', 'status']),
+        ]
+
+    def __str__(self):
+        owner = self.owner_company.name if self.owner_company else self.owner_user.email
+        return f"{owner} - {self.addon_code} - {self.status}"
 
 
 class Invoice(TimeStampedModel):

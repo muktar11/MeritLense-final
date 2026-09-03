@@ -1,14 +1,16 @@
 import logging
 import stripe
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
 from api.core.public_ids import get_by_identifier
 from api.core.constants import SubscriptionStatus
 from .models import (
-    Price, Customer, PaymentMethod, 
+    Price, Customer, PaymentMethod,
     Subscription, Payment, Invoice
 )
+from .refund_services import RefundService
 
 import logging
 logger = logging.getLogger(__name__)
@@ -536,6 +538,7 @@ class StripeService:
             'invoice.payment_succeeded': self.handle_invoice_paid,
             'invoice.payment_failed': self.handle_invoice_failed,
             'invoice.upcoming': self.handle_invoice_upcoming,
+            'charge.refunded': self.handle_charge_refunded,
         }
         
         handler = event_handlers.get(event_type)
@@ -753,7 +756,26 @@ class StripeService:
         except Exception as e:
             logger.error(f"Error handling subscription deleted: {e}")
             return None
-    
+
+    def handle_charge_refunded(self, charge_data):
+        """A refund issued directly from the Stripe Dashboard (not through
+        our admin refund action) - syncs local state only, no Stripe call.
+        Idempotent against RefundService.refund_payment() already having
+        processed the same payment (checked via Payment.refunded_at)."""
+        payment_intent_id = charge_data.get('payment_intent')
+        if not payment_intent_id:
+            return None
+        payment = Payment.objects.filter(stripe_payment_intent_id=payment_intent_id).first()
+        if not payment or payment.refunded_at:
+            return payment
+        with transaction.atomic():
+            payment.status = 'REFUNDED'
+            payment.refunded_at = timezone.now()
+            payment.save(update_fields=["status", "refunded_at", "updated_at"])
+            RefundService.revoke_unused_entitlement(payment)
+        logger.info(f"Payment refunded via Stripe: {payment.stripe_payment_intent_id}")
+        return payment
+
     def handle_invoice_paid(self, invoice_data):
         """Handle invoice paid - records the invoice (the source of truth for
         subscription billing history, including renewals - see

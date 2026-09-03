@@ -22,7 +22,8 @@ from .models import Price, Customer, PaymentMethod, Subscription, Payment, Invoi
 from .serializers import (
     PriceSerializer, PriceAdminSerializer, CustomerSerializer, PaymentMethodSerializer,
     SubscriptionSerializer, PaymentSerializer, InvoiceSerializer,
-    CreatePaymentIntentSerializer, AttachPaymentMethodSerializer, CreateSubscriptionSerializer
+    CreatePaymentIntentSerializer, AttachPaymentMethodSerializer, CreateSubscriptionSerializer,
+    RefundPaymentSerializer
 )
 from .services import StripeService
 
@@ -584,12 +585,14 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
                 # otherwise there's no new payment to confirm): invoice and
                 # collect the proration immediately, and on confirmed
                 # payment, grant the new plan's entitlement right away via
-                # the same reset_b2b_balances() the normal renewal webhook
-                # uses - not a bespoke "credit only the difference" path,
-                # which the memo explicitly flags as ambiguous/undefined.
-                # Calling it here is safe even if the eventual invoice.paid
-                # webhook also fires for the same invoice - both the
-                # Invoice upsert and reset_b2b_balances are idempotent.
+                # EntitlementService.apply_upgrade_grant() - per the
+                # Product/Business Decision Sign-Off (Section 3), this adds
+                # the new plan's full entitlement on top of any unused
+                # balance (not a reset/overwrite - that's reset_b2b_balances,
+                # reserved for normal renewal), capped at one full grant per
+                # billing cycle. Calling it here is safe even if the eventual
+                # invoice.paid webhook also fires for the same invoice - both
+                # the Invoice upsert and apply_upgrade_grant are idempotent.
                 #
                 # Downgrade (or an upgrade with prorate=False, so nothing
                 # new was actually charged): per the memo's explicit
@@ -611,7 +614,7 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
                         paid_invoice = pending_invoice.pay()
                         if paid_invoice.status == 'paid':
                             from .entitlement_services import EntitlementService
-                            EntitlementService.reset_b2b_balances(subscription)
+                            EntitlementService.apply_upgrade_grant(subscription)
                     except stripe.error.StripeError as e:
                         # The plan change on Stripe's side already succeeded
                         # (matches Stripe's own behavior: a failed proration
@@ -1085,6 +1088,36 @@ class AdminPriceViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
         )
 
         return Response(self.get_serializer(instance).data, status=status.HTTP_200_OK)
+
+
+class AdminPaymentViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
+    """Admin/SuperAdmin-only visibility over ALL payments (unlike the
+    user-facing PaymentViewSet above, which is scoped to request.user's own
+    payments) - the manual refund action lives here."""
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+    serializer_class = PaymentSerializer
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Payment.objects.none()
+        return Payment.objects.all().order_by('-created_at')
+
+    @action(detail=True, methods=['post'])
+    def refund(self, request, id=None):
+        payment = self.get_object()
+        serializer = RefundPaymentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            from .refund_services import RefundService
+            RefundService.refund_payment(
+                payment=payment, actor=request.user,
+                override_reason_code=serializer.validated_data.get('override_reason_code'),
+            )
+        except (stripe.error.StripeError, ValueError) as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(PaymentSerializer(payment).data)
 
 
 class AdminSubscriptionPagination(PageNumberPagination):

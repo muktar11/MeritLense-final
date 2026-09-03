@@ -7,7 +7,7 @@ ADDON_POINTS_CATALOG = {
     "video_introduction_recording": 30,
     "reference_verification": 30,
     "job_role_matching_recommendation": 20,
-    "behavioral_indicators_report": 25,
+    "extended_assessment_insights": 25,
 }
 
 

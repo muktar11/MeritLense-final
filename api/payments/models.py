@@ -559,6 +559,7 @@ class BalanceTransaction(TimeStampedModel):
     ADMIN_ADJUST = 'ADMIN_ADJUST'
     RESERVE = 'RESERVE'
     RELEASE = 'RELEASE'
+    REFUND = 'REFUND'
     TRANSACTION_TYPE_CHOICES = [
         (GRANT, 'Grant'),
         (CONSUME, 'Consume'),
@@ -566,6 +567,7 @@ class BalanceTransaction(TimeStampedModel):
         (ADMIN_ADJUST, 'Admin Adjustment'),
         (RESERVE, 'Reserve'),
         (RELEASE, 'Release'),
+        (REFUND, 'Refund'),
     ]
 
     balance = models.ForeignKey(

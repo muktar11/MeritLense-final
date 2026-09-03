@@ -10,6 +10,7 @@ from api.accounts.models import Company, User
 from api.core.constants import Roles
 from api.payments.entitlement_services import ADDON_POINTS_CATALOG, EntitlementService
 from api.payments.models import AddonRequest, BalanceTransaction, Customer, Invoice, PackageBalance, Payment, Price, ProcessedStripeEvent, Subscription
+from api.payments.refund_services import CONFIRMED_BILLING_ERROR, PLATFORM_ERROR, RefundEligibilityService, RefundService
 from api.payments.serializers import CreateSubscriptionSerializer
 from api.payments.services import StripeService
 
@@ -407,6 +408,202 @@ class AddonReservationTests(TestCase):
         newer.refresh_from_db()
         self.assertEqual(older.current_balance, 10)
         self.assertEqual(newer.current_balance, 40)
+
+
+class RefundEligibilityTests(TestCase):
+    """Refund Eligibility Policy: B2C is refundable only with zero Slots/
+    Points consumed on that specific purchase; B2B's current billing
+    period is never refundable by default."""
+
+    def setUp(self):
+        self.b2c_user = User.objects.create_user(
+            email="refund-b2c@example.com", password="Password123!", first_name="Refund", last_name="User",
+            role=Roles.B2C, is_verified=True,
+        )
+        self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_refund_b2c", email=self.b2c_user.email)
+        self.payment = Payment.objects.create(
+            user=self.b2c_user, customer=self.customer, stripe_payment_intent_id="pi_refund_test",
+            amount=Decimal("50.00"), status="SUCCEEDED",
+        )
+
+    def test_b2c_eligible_when_nothing_consumed(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, source_payment=self.payment, fixed_amount=3, current_balance=3)
+
+        eligible, reason = RefundEligibilityService.check(self.payment)
+
+        self.assertTrue(eligible)
+        self.assertEqual(reason, "ELIGIBLE")
+
+    def test_b2c_ineligible_when_slots_consumed(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, source_payment=self.payment, fixed_amount=3, current_balance=2)
+
+        eligible, reason = RefundEligibilityService.check(self.payment)
+
+        self.assertFalse(eligible)
+        self.assertEqual(reason, "ALREADY_CONSUMED")
+
+    def test_b2b_current_period_not_refundable_by_default(self):
+        owner = User.objects.create_user(
+            email="refund-b2b@example.com", password="Password123!", first_name="Refund", last_name="B2B",
+            role=Roles.B2B, is_verified=True,
+        )
+        company = make_company(owner)
+        price = make_price(target_user_type="B2B", slot_grant=200, points_grant=2000)
+        subscription = make_subscription(owner, price, company=company, status="ACTIVE")
+        b2b_payment = Payment.objects.create(
+            user=owner, customer=subscription.customer, subscription=subscription, stripe_payment_intent_id="pi_refund_b2b",
+            amount=Decimal("2000.00"), status="SUCCEEDED",
+        )
+
+        eligible, reason = RefundEligibilityService.check(b2b_payment)
+
+        self.assertFalse(eligible)
+        self.assertEqual(reason, "B2B_CURRENT_PERIOD_NOT_REFUNDABLE")
+
+
+class RefundServiceTests(TestCase):
+    def setUp(self):
+        self.b2c_user = User.objects.create_user(
+            email="refund-service-b2c@example.com", password="Password123!", first_name="Refund", last_name="Service",
+            role=Roles.B2C, is_verified=True,
+        )
+        self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_refund_service", email=self.b2c_user.email)
+        self.payment = Payment.objects.create(
+            user=self.b2c_user, customer=self.customer, stripe_payment_intent_id="pi_refund_service_test",
+            amount=Decimal("50.00"), status="SUCCEEDED",
+        )
+        self.balance = PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, source_payment=self.payment, fixed_amount=3, current_balance=3,
+        )
+
+    @patch("api.payments.refund_services.stripe")
+    def test_successful_refund_revokes_unused_balance_and_marks_payment_refunded(self, mock_stripe):
+        RefundService.refund_payment(payment=self.payment, actor=self.b2c_user)
+
+        mock_stripe.Refund.create.assert_called_once_with(payment_intent="pi_refund_service_test")
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "REFUNDED")
+        self.assertIsNotNone(self.payment.refunded_at)
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 0)
+        self.assertTrue(
+            BalanceTransaction.objects.filter(
+                balance=self.balance, transaction_type=BalanceTransaction.REFUND,
+                reference=f"refund:{self.payment.stripe_payment_intent_id}",
+            ).exists()
+        )
+
+    @patch("api.payments.refund_services.stripe")
+    def test_refund_requires_override_reason_code_when_ineligible(self, mock_stripe):
+        self.balance.current_balance = 2
+        self.balance.save(update_fields=["current_balance"])
+
+        with self.assertRaises(ValueError):
+            RefundService.refund_payment(payment=self.payment, actor=self.b2c_user)
+
+        mock_stripe.Refund.create.assert_not_called()
+
+    @patch("api.payments.refund_services.stripe")
+    def test_refund_rejects_invalid_override_reason_code(self, mock_stripe):
+        self.balance.current_balance = 2
+        self.balance.save(update_fields=["current_balance"])
+
+        with self.assertRaises(ValueError):
+            RefundService.refund_payment(payment=self.payment, actor=self.b2c_user, override_reason_code="NOT_A_REAL_CODE")
+
+        mock_stripe.Refund.create.assert_not_called()
+
+    @patch("api.payments.refund_services.stripe")
+    def test_refund_never_restores_already_consumed_entitlement_even_with_override(self, mock_stripe):
+        self.balance.current_balance = 1  # 2 of 3 slots already consumed
+        self.balance.save(update_fields=["current_balance"])
+
+        RefundService.refund_payment(payment=self.payment, actor=self.b2c_user, override_reason_code=PLATFORM_ERROR)
+
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "REFUNDED")
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 0)  # never restored above what was left unused
+
+    @patch("api.payments.refund_services.stripe")
+    def test_cannot_refund_already_refunded_payment(self, mock_stripe):
+        RefundService.refund_payment(payment=self.payment, actor=self.b2c_user)
+        mock_stripe.Refund.create.reset_mock()
+
+        with self.assertRaises(ValueError):
+            RefundService.refund_payment(payment=self.payment, actor=self.b2c_user)
+
+        mock_stripe.Refund.create.assert_not_called()
+
+
+class ChargeRefundedWebhookTests(TestCase):
+    """Covers a refund issued directly from the Stripe Dashboard (not
+    through our admin action) - the webhook must still sync the local
+    entitlement state, and must not double-process a redelivered event."""
+
+    def setUp(self):
+        self.b2c_user = User.objects.create_user(
+            email="refund-webhook-b2c@example.com", password="Password123!", first_name="Refund", last_name="Webhook",
+            role=Roles.B2C, is_verified=True,
+        )
+        self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_refund_webhook", email=self.b2c_user.email)
+        self.payment = Payment.objects.create(
+            user=self.b2c_user, customer=self.customer, stripe_payment_intent_id="pi_refund_webhook_test",
+            amount=Decimal("50.00"), status="SUCCEEDED",
+        )
+        self.balance = PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, source_payment=self.payment, fixed_amount=3, current_balance=3,
+        )
+        self.service = StripeService()
+
+    def test_charge_refunded_webhook_syncs_entitlement_and_is_idempotent(self):
+        charge_data = {"payment_intent": "pi_refund_webhook_test"}
+
+        self.service.handle_charge_refunded(charge_data)
+
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "REFUNDED")
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 0)
+
+        # Redelivery, or the admin path already having processed this
+        # payment - must not double-process.
+        self.service.handle_charge_refunded(charge_data)
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 0)
+
+
+class AdminPaymentRefundEndpointTests(APITestCase):
+    def setUp(self):
+        self.superadmin = User.objects.create_user(
+            email="refund-endpoint-superadmin@example.com", password="Password123!",
+            first_name="Refund", last_name="Super", role=Roles.SUPERADMIN, is_verified=True, is_staff=True,
+        )
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": self.superadmin.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        self.b2c_user = User.objects.create_user(
+            email="refund-endpoint-b2c@example.com", password="Password123!", first_name="Refund", last_name="Endpoint",
+            role=Roles.B2C, is_verified=True,
+        )
+        self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_refund_endpoint", email=self.b2c_user.email)
+        self.payment = Payment.objects.create(
+            user=self.b2c_user, customer=self.customer, stripe_payment_intent_id="pi_refund_endpoint_test",
+            amount=Decimal("50.00"), status="SUCCEEDED",
+        )
+        PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, source_payment=self.payment, fixed_amount=3, current_balance=3,
+        )
+
+    @patch("api.payments.refund_services.stripe")
+    def test_admin_can_refund_an_eligible_payment(self, mock_stripe):
+        response = self.client.post(f"/api/v1/payments/admin/payments/{self.payment.id}/refund", {}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "REFUNDED")
 
 
 class RetireAndReplacePriceTests(TestCase):

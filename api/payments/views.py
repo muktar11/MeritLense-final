@@ -22,7 +22,8 @@ from .models import Price, Customer, PaymentMethod, Subscription, Payment, Invoi
 from .serializers import (
     PriceSerializer, PriceAdminSerializer, CustomerSerializer, PaymentMethodSerializer,
     SubscriptionSerializer, PaymentSerializer, InvoiceSerializer,
-    CreatePaymentIntentSerializer, AttachPaymentMethodSerializer, CreateSubscriptionSerializer
+    CreatePaymentIntentSerializer, AttachPaymentMethodSerializer, CreateSubscriptionSerializer,
+    RefundPaymentSerializer
 )
 from .services import StripeService
 
@@ -1087,6 +1088,36 @@ class AdminPriceViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
         )
 
         return Response(self.get_serializer(instance).data, status=status.HTTP_200_OK)
+
+
+class AdminPaymentViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
+    """Admin/SuperAdmin-only visibility over ALL payments (unlike the
+    user-facing PaymentViewSet above, which is scoped to request.user's own
+    payments) - the manual refund action lives here."""
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+    serializer_class = PaymentSerializer
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Payment.objects.none()
+        return Payment.objects.all().order_by('-created_at')
+
+    @action(detail=True, methods=['post'])
+    def refund(self, request, id=None):
+        payment = self.get_object()
+        serializer = RefundPaymentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            from .refund_services import RefundService
+            RefundService.refund_payment(
+                payment=payment, actor=request.user,
+                override_reason_code=serializer.validated_data.get('override_reason_code'),
+            )
+        except (stripe.error.StripeError, ValueError) as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(PaymentSerializer(payment).data)
 
 
 class AdminSubscriptionPagination(PageNumberPagination):

@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     PriceViewSet, CustomerViewSet, PaymentMethodViewSet,
     SubscriptionViewSet, PaymentViewSet, InvoiceViewSet,
-    StripeWebhookView, AdminSubscriptionViewSet, AdminPriceViewSet, AdminPaymentViewSet, check_all_subscriptions, debug_subscription_data, debug_subscription_payment, retry_subscription_payment, sync_all_subscriptions, sync_subscription_status, spend_points
+    StripeWebhookView, AdminSubscriptionViewSet, AdminPriceViewSet, AdminPaymentViewSet, AdminDealRecordViewSet, check_all_subscriptions, debug_subscription_data, debug_subscription_payment, retry_subscription_payment, sync_all_subscriptions, sync_subscription_status, spend_points
 )
 
 router = DefaultRouter(trailing_slash=False)
@@ -16,6 +16,7 @@ router.register(r'invoices', InvoiceViewSet, basename='invoice')
 router.register(r'admin/subscriptions', AdminSubscriptionViewSet, basename='admin-subscription')
 router.register(r'admin/prices', AdminPriceViewSet, basename='admin-price')
 router.register(r'admin/payments', AdminPaymentViewSet, basename='admin-payment')
+router.register(r'admin/deal-records', AdminDealRecordViewSet, basename='admin-deal-record')
 
 urlpatterns = [
     path('', include(router.urls)),

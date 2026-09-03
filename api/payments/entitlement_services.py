@@ -1,6 +1,7 @@
 from django.db import transaction
+from django.utils import timezone
 
-from .models import PackageBalance, BalanceTransaction, Subscription
+from .models import PackageBalance, BalanceTransaction, Subscription, AddonRequest
 
 ADDON_POINTS_CATALOG = {
     "practical_simulation_test": 30,
@@ -35,16 +36,99 @@ class EntitlementService:
             cls._consume_b2c(owner, PackageBalance.SLOTS, reference=f"session:{session.public_id}", actor=actor)
 
     @classmethod
-    def spend_points(cls, *, user, addon_code, actor=None):
+    def reserve_points(cls, *, user, addon_code, actor=None):
+        """Reserve Points for an add-on request (Sign-Off Section 5): deducts
+        current_balance immediately, same as any spend, but only marks the
+        request RESERVED - confirm_addon() or release_points() resolve it."""
         if addon_code not in ADDON_POINTS_CATALOG:
             raise ValueError("Unknown add-on code")
         points_cost = ADDON_POINTS_CATALOG[addon_code]
 
         owner_type = "COMPANY" if getattr(user, "role", None) in ("B2B", "B2B_TEAM") and hasattr(user, "company_profile") else "USER"
-        if owner_type == "COMPANY":
-            owner = user.company_profile.company
-            return cls._consume_b2b(owner, PackageBalance.POINTS, reference=f"addon:{addon_code}", actor=actor, amount=points_cost)
-        return cls._consume_b2c(user, PackageBalance.POINTS, reference=f"addon:{addon_code}", actor=actor, amount=points_cost)
+        with transaction.atomic():
+            addon_request = AddonRequest.objects.create(
+                owner_company=user.company_profile.company if owner_type == "COMPANY" else None,
+                owner_user=None if owner_type == "COMPANY" else user,
+                addon_code=addon_code,
+                points_cost=points_cost,
+                actor=actor,
+            )
+            reference = f"addon-reservation:{addon_request.public_id}"
+            if owner_type == "COMPANY":
+                cls._consume_b2b(
+                    addon_request.owner_company, PackageBalance.POINTS, reference=reference,
+                    actor=actor, amount=points_cost, transaction_type=BalanceTransaction.RESERVE,
+                )
+            else:
+                cls._consume_b2c(
+                    user, PackageBalance.POINTS, reference=reference,
+                    actor=actor, amount=points_cost, transaction_type=BalanceTransaction.RESERVE,
+                )
+            return addon_request
+
+    @classmethod
+    def confirm_addon(cls, *, addon_request, actor=None):
+        """Mark a reserved add-on request as successfully delivered. No
+        balance change - the Points already left current_balance when the
+        request was reserved; this just makes that deduction permanent."""
+        if addon_request.status != AddonRequest.RESERVED:
+            raise ValueError(f"Cannot confirm an add-on request in status {addon_request.status}")
+        addon_request.status = AddonRequest.CONSUMED
+        addon_request.resolved_at = timezone.now()
+        addon_request.save(update_fields=["status", "resolved_at", "updated_at"])
+        return addon_request
+
+    @classmethod
+    def release_points(cls, *, addon_request, actor=None):
+        """Reverse a reservation on cancel/reject/fail/timeout, crediting
+        back exactly what was reserved (per PackageBalance row touched, via
+        the RESERVE ledger entries - correct even when a B2C reservation
+        FIFO-split across multiple purchase rows). Idempotent if already
+        released; refuses to release an already-confirmed (delivered)
+        request, since consumed Points are never restored."""
+        if addon_request.status == AddonRequest.RELEASED:
+            return addon_request
+        if addon_request.status != AddonRequest.RESERVED:
+            raise ValueError(f"Cannot release an add-on request in status {addon_request.status}")
+
+        reference = f"addon-reservation:{addon_request.public_id}"
+        with transaction.atomic():
+            reserved_txns = list(
+                BalanceTransaction.objects.filter(reference=reference, transaction_type=BalanceTransaction.RESERVE)
+            )
+            for txn in reserved_txns:
+                balance = PackageBalance.objects.select_for_update().get(pk=txn.balance_id)
+                credit = -txn.amount
+                balance.current_balance += credit
+                balance.save(update_fields=["current_balance", "updated_at"])
+                BalanceTransaction.objects.create(
+                    balance=balance,
+                    transaction_type=BalanceTransaction.RELEASE,
+                    amount=credit,
+                    balance_after=balance.current_balance,
+                    reference=reference,
+                    actor=actor,
+                )
+            addon_request.status = AddonRequest.RELEASED
+            addon_request.resolved_at = timezone.now()
+            addon_request.save(update_fields=["status", "resolved_at", "updated_at"])
+        return addon_request
+
+    @classmethod
+    def spend_points(cls, *, user, addon_code, actor=None):
+        """Immediate spend (today's only real caller: POST /points/spend).
+        Reserves then immediately confirms - no fulfillment pipeline exists
+        yet to defer confirmation to, but every spend still goes through the
+        real Reserved -> Consumed lifecycle with a full audit trail."""
+        addon_request = cls.reserve_points(user=user, addon_code=addon_code, actor=actor)
+        cls.confirm_addon(addon_request=addon_request, actor=actor)
+        if addon_request.owner_company_id:
+            return PackageBalance.objects.filter(
+                owner_company_id=addon_request.owner_company_id, balance_type=PackageBalance.POINTS
+            ).first()
+        return PackageBalance.objects.filter(
+            owner_user_id=addon_request.owner_user_id, balance_type=PackageBalance.POINTS
+        ).order_by('-updated_at').first()
 
     @classmethod
     def _active_recurring_subscription(cls, company):
@@ -60,7 +144,7 @@ class EntitlementService:
         )
 
     @classmethod
-    def _consume_b2b(cls, company, balance_type, reference, actor=None, amount=1):
+    def _consume_b2b(cls, company, balance_type, reference, actor=None, amount=1, transaction_type=BalanceTransaction.CONSUME):
         subscription = cls._active_recurring_subscription(company)
         if not subscription or not subscription.stripe_price:
             return None
@@ -85,7 +169,7 @@ class EntitlementService:
             balance.save(update_fields=["current_balance", "updated_at"])
             BalanceTransaction.objects.create(
                 balance=balance,
-                transaction_type=BalanceTransaction.CONSUME,
+                transaction_type=transaction_type,
                 amount=-amount,
                 balance_after=balance.current_balance,
                 reference=reference,
@@ -94,7 +178,7 @@ class EntitlementService:
             return balance
 
     @classmethod
-    def _consume_b2c(cls, user, balance_type, reference, actor=None, amount=1):
+    def _consume_b2c(cls, user, balance_type, reference, actor=None, amount=1, transaction_type=BalanceTransaction.CONSUME):
         with transaction.atomic():
             rows = list(
                 PackageBalance.objects.select_for_update()
@@ -112,7 +196,7 @@ class EntitlementService:
                 row.save(update_fields=["current_balance", "updated_at"])
                 BalanceTransaction.objects.create(
                     balance=row,
-                    transaction_type=BalanceTransaction.CONSUME,
+                    transaction_type=transaction_type,
                     amount=-take,
                     balance_after=row.current_balance,
                     reference=reference,

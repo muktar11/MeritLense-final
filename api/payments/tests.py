@@ -9,7 +9,7 @@ from rest_framework.test import APIClient, APITestCase
 from api.accounts.models import Company, User
 from api.core.constants import Roles
 from api.payments.entitlement_services import ADDON_POINTS_CATALOG, EntitlementService
-from api.payments.models import BalanceTransaction, Customer, Invoice, PackageBalance, Payment, Price, ProcessedStripeEvent, Subscription
+from api.payments.models import AddonRequest, BalanceTransaction, Customer, Invoice, PackageBalance, Payment, Price, ProcessedStripeEvent, Subscription
 from api.payments.serializers import CreateSubscriptionSerializer
 from api.payments.services import StripeService
 
@@ -319,6 +319,94 @@ class EntitlementServiceTests(TestCase):
     def test_spend_points_rejects_unknown_addon_code(self):
         with self.assertRaises(ValueError):
             EntitlementService.spend_points(user=self.b2c_user, addon_code="not_a_real_addon")
+
+
+class AddonReservationTests(TestCase):
+    """Points spent on add-ons go through a real Reserve -> Consume/Release
+    lifecycle (Package Architecture Sign-Off, Section 5), not an immediate
+    irreversible deduction."""
+
+    def setUp(self):
+        self.b2c_user = User.objects.create_user(
+            email="addon-reservation@example.com", password="Password123!", first_name="Addon", last_name="User",
+            role=Roles.B2C, is_verified=True,
+        )
+
+    def test_reserve_points_deducts_immediately_and_creates_reserved_addon_request(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=50, current_balance=50)
+
+        addon_request = EntitlementService.reserve_points(user=self.b2c_user, addon_code="practical_simulation_test")
+
+        self.assertEqual(addon_request.status, AddonRequest.RESERVED)
+        balance = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS)
+        self.assertEqual(balance.current_balance, 50 - ADDON_POINTS_CATALOG["practical_simulation_test"])
+        reference = f"addon-reservation:{addon_request.public_id}"
+        self.assertTrue(BalanceTransaction.objects.filter(reference=reference, transaction_type=BalanceTransaction.RESERVE).exists())
+
+    def test_confirm_addon_marks_consumed_without_further_balance_change(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=50, current_balance=50)
+        addon_request = EntitlementService.reserve_points(user=self.b2c_user, addon_code="practical_simulation_test")
+        balance_after_reserve = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS).current_balance
+
+        EntitlementService.confirm_addon(addon_request=addon_request)
+
+        addon_request.refresh_from_db()
+        self.assertEqual(addon_request.status, AddonRequest.CONSUMED)
+        self.assertIsNotNone(addon_request.resolved_at)
+        balance = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS)
+        self.assertEqual(balance.current_balance, balance_after_reserve)
+
+    def test_release_points_credits_balance_back_and_marks_released(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=50, current_balance=50)
+        addon_request = EntitlementService.reserve_points(user=self.b2c_user, addon_code="practical_simulation_test")
+
+        EntitlementService.release_points(addon_request=addon_request)
+
+        addon_request.refresh_from_db()
+        self.assertEqual(addon_request.status, AddonRequest.RELEASED)
+        balance = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS)
+        self.assertEqual(balance.current_balance, 50)
+        reference = f"addon-reservation:{addon_request.public_id}"
+        self.assertTrue(BalanceTransaction.objects.filter(reference=reference, transaction_type=BalanceTransaction.RELEASE).exists())
+
+    def test_release_is_idempotent(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=50, current_balance=50)
+        addon_request = EntitlementService.reserve_points(user=self.b2c_user, addon_code="practical_simulation_test")
+
+        EntitlementService.release_points(addon_request=addon_request)
+        EntitlementService.release_points(addon_request=addon_request)
+
+        balance = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS)
+        self.assertEqual(balance.current_balance, 50)
+
+    def test_cannot_release_a_confirmed_addon_request(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=50, current_balance=50)
+        addon_request = EntitlementService.reserve_points(user=self.b2c_user, addon_code="practical_simulation_test")
+        EntitlementService.confirm_addon(addon_request=addon_request)
+
+        with self.assertRaises(ValueError):
+            EntitlementService.release_points(addon_request=addon_request)
+
+        balance = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS)
+        self.assertEqual(balance.current_balance, 50 - ADDON_POINTS_CATALOG["practical_simulation_test"])
+
+    def test_release_reverses_b2c_multi_row_fifo_reservation(self):
+        older = PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=10, current_balance=10)
+        newer = PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS, fixed_amount=40, current_balance=40)
+
+        addon_request = EntitlementService.reserve_points(user=self.b2c_user, addon_code="practical_simulation_test")  # costs 30
+
+        older.refresh_from_db()
+        newer.refresh_from_db()
+        self.assertEqual(older.current_balance, 0)
+        self.assertEqual(newer.current_balance, 20)
+
+        EntitlementService.release_points(addon_request=addon_request)
+
+        older.refresh_from_db()
+        newer.refresh_from_db()
+        self.assertEqual(older.current_balance, 10)
+        self.assertEqual(newer.current_balance, 40)
 
 
 class RetireAndReplacePriceTests(TestCase):

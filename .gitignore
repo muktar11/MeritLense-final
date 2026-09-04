@@ -120,3 +120,7 @@ MeritLense-ui/
 
 # Django collected static files
 staticfiles/
+
+# Personal reference/working files - not source, never meant to be committed
+*.docx
+get_paths.sh

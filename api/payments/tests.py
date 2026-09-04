@@ -216,6 +216,37 @@ class HandleInvoicePaidTests(TestCase):
 
         self.assertEqual(PackageBalance.objects.filter(owner_company=company).count(), 0)
 
+    def test_manual_billing_reason_invoice_does_not_reset_balance(self):
+        """Confirmed live: change_plan()'s upgrade-proration invoice (billing_reason
+        'manual') still generates a real invoice.payment_succeeded webhook - it must
+        not re-reset a balance apply_upgrade_grant() already additively topped up."""
+        company = make_company(self.user)
+        self.price.slot_grant = 500
+        self.price.points_grant = 3500
+        self.price.save(update_fields=["slot_grant", "points_grant"])
+        self.subscription.company = company
+        self.subscription.save(update_fields=["company"])
+        balance = PackageBalance.objects.create(
+            owner_company=company, balance_type=PackageBalance.SLOTS,
+            source_subscription=self.subscription, fixed_amount=500, current_balance=530,
+        )
+
+        invoice = self.service.handle_invoice_paid({
+            "id": "in_manual_proration",
+            "number": "INV-PRORATION",
+            "amount_due": 150000,
+            "amount_paid": 150000,
+            "amount_remaining": 0,
+            "currency": "eur",
+            "subscription": self.subscription.stripe_subscription_id,
+            "billing_reason": "manual",
+        })
+
+        self.assertIsNotNone(invoice)
+        self.assertEqual(invoice.status, "PAID")
+        balance.refresh_from_db()
+        self.assertEqual(balance.current_balance, 530)
+
     def test_grant_resolution_prefers_deal_record_over_price(self):
         """self.price defaults to slot_grant/points_grant = None (unset) -
         a linked, active DealRecord must still grant its own terms."""
@@ -728,8 +759,13 @@ class RefundEligibilityTests(TestCase):
             role=Roles.B2C, is_verified=True,
         )
         self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_refund_b2c", email=self.b2c_user.email)
+        # A real B2C one-time purchase always gets a bookkeeping Subscription
+        # row too (see _grant_one_time_package) - confirmed live this was
+        # wrongly classified as B2B (subscription_id set) without this.
+        one_time_price = make_price(target_user_type="B2C", billing_type="ONE_TIME", slot_grant=3, points_grant=50)
+        one_time_subscription = make_subscription(self.b2c_user, one_time_price, status="ACTIVE")
         self.payment = Payment.objects.create(
-            user=self.b2c_user, customer=self.customer, stripe_payment_intent_id="pi_refund_test",
+            user=self.b2c_user, customer=self.customer, subscription=one_time_subscription, stripe_payment_intent_id="pi_refund_test",
             amount=Decimal("50.00"), status="SUCCEEDED",
         )
 
@@ -775,8 +811,10 @@ class RefundServiceTests(TestCase):
             role=Roles.B2C, is_verified=True,
         )
         self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_refund_service", email=self.b2c_user.email)
+        one_time_price = make_price(target_user_type="B2C", billing_type="ONE_TIME", slot_grant=3, points_grant=50)
+        one_time_subscription = make_subscription(self.b2c_user, one_time_price, status="ACTIVE")
         self.payment = Payment.objects.create(
-            user=self.b2c_user, customer=self.customer, stripe_payment_intent_id="pi_refund_service_test",
+            user=self.b2c_user, customer=self.customer, subscription=one_time_subscription, stripe_payment_intent_id="pi_refund_service_test",
             amount=Decimal("50.00"), status="SUCCEEDED",
         )
         self.balance = PackageBalance.objects.create(
@@ -854,8 +892,10 @@ class ChargeRefundedWebhookTests(TestCase):
             role=Roles.B2C, is_verified=True,
         )
         self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_refund_webhook", email=self.b2c_user.email)
+        one_time_price = make_price(target_user_type="B2C", billing_type="ONE_TIME", slot_grant=3, points_grant=50)
+        one_time_subscription = make_subscription(self.b2c_user, one_time_price, status="ACTIVE")
         self.payment = Payment.objects.create(
-            user=self.b2c_user, customer=self.customer, stripe_payment_intent_id="pi_refund_webhook_test",
+            user=self.b2c_user, customer=self.customer, subscription=one_time_subscription, stripe_payment_intent_id="pi_refund_webhook_test",
             amount=Decimal("50.00"), status="SUCCEEDED",
         )
         self.balance = PackageBalance.objects.create(
@@ -896,8 +936,10 @@ class AdminPaymentRefundEndpointTests(APITestCase):
             role=Roles.B2C, is_verified=True,
         )
         self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_refund_endpoint", email=self.b2c_user.email)
+        one_time_price = make_price(target_user_type="B2C", billing_type="ONE_TIME", slot_grant=3, points_grant=50)
+        one_time_subscription = make_subscription(self.b2c_user, one_time_price, status="ACTIVE")
         self.payment = Payment.objects.create(
-            user=self.b2c_user, customer=self.customer, stripe_payment_intent_id="pi_refund_endpoint_test",
+            user=self.b2c_user, customer=self.customer, subscription=one_time_subscription, stripe_payment_intent_id="pi_refund_endpoint_test",
             amount=Decimal("50.00"), status="SUCCEEDED",
         )
         PackageBalance.objects.create(

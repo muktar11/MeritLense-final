@@ -840,8 +840,20 @@ class StripeService:
                 subscription.save()
                 logger.info(f"Subscription {subscription.id} status updated to active after payment")
 
-            from .entitlement_services import EntitlementService
-            EntitlementService.reset_b2b_balances(subscription)
+            # A 'manual' billing_reason is the mid-cycle proration invoice
+            # change_plan() creates and pays directly for an upgrade - its
+            # entitlement was already granted additively via
+            # apply_upgrade_grant() at that time. Confirmed live: Stripe
+            # still sends a real invoice.payment_succeeded webhook for that
+            # same invoice moments later, and resetting again here would
+            # silently overwrite the additive top-up with a flat reset to
+            # just the new plan's grant, discarding whatever was unused
+            # before the upgrade. Genuine renewals (billing_reason
+            # 'subscription_cycle', 'subscription_create', etc.) are
+            # unaffected and still reset as before.
+            if invoice_data.get('billing_reason') != 'manual':
+                from .entitlement_services import EntitlementService
+                EntitlementService.reset_b2b_balances(subscription)
 
             logger.info(f"Invoice paid: {invoice_data['id']}")
             return invoice

@@ -26,7 +26,15 @@ class RefundEligibilityService:
             return False, "ALREADY_REFUNDED"
         if payment.status != PaymentStatus.SUCCEEDED:
             return False, "NOT_SUCCEEDED"
-        if payment.subscription_id:
+        # A B2C one-time purchase also gets a bookkeeping Subscription row
+        # (stripe_subscription_id="one_time_<payment_intent_id>", so the
+        # existing usage/limit machinery built for real Subscriptions can be
+        # reused - see _grant_one_time_package()) - so subscription_id alone
+        # doesn't distinguish B2B from B2C. billing_type on the linked
+        # Price does: RECURRING is a real B2B subscription payment, whose
+        # current billing period is never refundable by default; ONE_TIME
+        # is a B2C purchase, judged on its own consumption below instead.
+        if payment.subscription_id and payment.subscription.stripe_price and payment.subscription.stripe_price.billing_type == 'RECURRING':
             return False, "B2B_CURRENT_PERIOD_NOT_REFUNDABLE"
         for balance in PackageBalance.objects.filter(source_payment=payment):
             if balance.current_balance < balance.fixed_amount:

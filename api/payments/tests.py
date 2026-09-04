@@ -332,6 +332,91 @@ class AdminDealRecordEndpointTests(APITestCase):
         self.assertEqual(response.status_code, 403)
 
 
+class AdminAdjustBalanceTests(TestCase):
+    def setUp(self):
+        self.superadmin = User.objects.create_user(
+            email="adjust-superadmin@example.com", password="Password123!",
+            first_name="Adjust", last_name="Super", role=Roles.SUPERADMIN, is_verified=True,
+        )
+        self.owner = User.objects.create_user(
+            email="adjust-owner@example.com", password="Password123!", first_name="Adjust", last_name="Owner",
+            role=Roles.B2B, is_verified=True,
+        )
+        self.company = make_company(self.owner)
+        self.balance = PackageBalance.objects.create(
+            owner_company=self.company, balance_type=PackageBalance.SLOTS, fixed_amount=200, current_balance=30,
+        )
+
+    def test_admin_adjust_balance_credits_positive_delta(self):
+        EntitlementService.admin_adjust_balance(balance=self.balance, delta=20, reason="Manual correction after billing-error refund", actor=self.superadmin)
+
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 50)
+        txn = BalanceTransaction.objects.get(balance=self.balance, transaction_type=BalanceTransaction.ADMIN_ADJUST)
+        self.assertEqual(txn.amount, 20)
+        self.assertEqual(txn.metadata, {"reason": "Manual correction after billing-error refund"})
+
+    def test_admin_adjust_balance_debits_negative_delta(self):
+        EntitlementService.admin_adjust_balance(balance=self.balance, delta=-10, reason="Correcting an over-grant", actor=self.superadmin)
+
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 20)
+
+    def test_admin_adjust_balance_rejects_negative_result(self):
+        with self.assertRaises(ValueError):
+            EntitlementService.admin_adjust_balance(balance=self.balance, delta=-999, reason="Too much", actor=self.superadmin)
+
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 30)
+
+
+class AdminPackageBalanceEndpointTests(APITestCase):
+    def setUp(self):
+        self.superadmin = User.objects.create_user(
+            email="adjust-endpoint-superadmin@example.com", password="Password123!",
+            first_name="Adjust", last_name="Endpoint", role=Roles.SUPERADMIN, is_verified=True, is_staff=True,
+        )
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": self.superadmin.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        self.owner = User.objects.create_user(
+            email="adjust-endpoint-owner@example.com", password="Password123!", first_name="Adjust", last_name="Company",
+            role=Roles.B2B, is_verified=True,
+        )
+        self.company = make_company(self.owner)
+        self.balance = PackageBalance.objects.create(
+            owner_company=self.company, balance_type=PackageBalance.SLOTS, fixed_amount=200, current_balance=30,
+        )
+
+    def test_superadmin_can_adjust_a_balance(self):
+        response = self.client.post(
+            f"/api/v1/payments/admin/package-balances/{self.balance.id}/adjust",
+            {"delta": 15, "reason": "Goodwill credit"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 45)
+
+    def test_non_superadmin_cannot_adjust_a_balance(self):
+        self.client.credentials()
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": self.owner.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        response = self.client.post(
+            f"/api/v1/payments/admin/package-balances/{self.balance.id}/adjust",
+            {"delta": 15, "reason": "Goodwill credit"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+
 class GrantB2COneTimePackageTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(

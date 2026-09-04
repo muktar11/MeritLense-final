@@ -368,3 +368,30 @@ class EntitlementService:
                 else:
                     summary[balance_type] = {"remaining": None, "limit": None, "unlimited": False}
         return summary
+
+    @classmethod
+    def admin_adjust_balance(cls, *, balance, delta, reason, actor):
+        """Manual correction to a PackageBalance's current_balance - e.g.
+        after a B2B refund override where a pooled balance can't be
+        automatically attributed to one payment, or any other Ops-judgment
+        correction. Never allowed to push a balance negative. Only
+        current_balance moves - fixed_amount (the displayed "limit") stays
+        a stable record of what was actually granted, matching how
+        RELEASE/REFUND already behave."""
+        with transaction.atomic():
+            balance = PackageBalance.objects.select_for_update().get(pk=balance.pk)
+            new_balance = balance.current_balance + delta
+            if new_balance < 0:
+                raise ValueError("Adjustment would take the balance negative")
+            balance.current_balance = new_balance
+            balance.save(update_fields=["current_balance", "updated_at"])
+            BalanceTransaction.objects.create(
+                balance=balance,
+                transaction_type=BalanceTransaction.ADMIN_ADJUST,
+                amount=delta,
+                balance_after=new_balance,
+                reference=f"admin-adjust:{actor.email}",
+                actor=actor,
+                metadata={"reason": reason},
+            )
+        return balance

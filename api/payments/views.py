@@ -18,12 +18,12 @@ from api.audit.services import AuditLogService
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.public_ids import PublicIdLookupMixin, get_by_identifier
 
-from .models import Price, Customer, PaymentMethod, Subscription, Payment, Invoice, ProcessedStripeEvent, DealRecord
+from .models import Price, Customer, PaymentMethod, Subscription, Payment, Invoice, ProcessedStripeEvent, DealRecord, PackageBalance
 from .serializers import (
     PriceSerializer, PriceAdminSerializer, CustomerSerializer, PaymentMethodSerializer,
     SubscriptionSerializer, PaymentSerializer, InvoiceSerializer,
     CreatePaymentIntentSerializer, AttachPaymentMethodSerializer, CreateSubscriptionSerializer,
-    RefundPaymentSerializer, DealRecordSerializer
+    RefundPaymentSerializer, DealRecordSerializer, PackageBalanceSerializer, AdjustBalanceSerializer
 )
 from .services import StripeService
 
@@ -1163,6 +1163,46 @@ class AdminDealRecordViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
             data={'changes': list(serializer.validated_data.keys())},
             request=self.request,
         )
+
+
+class AdminPackageBalanceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
+    """SuperAdmin-only visibility and manual correction of any Slots/Points
+    balance - same sensitivity precedent as AdminPriceViewSet/
+    AdminDealRecordViewSet/CreateAdminView, since this directly manipulates
+    a customer's paid-for balance."""
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
+    serializer_class = PackageBalanceSerializer
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return PackageBalance.objects.none()
+        return PackageBalance.objects.all().order_by('-updated_at')
+
+    @action(detail=True, methods=['post'])
+    def adjust(self, request, id=None):
+        balance = self.get_object()
+        serializer = AdjustBalanceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            from .entitlement_services import EntitlementService
+            EntitlementService.admin_adjust_balance(
+                balance=balance, delta=serializer.validated_data['delta'],
+                reason=serializer.validated_data['reason'], actor=request.user,
+            )
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        AuditLogService.log(
+            user=request.user,
+            action='BALANCE_ADJUSTED',
+            category=AuditLogCategory.SUBSCRIPTION,
+            description=f"Balance manually adjusted: {balance}",
+            resource=balance,
+            data={'delta': serializer.validated_data['delta'], 'reason': serializer.validated_data['reason']},
+            request=request,
+        )
+        return Response(PackageBalanceSerializer(balance).data)
 
 
 class AdminSubscriptionPagination(PageNumberPagination):

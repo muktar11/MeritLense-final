@@ -4,7 +4,7 @@ from api.core.serializers import PublicIdModelSerializer
 from api.core.public_ids import get_by_identifier
 from .models import (
     Price, Customer, PaymentMethod,
-    Subscription, Payment, Invoice, DealRecord
+    Subscription, Payment, Invoice, DealRecord, PackageBalance
 )
 from .refund_services import OVERRIDE_REASON_CODES
 
@@ -104,6 +104,25 @@ class DealRecordSerializer(PublicIdModelSerializer):
             ).exists():
                 raise serializers.ValidationError("This company (or its admin email) has already used a Free Trial.")
         return data
+
+
+class PackageBalanceSerializer(PublicIdModelSerializer):
+    owner_user_email = serializers.EmailField(source='owner_user.email', read_only=True, allow_null=True)
+    owner_company_name = serializers.CharField(source='owner_company.name', read_only=True, allow_null=True)
+
+    class Meta:
+        model = PackageBalance
+        fields = [
+            'id', 'owner_user', 'owner_user_email', 'owner_company', 'owner_company_name',
+            'balance_type', 'current_balance', 'fixed_amount',
+            'source_subscription', 'source_payment', 'created_at', 'updated_at'
+        ]
+        read_only_fields = fields
+
+
+class AdjustBalanceSerializer(serializers.Serializer):
+    delta = serializers.IntegerField(help_text="Signed: positive credits, negative debits")
+    reason = serializers.CharField(required=True, allow_blank=False)
 
 
 class CustomerSerializer(PublicIdModelSerializer):

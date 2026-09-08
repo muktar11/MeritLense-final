@@ -421,7 +421,8 @@ class ProfileSerializer(serializers.Serializer):
 class AdminUserSerializer(PublicIdModelSerializer):
     full_name = serializers.SerializerMethodField()
     profile_type = serializers.SerializerMethodField()
-    
+    admin_permissions = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = [
@@ -431,9 +432,19 @@ class AdminUserSerializer(PublicIdModelSerializer):
             'created_at', 'updated_at', 'last_login'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'last_login']
-    
+
     def get_full_name(self, obj):
         return obj.get_full_name()
+
+    def get_admin_permissions(self, obj):
+        # Super Admins have every permission implicitly (see
+        # User.has_admin_permission) rather than an explicit stored list -
+        # admin_permissions is never populated for them (create_superuser
+        # doesn't set it), so surface the full set here instead of showing
+        # "No permissions" for an account that actually has all of them.
+        if obj.role == Roles.SUPERADMIN:
+            return [key for key, _ in AdminPermissions.CHOICES]
+        return obj.admin_permissions or []
     
     def get_profile_type(self, obj):
         if obj.role == Roles.SUPERADMIN:

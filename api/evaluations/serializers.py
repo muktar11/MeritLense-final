@@ -15,7 +15,7 @@ from .models import (
 from api.core.constants import CertificateStatus
 from api.core.serializers import PublicIdModelSerializer
 from api.candidates.serializers import CandidateSerializer
-from api.core.constants import EvaluationType
+from api.core.constants import EvaluationType, CandidateJobRoles
 from api.interviews.models import InterviewConfiguration
 from api.sessions.models import InterviewSession
 from api.sessions.services import InterviewSessionService
@@ -222,7 +222,11 @@ class EvaluationCreateSerializer(PublicIdModelSerializer):
         return super().create(validated_data)
 
     def _resolve_interview_config(self, candidate):
-        role_name = candidate.get_job_role_display()
+        role_name = CandidateJobRoles.INTERVIEW_ROLE_NAME_MAP.get(candidate.job_role)
+        if role_name is None:
+            raise serializers.ValidationError(
+                {"candidate": f"AI interview scheduling isn't supported yet for role '{candidate.get_job_role_display()}'."}
+            )
         preferred_language = candidate.preferred_language or "EN"
         queryset = InterviewConfiguration.objects.filter(is_active=True)
 

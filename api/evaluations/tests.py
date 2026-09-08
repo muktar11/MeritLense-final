@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlsplit
 from api.accounts.models import Company, CompanyEmployerProfile, User
 from api.audit.models import AuditLog
 from api.candidates.models import Candidate
-from api.core.constants import AgreementMethod, AgreementStatus, AgreementType, AuditLogAction, CandidateResponseType, CoverageLevel, EvaluationLayer, EvaluationStatus, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles, SubscriptionStatus, BillingInterval
+from api.core.constants import AgreementMethod, AgreementStatus, AgreementType, AuditLogAction, CandidateJobRoles, CandidateResponseType, CoverageLevel, EvaluationLayer, EvaluationStatus, EvaluationType, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, ReadinessStatus, Roles, SubscriptionStatus, BillingInterval
 from api.contracts.models import Agreement
 from api.evaluations.models import Certificate, CompetencyEvaluationResult, Evaluation, EvaluationReadinessDecisionRecord, EvaluatorRating, ResponseEvaluationResult, ScoringRule, ScoringRuleSet, SessionEvaluationSummary
 from api.evaluations.scoring_services import Week6ScoringService
@@ -556,6 +556,141 @@ class EvaluationInterviewSchedulingApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 201, response.data)
         return Evaluation.objects.get(public_id=response.data["id"])
+
+
+class InterviewRoleMappingTests(TestCase):
+    """Candidate roles resolve to InterviewConfiguration.role_name via
+    CandidateJobRoles.INTERVIEW_ROLE_NAME_MAP, not by exact-string-matching
+    the candidate's CHOICES label (which found zero configs for EC/KA/MW/OT
+    in production - see api/core/constants.py)."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="role-mapping@example.com",
+            password="testpass123",
+            first_name="Role",
+            last_name="Mapper",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.client.force_authenticate(self.user)
+        customer = Customer.objects.create(
+            user=self.user,
+            stripe_customer_id="cus_role_mapping_tests",
+            email=self.user.email,
+            name=self.user.get_full_name(),
+        )
+        price = Price.objects.create(
+            name="B2C Role Mapping Test Plan",
+            stripe_price_id="price_role_mapping_tests",
+            stripe_product_id="prod_role_mapping_tests",
+            target_user_type="B2C",
+            unit_amount="99.00",
+            currency="usd",
+            interval=BillingInterval.MONTHLY,
+            billing_type="RECURRING",
+            feature_limits={"evaluation_limit": 10},
+            is_active=True,
+        )
+        Subscription.objects.create(
+            user=self.user,
+            customer=customer,
+            stripe_subscription_id="sub_role_mapping_tests",
+            stripe_price=price,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=timezone.now(),
+            current_period_end=timezone.now() + timezone.timedelta(days=30),
+        )
+
+    def _create_candidate(self, job_role, passport_id):
+        return Candidate.objects.create(
+            first_name="Test",
+            last_name="Candidate",
+            email=f"candidate-{passport_id}@example.com",
+            passport_id=passport_id,
+            job_role=job_role,
+            core_skills="care,safety",
+            preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf",
+            created_by=self.user,
+        )
+
+    def _schedule(self, candidate):
+        return self.client.post(
+            "/api/v1/evaluations/evaluations",
+            {
+                "candidate": str(candidate.public_id),
+                "evaluation_type": EvaluationType.INTERVIEW,
+                "scheduled_date": (timezone.now() + timezone.timedelta(days=1)).isoformat(),
+            },
+            format="json",
+        )
+
+    def test_elder_companion_resolves_to_elderly_caregiver_config(self):
+        InterviewConfiguration.objects.create(
+            role_name="Elderly Caregiver",
+            role_code="elderly_caregiver",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=30,
+            total_questions=1,
+            rubric_version="v1",
+            question_set_version="v1",
+            is_active=True,
+        )
+        candidate = self._create_candidate(CandidateJobRoles.ELDERCOMPANION, "EC-001")
+        response = self._schedule(candidate)
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_kitchen_assistant_resolves_to_restaurant_staff_config(self):
+        InterviewConfiguration.objects.create(
+            role_name="Restaurant Staff",
+            role_code="restaurant_staff",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=30,
+            total_questions=1,
+            rubric_version="v1",
+            question_set_version="v1",
+            is_active=True,
+        )
+        candidate = self._create_candidate(CandidateJobRoles.KITCHENASSISTANT, "KA-001")
+        response = self._schedule(candidate)
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_maintenance_worker_resolves_to_skilled_trades_config(self):
+        InterviewConfiguration.objects.create(
+            role_name="Skilled Trades & Maintenance",
+            role_code="skilled_trades_maintenance",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=30,
+            total_questions=1,
+            rubric_version="v1",
+            question_set_version="v1",
+            is_active=True,
+        )
+        candidate = self._create_candidate(CandidateJobRoles.MAINTAINANCEWORKER, "MW-001")
+        response = self._schedule(candidate)
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_other_role_is_blocked_with_clear_message_even_if_a_matching_config_exists(self):
+        InterviewConfiguration.objects.create(
+            role_name="Other",
+            role_code="other",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=30,
+            total_questions=1,
+            rubric_version="v1",
+            question_set_version="v1",
+            is_active=True,
+        )
+        candidate = self._create_candidate(CandidateJobRoles.OTHER, "OT-001")
+        response = self._schedule(candidate)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("isn't supported yet", str(response.data["candidate"]))
 
 
 class Week6ScoringServiceTests(TestCase):

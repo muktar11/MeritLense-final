@@ -404,6 +404,28 @@ class CandidateJobRoles:
         (OTHER, 'Other'),
     ]
 
+    # Maps each candidate role code to the InterviewConfiguration.role_name it
+    # should be evaluated against. Matching used to rely on an exact string
+    # comparison between this CHOICES label and InterviewConfiguration.role_name,
+    # which silently found zero configs for EC/KA/MW/OT (no interview package
+    # is literally named "Elder Companion", "Kitchen Assistant", "Maintenance
+    # Worker" or "Other"), blocking evaluation scheduling for those roles in
+    # production. None means no interview package covers this role and
+    # scheduling should be blocked with a clear message rather than silently
+    # assessed against an unrelated rubric - see product decisions recorded
+    # 2026-09-08 (EC -> Elderly Caregiver; KA -> Restaurant Staff as a
+    # temporary stand-in pending dedicated Kitchen Assistant content; OT ->
+    # blocked, "Other" can't be meaningfully assessed by a fixed rubric).
+    INTERVIEW_ROLE_NAME_MAP = {
+        NANNY: 'Nanny',
+        DRIVER: 'Driver',
+        HOUSEKEEPER: 'Housekeeper',
+        ELDERCOMPANION: 'Elderly Caregiver',
+        KITCHENASSISTANT: 'Restaurant Staff',
+        MAINTAINANCEWORKER: 'Skilled Trades & Maintenance',
+        OTHER: None,
+    }
+
 
 # Backwards-compatible name retained for existing API imports. New code should
 # use CandidateJobRoles so the distinction from account-holder roles is clear.

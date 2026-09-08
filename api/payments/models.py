@@ -111,7 +111,7 @@ class Price(TimeStampedModel):
         return f"{self.name} ({user_type_display}) - {self.currency} {self.unit_amount}/{self.interval}"
     
     def get_formatted_price(self):
-        return f"{self.currency} {self.unit_amount}"
+        return f"€{self.unit_amount}"
     
     def is_available_for_user(self, user):
         if self.target_user_type == 'BOTH':

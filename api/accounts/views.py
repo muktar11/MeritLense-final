@@ -1,4 +1,5 @@
 from datetime import timedelta
+import logging
 import secrets
 from django.db import IntegrityError, transaction
 from django.db.models import Q
@@ -44,6 +45,8 @@ from .serializers import (
 )
 from .utils import send_password_reset_email, send_verification_email, send_team_invitation_email, send_admin_credentials_email, send_employer_welcome_email, invalidate_user_sessions
 import random
+
+logger = logging.getLogger(__name__)
 
 
 class StandardResultsSetPagination(PageNumberPagination):
@@ -1688,22 +1691,37 @@ class PendingVerificationListView(APIView):
         result = []
         for user in pending_users:
             profile = user.get_profile()
-            if profile:
-                user_data = EmployerListSerializer(user).data
-                
-                if user.role == Roles.B2C:
-                    user_data['documents'] = {
-                        'id_document': request.build_absolute_uri(profile.id_document.url) if profile.id_document else None,
-                        'resume_document': request.build_absolute_uri(profile.resume_document.url) if profile.resume_document else None,
-                    }
-                elif user.role == Roles.B2B:
-                    user_data['documents'] = {
-                        'registration_certificate': request.build_absolute_uri(profile.registration_certificate.url) if profile.registration_certificate else None,
-                        'resachetified_license': request.build_absolute_uri(profile.resachetified_license.url) if profile.resachetified_license else None,
-                        'tax_id_document': request.build_absolute_uri(profile.tax_id_document.url) if profile.tax_id_document else None,
-                    }
-                
+            user_data = EmployerListSerializer(user).data
+
+            if not profile:
+                # Data-integrity edge case: a User row exists but its
+                # IndividualEmployerProfile/CompanyEmployerProfile doesn't
+                # (e.g. an incomplete signup). Previously silently dropped
+                # from this list entirely, which under-counted "Total
+                # Pending" relative to the System Configuration stat that
+                # counts the same PENDING/B2B+B2C users - still surface the
+                # user so counts stay consistent and the gap is visible.
+                logger.warning(
+                    "Pending verification user %s (role=%s) has no profile row",
+                    user.id, user.role,
+                )
+                user_data['documents'] = {}
                 result.append(user_data)
+                continue
+
+            if user.role == Roles.B2C:
+                user_data['documents'] = {
+                    'id_document': request.build_absolute_uri(profile.id_document.url) if profile.id_document else None,
+                    'resume_document': request.build_absolute_uri(profile.resume_document.url) if profile.resume_document else None,
+                }
+            elif user.role == Roles.B2B:
+                user_data['documents'] = {
+                    'registration_certificate': request.build_absolute_uri(profile.registration_certificate.url) if profile.registration_certificate else None,
+                    'resachetified_license': request.build_absolute_uri(profile.resachetified_license.url) if profile.resachetified_license else None,
+                    'tax_id_document': request.build_absolute_uri(profile.tax_id_document.url) if profile.tax_id_document else None,
+                }
+
+            result.append(user_data)
         
         return Response({
             'count': len(result),
@@ -1932,16 +1950,26 @@ class AdminDashboardStatsView(APIView):
         total_b2b = User.objects.filter(role=Roles.B2B).count()
         
         pending_email = User.objects.filter(is_verified=False).count()
+        # Document verification only ever applies to B2B/B2C accounts (see
+        # DocumentVerificationView, PendingVerificationListView, and
+        # EmployerListView, which all scope the same way) - ADMIN/SUPERADMIN/
+        # B2B_TEAM_MEMBER default to PENDING and are never actively verified,
+        # so counting them here inflated these stats relative to every other
+        # admin page showing the same concept.
+        verifiable_roles = [Roles.B2B, Roles.B2C]
         pending_documents = User.objects.filter(
-            documents_verification_status=DocumentStatus.PENDING
+            documents_verification_status=DocumentStatus.PENDING,
+            role__in=verifiable_roles,
         ).count()
-        
+
         approved_documents = User.objects.filter(
-            documents_verification_status=DocumentStatus.APPROVED
+            documents_verification_status=DocumentStatus.APPROVED,
+            role__in=verifiable_roles,
         ).count()
-        
+
         rejected_documents = User.objects.filter(
-            documents_verification_status=DocumentStatus.REJECTED
+            documents_verification_status=DocumentStatus.REJECTED,
+            role__in=verifiable_roles,
         ).count()
         
         recent_users = User.objects.order_by('-created_at')[:10]

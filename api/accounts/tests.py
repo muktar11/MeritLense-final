@@ -710,6 +710,73 @@ class AccountsWeek2Tests(APITestCase):
         self.assertFalse(company.is_verified)
         self.assertIsNone(company.verified_at)
 
+    @patch("google.oauth2.id_token.verify_oauth2_token")
+    def test_google_login_logs_in_existing_verified_user(self, mock_verify):
+        user = self.create_verified_b2c_user(email="googler@example.com")
+        mock_verify.return_value = {"email": "googler@example.com", "email_verified": True}
+
+        with self.settings(GOOGLE_OAUTH_CLIENT_ID="test-client-id"):
+            response = self.client.post(
+                "/api/v1/auth/oauth/google", {"id_token": "fake-token"}, format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["user_id"], str(user.public_id))
+        self.assertIn("access", response.data)
+        self.assertIn("refresh", response.data)
+
+    @patch("google.oauth2.id_token.verify_oauth2_token")
+    def test_google_login_auto_verifies_a_previously_unverified_account(self, mock_verify):
+        user = User.objects.create_user(
+            email="unverified-googler@example.com",
+            password="Password123!",
+            first_name="Not",
+            last_name="Verified",
+            role=Roles.B2C,
+            is_verified=False,
+        )
+        mock_verify.return_value = {"email": user.email, "email_verified": True}
+
+        with self.settings(GOOGLE_OAUTH_CLIENT_ID="test-client-id"):
+            response = self.client.post(
+                "/api/v1/auth/oauth/google", {"id_token": "fake-token"}, format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        user.refresh_from_db()
+        self.assertTrue(user.is_verified)
+
+    @patch("google.oauth2.id_token.verify_oauth2_token")
+    def test_google_login_rejects_unknown_email_without_creating_an_account(self, mock_verify):
+        mock_verify.return_value = {"email": "nobody-here@example.com", "email_verified": True}
+
+        with self.settings(GOOGLE_OAUTH_CLIENT_ID="test-client-id"):
+            response = self.client.post(
+                "/api/v1/auth/oauth/google", {"id_token": "fake-token"}, format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertFalse(User.objects.filter(email="nobody-here@example.com").exists())
+
+    @patch("google.oauth2.id_token.verify_oauth2_token")
+    def test_google_login_rejects_unverified_google_email(self, mock_verify):
+        self.create_verified_b2c_user(email="shaky-email@example.com")
+        mock_verify.return_value = {"email": "shaky-email@example.com", "email_verified": False}
+
+        with self.settings(GOOGLE_OAUTH_CLIENT_ID="test-client-id"):
+            response = self.client.post(
+                "/api/v1/auth/oauth/google", {"id_token": "fake-token"}, format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_google_login_returns_503_when_not_configured(self):
+        with self.settings(GOOGLE_OAUTH_CLIENT_ID=""):
+            response = self.client.post(
+                "/api/v1/auth/oauth/google", {"id_token": "fake-token"}, format="json",
+            )
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+
     def create_verified_superadmin(self, email="superadmin@example.com"):
         return User.objects.create_user(
             email=email,

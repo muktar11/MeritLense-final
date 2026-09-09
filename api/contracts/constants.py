@@ -6,8 +6,8 @@ from api.core.constants import AgreementType
 CURRENT_VERSIONS = {
     AgreementType.PRIVACY_TERMS: "v1.1",
     AgreementType.AI_DISCLOSURE: "v1.0",
-    AgreementType.B2B_AGREEMENT: "Legal",
+    AgreementType.B2B_AGREEMENT: "v1.4",
     AgreementType.DPA: "v1.2",
-    AgreementType.B2C_AGREEMENT: "v1.1",
+    AgreementType.B2C_AGREEMENT: "v1.5",
     AgreementType.CANDIDATE_CONSENT: "v1.1",
 }

@@ -1,51 +1,279 @@
 {% extends "contracts/_base.html" %}
 {% block content %}
-<h1>B2C Agreement</h1>
+<h1>B2C Individual Services Agreement</h1>
 <div class="doc-meta">
   <span>Version {{ version }}</span>
   <span>Generated {{ generated_at }}</span>
-</div>
-
-<div class="placeholder-notice">
-  ⚠ PLACEHOLDER TEXT — this document body has not yet been reviewed by legal. Replace this
-  template with the approved B2C Agreement text before any real individual employer relies on it.
+  <span>Jurisdiction: Republic of Estonia</span>
 </div>
 
 <p>
-  This B2C Agreement ("Agreement") is entered into between <span class="field">MeritLense</span>
-  and <span class="field">{{ individual_name }}</span>
-  {% if individual_nationality %}(<span class="field">{{ individual_nationality }}</span>){% endif %}
-  ("the Employer"), effective as of the date of signing below.
+  This Agreement is designated for individuals and household employers who wish to evaluate
+  candidates for domestic labor, caregiving, or home operational services. It is a confidential
+  document for contractual use only.
 </p>
 
-<h2>1. Services</h2>
+<h2>0. Parties to the Agreement</h2>
 <p>
-  MeritLense will provide AI-powered candidate evaluation, assessment, and reporting services
-  to the Employer, subject to the terms of the Employer's selected package and the MeritLense
-  Platform Terms of Use.
+  <strong>MeritLense Platform</strong> — an independent digital evaluation platform, legally
+  established under the laws of the Republic of Estonia. The Platform provides modular
+  multilingual assessment tools specializing in operational, technical, and non-academic
+  competencies prior to employment, including: domestic workers, caregivers, cooks, technicians,
+  and household operational services. Email: info@meritlense.com. (Hereinafter referred to as
+  "the First Party").
+</p>
+<p>
+  <span class="field">{{ individual_name }}</span>{% if individual_nationality %} (<span class="field">{{ individual_nationality }}</span>){% endif %}
+  — an individual or household employer wishing to evaluate a candidate for domestic labor,
+  caregiving, or home operational services through the MeritLense platform. (Hereinafter referred
+  to as "the Second Party").
 </p>
 
-<h2>2. Term &amp; Termination</h2>
+<h2>1. Preamble</h2>
 <p>
-  This Agreement remains in effect for as long as the Employer maintains an active package with
-  MeritLense, and may be terminated by either party in accordance with the notice periods set
-  out in the Employer's package.
+  The First Party operates MeritLense, designed to provide secure, neutral, and scalable tools
+  for evaluating operational, technical, and non-academic competencies prior to employment. The
+  Platform specializes in serving individuals and household employers seeking an objective and
+  structured candidate assessment.
+</p>
+<p>
+  The Second Party (individual / household employer) wishes to access these services in a
+  personal capacity for the purpose of evaluating a candidate to work in or for their household.
+  This Agreement does not create any employment, brokerage, or legal representation relationship
+  on the part of the Platform. This preamble shall be considered an integral part of this
+  Agreement.
 </p>
 
-<h2>3. Fees</h2>
+<h2>2. Scope of Services</h2>
+<p>The Platform provides the Second Party with two evaluation tiers, based on the selected package:</p>
+<p><strong>Screening Evaluation</strong></p>
+<ul>
+  <li>Quick assessment to support proceed / no-proceed decisions</li>
+  <li>Identity verification and foundational assessment across the approved dimensions</li>
+  <li>Preliminary Readiness Indicator using the same official labels (Ready / Partially Ready /
+    Readiness Gaps Identified) as a preliminary signal only — not equivalent to the Full
+    Evaluation's official Workforce Readiness Level, and not a certificate-eligible output</li>
+</ul>
+<p><strong>Full MeritLense Evaluation</strong></p>
+<ul>
+  <li>Comprehensive assessment across the five approved Workforce Readiness dimensions: Safety
+    Awareness, Hygiene &amp; Standards, Communication Ability, Practical Task Execution, and
+    Behavioral Indicators</li>
+  <li>Detailed structured report + official Workforce Readiness Level + candidate comparison (per
+    package)</li>
+  <li>AI-Led or Employer-Led assessment path, as applicable to the selected package</li>
+</ul>
+<p><strong>Services included across all packages</strong></p>
+<ul>
+  <li>Multilingual dashboards</li>
+  <li>Technical support and account configuration</li>
+  <li>Verifiable digital evaluation certificate, issued only where the linked report satisfies the
+    applicable eligibility requirements (Full Evaluation)</li>
+</ul>
 <p>
-  Fees are as set out in the Employer's selected package at the time of signing, and are subject
-  to change with notice as described in the MeritLense Platform Terms of Use.
+  The Platform does not participate in recruitment, candidate selection, or legal representation.
+  The final hiring decision remains the sole responsibility of the Second Party. The Platform may
+  not be used to evaluate academic or specialized professional roles. Use is restricted to the
+  operational, domestic, and non-academic workforce.
 </p>
 
-<h2>4. Data Protection</h2>
+<h2>3. Responsibilities of the Parties</h2>
+<p><strong>First Party — MeritLense</strong></p>
+<ul>
+  <li>Ensure secure and reliable platform operation</li>
+  <li>Provide technical support and onboarding assistance</li>
+  <li>Protect Second Party and candidate data in accordance with the GDPR and Estonian data
+    protection laws</li>
+  <li>Maintain platform neutrality and full legal compliance</li>
+  <li>Provide objective evaluation reports based on neutral data and algorithms</li>
+  <li>Notify the Second Party of any material changes to services or pricing at least 14 days in
+    advance</li>
+</ul>
+<p><strong>Second Party — Individual / Household Employer</strong></p>
+<ul>
+  <li>Provide accurate information about the candidate to be evaluated and the nature of the work
+    required</li>
+  <li>Obtain explicit consent from the candidate to participate in the evaluation process before
+    entering their data</li>
+  <li>Comply with applicable domestic labor, privacy, and data protection laws in their country</li>
+  <li>Not use evaluation results for discriminatory purposes, unlawful exclusion, or any purpose
+    contrary to the candidate's rights</li>
+  <li>Use the Platform for personal household purposes only, and not for resale or commercial
+    recruitment</li>
+  <li>Maintain the confidentiality of login credentials and not share the account with third
+    parties</li>
+</ul>
+
+<h2>4. Consumer Protection and Individual Rights</h2>
+<p>As an individual (consumer), the Second Party is entitled to the following non-waivable rights:</p>
+<ul>
+  <li>The right to full information about the service and pricing before completing any purchase</li>
+  <li>The right to receive a copy of this Agreement in digital format at any time</li>
+  <li>The right to deletion of personal data from the Platform upon termination of the Agreement,
+    pursuant to the GDPR</li>
+  <li>The right to file a complaint or request a review of any decision related to service
+    quality</li>
+  <li>The right to know how candidate data is processed and used within the Platform</li>
+</ul>
+
+<h2>5. Candidate Data and Informed Consent</h2>
 <p>
-  MeritLense processes personal data submitted by the Employer, and by candidates evaluated on
-  the Employer's behalf, in accordance with the MeritLense Privacy Policy.
+  The Second Party acknowledges that it is legally responsible for obtaining explicit and
+  informed consent from the candidate before conducting any evaluation.
 </p>
+<ul>
+  <li>Candidate data is processed in accordance with MeritLense's Privacy Policy, aligned with the
+    GDPR</li>
+  <li>The Platform does not share candidate data with third parties without explicit consent</li>
+  <li>The candidate has the right at any time to access, correct, or request deletion of their
+    data</li>
+  <li>Upon expiry of the associated evaluation, personally identifying candidate data (name,
+    contact details, photo / ID image) is deleted or anonymized. The underlying assessment record
+    (readiness level, dates, certificate status) is retained in de-identified form for audit,
+    verification, and legal record-keeping purposes, consistent with the Data Retention Period in
+    MeritLense's Privacy Policy</li>
+  <li>Evaluation results are shared with the Second Party (individual) and the candidate only —
+    transfer to other parties is not permitted</li>
+</ul>
+
+<h2>6. Payment Terms and Packages</h2>
+<p>MeritLense offers individuals one-time packages, defined by a number of Assessment Slots and Points:</p>
+<table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
+  <thead>
+    <tr style="border-bottom:1px solid #ccc;text-align:left;">
+      <th style="padding:4px 6px;">Package</th><th style="padding:4px 6px;">Slots</th><th style="padding:4px 6px;">Points</th><th style="padding:4px 6px;">Tier</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Basic</td><td style="padding:4px 6px;">3</td><td style="padding:4px 6px;">Per pricing page</td><td style="padding:4px 6px;">Screening</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Essential</td><td style="padding:4px 6px;">5</td><td style="padding:4px 6px;">Per pricing page</td><td style="padding:4px 6px;">Screening</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Advanced</td><td style="padding:4px 6px;">10</td><td style="padding:4px 6px;">Per pricing page</td><td style="padding:4px 6px;">Full Evaluation</td></tr>
+    <tr><td style="padding:4px 6px;">Premium</td><td style="padding:4px 6px;">20</td><td style="padding:4px 6px;">Per pricing page</td><td style="padding:4px 6px;">Full Evaluation</td></tr>
+  </tbody>
+</table>
+<p>
+  Current pricing and the exact Points allocation for each package are displayed on the
+  Platform's pricing page and confirmed to the Second Party at checkout before any payment is
+  completed. This Agreement does not itself state a fixed price or Points figure, so that this
+  information always reflects what is currently in effect on the Platform.
+</p>
+<ul>
+  <li>All packages are one-time purchases; Assessment Slots and Points do not expire and remain
+    usable until fully consumed</li>
+  <li>Because balances never expire, no rollover mechanism is required</li>
+  <li>The full price and applicable taxes are clearly displayed before completing any purchase</li>
+  <li>Assessment Slots and Points are non-transferable to other persons or accounts</li>
+</ul>
+
+<h2>7. Refund Policy (B2C)</h2>
+<p>
+  As the Second Party is an individual (consumer), the following refund policy applies, based on
+  actual usage of the purchased package:
+</p>
+<p><strong>Accepted refund cases</strong></p>
+<ul>
+  <li>Zero consumption on the purchase — no Assessment Slot has been started and no Points have
+    been consumed. A full refund applies regardless of how much time has passed since purchase,
+    since Assessment Slots and Points do not expire</li>
+  <li>A confirmed billing, payment, or platform error by MeritLense</li>
+  <li>A material breach by the First Party of its contractual obligations</li>
+</ul>
+<p><strong>Non-accepted refund cases</strong></p>
+<ul>
+  <li>Any consumption has occurred — at least one Assessment Slot has been started or any Points
+    have been consumed on the purchase, regardless of how much of the package remains unused</li>
+  <li>Second Party dissatisfaction with candidate results (results reflect actual performance)</li>
+</ul>
+<p>
+  Refund requests must be submitted in writing to info@meritlense.com with the order number and
+  reason. If approved, refunds will be processed within 14 business days.
+</p>
+
+<h2>8. Mutual Obligations</h2>
+<ul>
+  <li>Both parties shall cooperate in good faith to ensure a smooth evaluation process and legal
+    compliance</li>
+  <li>The Second Party acknowledges that the candidate participates in the evaluation of their own
+    free will and with prior consent</li>
+  <li>The First Party is entitled to service fees upon activating access to the evaluation tools,
+    regardless of the evaluation outcome</li>
+  <li>The First Party is not a party to any employment or contractual relationship arising between
+    the Second Party and the candidate</li>
+</ul>
+
+<h2>9. Intellectual Property and Confidentiality</h2>
+<ul>
+  <li>The Platform retains all intellectual property rights unless explicitly transferred in
+    writing</li>
+  <li>Evaluation reports and results are owned by the Second Party for personal internal use only
+    — resale or redistribution is strictly prohibited</li>
+  <li>The Second Party commits to not sharing reports with third parties outside the scope of the
+    direct personal hiring decision</li>
+  <li>Disclosure of any Platform proprietary information to third parties is prohibited without
+    prior written consent</li>
+</ul>
+
+<h2>10. Acceptable Use Policy</h2>
+<p><strong>Permitted uses</strong></p>
+<ul>
+  <li>Evaluating candidates for domestic labor, caregiving, or personal operational services only</li>
+  <li>Using reports personally to make a household hiring decision</li>
+</ul>
+<p><strong>Prohibited uses</strong></p>
+<ul>
+  <li>Reselling evaluation reports or using them for commercial or paid recruitment purposes</li>
+  <li>Evaluating candidates for academic or specialized professional roles (doctors, engineers,
+    etc.)</li>
+  <li>Using results for discrimination based on gender, nationality, age, or religion</li>
+  <li>Sharing candidate data with agencies or other parties without their consent</li>
+</ul>
+
+<h2>11. Force Majeure</h2>
+<p>
+  Neither party shall be held liable for delays or failures resulting from events beyond its
+  control, including natural disasters, pandemics, governmental decisions, or major electronic
+  infrastructure failures. The affected party shall notify the other in writing as soon as
+  possible, and both parties shall endeavor to resume their obligations as soon as the cause is
+  removed.
+</p>
+
+<h2>12. Term and Termination</h2>
+<ul>
+  <li>The Agreement commences from the date the Second Party completes the purchase and registers
+    on the Platform</li>
+  <li>The Second Party may terminate the Agreement with 14 days' prior written notice</li>
+  <li>The First Party may terminate the Agreement immediately upon a proven violation by the
+    Second Party of the acceptable use terms or of candidate rights</li>
+  <li>Upon termination: personally identifying data is deleted or anonymized per the Privacy
+    Policy, and any remaining unused Assessment Slots / Points are handled per the Refund Policy
+    in Article 7, where applicable</li>
+</ul>
+
+<h2>13. Governing Law and Jurisdiction</h2>
+<p>
+  This Agreement shall be governed by the laws of the Republic of Estonia. Any disputes shall be
+  resolved by the competent courts in Estonia unless both parties agree in writing on an
+  alternative mechanism. This Agreement does not override any non-waivable consumer rights
+  guaranteed by the local law of the Second Party's country.
+</p>
+
+<h2>14. Platform Disclaimer</h2>
+<p>
+  MeritLense provides structured assessment and readiness indicators. The final hiring decision
+  remains the sole responsibility of the Second Party.
+</p>
+<ul>
+  <li>Reports reflect candidate performance at the time of evaluation and do not constitute a
+    guarantee of future performance. Evaluation results should be considered decision-support
+    information and not the sole basis for hiring decisions</li>
+  <li>All figures and statistics in marketing materials are based on market assumptions and
+    operational estimates</li>
+  <li>The Platform assumes no liability for hiring decisions or the operational outcomes resulting
+    from them</li>
+</ul>
 
 <div class="signature-block">
-  <p>Signed electronically by:</p>
+  <p>Both parties acknowledge that they have read, understood, and agreed to all terms of this Agreement. In a digital environment, clicking "I Agree" or completing the purchase is equivalent to a legally binding electronic signature. Signed electronically by:</p>
   <p><strong>{{ signatory_name }}</strong></p>
 </div>
 

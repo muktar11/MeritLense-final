@@ -670,6 +670,46 @@ class AccountsWeek2Tests(APITestCase):
         allowed_response = self.client.get("/api/v1/auth/admin/employers/pending-verification")
         self.assertEqual(allowed_response.status_code, status.HTTP_200_OK, allowed_response.data)
 
+    def test_verify_documents_approval_sets_company_is_verified(self):
+        """Company.is_verified previously had no writer anywhere in the
+        codebase - approving a B2B company's documents must now actually
+        approve the company itself, since IsCompanyApproved (candidates/
+        evaluations/interviews permission gate) reads this exact field."""
+        superadmin = self.create_verified_superadmin()
+        b2b_user, company = self.create_verified_b2b_owner(email="approve-me@example.com")
+        self.assertFalse(company.is_verified)
+
+        self.authenticate(superadmin.email, "Password123!")
+        response = self.client.post(
+            "/api/v1/auth/admin/employers/verify-documents",
+            {"user_id": str(b2b_user.public_id), "status": "APPROVED"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+        company.refresh_from_db()
+        self.assertTrue(company.is_verified)
+        self.assertIsNotNone(company.verified_at)
+        self.assertEqual(company.verified_by_id, superadmin.id)
+
+    def test_verify_documents_rejection_unsets_company_is_verified(self):
+        superadmin = self.create_verified_superadmin()
+        b2b_user, company = self.create_verified_b2b_owner(email="reject-me@example.com")
+        company.is_verified = True
+        company.save(update_fields=["is_verified"])
+
+        self.authenticate(superadmin.email, "Password123!")
+        response = self.client.post(
+            "/api/v1/auth/admin/employers/verify-documents",
+            {"user_id": str(b2b_user.public_id), "status": "REJECTED", "rejection_reason": "Bad scan"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+        company.refresh_from_db()
+        self.assertFalse(company.is_verified)
+        self.assertIsNone(company.verified_at)
+
     def create_verified_superadmin(self, email="superadmin@example.com"):
         return User.objects.create_user(
             email=email,

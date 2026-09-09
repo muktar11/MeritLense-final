@@ -33,6 +33,7 @@ from .serializers import (
     EvaluatorRatingWriteSerializer,
 )
 from .permissions import CanManageEvaluation, CanViewEvaluation
+from api.core.permisssions import IsCompanyApproved
 from api.core.constants import CertificateStatus, Roles, EvaluationStatus, EvaluationType
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
@@ -206,14 +207,14 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
     
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            self.permission_classes = [IsAuthenticated, CanManageEvaluation]
+            self.permission_classes = [IsAuthenticated, CanManageEvaluation, IsCompanyApproved]
         elif self.action in ['list', 'retrieve']:
             self.permission_classes = [IsAuthenticated, CanViewEvaluation]
         elif self.action in ['complete', 'reschedule', 'cancel']:
-            self.permission_classes = [IsAuthenticated, CanManageEvaluation]
+            self.permission_classes = [IsAuthenticated, CanManageEvaluation, IsCompanyApproved]
         elif self.action == 'evaluator_rating':
             self.permission_classes = (
-                [IsAuthenticated, CanManageEvaluation] if self.request.method == 'POST'
+                [IsAuthenticated, CanManageEvaluation, IsCompanyApproved] if self.request.method == 'POST'
                 else [IsAuthenticated, CanViewEvaluation]
             )
 

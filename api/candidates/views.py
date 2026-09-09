@@ -17,6 +17,7 @@ from .serializers import (
     CandidateShareSerializer
 )
 from .permissions import CanManageCandidate, CanViewCandidate
+from api.core.permisssions import IsCompanyApproved
 from api.core.constants import Roles
 from api.core.constants import AuditLogCategory, AuditLogAction
 from api.accounts.models import User
@@ -99,7 +100,7 @@ class CandidateViewSet(SubscriptionUsageMixin, viewsets.ModelViewSet):
         
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            self.permission_classes = [IsAuthenticated, CanManageCandidate]
+            self.permission_classes = [IsAuthenticated, CanManageCandidate, IsCompanyApproved]
         elif self.action in ['list', 'retrieve']:
             self.permission_classes = [IsAuthenticated, CanViewCandidate]
         elif self.action == 'share':

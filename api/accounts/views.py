@@ -16,7 +16,7 @@ from drf_spectacular.utils import OpenApiExample, OpenApiResponse, PolymorphicPr
 from rest_framework import serializers
 from api.audit.services import AuditLogService
 from api.core.constants import AdminPermissions, AuditLogAction, AuditLogCategory, AuditLogSeverity, CompanyTeamPermissions, DocumentStatus, Roles
-from api.core.permisssions import CanVerifyDocuments, IsAdminOrSuperAdmin, IsB2BTeamMember, IsB2BUser, IsEmployer, IsOwnerOrAdmin, IsSuperAdmin
+from api.core.permisssions import CanVerifyDocuments, IsAdminOrSuperAdmin, IsB2BTeamMember, IsB2BUser, IsEmployer, IsOwnerOrAdmin, IsSuperAdmin, get_user_company
 from api.core.public_ids import get_by_identifier
 from .models import Company, TeamInvitation, TeamMemberProfile, User, IndividualEmployerProfile, CompanyEmployerProfile, AdminProfile
 from .serializers import (
@@ -1793,7 +1793,15 @@ class VerifyDocumentsView(APIView):
                 profile.documents_verified = True
                 profile.verified_at = timezone.now()
                 profile.verification_notes = serializer.validated_data.get('verification_notes', '')
-                
+
+                if user.role == Roles.B2B:
+                    company = get_user_company(user)
+                    if company:
+                        company.is_verified = True
+                        company.verified_at = timezone.now()
+                        company.verified_by = request.user
+                        company.save(update_fields=['is_verified', 'verified_at', 'verified_by', 'updated_at'])
+
                 message = 'Documents approved successfully'
                 
                 AuditLogService.log(
@@ -1818,7 +1826,15 @@ class VerifyDocumentsView(APIView):
                 profile.documents_verified = False
                 profile.verified_at = None
                 profile.verification_notes = serializer.validated_data.get('verification_notes', '')
-                
+
+                if user.role == Roles.B2B:
+                    company = get_user_company(user)
+                    if company:
+                        company.is_verified = False
+                        company.verified_at = None
+                        company.verified_by = None
+                        company.save(update_fields=['is_verified', 'verified_at', 'verified_by', 'updated_at'])
+
                 message = 'Documents rejected'
                 
                 AuditLogService.log(
@@ -1916,7 +1932,15 @@ class RejectDocumentsView(APIView):
         profile.verified_at = None
         profile.verification_notes = verification_notes
         profile.save()
-        
+
+        if user.role == Roles.B2B:
+            company = get_user_company(user)
+            if company:
+                company.is_verified = False
+                company.verified_at = None
+                company.verified_by = None
+                company.save(update_fields=['is_verified', 'verified_at', 'verified_by', 'updated_at'])
+
         AuditLogService.log(
             user=request.user,
             action=AuditLogAction.DOCUMENT_REJECTED,

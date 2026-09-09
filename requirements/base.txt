@@ -17,6 +17,7 @@ djangorestframework==3.16.1
 djangorestframework_simplejwt==5.5.1
 drf-spectacular==0.29.0
 fonttools==4.61.1
+google-auth==2.57.1
 idna==3.11
 inflection==0.5.1
 jsonschema==4.26.0
@@ -24,6 +25,8 @@ jsonschema-specifications==2025.9.1
 openpyxl==3.1.5
 pillow==12.1.1
 psycopg2-binary==2.9.11
+pyasn1==0.6.4
+pyasn1-modules==0.4.2
 pycparser==3.0
 pydyf==0.12.1
 PyJWT==2.11.0

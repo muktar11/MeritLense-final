@@ -357,6 +357,14 @@ AGREEMENT_OTP_MAX_ATTEMPTS = int(os.getenv("AGREEMENT_OTP_MAX_ATTEMPTS", "5"))
 AGREEMENT_OTP_MAX_RESENDS = int(os.getenv("AGREEMENT_OTP_MAX_RESENDS", "5"))
 AGREEMENT_OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv("AGREEMENT_OTP_RESEND_COOLDOWN_SECONDS", "60"))
 
+# "Sign in with Google/Facebook" on the login page (existing accounts only -
+# see api/accounts/oauth_views.py). No client secret needed for Google: the
+# frontend uses Google Identity Services to get an ID token, and this ID
+# (used as the verification audience) is the only value the backend needs.
+GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
+FACEBOOK_APP_ID = os.getenv("FACEBOOK_APP_ID", "")
+FACEBOOK_APP_SECRET = os.getenv("FACEBOOK_APP_SECRET", "")
+
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True

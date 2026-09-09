@@ -34,11 +34,13 @@ from .views import (
     ValidateResetTokenView,
     VerifyDocumentsView
 )
+from .oauth_views import GoogleLoginView
 
 urlpatterns = [
     path('register/b2c', B2CRegistrationView.as_view(), name='register-b2c'),
     path('register/b2b', B2BRegistrationView.as_view(), name='register-b2b'),
     path('verify-email', EmailVerificationView.as_view(), name='verify-email'),
+    path('oauth/google', GoogleLoginView.as_view(), name='oauth-google'),
     path('resend-verification', ResendVerificationView.as_view(), name='resend-verification'),
     path('forgot-password', ForgotPasswordView.as_view(), name='forgot-password'),
     path('reset-password', ResetPasswordView.as_view(), name='reset-password'),

@@ -81,6 +81,7 @@ class CandidatesWeek2Tests(APITestCase):
             website="https://example.com",
             admin_user=user,
             registration_certificate=make_file(f"{registration_number}-certificate.pdf"),
+            is_verified=True,
         )
         CompanyEmployerProfile.objects.create(
             user=user,
@@ -166,6 +167,44 @@ class CandidatesWeek2Tests(APITestCase):
         self.client.credentials()
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         return Candidate.objects.get(email=defaults["email"])
+
+    def test_unverified_b2b_company_cannot_create_candidates(self):
+        """Company.is_verified gates candidate creation (IsCompanyApproved) -
+        this is the real enforcement of "B2B users need admin approval
+        before they can fully use the system"; the frontend's own
+        sign-agreements redirect was never backed by anything server-side."""
+        company_admin, company = self.create_b2b_company(
+            "unverified-admin@example.com", "PendingCo", "PENDING-1"
+        )
+        company.is_verified = False
+        company.save(update_fields=["is_verified"])
+
+        self.authenticate(company_admin)
+        response = self.client.post(
+            "/api/v1/candidates/candidates",
+            {
+                "first_name": "Jane",
+                "last_name": "Candidate",
+                "email": "blocked-candidate@example.com",
+                "passport_id": "PASS-BLOCKED-1",
+                "job_role": candidateJobRoles.NANNY,
+                "core_skills": "communication, patience",
+                "preferred_language": Languages.ENGLISH,
+                "passport_document": make_file("blocked-passport.pdf"),
+            },
+            format="multipart",
+        )
+        self.client.credentials()
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN, response.data)
+        self.assertFalse(Candidate.objects.filter(email="blocked-candidate@example.com").exists())
+
+    def test_verified_b2b_company_can_create_candidates(self):
+        company_admin, company = self.create_b2b_company(
+            "verified-admin@example.com", "ApprovedCo", "APPROVED-1"
+        )
+        self.assertTrue(company.is_verified, "create_b2b_company should default to an approved company for existing tests")
+        candidate = self.create_candidate(company_admin, email="allowed-candidate@example.com")
+        self.assertEqual(candidate.company_id, company.id)
 
     def test_b2b_candidate_creation_is_company_scoped_and_duplicate_email_is_rejected(self):
         company_admin, company = self.create_b2b_company(

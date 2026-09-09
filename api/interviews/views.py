@@ -12,6 +12,7 @@ from rest_framework.response import Response
 
 from api.core.public_ids import PUBLIC_ID_OR_PK_REGEX, build_object_identifier_filter
 from api.core.constants import InterviewSessionStatus
+from api.core.permisssions import IsCompanyApproved
 from api.interviews.models import (
     InterviewConfiguration,
     InterviewRubric,
@@ -207,7 +208,9 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
     lookup_value_regex = PUBLIC_ID_OR_PK_REGEX
 
     def get_permissions(self):
-        if self.action in {"list", "create"}:
+        if self.action == "create":
+            return [IsAuthenticated(), IsCompanyApproved()]
+        if self.action == "list":
             return [IsAuthenticated()]
         return [AllowAny()]
 

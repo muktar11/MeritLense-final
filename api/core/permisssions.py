@@ -2,6 +2,18 @@ from rest_framework.permissions import BasePermission, SAFE_METHODS
 from api.core.constants import Roles
 
 
+def get_user_company(user):
+    """Resolve the Company for a B2B company admin or B2B_TEAM_MEMBER, else
+    None (B2C and Candidate accounts have no Company)."""
+    company_profile = getattr(user, 'company_profile', None)
+    if company_profile is not None:
+        return company_profile.company
+    team_member_profile = getattr(user, 'team_member_profile', None)
+    if team_member_profile is not None:
+        return team_member_profile.company
+    return None
+
+
 class IsSuperAdmin(BasePermission):
     def has_permission(self, request, view):
         return bool(
@@ -112,6 +124,28 @@ class CanManageUsers(BasePermission):
             return request.user.has_admin_permission('can_manage_users')
         
         return False
+
+
+class IsCompanyApproved(BasePermission):
+    """B2B company admins and their team members may only create or modify
+    core resources (candidates, evaluations) once their company has passed
+    admin document review (Company.is_verified). Not applied to B2C, which
+    has no Company and its own separate email-verification gate.
+
+    Read-only requests (list/retrieve/GET) are always allowed so a pending
+    company can still see its own dashboard while awaiting approval - this
+    only blocks write actions.
+    """
+    message = "Your company's registration is still pending admin approval."
+
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return True
+        user = request.user
+        if not user or not user.is_authenticated or user.role not in (Roles.B2B, Roles.B2B_TEAM_MEMBER):
+            return True
+        company = get_user_company(user)
+        return bool(company and company.is_verified)
 
 
 class IsCompanyAdmin(BasePermission):

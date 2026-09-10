@@ -1487,6 +1487,82 @@ class InvoiceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
         return response
 
 
+class AdminInvoiceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
+    """Admin/SuperAdmin-only visibility over ALL invoices, with search/status
+    filtering and a manual "send to customer" action - the user-facing
+    InvoiceViewSet above only ever shows a customer their own invoices, and
+    has no send action. Invoice PDFs themselves are Stripe's own
+    hosted/generated PDFs (Invoice.invoice_pdf / hosted_invoice_url) - this
+    just gives admins a way to find one and re-send its link."""
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+    serializer_class = InvoiceSerializer
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Invoice.objects.none()
+
+        queryset = Invoice.objects.select_related('user').order_by('-created_at')
+
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(user__email__icontains=search) |
+                Q(user__first_name__icontains=search) |
+                Q(user__last_name__icontains=search) |
+                Q(number__icontains=search) |
+                Q(stripe_invoice_id__icontains=search)
+            )
+
+        status_filter = self.request.query_params.get('status', '').strip()
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+
+        return queryset
+
+    @action(detail=True, methods=['post'])
+    def send(self, request, id=None):
+        invoice = self.get_object()
+        pdf_link = invoice.invoice_pdf or invoice.hosted_invoice_url
+        if not pdf_link:
+            return Response(
+                {'error': 'This invoice has no PDF or hosted link yet - it may still be pending from Stripe.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from api.accounts.utils import safe_send_mail
+
+        reference = invoice.number or invoice.stripe_invoice_id
+        subject = f"Your MeritLense invoice {reference}"
+        message = f"""
+        Hello {invoice.user.get_full_name()},
+
+        Your invoice from MeritLense is ready to view and download:
+        {pdf_link}
+
+        Amount due: {invoice.amount_due} {invoice.currency.upper()}
+        Status: {invoice.get_status_display()}
+
+        If you have any questions about this invoice, reply to this email
+        or contact us at info@meritlense.com.
+
+        Best regards,
+        MeritLense Team
+        """
+        safe_send_mail(subject, message, [invoice.user.email])
+
+        AuditLogService.log(
+            user=request.user,
+            action='INVOICE_SENT',
+            category=AuditLogCategory.BILLING,
+            description=f"Invoice {reference} sent to {invoice.user.email}",
+            resource=invoice,
+            data={'recipient': invoice.user.email},
+            request=request,
+        )
+
+        return Response({'message': f'Invoice sent to {invoice.user.email}.'})
+
+
 import logging
 logger = logging.getLogger(__name__)
 

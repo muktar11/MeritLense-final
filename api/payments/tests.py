@@ -1353,3 +1353,74 @@ class WebhookIdempotencyTests(APITestCase):
 
         self.assertEqual(response.status_code, 500)
         self.assertFalse(ProcessedStripeEvent.objects.filter(stripe_event_id="evt_fail").exists())
+
+
+class AdminInvoiceEndpointTests(APITestCase):
+    def setUp(self):
+        self.superadmin = User.objects.create_user(
+            email="invoice-endpoint-superadmin@example.com", password="Password123!",
+            first_name="Invoice", last_name="Super", role=Roles.SUPERADMIN, is_verified=True, is_staff=True,
+        )
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": self.superadmin.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        self.b2c_user = User.objects.create_user(
+            email="invoice-endpoint-b2c@example.com", password="Password123!",
+            first_name="Jamie", last_name="Customer", role=Roles.B2C, is_verified=True,
+        )
+        self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_invoice_endpoint", email=self.b2c_user.email)
+        self.invoice = Invoice.objects.create(
+            user=self.b2c_user, customer=self.customer, stripe_invoice_id="in_endpoint_test",
+            number="INV-ENDPOINT-1", status="PAID", amount_due=Decimal("79.00"),
+            amount_paid=Decimal("79.00"), amount_remaining=Decimal("0.00"), currency="eur",
+            invoice_pdf="https://stripe.example/inv.pdf", paid_at=timezone.now(),
+        )
+
+    def test_admin_can_list_all_invoices(self):
+        response = self.client.get("/api/v1/payments/admin/invoices")
+        self.assertEqual(response.status_code, 200, response.data)
+        results = response.data
+        self.assertEqual(len(results), 1)
+
+    def test_admin_can_search_invoices_by_customer_email(self):
+        response = self.client.get("/api/v1/payments/admin/invoices", {"search": "invoice-endpoint-b2c"})
+        results = response.data
+        self.assertEqual(len(results), 1)
+
+        response = self.client.get("/api/v1/payments/admin/invoices", {"search": "no-such-customer"})
+        results = response.data
+        self.assertEqual(len(results), 0)
+
+    @patch("api.accounts.utils.safe_send_mail")
+    def test_admin_can_send_invoice_to_customer(self, mock_send_mail):
+        mock_send_mail.return_value = 1
+
+        response = self.client.post(f"/api/v1/payments/admin/invoices/{self.invoice.id}/send", {}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        mock_send_mail.assert_called_once()
+        recipients = mock_send_mail.call_args[0][2]
+        self.assertEqual(recipients, [self.b2c_user.email])
+
+    def test_sending_an_invoice_with_no_pdf_link_is_rejected(self):
+        bare_invoice = Invoice.objects.create(
+            user=self.b2c_user, customer=self.customer, stripe_invoice_id="in_no_pdf",
+            number="INV-ENDPOINT-2", status="OPEN", amount_due=Decimal("10.00"),
+            amount_paid=Decimal("0.00"), amount_remaining=Decimal("10.00"), currency="eur",
+        )
+
+        response = self.client.post(f"/api/v1/payments/admin/invoices/{bare_invoice.id}/send", {}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_non_admin_cannot_access_admin_invoice_list(self):
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": self.b2c_user.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        response = self.client.get("/api/v1/payments/admin/invoices")
+
+        self.assertEqual(response.status_code, 403)

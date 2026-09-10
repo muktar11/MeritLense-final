@@ -216,17 +216,21 @@ class RefundPaymentSerializer(serializers.Serializer):
 
 class InvoiceSerializer(PublicIdModelSerializer):
     user_email = serializers.EmailField(source='user.email', read_only=True)
-    
+    user_full_name = serializers.SerializerMethodField()
+
     class Meta:
         model = Invoice
         fields = [
-            'id', 'user', 'user_email', 'customer', 'subscription',
+            'id', 'user', 'user_email', 'user_full_name', 'customer', 'subscription',
             'stripe_invoice_id', 'stripe_payment_intent',
             'number', 'status', 'amount_due', 'amount_paid',
             'amount_remaining', 'currency', 'due_date', 'paid_at',
             'voided_at', 'invoice_pdf', 'hosted_invoice_url',
             'metadata', 'created_at', 'updated_at'
         ]
+
+    def get_user_full_name(self, obj):
+        return obj.user.get_full_name()
 
 
 

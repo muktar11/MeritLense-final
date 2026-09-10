@@ -15,6 +15,49 @@ from .refund_services import RefundService
 import logging
 logger = logging.getLogger(__name__)
 
+
+def _notify_package_activated(user, package_name):
+    try:
+        from api.accounts.utils import safe_send_mail
+        safe_send_mail(
+            "Your Meritlense Package Is Active",
+            f"""Hello {user.get_full_name()},
+
+Your {package_name} package is now active and ready to use.
+
+Best regards,
+Meritlense Team
+""",
+            [user.email],
+        )
+    except Exception:
+        logger.exception("Failed to send package-activated email to %s", user.email)
+
+
+def _notify_invoice_generated(invoice):
+    pdf_link = invoice.invoice_pdf or invoice.hosted_invoice_url
+    if not pdf_link:
+        return
+    try:
+        from api.accounts.utils import safe_send_mail
+        safe_send_mail(
+            f"Your Meritlense invoice {invoice.number or invoice.stripe_invoice_id}",
+            f"""Hello {invoice.user.get_full_name()},
+
+A new invoice has been generated for your Meritlense subscription.
+
+Amount: {invoice.amount_paid} {invoice.currency.upper()}
+Invoice: {pdf_link}
+
+Best regards,
+Meritlense Team
+""",
+            [invoice.user.email],
+        )
+    except Exception:
+        logger.exception("Failed to send invoice-generated email for invoice %s", invoice.stripe_invoice_id)
+
+
 class StripeService:
     
     def __init__(self):
@@ -425,7 +468,10 @@ class StripeService:
                 subscription.company = user.company_profile.company
             
             subscription.save()
-            
+
+            if subscription.status in ('ACTIVE', 'TRIALING'):
+                _notify_package_activated(user, price.name)
+
             if hasattr(stripe_subscription, 'latest_invoice') and stripe_subscription.latest_invoice:
                 invoice = stripe_subscription.latest_invoice
                 payment_intent_id = None
@@ -839,6 +885,10 @@ class StripeService:
                 subscription.status = 'ACTIVE'
                 subscription.save()
                 logger.info(f"Subscription {subscription.id} status updated to active after payment")
+                _notify_package_activated(subscription.user, subscription.stripe_price.name if subscription.stripe_price else "")
+
+            if created and invoice.status == 'PAID':
+                _notify_invoice_generated(invoice)
 
             # A 'manual' billing_reason is the mid-cycle proration invoice
             # change_plan() creates and pays directly for an upgrade - its

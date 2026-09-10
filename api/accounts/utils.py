@@ -209,6 +209,86 @@ Meritlense Team
     safe_send_mail(subject, message, [user.email])
 
 
+def send_welcome_email(user, request=None):
+    """Sent once, right after a self-registered user verifies their email
+    (EmailVerificationView) - distinct from send_employer_welcome_email,
+    which is only for accounts an admin created on someone's behalf."""
+    locale = request.GET.get('locale', 'en') if request else 'en'
+    login_url = f"{settings.FRONTEND_URL}/{locale}/auth/login"
+
+    if user.role == Roles.B2C:
+        account_type = "Individual Employer"
+    elif user.role == Roles.B2B:
+        account_type = "Company Employer"
+    else:
+        account_type = "Employer"
+
+    subject = "Welcome to Meritlense"
+    message = f"""
+Hello {user.first_name},
+
+Welcome to Meritlense! Your {account_type} account is verified and ready to use.
+
+To sign in, go to:
+{login_url}
+
+Best regards,
+Meritlense Team
+"""
+    safe_send_mail(subject, message, [user.email])
+
+
+def send_account_approved_email(user):
+    subject = "Your Meritlense Account Has Been Approved"
+    message = f"""
+Hello {user.first_name},
+
+Good news - your documents have been reviewed and your Meritlense account
+has been approved. You now have full access to the platform.
+
+Best regards,
+Meritlense Team
+"""
+    safe_send_mail(subject, message, [user.email])
+
+
+def send_account_rejected_email(user, reason):
+    subject = "Update on Your Meritlense Account"
+    message = f"""
+Hello {user.first_name},
+
+Your submitted documents could not be verified.
+
+Reason: {reason or 'Not specified'}
+
+Please review and resubmit your documents, or contact support if you have
+any questions.
+
+Best regards,
+Meritlense Team
+"""
+    safe_send_mail(subject, message, [user.email])
+
+
+def notify_superadmins(subject, message):
+    """Best-effort alert to every active SuperAdmin - e.g. a new
+    registration or a freshly-signed B2B contract awaiting review. Failure
+    to notify admins should never break the action that triggered it, so
+    this intentionally swallows send errors rather than propagating them
+    (safe_send_mail already re-raises outside DEBUG)."""
+    from .models import User
+
+    recipients = list(
+        User.objects.filter(role=Roles.SUPERADMIN, is_active=True).values_list('email', flat=True)
+    )
+    if not recipients:
+        return
+    try:
+        safe_send_mail(subject, message, recipients)
+    except Exception:
+        logger.exception("Failed to notify superadmins. subject=%s", subject)
+
+
 def send_employer_welcome_email(user, request=None):
     locale = request.GET.get('locale', 'en') if request else 'en'
     login_url = f"{settings.FRONTEND_URL}/{locale}/auth/login"

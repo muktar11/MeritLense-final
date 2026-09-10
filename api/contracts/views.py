@@ -357,9 +357,13 @@ def agreement_status(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def agreement_download(request, agreement_id):
-    """GET /agreements/download/{agreement_id} — signed PDF (B2B/DPA/B2C only)."""
+    """GET /agreements/download/{agreement_id} — signed PDF (B2B/DPA/B2C only).
+    Auth: the owning user, or an admin/superadmin (e.g. reviewing a company's
+    signed B2B Agreement before approving the account)."""
+    is_admin = request.user.role in {Roles.ADMIN, Roles.SUPERADMIN}
+    queryset = Agreement.objects.all() if is_admin else Agreement.objects.filter(user=request.user)
     try:
-        agreement = get_by_identifier(Agreement.objects.filter(user=request.user), agreement_id)
+        agreement = get_by_identifier(queryset, agreement_id)
     except Agreement.DoesNotExist:
         return Response({'error': 'Agreement not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -419,6 +423,25 @@ def agreement_verify(request, contract_id):
         'status': 'SUPERSEDED' if agreement.status == AgreementStatus.SUPERSEDED else 'VALID',
         'pdf_hash': agreement.pdf_hash,
     })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_user_agreements(request, user_id):
+    """GET /agreements/admin/user/{user_id} — every agreement (signed, pending,
+    superseded) for one user, so an admin can review a B2B account's signed
+    contracts (B2B Agreement, DPA) before approving/rejecting it."""
+    if request.user.role not in {Roles.ADMIN, Roles.SUPERADMIN}:
+        return Response({'error': 'Not authorized.'}, status=status.HTTP_403_FORBIDDEN)
+
+    from api.accounts.models import User
+    try:
+        target_user = get_by_identifier(User.objects.all(), user_id)
+    except User.DoesNotExist:
+        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    agreements = Agreement.objects.filter(user=target_user).order_by('-created_at')
+    return Response(AgreementSerializer(agreements, many=True, context={'request': request}).data)
 
 
 @api_view(['GET'])

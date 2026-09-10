@@ -1,8 +1,13 @@
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.utils import timezone
+from rest_framework.test import APITestCase
 
+from api.accounts.models import Company, User
 from api.contracts.constants import CURRENT_VERSIONS
+from api.contracts.models import Agreement
 from api.contracts.pdf_service import render_preview_html
-from api.core.constants import AgreementType
+from api.core.constants import AgreementMethod, AgreementStatus, AgreementType, Roles
 
 
 class FakeCompany:
@@ -58,3 +63,85 @@ class AgreementTemplateContentTests(TestCase):
             company=FakeCompany(), user=None,
         )
         self.assertIn("PLACEHOLDER", html)
+
+
+def make_company(admin_user, **overrides):
+    defaults = dict(
+        name="Test Co",
+        registration_number=f"REG-{admin_user.id}-{timezone.now().timestamp()}",
+        company_size="1-10",
+        phone_number="+15550000000",
+        country="United States",
+        city="San Francisco",
+        admin_user=admin_user,
+        registration_certificate=SimpleUploadedFile("cert.pdf", b"cert", content_type="application/pdf"),
+    )
+    defaults.update(overrides)
+    return Company.objects.create(**defaults)
+
+
+class AdminAgreementEndpointTests(APITestCase):
+    """Admin needs to see and download a company's signed B2B Agreement
+    before approving/rejecting the account - previously a full gap, see
+    admin_user_agreements and the admin bypass on agreement_download."""
+
+    def setUp(self):
+        self.superadmin = User.objects.create_user(
+            email="agreement-endpoint-superadmin@example.com", password="Password123!",
+            first_name="Agreement", last_name="Super", role=Roles.SUPERADMIN, is_verified=True, is_staff=True,
+        )
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": self.superadmin.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        self.b2b_user = User.objects.create_user(
+            email="agreement-endpoint-b2b@example.com", password="Password123!",
+            first_name="Bizz", last_name="Owner", role=Roles.B2B, is_verified=True,
+        )
+        self.company = make_company(self.b2b_user)
+        self.agreement = Agreement.objects.create(
+            user=self.b2b_user, company=self.company, agreement_type=AgreementType.B2B_AGREEMENT,
+            version="v1.4", method=AgreementMethod.OTP_SIGNATURE, status=AgreementStatus.SIGNED,
+            signatory_name="Bizz Owner", accepted_at=timezone.now(), contract_id="MLB2B-TEST-1",
+            signed_pdf=SimpleUploadedFile("agreement.pdf", b"%PDF-1.4 fake", content_type="application/pdf"),
+        )
+
+    def test_admin_can_list_a_users_agreements(self):
+        response = self.client.get(f"/api/v1/agreements/admin/user/{self.b2b_user.id}")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['contract_id'], "MLB2B-TEST-1")
+
+    def test_admin_can_download_another_users_signed_agreement(self):
+        response = self.client.get(f"/api/v1/agreements/download/{self.agreement.id}")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIn('url', response.data)
+
+    def test_admin_listing_unknown_user_returns_404(self):
+        response = self.client.get("/api/v1/agreements/admin/user/999999")
+        self.assertEqual(response.status_code, 404)
+
+    def test_non_admin_cannot_list_another_users_agreements(self):
+        other_user = User.objects.create_user(
+            email="agreement-endpoint-other@example.com", password="Password123!",
+            first_name="Other", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": other_user.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+        response = self.client.get(f"/api/v1/agreements/admin/user/{self.b2b_user.id}")
+        self.assertEqual(response.status_code, 403)
+
+    def test_non_owner_non_admin_cannot_download(self):
+        other_user = User.objects.create_user(
+            email="agreement-endpoint-other2@example.com", password="Password123!",
+            first_name="Other", last_name="Two", role=Roles.B2C, is_verified=True,
+        )
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": other_user.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+        response = self.client.get(f"/api/v1/agreements/download/{self.agreement.id}")
+        self.assertEqual(response.status_code, 404)

@@ -11,6 +11,7 @@ from .views import (
     agreement_preview,
     agreement_verify,
     agreement_audit,
+    admin_user_agreements,
 )
 
 urlpatterns = [
@@ -24,4 +25,5 @@ urlpatterns = [
     path('preview/<str:agreement_type>', agreement_preview, name='agreement-preview'),
     path('verify/<str:contract_id>', agreement_verify, name='agreement-verify'),
     path('audit/<str:agreement_id>', agreement_audit, name='agreement-audit'),
+    path('admin/user/<str:user_id>', admin_user_agreements, name='agreement-admin-user-list'),
 ]

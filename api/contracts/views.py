@@ -16,6 +16,7 @@ from api.core.public_ids import get_by_identifier
 from api.audit.models import AuditLog
 from api.audit.serializers import AuditLogSerializer
 from api.audit.services import AuditLogService
+from api.accounts.utils import notify_superadmins
 
 from .constants import CURRENT_VERSIONS
 from .models import Agreement
@@ -331,6 +332,15 @@ class AgreementSignConfirmView(APIView):
                     'otp_reference': agreement.otp_reference,
                 },
                 request=request,
+            )
+
+        if any(a.agreement_type == AgreementType.B2B_AGREEMENT for a in signed):
+            company_name = company.name if company else request.user.get_full_name()
+            notify_superadmins(
+                f"B2B Agreement signed: {company_name}",
+                f"{request.user.get_full_name()} ({request.user.email}) has signed the B2B "
+                f"Agreement for {company_name}. Please review the signed contract and "
+                f"approve/reject the account.",
             )
 
         return Response(AgreementSerializer(signed, many=True, context={'request': request}).data)

@@ -1,6 +1,7 @@
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
@@ -148,6 +149,53 @@ class HandleInvoicePaidTests(TestCase):
         self.service.handle_invoice_paid(second)
 
         self.assertEqual(Invoice.objects.filter(subscription=self.subscription).count(), 2)
+
+    def test_invoice_paid_emails_the_customer_and_activation_notice(self):
+        """Business requirement: automatic email alerts for package
+        activation and invoice generation - both fire from this one
+        webhook handler since an INCOMPLETE subscription becomes ACTIVE
+        and its first real Invoice row is created in the same call."""
+        mail.outbox = []
+        invoice_data = {
+            "id": "in_activation_test",
+            "number": "INV-ACT-1",
+            "amount_due": 200000,
+            "amount_paid": 200000,
+            "amount_remaining": 0,
+            "currency": "eur",
+            "subscription": self.subscription.stripe_subscription_id,
+            "invoice_pdf": "https://stripe.example/inv.pdf",
+            "hosted_invoice_url": "",
+        }
+
+        self.service.handle_invoice_paid(invoice_data)
+
+        activation_emails = [m for m in mail.outbox if "active" in m.subject.lower()]
+        self.assertEqual(len(activation_emails), 1)
+        self.assertIn(self.user.email, activation_emails[0].to)
+
+        invoice_emails = [m for m in mail.outbox if "invoice" in m.subject.lower()]
+        self.assertEqual(len(invoice_emails), 1)
+        self.assertIn(self.user.email, invoice_emails[0].to)
+        self.assertIn("https://stripe.example/inv.pdf", invoice_emails[0].body)
+
+    def test_renewal_invoice_does_not_resend_activation_email(self):
+        """Only the INCOMPLETE->ACTIVE transition (first invoice) should
+        trigger the activation email - a renewal on an already-active
+        subscription must not re-send it, only the invoice email."""
+        first = {
+            "id": "in_act_first", "number": "INV-ACT-1", "amount_due": 200000,
+            "amount_paid": 200000, "amount_remaining": 0, "currency": "eur",
+            "subscription": self.subscription.stripe_subscription_id,
+        }
+        self.service.handle_invoice_paid(first)
+
+        mail.outbox = []
+        second = {**first, "id": "in_act_second", "number": "INV-ACT-2"}
+        self.service.handle_invoice_paid(second)
+
+        activation_emails = [m for m in mail.outbox if "active" in m.subject.lower()]
+        self.assertEqual(len(activation_emails), 0)
 
     def test_skips_gracefully_when_subscription_unresolvable(self):
         invoice_data = {

@@ -2,6 +2,7 @@ import shutil
 import tempfile
 from unittest.mock import patch
 
+from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.utils import timezone
@@ -1123,3 +1124,91 @@ class AccountsWeek2Tests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access_token}")
         stale_token_response = self.client.get("/api/v1/auth/me")
         self.assertEqual(stale_token_response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_b2b_registration_notifies_superadmins(self):
+        """Business requirement: admins get an automatic alert on new
+        registrations, so they know to expect a pending review."""
+        self.create_verified_superadmin(email="notify-superadmin@example.com")
+        mail.outbox = []
+
+        response = self.client.post(
+            "/api/v1/auth/register/b2b",
+            {
+                "email": "notify-b2b@example.com",
+                "first_name": "New",
+                "last_name": "Company",
+                "password": "Password123!",
+                "confirm_password": "Password123!",
+                "company_name": "Notify Co",
+                "company_registration_number": "REG-NOTIFY-1",
+                "company_size": "1-10",
+                "country": "Ethiopia",
+                "city": "Addis Ababa",
+                "preferred_language": Languages.ENGLISH,
+                "phone_number": "+15559990000",
+                "website": "https://notify.example.com",
+                "industry": "Services",
+                "address": "Kazanchis",
+                "registration_certificate": make_file("notify-cert.pdf"),
+                "resachetified_license": make_file("notify-license.pdf"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+
+        admin_alert = [m for m in mail.outbox if "notify-superadmin@example.com" in m.to]
+        self.assertEqual(len(admin_alert), 1)
+        self.assertIn("Notify Co", admin_alert[0].subject + admin_alert[0].body)
+
+    def test_verifying_email_sends_welcome_email(self):
+        user = User.objects.create_user(
+            email="welcome-me@example.com", password="Password123!",
+            first_name="Welcome", last_name="Me", role=Roles.B2C, is_verified=False,
+            email_verification_code="12345",
+        )
+        mail.outbox = []
+
+        response = self.client.post(
+            "/api/v1/auth/verify-email",
+            {"email": user.email, "code": "12345"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+        welcome_emails = [m for m in mail.outbox if user.email in m.to]
+        self.assertEqual(len(welcome_emails), 1)
+        self.assertIn("Welcome", welcome_emails[0].subject)
+
+    def test_verify_documents_approval_emails_the_user(self):
+        superadmin = self.create_verified_superadmin(email="approve-notify-admin@example.com")
+        b2b_user, _company = self.create_verified_b2b_owner(email="approve-notify-me@example.com")
+
+        self.authenticate(superadmin.email, "Password123!")
+        mail.outbox = []
+        response = self.client.post(
+            "/api/v1/auth/admin/employers/verify-documents",
+            {"user_id": str(b2b_user.public_id), "status": "APPROVED"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+        approved_emails = [m for m in mail.outbox if b2b_user.email in m.to]
+        self.assertEqual(len(approved_emails), 1)
+        self.assertIn("Approved", approved_emails[0].subject)
+
+    def test_verify_documents_rejection_emails_the_user_with_reason(self):
+        superadmin = self.create_verified_superadmin(email="reject-notify-admin@example.com")
+        b2b_user, _company = self.create_verified_b2b_owner(email="reject-notify-me@example.com")
+
+        self.authenticate(superadmin.email, "Password123!")
+        mail.outbox = []
+        response = self.client.post(
+            "/api/v1/auth/admin/employers/verify-documents",
+            {"user_id": str(b2b_user.public_id), "status": "REJECTED", "rejection_reason": "Blurry scan"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+        rejected_emails = [m for m in mail.outbox if b2b_user.email in m.to]
+        self.assertEqual(len(rejected_emails), 1)
+        self.assertIn("Blurry scan", rejected_emails[0].body)

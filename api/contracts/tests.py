@@ -1,3 +1,6 @@
+import re
+
+from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
@@ -145,3 +148,44 @@ class AdminAgreementEndpointTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
         response = self.client.get(f"/api/v1/agreements/download/{self.agreement.id}")
         self.assertEqual(response.status_code, 404)
+
+    def test_signing_b2b_agreement_notifies_superadmins(self):
+        """Business requirement: admins get an automatic alert once a B2B
+        Agreement is signed, so they know to review it for approval."""
+        signer = User.objects.create_user(
+            email="agreement-endpoint-signer@example.com", password="Password123!",
+            first_name="Signer", last_name="Co", role=Roles.B2B, is_verified=True,
+        )
+        make_company(signer, name="Signer Co", registration_number="REG-SIGNER-1")
+
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": signer.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        mail.outbox = []
+        initiate = self.client.post(
+            "/api/v1/agreements/sign/initiate",
+            {
+                "agreement_types": [AgreementType.B2B_AGREEMENT],
+                "signatory_name": "Signer Co",
+                "authorized_signatory_confirmed": True,
+            },
+            format="json",
+        )
+        self.assertEqual(initiate.status_code, 200, initiate.data)
+
+        otp_email = next(m for m in mail.outbox if "signing code" in m.subject.lower())
+        code = re.search(r"is:\s*(\d+)", otp_email.body).group(1)
+
+        mail.outbox = []
+        confirm = self.client.post(
+            "/api/v1/agreements/sign/confirm",
+            {"otp_reference": initiate.data["otp_reference"], "code": code},
+            format="json",
+        )
+        self.assertEqual(confirm.status_code, 200, confirm.data)
+
+        admin_alerts = [m for m in mail.outbox if self.superadmin.email in m.to]
+        self.assertEqual(len(admin_alerts), 1)
+        self.assertIn("Signer Co", admin_alerts[0].subject)

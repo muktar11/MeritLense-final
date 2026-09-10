@@ -43,7 +43,11 @@ from .serializers import (
     TeamMemberUpdateSerializer,
     UserStatusUpdateSerializer
 )
-from .utils import send_password_reset_email, send_verification_email, send_team_invitation_email, send_admin_credentials_email, send_employer_welcome_email, invalidate_user_sessions
+from .utils import (
+    send_password_reset_email, send_verification_email, send_team_invitation_email,
+    send_admin_credentials_email, send_employer_welcome_email, invalidate_user_sessions,
+    send_welcome_email, send_account_approved_email, send_account_rejected_email, notify_superadmins,
+)
 import random
 
 logger = logging.getLogger(__name__)
@@ -321,6 +325,12 @@ class B2CRegistrationView(APIView):
                         data={'registration_type': 'B2C'},
                         request=request
                     )
+
+                    notify_superadmins(
+                        f"New registration: {user.get_full_name()}",
+                        f"A new Individual Employer account was registered: {user.get_full_name()} "
+                        f"({user.email}). Pending email verification and document review.",
+                    )
             except IntegrityError:
                 return Response(
                     {'detail': 'Registration failed because one of the submitted unique values already exists.'},
@@ -453,6 +463,13 @@ class B2BRegistrationView(APIView):
                         resource=user,
                         data={'registration_type': 'B2B', 'company': company.name},
                         request=request
+                    )
+
+                    notify_superadmins(
+                        f"New B2B registration: {company.name}",
+                        f"A new Company account was registered: {company.name}, admin "
+                        f"{user.get_full_name()} ({user.email}). Pending email verification, "
+                        f"document review, and account approval.",
                     )
             except IntegrityError:
                 return Response(
@@ -699,7 +716,9 @@ class EmailVerificationView(APIView):
                     resource=user,
                     request=request
                 )
-                
+
+                send_welcome_email(user, request)
+
                 return Response({
                     'message': 'Email verified successfully. You can now log in.',
                     'role': user.role
@@ -1854,12 +1873,17 @@ class VerifyDocumentsView(APIView):
             
             user.save()
             profile.save()
-            
+
+            if status_value == 'APPROVED':
+                send_account_approved_email(user)
+            else:
+                send_account_rejected_email(user, serializer.validated_data.get('rejection_reason', ''))
+
             return Response({
                 'message': message,
                 'user': EmployerListSerializer(user).data
             })
-        
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -1955,7 +1979,9 @@ class RejectDocumentsView(APIView):
             },
             request=request
         )
-        
+
+        send_account_rejected_email(user, rejection_reason)
+
         return Response({
             'message': 'Documents rejected successfully',
             'user': EmployerListSerializer(user).data

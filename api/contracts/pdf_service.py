@@ -1,7 +1,9 @@
 import base64
+import functools
 import hashlib
 import io
 import secrets
+from pathlib import Path
 
 from django.conf import settings
 from django.core.files.base import ContentFile
@@ -16,9 +18,48 @@ TEMPLATE_BY_TYPE = {
     AgreementType.B2C_AGREEMENT: "contracts/b2c_agreement.html",
 }
 
+# Agreement types with a translated Arabic template. Only B2C_AGREEMENT has
+# one today; other types fall back to the English template regardless of
+# the requested language.
+TEMPLATE_BY_TYPE_AR = {
+    AgreementType.B2C_AGREEMENT: "contracts/b2c_agreement_ar.html",
+}
+
 # Company stamp only applies to the B2B-scoped documents — B2C signers have
 # no company, so B2C_AGREEMENT is intentionally excluded here.
 STAMPED_TYPES = {AgreementType.B2B_AGREEMENT, AgreementType.DPA}
+
+FONTS_DIR = Path(__file__).resolve().parent / "static_fonts"
+
+
+def _template_name(agreement_type, language):
+    if language == "ar" and agreement_type in TEMPLATE_BY_TYPE_AR:
+        return TEMPLATE_BY_TYPE_AR[agreement_type]
+    template_name = TEMPLATE_BY_TYPE.get(agreement_type)
+    if not template_name:
+        raise ValueError(f"No PDF template configured for {agreement_type}")
+    return template_name
+
+
+@functools.lru_cache(maxsize=None)
+def _arabic_font_data_uri(filename):
+    """Base64 data URI for a bundled Noto Naskh Arabic weight, embedded
+    directly in the rendered HTML (same pattern as the QR code / company
+    stamp below) so both the browser preview and the WeasyPrint PDF render
+    Arabic glyphs correctly without depending on static file serving.
+    """
+    encoded = base64.b64encode((FONTS_DIR / filename).read_bytes()).decode()
+    return f"data:font/ttf;base64,{encoded}"
+
+
+def _language_context(language):
+    if language != "ar":
+        return {"language": "en"}
+    return {
+        "language": "ar",
+        "arabic_font_regular_uri": _arabic_font_data_uri("NotoNaskhArabic-Regular.ttf"),
+        "arabic_font_bold_uri": _arabic_font_data_uri("NotoNaskhArabic-Bold.ttf"),
+    }
 
 
 def _individual_context(user):
@@ -84,14 +125,14 @@ def _file_to_data_uri(file_field):
     return f"data:{mime};base64,{encoded}"
 
 
-def render_preview_html(agreement_type, version, company=None, user=None):
+def render_preview_html(agreement_type, version, company=None, user=None, language="en"):
     """Renders the unsigned document body (with an unsealed 'Not Yet Signed'
     placeholder instead of the digital seal) for inline review before the
-    user commits to signing.
+    user commits to signing. `language` selects the translated template
+    where one exists (currently B2C_AGREEMENT only) so switching the site's
+    locale switches the document itself, not just its chrome.
     """
-    template_name = TEMPLATE_BY_TYPE.get(agreement_type)
-    if not template_name:
-        raise ValueError(f"No PDF template configured for {agreement_type}")
+    template_name = _template_name(agreement_type, language)
 
     context = {
         "version": version,
@@ -101,6 +142,7 @@ def render_preview_html(agreement_type, version, company=None, user=None):
         "company_country": getattr(company, "country", ""),
         "signatory_name": "",
         "is_preview": True,
+        **_language_context(language),
         **_individual_context(user),
     }
     return render_to_string(template_name, context)
@@ -115,11 +157,10 @@ def render_agreement_pdf(agreement, company=None, user=None, request=None):
     """
     from weasyprint import HTML
 
-    template_name = TEMPLATE_BY_TYPE.get(agreement.agreement_type)
-    if not template_name:
-        raise ValueError(f"No PDF template configured for {agreement.agreement_type}")
+    language = agreement.language or "en"
+    template_name = _template_name(agreement.agreement_type, language)
 
-    verification_url = f"{settings.FRONTEND_URL}/en/verify-agreement?id={agreement.contract_id}"
+    verification_url = f"{settings.FRONTEND_URL}/{language}/verify-agreement?id={agreement.contract_id}"
 
     stamp_data_uri = None
     if agreement.agreement_type in STAMPED_TYPES and company is not None:
@@ -139,6 +180,7 @@ def render_agreement_pdf(agreement, company=None, user=None, request=None):
         "verification_url": verification_url,
         "qr_data_uri": _build_qr_data_uri(verification_url),
         "stamp_data_uri": stamp_data_uri,
+        **_language_context(language),
         **_individual_context(user),
     }
 

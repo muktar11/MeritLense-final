@@ -15,8 +15,8 @@ class AgreementSerializer(PublicIdModelSerializer):
         model = Agreement
         fields = [
             'id', 'agreement_type', 'agreement_type_display', 'version', 'method',
-            'status', 'status_display', 'signatory_name', 'accepted_at', 'contract_id',
-            'signed_pdf_url', 'pdf_hash', 'created_at',
+            'status', 'status_display', 'signatory_name', 'language', 'accepted_at',
+            'contract_id', 'signed_pdf_url', 'pdf_hash', 'created_at',
         ]
         read_only_fields = fields
 
@@ -57,6 +57,9 @@ class AgreementSignInitiateSerializer(serializers.Serializer):
     # view, not here, since this checkbox doesn't apply to B2C/Candidate
     # signing) — "I confirm I am authorized to legally bind this organization."
     authorized_signatory_confirmed = serializers.BooleanField(required=False, default=False)
+    # The site locale the signer reviewed the document in — determines which
+    # language template the signed PDF is rendered from (see Agreement.language).
+    language = serializers.ChoiceField(choices=["en", "ar"], required=False, default="en")
 
     def validate_agreement_types(self, value):
         if len(set(value)) != len(value):

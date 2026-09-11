@@ -26,6 +26,13 @@ class Agreement(TimeStampedModel):
     status = models.CharField(
         max_length=20, choices=AgreementStatus.CHOICES, default=AgreementStatus.PENDING
     )
+    language = models.CharField(
+        max_length=5,
+        choices=[("en", "English"), ("ar", "Arabic")],
+        default="en",
+        help_text="Locale the document was reviewed/signed in — determines which "
+                   "language template the signed PDF is rendered from.",
+    )
 
     # Typed full legal name at signing time (OTP method only).
     signatory_name = models.CharField(max_length=255, blank=True)

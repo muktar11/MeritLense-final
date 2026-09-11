@@ -1,0 +1,33 @@
+{% if is_preview %}
+<div class="ml-seal ml-seal-preview">
+  <div class="ml-seal-header">
+    <span class="ml-seal-wordmark">Merit<span class="ml-seal-wordmark-accent">Lense</span></span>
+    <span class="ml-seal-title">لم يتم التوقيع بعد</span>
+  </div>
+  <p class="ml-seal-preview-note">
+    هذه معاينة. بعد التوقيع، سيحتوي هذا القسم على رقم العقد، والموقِّع، والطابع الزمني،
+    وعنوان IP، ورمز QR للتحقق، وختم الشركة (عند الاقتضاء).
+  </p>
+</div>
+{% else %}
+<div class="ml-seal">
+  <div class="ml-seal-header">
+    <span class="ml-seal-wordmark">Merit<span class="ml-seal-wordmark-accent">Lense</span></span>
+    <span class="ml-seal-title">مستند موقَّع رقمياً</span>
+  </div>
+  <table class="ml-seal-table">
+    <tr><td>رقم العقد</td><td>{{ contract_id }}</td></tr>
+    <tr><td>وقّعه</td><td>{{ signatory_name }}</td></tr>
+    <tr><td>تاريخ التوقيع</td><td>{{ signed_at }}</td></tr>
+    <tr><td>عنوان IP</td><td>{{ ip_address }}</td></tr>
+    <tr><td>مرجع التحقق</td><td>{{ otp_reference }}</td></tr>
+    <tr><td>التحقق عبر</td><td>{{ verification_url }}</td></tr>
+  </table>
+  {% if qr_data_uri %}
+  <img class="ml-seal-qr" src="{{ qr_data_uri }}" alt="رمز QR للتحقق" />
+  {% endif %}
+  {% if stamp_data_uri %}
+  <img class="ml-seal-stamp" src="{{ stamp_data_uri }}" alt="ختم الشركة" />
+  {% endif %}
+</div>
+{% endif %}

@@ -843,8 +843,20 @@ class InterviewSessionService:
             # too, just distinguished in the audit log.
             try:
                 summary = Week6ScoringService.run_for_evaluation(evaluation=evaluation, actor=actor)
-            except Week6ScoringError:
+            except Week6ScoringError as exc:
                 summary = None
+                if actor:
+                    AuditLogService.log(
+                        user=actor,
+                        action=AuditLogAction.SESSION_COMPLETED,
+                        category=AuditLogCategory.SESSION,
+                        description=(
+                            f"Session completed unscored for {session.candidate.get_full_name()} - {exc}"
+                        ),
+                        resource=session,
+                        data=session_event_payload(session),
+                        severity=AuditLogSeverity.WARNING,
+                    )
             except Exception:
                 summary = None
                 if actor:

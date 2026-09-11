@@ -62,6 +62,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
     created_by_name = serializers.SerializerMethodField()
     session_id = serializers.SerializerMethodField()
     latest_session_summary = serializers.SerializerMethodField()
+    is_scored = serializers.SerializerMethodField()
     readiness_legal_record = serializers.SerializerMethodField()
     latest_report = serializers.SerializerMethodField()
     evaluator_rating = serializers.SerializerMethodField()
@@ -82,7 +83,7 @@ class EvaluationSerializer(PublicIdModelSerializer):
             'certificate_issued_at', 'certificate_url',
             'last_evaluation_date',
             'score', 'feedback',
-            'latest_session_summary',
+            'latest_session_summary', 'is_scored',
             'readiness_legal_record',
             'latest_report',
             'evaluator_rating',
@@ -117,6 +118,13 @@ class EvaluationSerializer(PublicIdModelSerializer):
         if summary is None:
             return None
         return SessionEvaluationSummarySerializer(summary).data
+
+    def get_is_scored(self, obj):
+        """True once Week6ScoringService has actually produced a summary.
+        A COMPLETED evaluation with is_scored=False means the session ran
+        but nothing could grade it (e.g. no active Scoring Rule Set for
+        this role+tier yet) - distinct from a real 0% score."""
+        return obj.session_summaries.exists()
 
     def get_readiness_legal_record(self, obj):
         try:
@@ -344,6 +352,7 @@ class EvaluationListSerializer(PublicIdModelSerializer):
     evaluation_type_display = serializers.CharField(source='get_evaluation_type_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     latest_session_summary = serializers.SerializerMethodField()
+    is_scored = serializers.SerializerMethodField()
     readiness_legal_record = serializers.SerializerMethodField()
     latest_report = serializers.SerializerMethodField()
     # The detail/edit view (EvaluationSerializer) already exposes these -
@@ -359,7 +368,7 @@ class EvaluationListSerializer(PublicIdModelSerializer):
         fields = [
             'id', 'candidate_name', 'evaluation_type', 'evaluation_type_display',
             'status', 'status_display', 'scheduled_date', 'duration_minutes',
-            'score', 'latest_session_summary', 'readiness_legal_record', 'latest_report',
+            'score', 'latest_session_summary', 'is_scored', 'readiness_legal_record', 'latest_report',
             'readiness_status', 'readiness_override_applied', 'created_by', 'created_at',
             'meeting_link', 'session_id',
             'evaluator_rating', 'assessment_mode',
@@ -384,6 +393,9 @@ class EvaluationListSerializer(PublicIdModelSerializer):
         if summary is None:
             return None
         return SessionEvaluationSummarySerializer(summary).data
+
+    def get_is_scored(self, obj):
+        return obj.session_summaries.exists()
 
     def get_readiness_legal_record(self, obj):
         try:

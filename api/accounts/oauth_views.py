@@ -40,8 +40,8 @@ class GoogleLoginView(APIView):
 
     Logs an EXISTING account in after verifying the Google ID token
     server-side. Deliberately does not create new accounts - sign-up still
-    goes through the normal registration flow, matching how the Google/
-    Facebook buttons are only shown on the login page, never on register.
+    goes through the normal registration flow, matching how the Google
+    button is only shown on the login page, never on register.
     """
     permission_classes = [AllowAny]
 

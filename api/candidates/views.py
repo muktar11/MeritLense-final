@@ -1,6 +1,5 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -128,13 +127,24 @@ class CandidateViewSet(SubscriptionUsageMixin, viewsets.ModelViewSet):
             return True
         return False
     
-    def perform_create(self, serializer):
-        if not self.check_subscription_limit(self.request.user, 'candidate_limit'):
-            raise PermissionDenied(
-                "You've reached the candidate limit for your current package. "
-                "Upgrade your plan to add more candidates."
+    def create(self, request, *args, **kwargs):
+        # Checked here, before serializer validation/file uploads run, both
+        # to avoid wasted work on a request we already know will be
+        # rejected, and so the response carries a machine-readable `code`
+        # the frontend can act on (offer to buy a package) without having
+        # to string-match a message that may one day be localized.
+        if not self.check_subscription_limit(request.user, 'candidate_limit'):
+            return Response(
+                {
+                    'detail': "You've reached the candidate limit for your current package. "
+                              "Upgrade your plan to add more candidates.",
+                    'code': 'candidate_limit_reached',
+                },
+                status=status.HTTP_403_FORBIDDEN,
             )
+        return super().create(request, *args, **kwargs)
 
+    def perform_create(self, serializer):
         candidate = serializer.save()
         self.increment_subscription_usage(self.request.user, 'candidate_limit')
 

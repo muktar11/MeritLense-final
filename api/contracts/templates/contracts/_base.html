@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="{{ language|default:"en" }}" dir="{% if language == "ar" %}rtl{% else %}ltr{% endif %}">
 <head>
 <meta charset="utf-8" />
 <style>
@@ -32,6 +32,32 @@
   .ml-seal-preview { border-style: dashed; background: #fafafa; }
   .ml-seal-preview .ml-seal-title { color: #999; }
   .ml-seal-preview-note { font-size: 8.5pt; color: #888; margin: 0; }
+
+  {% if language == "ar" %}
+  @font-face {
+    font-family: "Noto Naskh Arabic";
+    src: url({{ arabic_font_regular_uri }}) format("truetype");
+    font-weight: 400;
+  }
+  @font-face {
+    font-family: "Noto Naskh Arabic";
+    src: url({{ arabic_font_bold_uri }}) format("truetype");
+    font-weight: 700;
+  }
+  body {
+    font-family: "Noto Naskh Arabic", "Helvetica Neue", Arial, sans-serif;
+    direction: rtl;
+    text-align: right;
+  }
+  .ml-seal-table td:first-child { padding: 1px 0 1px 6px; }
+  .ml-seal-qr { right: auto; left: 24px; }
+  .ml-seal-stamp { right: auto; left: 110px; }
+  /* Brand wordmark stays "MeritLense" (never "LenseMerit") even inside an
+     RTL document — it's split across two <span> siblings for the accent
+     color, and without this the RTL bidi algorithm reorders them as
+     separate runs. */
+  .ml-seal-wordmark { direction: ltr; unicode-bidi: embed; display: inline-block; }
+  {% endif %}
 </style>
 </head>
 <body>

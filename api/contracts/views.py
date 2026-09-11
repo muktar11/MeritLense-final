@@ -140,6 +140,7 @@ class AgreementSignInitiateView(APIView):
                     'company': company if agreement_type in COMPANY_SCOPED_TYPES else None,
                     'method': AgreementMethod.OTP_SIGNATURE,
                     'signatory_name': data['signatory_name'],
+                    'language': data.get('language', 'en'),
                     'auth_checkbox_confirmed': bool(data.get('authorized_signatory_confirmed')),
                     'otp_code_hash': code_hash,
                     'otp_expires_at': expires_at,
@@ -396,16 +397,22 @@ def agreement_versions(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def agreement_preview(request, agreement_type):
-    """GET /agreements/preview/{agreement_type} — unsigned document body for
-    inline review before the user commits to signing."""
+    """GET /agreements/preview/{agreement_type}?lang=en|ar — unsigned document
+    body for inline review before the user commits to signing. `lang`
+    selects the translated template where one exists (currently
+    B2C_AGREEMENT only); any other value silently falls back to English."""
     if agreement_type not in dict(AgreementType.CHOICES):
         return Response({'error': 'Unknown agreement type.'}, status=status.HTTP_404_NOT_FOUND)
     if agreement_type not in {AgreementType.B2B_AGREEMENT, AgreementType.DPA, AgreementType.B2C_AGREEMENT}:
         return Response({'error': 'No preview available for this agreement type.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    language = request.query_params.get('lang', 'en')
+    if language not in {'en', 'ar'}:
+        language = 'en'
+
     company = _user_company(request.user)
     version = CURRENT_VERSIONS.get(agreement_type, '')
-    html = render_preview_html(agreement_type, version, company=company, user=request.user)
+    html = render_preview_html(agreement_type, version, company=company, user=request.user, language=language)
     return Response({'html': html, 'version': version})
 
 

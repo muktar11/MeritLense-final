@@ -82,6 +82,37 @@ class AgreementTemplateContentTests(TestCase):
         self.assertIn("Acme Staffing LLC", html)
 
 
+class AgreementPublicPreviewEndpointTests(APITestCase):
+    """B2C/B2B Agreement templates are linked from the marketing site
+    footer, so they must render for a signed-out visitor - see
+    agreement_public_preview and PUBLIC_PREVIEW_TYPES."""
+
+    def test_b2c_public_preview_accessible_without_auth(self):
+        response = self.client.get("/api/v1/agreements/public-preview/B2C_AGREEMENT")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIn("Refund Policy (B2C)", response.data["html"])
+        self.assertEqual(response.data["version"], CURRENT_VERSIONS[AgreementType.B2C_AGREEMENT])
+
+    def test_b2b_public_preview_accessible_without_auth(self):
+        response = self.client.get("/api/v1/agreements/public-preview/B2B_AGREEMENT")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIn("Republic of Estonia", response.data["html"])
+        self.assertEqual(response.data["version"], CURRENT_VERSIONS[AgreementType.B2B_AGREEMENT])
+
+    def test_b2c_public_preview_arabic(self):
+        response = self.client.get("/api/v1/agreements/public-preview/B2C_AGREEMENT?lang=ar")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIn('dir="rtl"', response.data["html"])
+
+    def test_dpa_has_no_public_preview(self):
+        response = self.client.get("/api/v1/agreements/public-preview/DPA")
+        self.assertEqual(response.status_code, 400)
+
+    def test_candidate_consent_has_no_public_preview(self):
+        response = self.client.get("/api/v1/agreements/public-preview/CANDIDATE_CONSENT")
+        self.assertEqual(response.status_code, 400)
+
+
 def make_company(admin_user, **overrides):
     defaults = dict(
         name="Test Co",

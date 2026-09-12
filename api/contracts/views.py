@@ -416,6 +416,33 @@ def agreement_preview(request, agreement_type):
     return Response({'html': html, 'version': version})
 
 
+# Only the two commercial agreements are meant to be readable by the public
+# (marketing-site footer, before anyone has an account) - DPA and
+# CANDIDATE_CONSENT are contextual to a signed relationship and stay behind
+# auth on `agreement_preview` above.
+PUBLIC_PREVIEW_TYPES = {AgreementType.B2B_AGREEMENT, AgreementType.B2C_AGREEMENT}
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def agreement_public_preview(request, agreement_type):
+    """GET /agreements/public-preview/{agreement_type}?lang=en|ar — the same
+    unsigned document body as `agreement_preview`, but reachable without an
+    account and with no company/user personalization filled in (blank
+    fields), for the public B2C/B2B Agreement pages linked from the
+    marketing site footer."""
+    if agreement_type not in PUBLIC_PREVIEW_TYPES:
+        return Response({'error': 'No public preview available for this agreement type.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    language = request.query_params.get('lang', 'en')
+    if language not in {'en', 'ar'}:
+        language = 'en'
+
+    version = CURRENT_VERSIONS.get(agreement_type, '')
+    html = render_preview_html(agreement_type, version, language=language)
+    return Response({'html': html, 'version': version})
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def agreement_verify(request, contract_id):

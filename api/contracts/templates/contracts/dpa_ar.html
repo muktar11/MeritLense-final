@@ -3,6 +3,7 @@
 <h1>اتفاقية معالجة البيانات (DPA)</h1>
 <div class="doc-meta">
   <span>الإصدار {{ version }}</span>
+  <span>تاريخ السريان: 2026-09-12</span>
   <span>تاريخ الإنشاء {{ generated_at }}</span>
   <span>الاختصاص القضائي: إستونيا (الاتحاد الأوروبي)</span>
 </div>
@@ -104,8 +105,8 @@
 <h3>6.3 بيانات التحقق</h3>
 <ul>
   <li>حالة التحقق من الهوية (نجاح / فشل)</li>
-  <li>الاحتفاظ بوثائق أو صور الهوية الأساسية والتعامل معها: [سياسة الاحتفاظ / الحذف قيد
-    التأكيد]</li>
+  <li>وثائق أو صور الهوية الأساسية: تُحفظ لمدة 90 يوماً بعد اكتمال التحقق من الهوية المرتبط بها،
+    ثم تُحذف تلقائياً</li>
 </ul>
 <h3>6.4 فئات البيانات الخاصة</h3>
 <p>
@@ -158,6 +159,11 @@
     يُصرّح العميل بذلك كتابياً وصراحةً وبوجود أساس قانوني مناسب</li>
   <li>لا تُستخدم البيانات الشخصية الخاصة بالعميل لتدريب أو تحسين نماذج لصالح عملاء آخرين</li>
 </ul>
+<p>
+  لا تُستخدَم البيانات الشخصية المُقدَّمة عبر الخدمات من قِبل مزّودي الخدمة الخاصين بـ
+  MeritLense لتدريب أو تحسين نماذجهم ذات الغرض العام، وذلك وفقاً لسياسات استخدام البيانات
+  المُعلَنة لكل مزّود والمطبَّقة على حسابات الأعمال / API.
+</p>
 
 <h2>10. معالجو البيانات الفرعيون</h2>
 <p>يجوز لـ MeritLense الاستعانة بمعالجي بيانات فرعيين لدعم تقديم الخدمة. ويرد معالجو البيانات
@@ -180,10 +186,12 @@
   آلية نقل مناسبة وفق المادة 46 من GDPR — كقرار كفاية، أو البنود التعاقدية القياسية (SCCs)،
   أو أي آلية نقل قانونية أخرى — على النحو المُفصَّل في الملحق C.
 </p>
-<ul>
-  <li>موقع البيانات الحالي: الولايات المتحدة الأمريكية (انظر الملحق C للاطلاع على القائمة الكاملة
-    لمعالجي البيانات الفرعيين وآليات النقل)</li>
-</ul>
+<p>
+  يقع بعض معالجي البيانات الفرعيين المُدرَجين في الملحق B خارج المنطقة الاقتصادية الأوروبية، بما
+  في ذلك الولايات المتحدة. وتلتزم MeritLense بضمان خضوع أي نقل من هذا النوع لضمانة مناسبة وفقاً
+  للفصل الخامس من GDPR، بما في ذلك البنود التعاقدية القياسية عند الاقتضاء، على النحو الوارد في
+  الملحق C.
+</p>
 
 <h2>12. حقوق أصحاب البيانات</h2>
 <p>
@@ -336,25 +344,29 @@
 </table>
 
 <h2>الملحق B — معالجو البيانات الفرعيون المعتمدون</h2>
-<p>يرد أدناه معالجو البيانات الفرعيون الذين تستعين بهم MeritLense لدعم تقديم الخدمات. تُراجَع
-  هذه القائمة وتُحدَّث من وقت لآخر وفق المادة 10.</p>
 <table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
   <thead>
     <tr style="border-bottom:1px solid #ccc;text-align:right;">
-      <th style="padding:4px 6px;">المعالج الفرعي</th><th style="padding:4px 6px;">الغرض</th><th style="padding:4px 6px;">فئات البيانات</th><th style="padding:4px 6px;">الموقع</th><th style="padding:4px 6px;">الآلية</th>
+      <th style="padding:4px 6px;">المعالج الفرعي</th><th style="padding:4px 6px;">الغرض</th><th style="padding:4px 6px;">فئات البيانات</th><th style="padding:4px 6px;">الموقع</th>
     </tr>
   </thead>
   <tbody>
-    <tr><td style="padding:4px 6px;">Microsoft Azure</td><td style="padding:4px 6px;">استضافة البنية التحتية (خادم التطبيق، قاعدة البيانات، الوسائط المخزَّنة)</td><td style="padding:4px 6px;">جميع البيانات الشخصية المعالَجة عبر المنصة</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td><td style="padding:4px 6px;">البنود التعاقدية القياسية (اتفاقية معالجة بيانات Microsoft Online Services)</td></tr>
-    <tr><td style="padding:4px 6px;">OpenAI</td><td style="padding:4px 6px;">تحويل الصوت إلى نص وتفسير النصوص المُفرَّغة</td><td style="padding:4px 6px;">التسجيلات الصوتية للمرشحين والنصوص المُفرَّغة</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td><td style="padding:4px 6px;">البنود التعاقدية القياسية (اتفاقية معالجة بيانات OpenAI)</td></tr>
-    <tr><td style="padding:4px 6px;">Google</td><td style="padding:4px 6px;">ترجمة النصوص المُفرَّغة؛ إرسال رسائل البريد الإلكتروني التشغيلية</td><td style="padding:4px 6px;">النصوص المُفرَّغة؛ اسم المرشح وبريده الإلكتروني</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td><td style="padding:4px 6px;">البنود التعاقدية القياسية (اتفاقية معالجة بيانات Google)</td></tr>
-    <tr><td style="padding:4px 6px;">Stripe</td><td style="padding:4px 6px;">معالجة المدفوعات</td><td style="padding:4px 6px;">بيانات الفوترة والدفع فقط — لا تشمل بيانات تقييم المرشحين</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية / أيرلندا</td><td style="padding:4px 6px;">البنود التعاقدية القياسية (اتفاقية معالجة بيانات Stripe)</td></tr>
+    <tr><td style="padding:4px 6px;">OpenAI</td><td style="padding:4px 6px;">دعم المعالجة بمساعدة الذكاء الاصطناعي</td><td style="padding:4px 6px;">صوت المرشح، النصوص المُفرَّغة</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td></tr>
+    <tr><td style="padding:4px 6px;">Google</td><td style="padding:4px 6px;">دعم المعالجة بمساعدة الذكاء الاصطناعي</td><td style="padding:4px 6px;">النصوص المُفرَّغة، نص الأسئلة</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td></tr>
+    <tr><td style="padding:4px 6px;">Microsoft Azure</td><td style="padding:4px 6px;">استضافة التطبيق والمعالجة بمساعدة الذكاء الاصطناعي</td><td style="padding:4px 6px;">صوت المرشح (اللغات الاحتياطية)، جميع بيانات المرشح المخزَّنة</td><td style="padding:4px 6px;">بنية تحتية عالمية للخدمة</td></tr>
   </tbody>
 </table>
+<p>
+  تُعالج جهات معالجة المدفوعات (مثل Stripe) بيانات الفوترة والدفع الخاصة بالعميل نفسه، ولا تُعالج
+  بيانات المرشحين الشخصية نيابةً عن العميل. لذا تخضع علاقة هذه الجهات لشروط الدفع وسياسة
+  الخصوصية الخاصة بـ MeritLense، وليس لهذه الاتفاقية.
+</p>
+<p>
+  تخضع عمليات نقل البيانات الشخصية إلى معالجي البيانات الفرعيين الواقعين خارج المنطقة الاقتصادية
+  الأوروبية للضمانة الموصوفة في المادة 11 والملحق C.
+</p>
 
 <h2>الملحق C — النقل الدولي للبيانات</h2>
-<p>تُنقَل البيانات الشخصية خارج المنطقة الاقتصادية الأوروبية (EEA) إلى معالجي البيانات الفرعيين
-  المُدرَجين أدناه، كلٌّ بموجب آلية النقل المُشار إليها.</p>
 <table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
   <thead>
     <tr style="border-bottom:1px solid #ccc;text-align:right;">
@@ -362,12 +374,15 @@
     </tr>
   </thead>
   <tbody>
-    <tr><td style="padding:4px 6px;">Microsoft Azure</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td><td style="padding:4px 6px;">جميع البيانات الشخصية المعالَجة عبر المنصة</td><td style="padding:4px 6px;">البنود التعاقدية القياسية</td></tr>
-    <tr><td style="padding:4px 6px;">OpenAI</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td><td style="padding:4px 6px;">التسجيلات الصوتية للمرشحين والنصوص المُفرَّغة</td><td style="padding:4px 6px;">البنود التعاقدية القياسية</td></tr>
-    <tr><td style="padding:4px 6px;">Google</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td><td style="padding:4px 6px;">النصوص المُفرَّغة؛ اسم المرشح وبريده الإلكتروني</td><td style="padding:4px 6px;">البنود التعاقدية القياسية</td></tr>
-    <tr><td style="padding:4px 6px;">Stripe</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية / أيرلندا</td><td style="padding:4px 6px;">بيانات الفوترة والدفع فقط</td><td style="padding:4px 6px;">البنود التعاقدية القياسية</td></tr>
+    <tr><td style="padding:4px 6px;">OpenAI</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td><td style="padding:4px 6px;">صوت المرشح، النصوص المُفرَّغة</td><td style="padding:4px 6px;">ضمانة مناسبة وفق المادة 11</td></tr>
+    <tr><td style="padding:4px 6px;">Google</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td><td style="padding:4px 6px;">النصوص المُفرَّغة، نص الأسئلة</td><td style="padding:4px 6px;">ضمانة مناسبة وفق المادة 11</td></tr>
+    <tr><td style="padding:4px 6px;">Microsoft Azure</td><td style="padding:4px 6px;">بنية تحتية عالمية للخدمة</td><td style="padding:4px 6px;">صوت المرشح (اللغات الاحتياطية)، بيانات المرشح المخزَّنة</td><td style="padding:4px 6px;">ضمانة مناسبة وفق المادة 11</td></tr>
   </tbody>
 </table>
+<p>
+  سيتم تأكيد آلية النقل المحدَّدة المُعتَمدة لكل مزوِّد (مثل البنود التعاقدية القياسية) وتسجيلها
+  هنا فور التحقق منها وفق الشروط المعمول بها لدى ذلك المزوِّد.
+</p>
 
 <h2>الملحق D — التدابير التقنية والتنظيمية الأمنية</h2>
 <table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
@@ -397,12 +412,12 @@
     </tr>
   </thead>
   <tbody>
-    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">التسجيل الصوتي الأصلي</td><td style="padding:4px 6px;">يُحذف تلقائياً بعد 90 يوماً من إتمام التقييم المرتبط به؛ يُحتفظ بالنص المُفرَّغ وسجل التقييم بشكل منفصل وفق سياسة الاحتفاظ المعيارية لمدة 24 شهراً</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">التسجيل الصوتي الأصلي</td><td style="padding:4px 6px;">يُحذف تلقائياً بعد 90 يوماً من إتمام التقييم المرتبط به</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">النص المُفرَّغ</td><td style="padding:4px 6px;">وفق مدة الاحتفاظ الافتراضية 24 شهراً (المادة 15)، ثم يُحذف أو تُخفى هويته</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">الأدلة المُستخرجة</td><td style="padding:4px 6px;">تُحفظ كجزء من سجل التقييم وفق المادة 15</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">نتيجة التقييم</td><td style="padding:4px 6px;">تُحفظ كجزء من سجل التقييم، مع إخفاء الهوية وفق المادة 15</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">سجل الشهادة</td><td style="padding:4px 6px;">يُحفظ لأغراض التحقق وفق المادة 15</td></tr>
-    <tr><td style="padding:4px 6px;">وثيقة أو صورة التحقق من الهوية</td><td style="padding:4px 6px;">تُحذف تلقائياً بعد 90 يوماً من إتمام التقييم/التحقق المرتبط بها؛ تُحفظ نتيجة التحقق (ناجح/غير ناجح) بشكل منفصل وفق سياسة الاحتفاظ المعيارية لمدة 24 شهراً</td></tr>
+    <tr><td style="padding:4px 6px;">وثيقة أو صورة التحقق من الهوية</td><td style="padding:4px 6px;">تُحذف تلقائياً بعد 90 يوماً من إتمام التحقق المرتبط بها</td></tr>
   </tbody>
 </table>
 

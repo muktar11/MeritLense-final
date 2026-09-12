@@ -3,6 +3,7 @@
 <h1>Data Processing Agreement (DPA)</h1>
 <div class="doc-meta">
   <span>Version {{ version }}</span>
+  <span>Effective Date: 2026-09-12</span>
   <span>Generated {{ generated_at }}</span>
   <span>Jurisdiction: Estonia (EU)</span>
 </div>
@@ -108,8 +109,8 @@
 <h3>6.3 Verification Data</h3>
 <ul>
   <li>Identity verification status (pass / fail)</li>
-  <li>Retention / handling of underlying identity documents or images: [Retention / Deletion
-    Policy to be confirmed]</li>
+  <li>Underlying identity documents or images: retained for 90 days following completion of the
+    associated identity verification, then automatically deleted</li>
 </ul>
 <h3>6.4 Special Category Data</h3>
 <p>
@@ -170,6 +171,11 @@
   <li>Customer Personal Data shall not be used to train or improve models for the benefit of
     other customers</li>
 </ul>
+<p>
+  Personal Data submitted through the Services is not used by MeritLense's service providers to
+  train or improve their general-purpose models, in accordance with each provider's published
+  data use policies applicable to business / API accounts.
+</p>
 
 <h2>10. Subprocessors</h2>
 <p>MeritLense may engage Subprocessors to support service delivery. Approved Subprocessors are
@@ -194,10 +200,12 @@
   adequacy decision, Standard Contractual Clauses (SCCs), or another lawful transfer mechanism —
   as further detailed in Annex C.
 </p>
-<ul>
-  <li>Current data location: United States (see Annex C for the full list of Subprocessors and
-    transfer mechanisms)</li>
-</ul>
+<p>
+  Certain Subprocessors listed in Annex B are located outside the EEA, including in the United
+  States. MeritLense shall ensure that any such transfer is subject to an appropriate safeguard in
+  accordance with GDPR Chapter V, including Standard Contractual Clauses where applicable, as set
+  out in Annex C.
+</p>
 
 <h2>12. Data Subject Rights</h2>
 <p>
@@ -362,25 +370,29 @@
 </table>
 
 <h2>Annex B — Approved Subprocessors</h2>
-<p>The following Subprocessors are engaged by MeritLense to support delivery of the Services. This
-  list is reviewed and updated from time to time in accordance with Section 10.</p>
 <table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
   <thead>
     <tr style="border-bottom:1px solid #ccc;text-align:left;">
-      <th style="padding:4px 6px;">Subprocessor</th><th style="padding:4px 6px;">Purpose</th><th style="padding:4px 6px;">Data</th><th style="padding:4px 6px;">Location</th><th style="padding:4px 6px;">Mechanism</th>
+      <th style="padding:4px 6px;">Subprocessor</th><th style="padding:4px 6px;">Purpose</th><th style="padding:4px 6px;">Data Categories</th><th style="padding:4px 6px;">Location</th>
     </tr>
   </thead>
   <tbody>
-    <tr><td style="padding:4px 6px;">Microsoft Azure</td><td style="padding:4px 6px;">Infrastructure hosting (application server, database, stored media)</td><td style="padding:4px 6px;">All Personal Data processed through the Platform</td><td style="padding:4px 6px;">United States</td><td style="padding:4px 6px;">Standard Contractual Clauses (Microsoft Online Services DPA)</td></tr>
-    <tr><td style="padding:4px 6px;">OpenAI</td><td style="padding:4px 6px;">Speech-to-text transcription and transcript interpretation</td><td style="padding:4px 6px;">Candidate audio recordings and transcripts</td><td style="padding:4px 6px;">United States</td><td style="padding:4px 6px;">Standard Contractual Clauses (OpenAI DPA)</td></tr>
-    <tr><td style="padding:4px 6px;">Google</td><td style="padding:4px 6px;">Transcript translation; transactional email delivery</td><td style="padding:4px 6px;">Transcripts; candidate name and email address</td><td style="padding:4px 6px;">United States</td><td style="padding:4px 6px;">Standard Contractual Clauses (Google DPA)</td></tr>
-    <tr><td style="padding:4px 6px;">Stripe</td><td style="padding:4px 6px;">Payment processing</td><td style="padding:4px 6px;">Billing and payment data only — no candidate assessment data</td><td style="padding:4px 6px;">United States / Ireland</td><td style="padding:4px 6px;">Standard Contractual Clauses (Stripe DPA)</td></tr>
+    <tr><td style="padding:4px 6px;">OpenAI</td><td style="padding:4px 6px;">AI-assisted processing support</td><td style="padding:4px 6px;">Candidate audio, transcripts</td><td style="padding:4px 6px;">United States</td></tr>
+    <tr><td style="padding:4px 6px;">Google</td><td style="padding:4px 6px;">AI-assisted processing support</td><td style="padding:4px 6px;">Transcripts, question text</td><td style="padding:4px 6px;">United States</td></tr>
+    <tr><td style="padding:4px 6px;">Microsoft Azure</td><td style="padding:4px 6px;">Application hosting and AI-assisted processing</td><td style="padding:4px 6px;">Candidate audio (fallback languages), all stored candidate data</td><td style="padding:4px 6px;">Global service infrastructure</td></tr>
   </tbody>
 </table>
+<p>
+  Payment processing providers (such as Stripe) process the Customer's own billing and payment
+  data and do not process candidate Personal Data on the Customer's behalf. Such providers are
+  therefore addressed under MeritLense's Payment Terms and Privacy Policy, not this DPA.
+</p>
+<p>
+  Transfers of Personal Data to Subprocessors located outside the EEA are subject to the
+  safeguard described in Section 11 and Annex C.
+</p>
 
 <h2>Annex C — International Data Transfers</h2>
-<p>Personal Data is transferred outside the European Economic Area (EEA) to the Subprocessors
-  listed below, each under the transfer mechanism indicated.</p>
 <table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
   <thead>
     <tr style="border-bottom:1px solid #ccc;text-align:left;">
@@ -388,12 +400,16 @@
     </tr>
   </thead>
   <tbody>
-    <tr><td style="padding:4px 6px;">Microsoft Azure</td><td style="padding:4px 6px;">United States</td><td style="padding:4px 6px;">All Personal Data processed through the Platform</td><td style="padding:4px 6px;">Standard Contractual Clauses</td></tr>
-    <tr><td style="padding:4px 6px;">OpenAI</td><td style="padding:4px 6px;">United States</td><td style="padding:4px 6px;">Candidate audio recordings and transcripts</td><td style="padding:4px 6px;">Standard Contractual Clauses</td></tr>
-    <tr><td style="padding:4px 6px;">Google</td><td style="padding:4px 6px;">United States</td><td style="padding:4px 6px;">Transcripts; candidate name and email address</td><td style="padding:4px 6px;">Standard Contractual Clauses</td></tr>
-    <tr><td style="padding:4px 6px;">Stripe</td><td style="padding:4px 6px;">United States / Ireland</td><td style="padding:4px 6px;">Billing and payment data only</td><td style="padding:4px 6px;">Standard Contractual Clauses</td></tr>
+    <tr><td style="padding:4px 6px;">OpenAI</td><td style="padding:4px 6px;">United States</td><td style="padding:4px 6px;">Candidate audio, transcripts</td><td style="padding:4px 6px;">Appropriate safeguard per Section 11</td></tr>
+    <tr><td style="padding:4px 6px;">Google</td><td style="padding:4px 6px;">United States</td><td style="padding:4px 6px;">Transcripts, question text</td><td style="padding:4px 6px;">Appropriate safeguard per Section 11</td></tr>
+    <tr><td style="padding:4px 6px;">Microsoft Azure</td><td style="padding:4px 6px;">Global service infrastructure</td><td style="padding:4px 6px;">Candidate audio (fallback languages), stored candidate data</td><td style="padding:4px 6px;">Appropriate safeguard per Section 11</td></tr>
   </tbody>
 </table>
+<p>
+  The specific transfer mechanism relied upon for each provider (e.g. Standard Contractual
+  Clauses) will be confirmed and recorded here once verified against that provider's applicable
+  terms.
+</p>
 
 <h2>Annex D — Technical &amp; Organizational Security Measures</h2>
 <table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
@@ -423,12 +439,12 @@
     </tr>
   </thead>
   <tbody>
-    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Raw audio recording</td><td style="padding:4px 6px;">Automatically deleted 90 days after the associated evaluation is completed; the transcript and evaluation record are retained separately per the standard 24-month policy</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Raw audio</td><td style="padding:4px 6px;">Automatically deleted 90 days after the associated evaluation is completed</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Transcript</td><td style="padding:4px 6px;">Per default 24-month retention (Section 15), then deleted or anonymized</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Extracted evidence</td><td style="padding:4px 6px;">Retained as part of the assessment record per Section 15</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Evaluation result</td><td style="padding:4px 6px;">Retained as part of the assessment record, anonymized per Section 15</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Certificate record</td><td style="padding:4px 6px;">Retained for verification purposes per Section 15</td></tr>
-    <tr><td style="padding:4px 6px;">Identity verification document / image</td><td style="padding:4px 6px;">Automatically deleted 90 days after the associated evaluation/verification is completed; the verification status (pass/fail) is retained separately per the standard 24-month policy</td></tr>
+    <tr><td style="padding:4px 6px;">Identity verification document / image</td><td style="padding:4px 6px;">Automatically deleted 90 days after the associated verification is completed</td></tr>
   </tbody>
 </table>
 

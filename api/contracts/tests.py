@@ -69,7 +69,7 @@ class AgreementTemplateContentTests(TestCase):
         self.assertIn("Annex E", html)
 
     def test_dpa_version_matches_provided_document(self):
-        self.assertEqual(CURRENT_VERSIONS[AgreementType.DPA], "v1.6")
+        self.assertEqual(CURRENT_VERSIONS[AgreementType.DPA], "v2.1")
 
     def test_dpa_arabic_preview_renders_rtl_with_real_content(self):
         html = render_preview_html(
@@ -85,7 +85,8 @@ class AgreementTemplateContentTests(TestCase):
         """Annex B/C/D/E shipped as literal '[To be completed]'/'[To be
         confirmed]' placeholders until the 90-day retention job, off-VM
         backups, and the subprocessor list were actually verified against
-        production - v1.6 fills them in with the confirmed real values."""
+        production - v2.1 fills them in with the confirmed real values,
+        matching the client-issued reference copy (MeritLense_DPA_v2_1)."""
         html = render_preview_html(
             AgreementType.DPA, CURRENT_VERSIONS[AgreementType.DPA],
             company=FakeCompany(), user=None,
@@ -110,6 +111,27 @@ class AgreementTemplateContentTests(TestCase):
         self.assertIn("Microsoft Azure", html)
         self.assertIn("Stripe", html)
         self.assertIn("البنود التعاقدية القياسية", html)
+
+    def test_dpa_annex_b_excludes_stripe_as_a_row_and_uses_appropriate_safeguard_wording(self):
+        """Stripe only ever touches the Customer's own billing data, never
+        candidate Personal Data on the Customer's behalf - it's explicitly
+        carved out of Annex B/C as a subprocessor row (still mentioned in
+        the explanatory paragraph). Annex C also deliberately doesn't
+        assert a specific transfer mechanism per provider until verified
+        against each provider's actual terms - "Appropriate safeguard per
+        Section 11" pending that, not a blanket SCC claim."""
+        html = render_preview_html(
+            AgreementType.DPA, CURRENT_VERSIONS[AgreementType.DPA],
+            company=FakeCompany(), user=None,
+        )
+        self.assertIn(
+            "Payment processing providers (such as Stripe) process the Customer's own billing",
+            html,
+        )
+        self.assertIn("Appropriate safeguard per Section 11", html)
+        self.assertIn(
+            "The specific transfer mechanism relied upon for each provider", html,
+        )
 
 
 class AgreementPublicPreviewEndpointTests(APITestCase):

@@ -163,8 +163,7 @@
 <p>يجوز لـ MeritLense الاستعانة بمعالجي بيانات فرعيين لدعم تقديم الخدمة. ويرد معالجو البيانات
   الفرعيون المعتمدون في الملحق B.</p>
 <ul>
-  <li>الملحق B مُحدَّد حالياً بـ [قيد الإكمال] — ولا يُذكر اسم أي معالج فرعي إلا بعد تأكيد
-    استخدامه فعلياً</li>
+  <li>يرد معالجو البيانات الفرعيون المعتمدون اعتباراً من هذا الإصدار في الملحق B</li>
   <li>يُقدّم العميل تفويضاً عاماً لاستعانة MeritLense بمعالجي البيانات الفرعيين المُدرَجين
     في الملحق B، كما يُحدَّث من وقت لآخر</li>
   <li>تلتزم MeritLense بإخطار العميل بأي إضافة أو استبدال مُزمَع لمعالجي البيانات الفرعيين،
@@ -182,7 +181,8 @@
   أو أي آلية نقل قانونية أخرى — على النحو المُفصَّل في الملحق C.
 </p>
 <ul>
-  <li>موقع البيانات الحالي: [قيد التأكيد]</li>
+  <li>موقع البيانات الحالي: الولايات المتحدة الأمريكية (انظر الملحق C للاطلاع على القائمة الكاملة
+    لمعالجي البيانات الفرعيين وآليات النقل)</li>
 </ul>
 
 <h2>12. حقوق أصحاب البيانات</h2>
@@ -208,7 +208,7 @@
 <p>تُطبِّق MeritLense ضوابط أمنية تشمل ما يلي:</p>
 <ul>
   <li>تشفير البيانات الشخصية أثناء النقل باستخدام TLS</li>
-  <li>تشفير البيانات الشخصية أثناء التخزين (At Rest): [قيد التأكيد]</li>
+  <li>تشفير البيانات الشخصية أثناء التخزين (At Rest): مُطبَّق (AES-256)</li>
   <li>التحكم في الوصول القائم على الأدوار (RBAC)</li>
   <li>ضوابط المصادقة والتفويض</li>
   <li>سجلات تدقيق شاملة</li>
@@ -336,7 +336,8 @@
 </table>
 
 <h2>الملحق B — معالجو البيانات الفرعيون المعتمدون</h2>
-<p>[قيد الإكمال — لا يُدرج أي معالج فرعي إلا بعد تأكيد استخدامه فعلياً]</p>
+<p>يرد أدناه معالجو البيانات الفرعيون الذين تستعين بهم MeritLense لدعم تقديم الخدمات. تُراجَع
+  هذه القائمة وتُحدَّث من وقت لآخر وفق المادة 10.</p>
 <table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
   <thead>
     <tr style="border-bottom:1px solid #ccc;text-align:right;">
@@ -344,13 +345,16 @@
     </tr>
   </thead>
   <tbody>
-    <tr><td style="padding:4px 6px;">[قيد الإكمال]</td><td style="padding:4px 6px;">[قيد الإكمال]</td><td style="padding:4px 6px;">[قيد الإكمال]</td><td style="padding:4px 6px;">[قيد الإكمال]</td><td style="padding:4px 6px;">[قيد الإكمال]</td></tr>
+    <tr><td style="padding:4px 6px;">Microsoft Azure</td><td style="padding:4px 6px;">استضافة البنية التحتية (خادم التطبيق، قاعدة البيانات، الوسائط المخزَّنة)</td><td style="padding:4px 6px;">جميع البيانات الشخصية المعالَجة عبر المنصة</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td><td style="padding:4px 6px;">البنود التعاقدية القياسية (اتفاقية معالجة بيانات Microsoft Online Services)</td></tr>
+    <tr><td style="padding:4px 6px;">OpenAI</td><td style="padding:4px 6px;">تحويل الصوت إلى نص وتفسير النصوص المُفرَّغة</td><td style="padding:4px 6px;">التسجيلات الصوتية للمرشحين والنصوص المُفرَّغة</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td><td style="padding:4px 6px;">البنود التعاقدية القياسية (اتفاقية معالجة بيانات OpenAI)</td></tr>
+    <tr><td style="padding:4px 6px;">Google</td><td style="padding:4px 6px;">ترجمة النصوص المُفرَّغة؛ إرسال رسائل البريد الإلكتروني التشغيلية</td><td style="padding:4px 6px;">النصوص المُفرَّغة؛ اسم المرشح وبريده الإلكتروني</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td><td style="padding:4px 6px;">البنود التعاقدية القياسية (اتفاقية معالجة بيانات Google)</td></tr>
+    <tr><td style="padding:4px 6px;">Stripe</td><td style="padding:4px 6px;">معالجة المدفوعات</td><td style="padding:4px 6px;">بيانات الفوترة والدفع فقط — لا تشمل بيانات تقييم المرشحين</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية / أيرلندا</td><td style="padding:4px 6px;">البنود التعاقدية القياسية (اتفاقية معالجة بيانات Stripe)</td></tr>
   </tbody>
 </table>
 
 <h2>الملحق C — النقل الدولي للبيانات</h2>
-<p>[قيد الإكمال — يُستكمل فقط في حال نُقلت البيانات الشخصية خارج المنطقة الاقتصادية
-  الأوروبية]</p>
+<p>تُنقَل البيانات الشخصية خارج المنطقة الاقتصادية الأوروبية (EEA) إلى معالجي البيانات الفرعيين
+  المُدرَجين أدناه، كلٌّ بموجب آلية النقل المُشار إليها.</p>
 <table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
   <thead>
     <tr style="border-bottom:1px solid #ccc;text-align:right;">
@@ -358,7 +362,10 @@
     </tr>
   </thead>
   <tbody>
-    <tr><td style="padding:4px 6px;">[قيد الإكمال]</td><td style="padding:4px 6px;">[قيد الإكمال]</td><td style="padding:4px 6px;">[قيد الإكمال]</td><td style="padding:4px 6px;">[قيد الإكمال]</td></tr>
+    <tr><td style="padding:4px 6px;">Microsoft Azure</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td><td style="padding:4px 6px;">جميع البيانات الشخصية المعالَجة عبر المنصة</td><td style="padding:4px 6px;">البنود التعاقدية القياسية</td></tr>
+    <tr><td style="padding:4px 6px;">OpenAI</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td><td style="padding:4px 6px;">التسجيلات الصوتية للمرشحين والنصوص المُفرَّغة</td><td style="padding:4px 6px;">البنود التعاقدية القياسية</td></tr>
+    <tr><td style="padding:4px 6px;">Google</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية</td><td style="padding:4px 6px;">النصوص المُفرَّغة؛ اسم المرشح وبريده الإلكتروني</td><td style="padding:4px 6px;">البنود التعاقدية القياسية</td></tr>
+    <tr><td style="padding:4px 6px;">Stripe</td><td style="padding:4px 6px;">الولايات المتحدة الأمريكية / أيرلندا</td><td style="padding:4px 6px;">بيانات الفوترة والدفع فقط</td><td style="padding:4px 6px;">البنود التعاقدية القياسية</td></tr>
   </tbody>
 </table>
 
@@ -371,13 +378,13 @@
   </thead>
   <tbody>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">التشفير أثناء النقل (TLS)</td><td style="padding:4px 6px;">مُطبَّق</td></tr>
-    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">التشفير أثناء التخزين</td><td style="padding:4px 6px;">[قيد التأكيد]</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">التشفير أثناء التخزين</td><td style="padding:4px 6px;">مُطبَّق — تشفير AES-256 على جميع وسائط التخزين</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">التحكم في الوصول القائم على الأدوار (RBAC)</td><td style="padding:4px 6px;">مُطبَّق</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">ضوابط المصادقة والتفويض</td><td style="padding:4px 6px;">مُطبَّق</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">سجلات التدقيق</td><td style="padding:4px 6px;">مُطبَّق</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">مراقبة البنية التحتية (24/7)</td><td style="padding:4px 6px;">مُطبَّق</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">المراجعات الأمنية الدورية وإدارة الثغرات</td><td style="padding:4px 6px;">مُطبَّق</td></tr>
-    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">النسخ الاحتياطية المشفَّرة وإجراءات التعافي</td><td style="padding:4px 6px;">[قيد التأكيد]</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">النسخ الاحتياطية المشفَّرة وإجراءات التعافي</td><td style="padding:4px 6px;">مُطبَّق — نسخ احتياطية تلقائية يومية إلى منطقة تخزين منفصلة، مشفَّرة أثناء التخزين، بفترة احتفاظ 30 يوماً</td></tr>
     <tr><td style="padding:4px 6px;">سرية الموظفين والتدريب الأمني</td><td style="padding:4px 6px;">مُطبَّق</td></tr>
   </tbody>
 </table>
@@ -390,12 +397,12 @@
     </tr>
   </thead>
   <tbody>
-    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">التسجيل الصوتي الأصلي</td><td style="padding:4px 6px;">[سياسة الاحتفاظ / الحذف قيد التأكيد]</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">التسجيل الصوتي الأصلي</td><td style="padding:4px 6px;">يُحذف تلقائياً بعد 90 يوماً من إتمام التقييم المرتبط به؛ يُحتفظ بالنص المُفرَّغ وسجل التقييم بشكل منفصل وفق سياسة الاحتفاظ المعيارية لمدة 24 شهراً</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">النص المُفرَّغ</td><td style="padding:4px 6px;">وفق مدة الاحتفاظ الافتراضية 24 شهراً (المادة 15)، ثم يُحذف أو تُخفى هويته</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">الأدلة المُستخرجة</td><td style="padding:4px 6px;">تُحفظ كجزء من سجل التقييم وفق المادة 15</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">نتيجة التقييم</td><td style="padding:4px 6px;">تُحفظ كجزء من سجل التقييم، مع إخفاء الهوية وفق المادة 15</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">سجل الشهادة</td><td style="padding:4px 6px;">يُحفظ لأغراض التحقق وفق المادة 15</td></tr>
-    <tr><td style="padding:4px 6px;">وثيقة أو صورة التحقق من الهوية</td><td style="padding:4px 6px;">[سياسة الاحتفاظ / الحذف قيد التأكيد]</td></tr>
+    <tr><td style="padding:4px 6px;">وثيقة أو صورة التحقق من الهوية</td><td style="padding:4px 6px;">تُحذف تلقائياً بعد 90 يوماً من إتمام التقييم/التحقق المرتبط بها؛ تُحفظ نتيجة التحقق (ناجح/غير ناجح) بشكل منفصل وفق سياسة الاحتفاظ المعيارية لمدة 24 شهراً</td></tr>
   </tbody>
 </table>
 

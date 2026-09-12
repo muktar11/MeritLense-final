@@ -69,7 +69,7 @@ class AgreementTemplateContentTests(TestCase):
         self.assertIn("Annex E", html)
 
     def test_dpa_version_matches_provided_document(self):
-        self.assertEqual(CURRENT_VERSIONS[AgreementType.DPA], "v1.5")
+        self.assertEqual(CURRENT_VERSIONS[AgreementType.DPA], "v1.6")
 
     def test_dpa_arabic_preview_renders_rtl_with_real_content(self):
         html = render_preview_html(
@@ -80,6 +80,36 @@ class AgreementTemplateContentTests(TestCase):
         self.assertNotIn("PLACEHOLDER", html)
         self.assertIn("اتفاقية معالجة البيانات", html)
         self.assertIn("Acme Staffing LLC", html)
+
+    def test_dpa_annex_b_subprocessors_are_confirmed_not_placeholder(self):
+        """Annex B/C/D/E shipped as literal '[To be completed]'/'[To be
+        confirmed]' placeholders until the 90-day retention job, off-VM
+        backups, and the subprocessor list were actually verified against
+        production - v1.6 fills them in with the confirmed real values."""
+        html = render_preview_html(
+            AgreementType.DPA, CURRENT_VERSIONS[AgreementType.DPA],
+            company=FakeCompany(), user=None,
+        )
+        self.assertNotIn("[To be completed]", html)
+        self.assertNotIn("[To be confirmed]", html)
+        self.assertNotIn("[Data Location to be confirmed]", html)
+        self.assertNotIn("[Retention / Deletion Policy to be confirmed]", html)
+        self.assertIn("Microsoft Azure", html)
+        self.assertIn("OpenAI", html)
+        self.assertIn("Stripe", html)
+        self.assertIn("Standard Contractual Clauses", html)
+        self.assertIn("90 days after the associated evaluation", html)
+
+    def test_dpa_arabic_annex_b_subprocessors_are_confirmed_not_placeholder(self):
+        html = render_preview_html(
+            AgreementType.DPA, CURRENT_VERSIONS[AgreementType.DPA],
+            company=FakeCompany(), user=None, language="ar",
+        )
+        self.assertNotIn("قيد الإكمال", html)
+        self.assertNotIn("قيد التأكيد", html)
+        self.assertIn("Microsoft Azure", html)
+        self.assertIn("Stripe", html)
+        self.assertIn("البنود التعاقدية القياسية", html)
 
 
 class AgreementPublicPreviewEndpointTests(APITestCase):

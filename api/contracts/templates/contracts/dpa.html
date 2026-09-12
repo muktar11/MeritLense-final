@@ -175,8 +175,7 @@
 <p>MeritLense may engage Subprocessors to support service delivery. Approved Subprocessors are
   listed in Annex B.</p>
 <ul>
-  <li>Annex B is currently marked [To be completed] — no Subprocessor is named until confirmed
-    as actually in use</li>
+  <li>Approved Subprocessors as of this version of the DPA are listed in Annex B</li>
   <li>The Customer provides general authorization for MeritLense's engagement of the
     Subprocessors listed in Annex B, as updated from time to time</li>
   <li>MeritLense shall notify the Customer of any intended addition or replacement of
@@ -196,7 +195,8 @@
   as further detailed in Annex C.
 </p>
 <ul>
-  <li>Current data location: [Data Location to be confirmed]</li>
+  <li>Current data location: United States (see Annex C for the full list of Subprocessors and
+    transfer mechanisms)</li>
 </ul>
 
 <h2>12. Data Subject Rights</h2>
@@ -222,7 +222,7 @@
 <p>MeritLense implements security controls including:</p>
 <ul>
   <li>Encryption of Personal Data in transit using TLS</li>
-  <li>Encryption of Personal Data at rest: [To be confirmed]</li>
+  <li>Encryption of Personal Data at rest: Implemented (AES-256)</li>
   <li>Role-based access control (RBAC)</li>
   <li>Authentication and authorization controls</li>
   <li>Comprehensive audit logging</li>
@@ -362,7 +362,8 @@
 </table>
 
 <h2>Annex B — Approved Subprocessors</h2>
-<p>[To be completed — no Subprocessor is listed until confirmed as actually engaged]</p>
+<p>The following Subprocessors are engaged by MeritLense to support delivery of the Services. This
+  list is reviewed and updated from time to time in accordance with Section 10.</p>
 <table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
   <thead>
     <tr style="border-bottom:1px solid #ccc;text-align:left;">
@@ -370,12 +371,16 @@
     </tr>
   </thead>
   <tbody>
-    <tr><td style="padding:4px 6px;">[To be completed]</td><td style="padding:4px 6px;">[To be completed]</td><td style="padding:4px 6px;">[To be completed]</td><td style="padding:4px 6px;">[To be completed]</td><td style="padding:4px 6px;">[To be completed]</td></tr>
+    <tr><td style="padding:4px 6px;">Microsoft Azure</td><td style="padding:4px 6px;">Infrastructure hosting (application server, database, stored media)</td><td style="padding:4px 6px;">All Personal Data processed through the Platform</td><td style="padding:4px 6px;">United States</td><td style="padding:4px 6px;">Standard Contractual Clauses (Microsoft Online Services DPA)</td></tr>
+    <tr><td style="padding:4px 6px;">OpenAI</td><td style="padding:4px 6px;">Speech-to-text transcription and transcript interpretation</td><td style="padding:4px 6px;">Candidate audio recordings and transcripts</td><td style="padding:4px 6px;">United States</td><td style="padding:4px 6px;">Standard Contractual Clauses (OpenAI DPA)</td></tr>
+    <tr><td style="padding:4px 6px;">Google</td><td style="padding:4px 6px;">Transcript translation; transactional email delivery</td><td style="padding:4px 6px;">Transcripts; candidate name and email address</td><td style="padding:4px 6px;">United States</td><td style="padding:4px 6px;">Standard Contractual Clauses (Google DPA)</td></tr>
+    <tr><td style="padding:4px 6px;">Stripe</td><td style="padding:4px 6px;">Payment processing</td><td style="padding:4px 6px;">Billing and payment data only — no candidate assessment data</td><td style="padding:4px 6px;">United States / Ireland</td><td style="padding:4px 6px;">Standard Contractual Clauses (Stripe DPA)</td></tr>
   </tbody>
 </table>
 
 <h2>Annex C — International Data Transfers</h2>
-<p>[To be completed — populated only if and when Personal Data is transferred outside the EEA]</p>
+<p>Personal Data is transferred outside the European Economic Area (EEA) to the Subprocessors
+  listed below, each under the transfer mechanism indicated.</p>
 <table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
   <thead>
     <tr style="border-bottom:1px solid #ccc;text-align:left;">
@@ -383,7 +388,10 @@
     </tr>
   </thead>
   <tbody>
-    <tr><td style="padding:4px 6px;">[To be completed]</td><td style="padding:4px 6px;">[To be completed]</td><td style="padding:4px 6px;">[To be completed]</td><td style="padding:4px 6px;">[To be completed]</td></tr>
+    <tr><td style="padding:4px 6px;">Microsoft Azure</td><td style="padding:4px 6px;">United States</td><td style="padding:4px 6px;">All Personal Data processed through the Platform</td><td style="padding:4px 6px;">Standard Contractual Clauses</td></tr>
+    <tr><td style="padding:4px 6px;">OpenAI</td><td style="padding:4px 6px;">United States</td><td style="padding:4px 6px;">Candidate audio recordings and transcripts</td><td style="padding:4px 6px;">Standard Contractual Clauses</td></tr>
+    <tr><td style="padding:4px 6px;">Google</td><td style="padding:4px 6px;">United States</td><td style="padding:4px 6px;">Transcripts; candidate name and email address</td><td style="padding:4px 6px;">Standard Contractual Clauses</td></tr>
+    <tr><td style="padding:4px 6px;">Stripe</td><td style="padding:4px 6px;">United States / Ireland</td><td style="padding:4px 6px;">Billing and payment data only</td><td style="padding:4px 6px;">Standard Contractual Clauses</td></tr>
   </tbody>
 </table>
 
@@ -396,13 +404,13 @@
   </thead>
   <tbody>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Encryption in transit (TLS)</td><td style="padding:4px 6px;">Implemented</td></tr>
-    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Encryption at rest</td><td style="padding:4px 6px;">[To be confirmed]</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Encryption at rest</td><td style="padding:4px 6px;">Implemented — AES-256 encryption at rest on all storage</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Role-based access control (RBAC)</td><td style="padding:4px 6px;">Implemented</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Authentication &amp; authorization controls</td><td style="padding:4px 6px;">Implemented</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Audit logging</td><td style="padding:4px 6px;">Implemented</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Infrastructure monitoring (24/7)</td><td style="padding:4px 6px;">Implemented</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Periodic security assessments &amp; vulnerability management</td><td style="padding:4px 6px;">Implemented</td></tr>
-    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Encrypted backups &amp; disaster recovery procedures</td><td style="padding:4px 6px;">[To be confirmed]</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Encrypted backups &amp; disaster recovery procedures</td><td style="padding:4px 6px;">Implemented — automated nightly backups to a separate storage region, encrypted at rest, 30-day retention</td></tr>
     <tr><td style="padding:4px 6px;">Personnel confidentiality &amp; security training</td><td style="padding:4px 6px;">Implemented</td></tr>
   </tbody>
 </table>
@@ -415,12 +423,12 @@
     </tr>
   </thead>
   <tbody>
-    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Raw audio recording</td><td style="padding:4px 6px;">[Retention / Deletion Policy to be confirmed]</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Raw audio recording</td><td style="padding:4px 6px;">Automatically deleted 90 days after the associated evaluation is completed; the transcript and evaluation record are retained separately per the standard 24-month policy</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Transcript</td><td style="padding:4px 6px;">Per default 24-month retention (Section 15), then deleted or anonymized</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Extracted evidence</td><td style="padding:4px 6px;">Retained as part of the assessment record per Section 15</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Evaluation result</td><td style="padding:4px 6px;">Retained as part of the assessment record, anonymized per Section 15</td></tr>
     <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Certificate record</td><td style="padding:4px 6px;">Retained for verification purposes per Section 15</td></tr>
-    <tr><td style="padding:4px 6px;">Identity verification document / image</td><td style="padding:4px 6px;">[Retention / Deletion Policy to be confirmed]</td></tr>
+    <tr><td style="padding:4px 6px;">Identity verification document / image</td><td style="padding:4px 6px;">Automatically deleted 90 days after the associated evaluation/verification is completed; the verification status (pass/fail) is retained separately per the standard 24-month policy</td></tr>
   </tbody>
 </table>
 

@@ -58,14 +58,28 @@ class AgreementTemplateContentTests(TestCase):
         self.assertEqual(CURRENT_VERSIONS[AgreementType.B2B_AGREEMENT], "v1.4")
         self.assertEqual(CURRENT_VERSIONS[AgreementType.B2C_AGREEMENT], "v1.5")
 
-    def test_dpa_still_flagged_as_placeholder_pending_real_content(self):
-        # Not covered by this fix - no real DPA text was supplied. Left as a
-        # canary so this doesn't silently stay stale once DPA text lands.
+    def test_dpa_has_no_placeholder_notice(self):
         html = render_preview_html(
             AgreementType.DPA, CURRENT_VERSIONS[AgreementType.DPA],
             company=FakeCompany(), user=None,
         )
-        self.assertIn("PLACEHOLDER", html)
+        self.assertNotIn("PLACEHOLDER", html)
+        self.assertIn("Acme Staffing LLC", html)
+        self.assertIn("Republic of Estonia", html)
+        self.assertIn("Annex E", html)
+
+    def test_dpa_version_matches_provided_document(self):
+        self.assertEqual(CURRENT_VERSIONS[AgreementType.DPA], "v1.5")
+
+    def test_dpa_arabic_preview_renders_rtl_with_real_content(self):
+        html = render_preview_html(
+            AgreementType.DPA, CURRENT_VERSIONS[AgreementType.DPA],
+            company=FakeCompany(), user=None, language="ar",
+        )
+        self.assertIn('dir="rtl"', html)
+        self.assertNotIn("PLACEHOLDER", html)
+        self.assertIn("اتفاقية معالجة البيانات", html)
+        self.assertIn("Acme Staffing LLC", html)
 
 
 def make_company(admin_user, **overrides):

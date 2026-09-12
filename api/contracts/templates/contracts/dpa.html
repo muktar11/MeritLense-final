@@ -4,53 +4,430 @@
 <div class="doc-meta">
   <span>Version {{ version }}</span>
   <span>Generated {{ generated_at }}</span>
-</div>
-
-<div class="placeholder-notice">
-  ⚠ PLACEHOLDER TEXT — this document body has not yet been reviewed by legal. Replace this
-  template with the approved DPA text before any real company relies on it.
+  <span>Jurisdiction: Estonia (EU)</span>
 </div>
 
 <p>
-  This Data Processing Agreement ("DPA") forms part of the B2B Agreement between
-  <span class="field">MeritLense</span> (the "Processor") and
-  <span class="field">{{ company_name }}</span> (the "Controller"), and governs MeritLense's
-  processing of personal data on the Controller's behalf.
+  Annex to the B2B Services Agreement. Governs MeritLense's processing of personal data on
+  behalf of the Customer, <span class="field">{{ company_name }}</span>.
 </p>
 
-<h2>1. Subject Matter and Duration</h2>
+<h2>1. Purpose</h2>
 <p>
-  MeritLense processes candidate and employer personal data solely to provide the evaluation
-  and assessment services described in the B2B Agreement, for the duration of that Agreement.
+  This Data Processing Agreement ("DPA") forms part of and supplements the B2B Services
+  Agreement entered into between MeritLense and the Customer regarding the use of MeritLense's
+  pre-employment workforce readiness assessment services. This DPA, together with its Annexes,
+  defines the conditions under which MeritLense processes Personal Data on behalf of the
+  Customer in accordance with Regulation (EU) 2016/679 (GDPR), applicable Estonian data
+  protection laws, and any other applicable data protection regulations in the Customer's
+  jurisdiction.
+</p>
+<p>
+  <strong>Order of documents:</strong> in the event of any conflict regarding data protection
+  matters not otherwise resolved by Section 21 (Liability), this DPA and its Annexes shall take
+  precedence over the B2B Services Agreement to the extent necessary to satisfy applicable data
+  protection law.
+</p>
+<p>
+  MeritLense's Privacy Policy is referenced in this DPA for general informational and descriptive
+  purposes only. It is not a binding contractual document, does not form part of this order of
+  precedence, and does not modify, supplement, or override the obligations set out in this DPA or
+  the B2B Services Agreement.
 </p>
 
-<h2>2. Nature and Purpose of Processing</h2>
+<h2>2. Definitions</h2>
+<ul>
+  <li><strong>"Personal Data"</strong> means any information relating to an identified or
+    identifiable natural person (GDPR Article 4(1)).</li>
+  <li><strong>"Processing"</strong> means any operation performed on Personal Data (GDPR Article
+    4(2)).</li>
+  <li><strong>"Controller"</strong> means the party that determines the purposes and means of
+    processing Personal Data.</li>
+  <li><strong>"Processor"</strong> means the party that processes Personal Data on behalf of, and
+    under the documented instructions of, a Controller.</li>
+  <li><strong>"Data Subject"</strong> means the individual to whom Personal Data relates,
+    including candidates evaluated through the Platform.</li>
+  <li><strong>"Subprocessor"</strong> means any third party engaged by MeritLense to assist in
+    providing the Services, as listed in Annex B.</li>
+  <li><strong>"Personal Data Breach"</strong> has the meaning given under GDPR Article 4(12).</li>
+  <li><strong>"Special Category Data"</strong> means Personal Data described in GDPR Article 9.</li>
+  <li><strong>"Anonymized"</strong> means Personal Data that has been processed such that the Data
+    Subject is no longer identifiable, and which is no longer considered Personal Data.
+    <strong>"Pseudonymized"</strong> means Personal Data processed such that it can no longer be
+    attributed to a Data Subject without additional information kept separately;
+    pseudonymized data remains Personal Data under GDPR.</li>
+</ul>
+
+<h2>3. Roles of the Parties</h2>
 <p>
-  Processing includes collection, storage, AI-assisted evaluation, and reporting of candidate
-  assessment data submitted by the Controller or its candidates.
+  For the processing of candidate Personal Data in connection with the assessment services
+  provided under the B2B Services Agreement, the Customer acts as Controller and MeritLense
+  acts as Processor.
+</p>
+<p>
+  For processing activities where MeritLense determines the purposes and means independently —
+  including public certificate verification (Section 19), platform security logs, aggregated
+  analytics, and legal recordkeeping — MeritLense may act as an independent Controller, and such
+  processing is governed by MeritLense's Privacy Policy and applicable law, rather than by this
+  DPA.
 </p>
 
-<h2>3. Data Subject Rights</h2>
+<h2>4. Scope and Instructions</h2>
 <p>
-  MeritLense will assist the Controller in responding to data subject requests (access,
-  rectification, erasure, portability) in accordance with applicable data protection law,
-  including GDPR.
+  MeritLense shall process Personal Data only on documented instructions from the Customer,
+  including those set out in the B2B Services Agreement, this DPA, and Annex A, unless otherwise
+  required by applicable law.
+</p>
+<p>
+  MeritLense shall promptly inform the Customer if, in its reasonable opinion, an instruction
+  from the Customer infringes applicable data protection law.
 </p>
 
-<h2>4. Security Measures</h2>
+<h2>5. Description of Processing</h2>
 <p>
-  MeritLense maintains appropriate technical and organizational measures to protect personal
-  data against unauthorized access, loss, or disclosure.
+  The subject matter, duration, nature, and purpose of processing, together with the categories
+  of Data Subjects and categories of Personal Data processed under this DPA, are set out in
+  Annex A (Description of Processing).
 </p>
 
-<h2>5. Sub-processors</h2>
+<h2>6. Categories of Personal Data</h2>
+<h3>6.1 Candidate Information</h3>
+<ul>
+  <li>Name (used for identity verification and for display on the issued certificate)</li>
+  <li>Nationality, contact information, and other employment-related information, where required
+    for the Services</li>
+  <li>Assessment responses (voice transcripts — deleted or anonymized / pseudonymized per
+    Annex E)</li>
+  <li>Evaluation outcomes (score, readiness indicator — retained per the schedule in Annex E)</li>
+</ul>
+<h3>6.2 Technical Data</h3>
+<ul>
+  <li>IP address, device information, browser information</li>
+  <li>Session logs and audit events</li>
+</ul>
+<h3>6.3 Verification Data</h3>
+<ul>
+  <li>Identity verification status (pass / fail)</li>
+  <li>Retention / handling of underlying identity documents or images: [Retention / Deletion
+    Policy to be confirmed]</li>
+</ul>
+<h3>6.4 Special Category Data</h3>
 <p>
-  MeritLense may engage sub-processors to support service delivery and will ensure equivalent
-  data protection obligations are imposed on any sub-processor.
+  MeritLense does not intentionally collect Special Category Data. Where a candidate voluntarily
+  provides Special Category Data within an assessment response, MeritLense shall process such
+  data only to the extent necessary for the provision of the Services and in accordance with the
+  Customer's documented instructions and applicable law.
 </p>
+<h3>6.5 Certificate & Verification Data</h3>
+<ul>
+  <li>Certificate identifier, certificate status, issue date, and supersession / revocation
+    status</li>
+  <li>Public verification reference</li>
+</ul>
+<p>Public disclosure of this data is limited as described in Section 19.</p>
+
+<h2>7. Customer Responsibilities</h2>
+<p>The Customer represents and warrants that:</p>
+<ul>
+  <li>All Personal Data has been collected lawfully with an appropriate legal basis</li>
+  <li>Appropriate candidate consent has been obtained where required by applicable law</li>
+  <li>Data Subjects have been informed of the processing activities and their rights</li>
+  <li>The Customer has a lawful basis for processing Personal Data under GDPR Article 6</li>
+</ul>
+<p>
+  The Customer remains solely responsible for determining the legality of data collection and
+  use in its jurisdiction, including any GCC-applicable regulations.
+</p>
+
+<h2>8. MeritLense Responsibilities</h2>
+<p>MeritLense shall:</p>
+<ul>
+  <li>Process Personal Data only on documented instructions from the Customer</li>
+  <li>Maintain confidentiality of Personal Data and restrict access to authorized personnel
+    only</li>
+  <li>Implement appropriate technical and organizational security measures (Section 13,
+    Annex D)</li>
+  <li>Assist the Customer in responding to lawful Data Subject requests where reasonably
+    required (Section 12)</li>
+  <li>Notify the Customer of any confirmed Personal Data Breach without undue delay
+    (Section 14)</li>
+</ul>
+
+<h2>9. AI-Assisted Processing</h2>
+<p>
+  AI-assisted processing may be used to support processing activities such as transcription,
+  translation, and evidence extraction from candidate responses. AI outputs do not independently
+  constitute an employment decision — MeritLense's evaluation methodology applies defined
+  evaluation rules, and the Customer remains solely responsible for employment decisions. This is
+  consistent with MeritLense's operating principle: AI Assists — Rules Decide — Employers
+  Decide.
+</p>
+<ul>
+  <li>MeritLense shall not use Customer Personal Data to train, fine-tune, or improve
+    general-purpose artificial intelligence or machine learning models for the benefit of
+    MeritLense or any third party, unless expressly authorized by the Customer in writing and
+    supported by an appropriate legal basis</li>
+  <li>Customer Personal Data shall not be used to train or improve models for the benefit of
+    other customers</li>
+</ul>
+
+<h2>10. Subprocessors</h2>
+<p>MeritLense may engage Subprocessors to support service delivery. Approved Subprocessors are
+  listed in Annex B.</p>
+<ul>
+  <li>Annex B is currently marked [To be completed] — no Subprocessor is named until confirmed
+    as actually in use</li>
+  <li>The Customer provides general authorization for MeritLense's engagement of the
+    Subprocessors listed in Annex B, as updated from time to time</li>
+  <li>MeritLense shall notify the Customer of any intended addition or replacement of
+    Subprocessors, giving the Customer a reasonable opportunity to object on legitimate data
+    protection grounds</li>
+  <li>Subprocessors are bound by data protection obligations no less protective than those set
+    out in this DPA</li>
+  <li>MeritLense remains liable to the Customer for the acts and omissions of its Subprocessors
+    to the same extent MeritLense would be liable if performing the services directly</li>
+</ul>
+
+<h2>11. International Data Transfers</h2>
+<p>
+  Where Personal Data is transferred outside the European Economic Area (EEA), MeritLense shall
+  implement an appropriate transfer mechanism required under GDPR Article 46 — such as an
+  adequacy decision, Standard Contractual Clauses (SCCs), or another lawful transfer mechanism —
+  as further detailed in Annex C.
+</p>
+<ul>
+  <li>Current data location: [Data Location to be confirmed]</li>
+</ul>
+
+<h2>12. Data Subject Rights</h2>
+<p>
+  MeritLense shall assist the Customer, taking into account the nature of processing, in
+  responding to Data Subject requests relating to:
+</p>
+<ul>
+  <li>Right of Access (GDPR Article 15)</li>
+  <li>Right to Rectification (GDPR Article 16)</li>
+  <li>Right to Erasure / Right to be Forgotten (GDPR Article 17)</li>
+  <li>Right to Restriction of Processing (GDPR Article 18)</li>
+  <li>Right to Object (GDPR Article 21)</li>
+  <li>Right to Data Portability (GDPR Article 20)</li>
+</ul>
+<p>
+  MeritLense shall not respond substantively to Data Subject requests except as instructed by
+  the Customer, unless required by applicable law. The Customer remains responsible for
+  determining and communicating the response to the Data Subject.
+</p>
+
+<h2>13. Security Measures</h2>
+<p>MeritLense implements security controls including:</p>
+<ul>
+  <li>Encryption of Personal Data in transit using TLS</li>
+  <li>Encryption of Personal Data at rest: [To be confirmed]</li>
+  <li>Role-based access control (RBAC)</li>
+  <li>Authentication and authorization controls</li>
+  <li>Comprehensive audit logging</li>
+  <li>Infrastructure monitoring (24/7)</li>
+  <li>Secure hosting environments</li>
+  <li>Periodic security assessments, vulnerability management, and testing of relevant technical
+    and organizational controls</li>
+  <li>Encrypted backups, backup retention, and disaster recovery procedures</li>
+  <li>Confidentiality obligations and data protection / security training for authorized
+    personnel</li>
+</ul>
+<p>Full detail is set out in Annex D (Technical &amp; Organizational Security Measures).</p>
+
+<h2>14. Personal Data Breach</h2>
+<p>
+  In the event of a confirmed Personal Data Breach affecting Customer Personal Data, MeritLense
+  shall notify the Customer without undue delay after becoming aware of the breach, and shall:
+</p>
+<ul>
+  <li>Provide the information then available regarding the nature, scope, and likely
+    consequences of the incident, supplementing it as further information becomes available</li>
+  <li>Describe mitigation and remediation measures undertaken or proposed</li>
+  <li>Cooperate to support the Customer's regulatory notification obligations under GDPR
+    Article 33</li>
+</ul>
+
+<h2>15. Data Retention / Return / Deletion</h2>
+<p>
+  MeritLense shall retain Personal Data only for as long as necessary to provide the Services,
+  comply with the Customer's documented instructions, fulfil applicable legal obligations, and
+  satisfy the retention schedule in Annex E. Unless otherwise specified in the B2B Services
+  Agreement or required by law, MeritLense's default retention period is up to 24 months from
+  the date of the last relevant interaction.
+</p>
+<ul>
+  <li>Upon expiry of the applicable retention period, personally identifying candidate data is
+    deleted or anonymized where technically and legally feasible; otherwise it is retained in
+    pseudonymized form subject to applicable data protection requirements</li>
+  <li>Upon termination of the B2B Services Agreement, the Customer may elect to have Customer
+    Personal Data returned or deleted, except to the extent MeritLense is required by law to
+    retain it</li>
+</ul>
+
+<h2>16. DPIA &amp; Regulatory Assistance</h2>
+<p>
+  MeritLense shall reasonably assist the Customer with information necessary for data
+  protection impact assessments and consultations with supervisory authorities, where required
+  by applicable law.
+</p>
+
+<h2>17. Audit Rights</h2>
+<p>
+  MeritLense shall make available to the Customer information reasonably necessary to
+  demonstrate compliance with this DPA, and shall allow and contribute to reasonable audits,
+  including inspections, conducted by the Customer or an auditor mandated by the Customer,
+  subject to:
+</p>
+<ul>
+  <li>Reasonable prior written notice</li>
+  <li>Audits conducted during normal business hours</li>
+  <li>Respect for confidentiality obligations owed to other customers, and no access to other
+    customers' data</li>
+  <li>Preference for remote evidence review where practicable</li>
+  <li>The Customer bearing its own costs of conducting the audit</li>
+</ul>
+
+<h2>18. Confidentiality</h2>
+<p>
+  Personnel authorized to access Personal Data are subject to confidentiality obligations and
+  receive appropriate data protection and security training.
+</p>
+
+<h2>19. Public Certificate Verification</h2>
+<p>
+  Where a certificate issued through the Platform is verified via a public verification
+  reference or QR code, the information disclosed through the verification interface is limited
+  to that necessary to confirm authenticity — such as the certificate identifier, status, issue
+  date, role / profile, and verification confirmation — and does not disclose candidate
+  assessment scores, competency details, or other Personal Data beyond what is necessary for
+  verification.
+</p>
+<p>
+  As set out in Section 3, this processing is carried out by MeritLense as an independent
+  Controller in accordance with MeritLense's Privacy Policy, and is not governed by this DPA.
+</p>
+
+<h2>20. Automated Decision-Making</h2>
+<p>
+  MeritLense does not make automated decisions on behalf of the Customer that produce legal
+  effects or similarly significant effects concerning candidates. AI-assisted processing may
+  support evidence extraction and evaluation, while final Readiness outcomes are determined
+  according to MeritLense's defined evaluation methodology, and the Customer remains solely
+  responsible for employment decisions.
+</p>
+
+<h2>21. Liability</h2>
+<p>Each party shall remain responsible for its own compliance with applicable data protection laws.</p>
+<p>
+  In the event of a conflict between this DPA and the B2B Services Agreement regarding data
+  protection matters, this DPA shall prevail to the extent necessary to satisfy applicable data
+  protection law.
+</p>
+<p>
+  Nothing in this DPA shall expand either party's liability beyond the limits established in the
+  B2B Services Agreement.
+</p>
+
+<h2>22. Governing Law</h2>
+<p>
+  This DPA shall be governed by the laws of the Republic of Estonia and applicable European
+  Union data protection regulations, without prejudice to any mandatory data protection
+  requirements applicable to the Customer or Data Subjects in the jurisdiction in which
+  processing occurs. Any disputes arising from this DPA shall be subject to the competent courts
+  of Estonia unless otherwise agreed by the parties in writing.
+</p>
+
+<h2>23. Contact</h2>
+<p>For all data protection matters relating to this DPA, please contact:</p>
+<ul>
+  <li>Email: info@meritlense.com (Data Protection Contact)</li>
+  <li>MeritLense Platform — Estonia</li>
+</ul>
+
+<h2>Annex A — Description of Processing</h2>
+<table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
+  <tbody>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:5px 6px;font-weight:600;width:28%;vertical-align:top;">Subject Matter</td><td style="padding:5px 6px;">Provision of workforce readiness assessment, reporting, and certification services by MeritLense to the Customer.</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:5px 6px;font-weight:600;vertical-align:top;">Duration</td><td style="padding:5px 6px;">For the term of the B2B Services Agreement, plus the applicable retention period set out in Section 15 and Annex E.</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:5px 6px;font-weight:600;vertical-align:top;">Nature of Processing</td><td style="padding:5px 6px;">Collection, storage, use, and analysis of candidate information to deliver assessment, reporting, certificate issuance, and verification services; identity verification.</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:5px 6px;font-weight:600;vertical-align:top;">Purpose</td><td style="padding:5px 6px;">Provision of the Services as described in the B2B Services Agreement.</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:5px 6px;font-weight:600;vertical-align:top;">Categories of Data Subjects</td><td style="padding:5px 6px;">Candidates evaluated through the Platform on the Customer's behalf; the Customer's authorized users.</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:5px 6px;font-weight:600;vertical-align:top;">Categories of Personal Data</td><td style="padding:5px 6px;">As set out in Section 6 of this DPA.</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:5px 6px;font-weight:600;vertical-align:top;">Processing Operations</td><td style="padding:5px 6px;">Collection, recording, storage, retrieval, use, transmission, and erasure / anonymization of Personal Data as necessary to provide the Services.</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:5px 6px;font-weight:600;vertical-align:top;">Controller Instructions</td><td style="padding:5px 6px;">As set out in the B2B Services Agreement and this DPA.</td></tr>
+    <tr><td style="padding:5px 6px;font-weight:600;vertical-align:top;">Retention / Deletion Requirements</td><td style="padding:5px 6px;">As set out in Section 15 and Annex E.</td></tr>
+  </tbody>
+</table>
+
+<h2>Annex B — Approved Subprocessors</h2>
+<p>[To be completed — no Subprocessor is listed until confirmed as actually engaged]</p>
+<table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
+  <thead>
+    <tr style="border-bottom:1px solid #ccc;text-align:left;">
+      <th style="padding:4px 6px;">Subprocessor</th><th style="padding:4px 6px;">Purpose</th><th style="padding:4px 6px;">Data</th><th style="padding:4px 6px;">Location</th><th style="padding:4px 6px;">Mechanism</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td style="padding:4px 6px;">[To be completed]</td><td style="padding:4px 6px;">[To be completed]</td><td style="padding:4px 6px;">[To be completed]</td><td style="padding:4px 6px;">[To be completed]</td><td style="padding:4px 6px;">[To be completed]</td></tr>
+  </tbody>
+</table>
+
+<h2>Annex C — International Data Transfers</h2>
+<p>[To be completed — populated only if and when Personal Data is transferred outside the EEA]</p>
+<table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
+  <thead>
+    <tr style="border-bottom:1px solid #ccc;text-align:left;">
+      <th style="padding:4px 6px;">Provider</th><th style="padding:4px 6px;">Country</th><th style="padding:4px 6px;">Data</th><th style="padding:4px 6px;">Mechanism</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td style="padding:4px 6px;">[To be completed]</td><td style="padding:4px 6px;">[To be completed]</td><td style="padding:4px 6px;">[To be completed]</td><td style="padding:4px 6px;">[To be completed]</td></tr>
+  </tbody>
+</table>
+
+<h2>Annex D — Technical &amp; Organizational Security Measures</h2>
+<table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
+  <thead>
+    <tr style="border-bottom:1px solid #ccc;text-align:left;">
+      <th style="padding:4px 6px;">Measure</th><th style="padding:4px 6px;">Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Encryption in transit (TLS)</td><td style="padding:4px 6px;">Implemented</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Encryption at rest</td><td style="padding:4px 6px;">[To be confirmed]</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Role-based access control (RBAC)</td><td style="padding:4px 6px;">Implemented</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Authentication &amp; authorization controls</td><td style="padding:4px 6px;">Implemented</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Audit logging</td><td style="padding:4px 6px;">Implemented</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Infrastructure monitoring (24/7)</td><td style="padding:4px 6px;">Implemented</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Periodic security assessments &amp; vulnerability management</td><td style="padding:4px 6px;">Implemented</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Encrypted backups &amp; disaster recovery procedures</td><td style="padding:4px 6px;">[To be confirmed]</td></tr>
+    <tr><td style="padding:4px 6px;">Personnel confidentiality &amp; security training</td><td style="padding:4px 6px;">Implemented</td></tr>
+  </tbody>
+</table>
+
+<h2>Annex E — Retention Schedule</h2>
+<table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
+  <thead>
+    <tr style="border-bottom:1px solid #ccc;text-align:left;">
+      <th style="padding:4px 6px;">Data</th><th style="padding:4px 6px;">Default Handling</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Raw audio recording</td><td style="padding:4px 6px;">[Retention / Deletion Policy to be confirmed]</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Transcript</td><td style="padding:4px 6px;">Per default 24-month retention (Section 15), then deleted or anonymized</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Extracted evidence</td><td style="padding:4px 6px;">Retained as part of the assessment record per Section 15</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Evaluation result</td><td style="padding:4px 6px;">Retained as part of the assessment record, anonymized per Section 15</td></tr>
+    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Certificate record</td><td style="padding:4px 6px;">Retained for verification purposes per Section 15</td></tr>
+    <tr><td style="padding:4px 6px;">Identity verification document / image</td><td style="padding:4px 6px;">[Retention / Deletion Policy to be confirmed]</td></tr>
+  </tbody>
+</table>
 
 <div class="signature-block">
-  <p>Signed electronically by the Controller's authorized representative:</p>
+  <p>By accepting this Agreement (electronically or in writing) as part of the B2B onboarding
+  process, both parties confirm their understanding and acceptance of its terms. Signed
+  electronically by the Customer's authorized representative:</p>
   <p><strong>{{ signatory_name }}</strong></p>
 </div>
 

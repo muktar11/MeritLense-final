@@ -18,11 +18,11 @@ TEMPLATE_BY_TYPE = {
     AgreementType.B2C_AGREEMENT: "contracts/b2c_agreement.html",
 }
 
-# Agreement types with a translated Arabic template. Only B2C_AGREEMENT has
-# one today; other types fall back to the English template regardless of
-# the requested language.
+# Agreement types with a translated Arabic template. Other types fall back
+# to the English template regardless of the requested language.
 TEMPLATE_BY_TYPE_AR = {
     AgreementType.B2C_AGREEMENT: "contracts/b2c_agreement_ar.html",
+    AgreementType.DPA: "contracts/dpa_ar.html",
 }
 
 # Company stamp only applies to the B2B-scoped documents — B2C signers have

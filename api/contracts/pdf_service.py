@@ -21,6 +21,7 @@ TEMPLATE_BY_TYPE = {
 # Agreement types with a translated Arabic template. Other types fall back
 # to the English template regardless of the requested language.
 TEMPLATE_BY_TYPE_AR = {
+    AgreementType.B2B_AGREEMENT: "contracts/b2b_agreement_ar.html",
     AgreementType.B2C_AGREEMENT: "contracts/b2c_agreement_ar.html",
     AgreementType.DPA: "contracts/dpa_ar.html",
 }

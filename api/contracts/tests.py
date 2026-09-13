@@ -55,8 +55,32 @@ class AgreementTemplateContentTests(TestCase):
         self.assertIn("Refund Policy (B2C)", html)
 
     def test_b2b_and_b2c_versions_match_provided_documents(self):
-        self.assertEqual(CURRENT_VERSIONS[AgreementType.B2B_AGREEMENT], "v1.4")
+        self.assertEqual(CURRENT_VERSIONS[AgreementType.B2B_AGREEMENT], "v1.5")
         self.assertEqual(CURRENT_VERSIONS[AgreementType.B2C_AGREEMENT], "v1.5")
+
+    def test_b2b_agreement_v1_5_privacy_policy_clause(self):
+        """v1.5 added the clause clarifying the Privacy Policy is
+        informational only and doesn't affect precedence between this
+        Agreement and the DPA - matches the DPA's equivalent language."""
+        html = render_preview_html(
+            AgreementType.B2B_AGREEMENT, CURRENT_VERSIONS[AgreementType.B2B_AGREEMENT],
+            company=FakeCompany(), user=None,
+        )
+        self.assertIn("is referenced in this Agreement and in the DPA for general", html)
+
+    def test_b2b_agreement_arabic_preview_renders_rtl_with_real_content(self):
+        """b2b_agreement_ar.html didn't exist until now - Arabic-locale B2B
+        signers were silently served the English template despite the
+        frontend already requesting lang=ar (see TEMPLATE_BY_TYPE_AR)."""
+        html = render_preview_html(
+            AgreementType.B2B_AGREEMENT, CURRENT_VERSIONS[AgreementType.B2B_AGREEMENT],
+            company=FakeCompany(), user=None, language="ar",
+        )
+        self.assertIn('dir="rtl"', html)
+        self.assertNotIn("PLACEHOLDER", html)
+        self.assertIn("اتفاقية خدمات B2B", html)
+        self.assertIn("Acme Staffing LLC", html)
+        self.assertIn("Assessment Slots", html)
 
     def test_dpa_has_no_placeholder_notice(self):
         html = render_preview_html(

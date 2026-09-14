@@ -270,6 +270,29 @@ Meritlense Team
     safe_send_mail(subject, message, [user.email])
 
 
+def send_admin_contact_email(user, message, sender):
+    """A lighter-weight alternative to rejecting: an admin flags an issue
+    with submitted documents without changing the account's verification
+    status at all, so the applicant isn't blocked from resubmitting or
+    left in a REJECTED state over something that just needs clarifying."""
+    subject = "A question about your Meritlense account documents"
+    body = f"""
+Hello {user.first_name},
+
+{sender.get_full_name()} from the Meritlense team has a question about your
+submitted documents:
+
+{message}
+
+Please reply to this email or contact support so we can continue reviewing
+your account.
+
+Best regards,
+Meritlense Team
+"""
+    safe_send_mail(subject, body, [user.email])
+
+
 def notify_superadmins(subject, message):
     """Best-effort alert to every active SuperAdmin - e.g. a new
     registration or a freshly-signed B2B contract awaiting review. Failure

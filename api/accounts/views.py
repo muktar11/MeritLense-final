@@ -46,7 +46,7 @@ from .serializers import (
 from .utils import (
     send_password_reset_email, send_verification_email, send_team_invitation_email,
     send_admin_credentials_email, send_employer_welcome_email, invalidate_user_sessions,
-    send_welcome_email, send_account_approved_email, send_account_rejected_email, notify_superadmins,
+    send_welcome_email, send_account_approved_email, send_account_rejected_email, send_admin_contact_email, notify_superadmins,
 )
 import random
 
@@ -1986,6 +1986,67 @@ class RejectDocumentsView(APIView):
             'message': 'Documents rejected successfully',
             'user': EmployerListSerializer(user).data
         }, status=status.HTTP_200_OK)
+
+
+class ContactApplicantView(APIView):
+    """POST /accounts/admin/contact-applicant — flag an issue with an
+    applicant's submitted documents without rejecting the account. Unlike
+    VerifyDocumentsView/RejectDocumentsView, this never touches
+    documents_verified / company.is_verified - it's purely a message, for
+    cases like "your registration certificate photo is a bit blurry,
+    could you re-upload it" that don't warrant a full rejection."""
+    permission_classes = [IsAuthenticated, CanVerifyDocuments]
+
+    @extend_schema(
+        summary="Contact an applicant about their documents",
+        request=inline_serializer(
+            name="ContactApplicantRequest",
+            fields={
+                "user_id": serializers.CharField(),
+                "message": serializers.CharField(),
+            },
+        ),
+        responses={
+            200: inline_serializer(
+                name="ContactApplicantResponse",
+                fields={"message": serializers.CharField()},
+            ),
+            400: error_response_serializer,
+            404: error_response_serializer,
+        },
+    )
+    def post(self, request):
+        user_id = request.data.get('user_id')
+        contact_message = request.data.get('message', '').strip()
+
+        if not user_id:
+            return Response({'error': 'user_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not contact_message:
+            return Response({'error': 'message is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = get_by_identifier(
+                User.objects.filter(role__in=[Roles.B2B, Roles.B2C]),
+                user_id
+            )
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        send_admin_contact_email(user, contact_message, request.user)
+
+        AuditLogService.log(
+            user=request.user,
+            action=AuditLogAction.DOCUMENT_CONTACT_REQUESTED,
+            category=AuditLogCategory.DOCUMENT,
+            description=f"Admin contacted {user.get_full_name()} ({user.email}) about their documents",
+            resource=user,
+            data={'verifier': request.user.email, 'message': contact_message, 'user_role': user.role},
+            request=request
+        )
+
+        return Response({'message': 'Message sent to applicant'}, status=status.HTTP_200_OK)
+
+
 class AdminDashboardStatsView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 

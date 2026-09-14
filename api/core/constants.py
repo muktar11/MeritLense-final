@@ -896,6 +896,7 @@ class AuditLogAction:
     DOCUMENT_UPLOADED = "DOCUMENT_UPLOADED"
     DOCUMENT_VERIFIED = "DOCUMENT_VERIFIED"
     DOCUMENT_REJECTED = "DOCUMENT_REJECTED"
+    DOCUMENT_CONTACT_REQUESTED = "DOCUMENT_CONTACT_REQUESTED"
     
     SUBSCRIPTION_CREATED = "SUBSCRIPTION_CREATED"
     SUBSCRIPTION_UPDATED = "SUBSCRIPTION_UPDATED"
@@ -1081,6 +1082,7 @@ class AuditLogAction:
         (DOCUMENT_UPLOADED, "Document Uploaded"),
         (DOCUMENT_VERIFIED, "Document Verified"),
         (DOCUMENT_REJECTED, "Document Rejected"),
+        (DOCUMENT_CONTACT_REQUESTED, "Admin Contacted Applicant About Documents"),
         
         (SUBSCRIPTION_CREATED, "Subscription Created"),
         (SUBSCRIPTION_UPDATED, "Subscription Updated"),

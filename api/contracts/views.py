@@ -21,7 +21,7 @@ from api.accounts.utils import notify_superadmins
 from .constants import CURRENT_VERSIONS
 from .models import Agreement
 from .otp_service import OTPService
-from .pdf_service import render_agreement_pdf, render_preview_html, generate_contract_id, compute_pdf_hash
+from .pdf_service import render_agreement_pdf, render_preview_html, generate_contract_id, compute_pdf_hash, STAMPED_TYPES
 from .serializers import (
     AgreementSerializer,
     AgreementAcceptSerializer,
@@ -115,6 +115,21 @@ class AgreementSignInitiateView(APIView):
             )
 
         company = _user_company(request.user)
+
+        # The company stamp is embedded in the signed PDF at this exact
+        # moment (pdf_service.STAMPED_TYPES) and the PDF is never
+        # regenerated afterward - a company that signs before uploading a
+        # stamp is permanently stuck with an unstamped document. Block
+        # signing up front instead.
+        if set(data['agreement_types']) & STAMPED_TYPES and not (company and company.stamp_image):
+            return Response(
+                {
+                    'error': 'Please upload your company stamp in Company Profile before signing this agreement.',
+                    'stamp_missing': True,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         email = request.user.email
 
         otp_service = OTPService()

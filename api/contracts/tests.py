@@ -277,7 +277,10 @@ class AdminAgreementEndpointTests(APITestCase):
             email="agreement-endpoint-signer@example.com", password="Password123!",
             first_name="Signer", last_name="Co", role=Roles.B2B, is_verified=True,
         )
-        make_company(signer, name="Signer Co", registration_number="REG-SIGNER-1")
+        make_company(
+            signer, name="Signer Co", registration_number="REG-SIGNER-1",
+            stamp_image=SimpleUploadedFile("stamp.png", b"fake-png-bytes", content_type="image/png"),
+        )
 
         login = self.client.post(
             "/api/v1/auth/login", {"email": signer.email, "password": "Password123!"}, format="json",
@@ -310,3 +313,66 @@ class AdminAgreementEndpointTests(APITestCase):
         admin_alerts = [m for m in mail.outbox if self.superadmin.email in m.to]
         self.assertEqual(len(admin_alerts), 1)
         self.assertIn("Signer Co", admin_alerts[0].subject)
+
+
+class CompanyStampRequiredForSigningTests(APITestCase):
+    """The company stamp is baked into the signed PDF at sign time only and
+    never regenerated (see pdf_service.STAMPED_TYPES) - a company that
+    signs before uploading a stamp is permanently stuck with an unstamped
+    document. Signing B2B_AGREEMENT/DPA must be blocked until a stamp
+    exists."""
+
+    def _login_b2b_user(self, **company_overrides):
+        user = User.objects.create_user(
+            email=f"stamp-gate-{company_overrides.get('registration_number', 'x')}@example.com",
+            password="Password123!", first_name="Owner", last_name="Co", role=Roles.B2B, is_verified=True,
+        )
+        make_company(user, name="Stamp Test Co", **company_overrides)
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": user.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+        return user
+
+    def test_b2b_sign_blocked_without_company_stamp(self):
+        self._login_b2b_user(registration_number="REG-STAMP-1")
+        response = self.client.post(
+            "/api/v1/agreements/sign/initiate",
+            {
+                "agreement_types": [AgreementType.B2B_AGREEMENT],
+                "signatory_name": "Stamp Test Co",
+                "authorized_signatory_confirmed": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertTrue(response.data.get("stamp_missing"))
+
+    def test_dpa_sign_also_blocked_without_company_stamp(self):
+        self._login_b2b_user(registration_number="REG-STAMP-2")
+        response = self.client.post(
+            "/api/v1/agreements/sign/initiate",
+            {
+                "agreement_types": [AgreementType.DPA],
+                "signatory_name": "Stamp Test Co",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertTrue(response.data.get("stamp_missing"))
+
+    def test_b2b_sign_allowed_with_company_stamp(self):
+        self._login_b2b_user(
+            registration_number="REG-STAMP-3",
+            stamp_image=SimpleUploadedFile("stamp.png", b"fake-png-bytes", content_type="image/png"),
+        )
+        response = self.client.post(
+            "/api/v1/agreements/sign/initiate",
+            {
+                "agreement_types": [AgreementType.B2B_AGREEMENT],
+                "signatory_name": "Stamp Test Co",
+                "authorized_signatory_confirmed": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)

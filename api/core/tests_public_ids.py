@@ -87,12 +87,17 @@ class PublicIdApiTests(TestCase):
             scheduled_date=timezone.now() + timezone.timedelta(days=1),
             created_by=user,
         )
+        # unit_amount=0: this test only checks that the serializer accepts a
+        # public_id for price_id, not payment-method handling - a paid price
+        # would additionally require payment_method_id (see
+        # CreateSubscriptionSerializer.validate), which is orthogonal to
+        # what's being tested here.
         price = Price.objects.create(
             name="Starter",
             stripe_price_id="price_test_123",
             stripe_product_id="prod_test_123",
             target_user_type="B2C",
-            unit_amount="25.00",
+            unit_amount="0.00",
             currency="usd",
             interval=BillingInterval.MONTHLY,
             is_active=True,

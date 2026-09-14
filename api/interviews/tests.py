@@ -23,6 +23,7 @@ from api.interviews.models import InterviewConfiguration, InterviewRubric, Packa
 from api.interviews.voice_services import VoiceProviderError
 from api.payments.models import PackageBalance
 from api.questions.models import QuestionTemplate
+from api.questions.skill_tags import FIXED_QUESTION_SKILL_TAGS
 from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionArtifact, SessionObservedTask, TaskObservationResult
 from api.sessions.services import InterviewSessionService
 from api.translation.models import CandidateResponseInterpretation, CandidateResponseTranslation, EvaluationInputArtifact
@@ -105,6 +106,13 @@ class InterviewSessionApiTests(APITestCase):
             question_set_version="v1",
         )
         for index in range(1, 4):
+            # skill_tag must normalize to one of the 4 fixed canonical tags
+            # (see api/questions/skill_tags.py) or _question_pool in
+            # api/sessions/services.py silently drops the template from the
+            # selectable pool - an arbitrary label like "Skill 1" survives
+            # nothing, leaving every session in this test class with zero
+            # generated questions.
+            skill_label = FIXED_QUESTION_SKILL_TAGS[index - 1]
             QuestionTemplate.objects.create(
                 role_name="Nanny",
                 role_code="nanny",
@@ -112,8 +120,8 @@ class InterviewSessionApiTests(APITestCase):
                 question_version="1.0",
                 question_status=QuestionLifecycleStatus.ACTIVE,
                 domain="Child Care",
-                skill_tag=f"Skill {index}",
-                skill=f"Skill {index}",
+                skill_tag=skill_label,
+                skill=skill_label,
                 sequence_number=index,
                 difficulty=QuestionDifficulty.MEDIUM,
                 question_text=f"Question text {index}",
@@ -1811,6 +1819,12 @@ class InterviewSessionApiTests(APITestCase):
             asked_at=timezone.now() - timezone.timedelta(days=2),
             answered_at=timezone.now() - timezone.timedelta(days=2),
         )
+        # skill_tag must normalize to a canonical tag (see setUp's fixture
+        # comment above) or this "fresh alternative" is invisible to
+        # _question_pool - the generator would then have to fall back to
+        # the only 3 templates that exist (all in setUp, including the
+        # just-answered NAN-001) to fill 3 slots, defeating the point of
+        # this test.
         QuestionTemplate.objects.create(
             role_name="Nanny",
             role_code="nanny",
@@ -1818,8 +1832,8 @@ class InterviewSessionApiTests(APITestCase):
             question_version="1.0",
             question_status=QuestionLifecycleStatus.ACTIVE,
             domain="Communication",
-            skill_tag="Greeting",
-            skill="Greeting",
+            skill_tag=FIXED_QUESTION_SKILL_TAGS[3],
+            skill=FIXED_QUESTION_SKILL_TAGS[3],
             sequence_number=10,
             difficulty=QuestionDifficulty.EASY,
             question_text="How do you greet a child in the morning?",
@@ -1855,11 +1869,20 @@ class InterviewSessionApiTests(APITestCase):
 
     def test_question_generation_balances_context_across_domains_and_skills(self):
         QuestionTemplate.objects.all().delete()
+        # Selection (_question_pool in api/sessions/services.py) only ever
+        # considers templates whose skill_tag normalizes to one of the 4
+        # fixed canonical tags (FIXED_QUESTION_SKILL_TAGS) - use those
+        # labels directly, one per fixture, so all four survive the pool
+        # filter instead of being silently dropped like ad-hoc labels
+        # ("Hazard Awareness", "Child Comfort", ...) would be. Each fixture
+        # also gets its own domain so any 3-of-4 selection necessarily
+        # spans 3 distinct domains, regardless of which the scoring
+        # algorithm happens to pick.
         fixtures = [
-            ("NAN-A1", "Safety", "Hazard Awareness", "What would you do if the floor is wet?", "safety", QuestionDifficulty.EASY),
-            ("NAN-A2", "Safety", "Emergency Response", "What would you do in a kitchen fire?", "safety", QuestionDifficulty.MEDIUM),
-            ("NAN-B1", "Care", "Child Comfort", "How do you calm a crying child?", "behavioral", QuestionDifficulty.MEDIUM),
-            ("NAN-C1", "Communication", "Employer Update", "How do you report a problem to an employer?", "communication", QuestionDifficulty.HARD),
+            ("NAN-A1", "Safety", FIXED_QUESTION_SKILL_TAGS[0], "What would you do if the floor is wet?", "safety", QuestionDifficulty.EASY),
+            ("NAN-B1", "Care", FIXED_QUESTION_SKILL_TAGS[1], "How do you calm a crying child?", "behavioral", QuestionDifficulty.MEDIUM),
+            ("NAN-C1", "Communication", FIXED_QUESTION_SKILL_TAGS[2], "How do you report a problem to an employer?", "communication", QuestionDifficulty.HARD),
+            ("NAN-D1", "Tasks", FIXED_QUESTION_SKILL_TAGS[3], "How do you complete a routine chore checklist?", "task", QuestionDifficulty.MEDIUM),
         ]
         for index, (code, domain, skill, text, qtype, difficulty) in enumerate(fixtures, start=1):
             QuestionTemplate.objects.create(

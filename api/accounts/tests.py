@@ -1212,3 +1212,53 @@ class AccountsWeek2Tests(APITestCase):
         rejected_emails = [m for m in mail.outbox if b2b_user.email in m.to]
         self.assertEqual(len(rejected_emails), 1)
         self.assertIn("Blurry scan", rejected_emails[0].body)
+
+    def test_contact_applicant_emails_a_custom_message_without_changing_verification_status(self):
+        """ContactApplicantView is a lighter alternative to rejecting - it
+        must never touch documents_verified / company.is_verified, only
+        send the message."""
+        superadmin = self.create_verified_superadmin(email="contact-notify-admin@example.com")
+        b2b_user, company = self.create_verified_b2b_owner(email="contact-notify-me@example.com")
+        documents_verified_before = b2b_user.documents_verified
+        company_verified_before = company.is_verified
+
+        self.authenticate(superadmin.email, "Password123!")
+        mail.outbox = []
+        response = self.client.post(
+            "/api/v1/auth/admin/employers/contact-applicant",
+            {"user_id": str(b2b_user.public_id), "message": "Could you re-upload a clearer registration certificate?"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+        contact_emails = [m for m in mail.outbox if b2b_user.email in m.to]
+        self.assertEqual(len(contact_emails), 1)
+        self.assertIn("Could you re-upload a clearer registration certificate?", contact_emails[0].body)
+
+        b2b_user.refresh_from_db()
+        company.refresh_from_db()
+        self.assertEqual(b2b_user.documents_verified, documents_verified_before)
+        self.assertEqual(company.is_verified, company_verified_before)
+
+    def test_contact_applicant_requires_a_message(self):
+        superadmin = self.create_verified_superadmin(email="contact-empty-admin@example.com")
+        b2b_user, _company = self.create_verified_b2b_owner(email="contact-empty-me@example.com")
+
+        self.authenticate(superadmin.email, "Password123!")
+        response = self.client.post(
+            "/api/v1/auth/admin/employers/contact-applicant",
+            {"user_id": str(b2b_user.public_id), "message": ""},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_contact_applicant_denied_for_non_admin(self):
+        b2b_user, _company = self.create_verified_b2b_owner(email="contact-denied-me@example.com")
+
+        self.authenticate(b2b_user.email, "Password123!")
+        response = self.client.post(
+            "/api/v1/auth/admin/employers/contact-applicant",
+            {"user_id": str(b2b_user.public_id), "message": "hello"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

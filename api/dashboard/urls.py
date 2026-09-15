@@ -15,6 +15,8 @@ urlpatterns = [
     path('b2b/status-distribution', views_b2b.B2BEvaluationStatusDistributionView.as_view(), name='b2b-status-distribution'),
     path('b2b/monthly-activity', views_b2b.B2BMonthlyActivityView.as_view(), name='b2b-monthly-activity'),
     path('b2b/candidate-comparison', views_b2b.B2BCandidateComparisonView.as_view(), name='b2b-candidate-comparison'),
+    path('b2b/job-role-distribution', views_b2b.B2BJobRoleDistributionView.as_view(), name='b2b-job-role-distribution'),
+    path('b2b/evaluation-time-range', views_b2b.B2BEvaluationTimeRangeView.as_view(), name='b2b-evaluation-time-range'),
 
     path('b2c/stats', views_b2c.B2CDashboardStatsView.as_view(), name='b2c-stats'),
     path('b2c/candidates/recent', views_b2c.B2CRecentCandidatesView.as_view(), name='b2c-recent-candidates'),
@@ -24,6 +26,9 @@ urlpatterns = [
     path('b2c/status-distribution', views_b2c.B2CEvaluationStatusDistributionView.as_view(), name='b2c-status-distribution'),
     path('b2c/job-role-distribution', views_b2c.B2CJobRoleDistributionView.as_view(), name='b2c-job-role-distribution'),
     path('b2c/score-trend', views_b2c.B2CScoreTrendView.as_view(), name='b2c-score-trend'),
+    path('b2c/language-distribution', views_b2c.B2CLanguageDistributionView.as_view(), name='b2c-language-distribution'),
+    path('b2c/evaluation-trend', views_b2c.B2CEvaluationTrendView.as_view(), name='b2c-evaluation-trend'),
+    path('b2c/monthly-activity', views_b2c.B2CMonthlyActivityView.as_view(), name='b2c-monthly-activity'),
 
     path('admin/stats', views_admin.AdminDashboardStatsView.as_view(), name='admin-stats'),
     path('admin/system-load', views_admin.AdminSystemLoadTrendView.as_view(), name='admin-system-load'),

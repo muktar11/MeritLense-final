@@ -410,6 +410,84 @@ class B2BMonthlyActivityView(APIView):
         return Response(serializer.data)
 
 
+class B2BJobRoleDistributionView(APIView):
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+
+    def get(self, request):
+        company = None
+        if request.user.role == Roles.B2B and hasattr(request.user, 'company_profile'):
+            company = request.user.company_profile.company
+        elif request.user.role == Roles.B2B_TEAM_MEMBER and hasattr(request.user, 'team_member_profile'):
+            company = request.user.team_member_profile.company
+
+        if not company:
+            return Response({'error': 'Company not found'}, status=400)
+
+        candidates = Candidate.objects.filter(company=company)
+        total = candidates.count()
+
+        if total == 0:
+            return Response([])
+
+        role_dict = dict(CandidateJobRoles.CHOICES)
+        distribution = []
+
+        for role_code, role_name in role_dict.items():
+            count = candidates.filter(job_role=role_code).count()
+            if count > 0:
+                distribution.append({
+                    'job_role': role_code,
+                    'job_role_display': role_name,
+                    'count': count,
+                    'percentage': round((count / total * 100), 2)
+                })
+
+        distribution.sort(key=lambda x: x['count'], reverse=True)
+
+        return Response(distribution)
+
+
+class B2BEvaluationTimeRangeView(APIView):
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+
+    def get(self, request):
+        company = None
+        if request.user.role == Roles.B2B and hasattr(request.user, 'company_profile'):
+            company = request.user.company_profile.company
+        elif request.user.role == Roles.B2B_TEAM_MEMBER and hasattr(request.user, 'team_member_profile'):
+            company = request.user.team_member_profile.company
+
+        if not company:
+            return Response({'error': 'Company not found'}, status=400)
+
+        evaluations = Evaluation.objects.filter(company=company)
+
+        time_ranges = {
+            'morning': {'name': 'Morning (6am-12pm)', 'count': 0},
+            'afternoon': {'name': 'Afternoon (12pm-6pm)', 'count': 0},
+            'evening': {'name': 'Evening (6pm-12am)', 'count': 0},
+            'night': {'name': 'Night (12am-6am)', 'count': 0}
+        }
+
+        for eval in evaluations:
+            hour = eval.scheduled_date.hour
+            if 6 <= hour < 12:
+                time_ranges['morning']['count'] += 1
+            elif 12 <= hour < 18:
+                time_ranges['afternoon']['count'] += 1
+            elif 18 <= hour < 24:
+                time_ranges['evening']['count'] += 1
+            else:
+                time_ranges['night']['count'] += 1
+
+        result = [
+            {'range': data['name'], 'count': data['count']}
+            for data in time_ranges.values()
+        ]
+
+        return Response(result)
+
+
 class B2BCandidateComparisonView(APIView):
     permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
 

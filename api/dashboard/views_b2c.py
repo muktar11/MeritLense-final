@@ -1,12 +1,12 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Count, Avg, Max
-from django.db.models.functions import TruncDate
+from django.db.models import Count, Avg, Max, Q
+from django.db.models.functions import TruncDate, TruncMonth
 from django.utils import timezone
 from datetime import timedelta
 
-from api.core.constants import EvaluationStatus, candidateJobRoles
+from api.core.constants import EvaluationStatus, candidateJobRoles, Languages
 from api.candidates.models import Candidate
 from api.core.permisssions import IsB2CUser
 from api.evaluations.models import Evaluation
@@ -16,6 +16,7 @@ from .comparison_services import build_candidate_comparison_entry
 from .serializers import (
     DashboardStatsSerializer, RecentCandidateSerializer, RecentEvaluationSerializer,
     CandidateComparisonSerializer, EvaluationStatusDistributionSerializer,
+    EvaluationTrendSerializer, LanguageDistributionSerializer, MonthlyActivitySerializer,
 )
 
 
@@ -253,5 +254,143 @@ class B2CScoreTrendView(APIView):
             {'date': item['date'].strftime('%Y-%m-%d'), 'avg_score': round(item['avg_score'], 2)}
             for item in evaluations
         ]
-        
+
         return Response(result)
+
+
+class B2CLanguageDistributionView(APIView):
+    permission_classes = [IsAuthenticated, IsB2CUser]
+
+    def get(self, request):
+        user = request.user
+        candidates = Candidate.objects.filter(created_by=user)
+        evaluations = Evaluation.objects.filter(candidate__in=candidates)
+        total = evaluations.count()
+
+        if total == 0:
+            return Response([])
+
+        lang_dict = dict(Languages.CHOICES)
+        distribution = []
+
+        for lang_code, lang_name in lang_dict.items():
+            count = evaluations.filter(candidate_preferred_language=lang_code).count()
+            if count > 0:
+                distribution.append({
+                    'language': lang_code,
+                    'language_display': lang_name,
+                    'count': count,
+                    'percentage': round((count / total * 100), 2)
+                })
+
+        distribution.sort(key=lambda x: x['count'], reverse=True)
+
+        serializer = LanguageDistributionSerializer(distribution, many=True)
+        return Response(serializer.data)
+
+
+class B2CEvaluationTrendView(APIView):
+    permission_classes = [IsAuthenticated, IsB2CUser]
+
+    def get(self, request):
+        days = int(request.query_params.get('days', 30))
+
+        user = request.user
+        candidates = Candidate.objects.filter(created_by=user)
+
+        start_date = timezone.now() - timedelta(days=days)
+
+        trends = Evaluation.objects.filter(
+            candidate__in=candidates,
+            created_at__gte=start_date
+        ).annotate(
+            date=TruncDate('created_at')
+        ).values('date').annotate(
+            scheduled_count=Count('id', filter=Q(status=EvaluationStatus.SCHEDULED)),
+            completed_count=Count('id', filter=Q(status=EvaluationStatus.COMPLETED)),
+            cancelled_count=Count('id', filter=Q(status=EvaluationStatus.CANCELLED))
+        ).order_by('date')
+
+        serializer = EvaluationTrendSerializer(trends, many=True)
+        return Response(serializer.data)
+
+
+class B2CMonthlyActivityView(APIView):
+    permission_classes = [IsAuthenticated, IsB2CUser]
+
+    def get(self, request):
+        months = int(request.query_params.get('months', 6))
+
+        user = request.user
+        candidates_qs = Candidate.objects.filter(created_by=user)
+
+        start_date = timezone.now() - timedelta(days=30 * months)
+
+        candidates = candidates_qs.filter(
+            created_at__gte=start_date
+        ).annotate(
+            month=TruncMonth('created_at')
+        ).values('month').annotate(
+            candidates_added=Count('id')
+        )
+
+        evaluations = Evaluation.objects.filter(
+            candidate__in=candidates_qs,
+            status=EvaluationStatus.COMPLETED,
+            created_at__gte=start_date
+        ).annotate(
+            month=TruncMonth('created_at')
+        ).values('month').annotate(
+            evaluations_completed=Count('id')
+        )
+
+        certificates = Evaluation.objects.filter(
+            candidate__in=candidates_qs,
+            certificate_status='ISSUED',
+            created_at__gte=start_date
+        ).annotate(
+            month=TruncMonth('created_at')
+        ).values('month').annotate(
+            certificates_issued=Count('id')
+        )
+
+        months_data = {}
+
+        for item in candidates:
+            month = item['month'].strftime('%Y-%m')
+            months_data[month] = {
+                'month': month,
+                'candidates_added': item['candidates_added'],
+                'evaluations_completed': 0,
+                'certificates_issued': 0
+            }
+
+        for item in evaluations:
+            month = item['month'].strftime('%Y-%m')
+            if month in months_data:
+                months_data[month]['evaluations_completed'] = item['evaluations_completed']
+            else:
+                months_data[month] = {
+                    'month': month,
+                    'candidates_added': 0,
+                    'evaluations_completed': item['evaluations_completed'],
+                    'certificates_issued': 0
+                }
+
+        for item in certificates:
+            month = item['month'].strftime('%Y-%m')
+            if month in months_data:
+                months_data[month]['certificates_issued'] = item['certificates_issued']
+            else:
+                months_data[month] = {
+                    'month': month,
+                    'candidates_added': 0,
+                    'evaluations_completed': 0,
+                    'certificates_issued': item['certificates_issued']
+                }
+
+        result = list(months_data.values())
+        result.sort(key=lambda x: x['month'])
+
+        serializer = MonthlyActivitySerializer(result, many=True)
+        return Response(serializer.data)

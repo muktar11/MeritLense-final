@@ -28,7 +28,8 @@ from api.evaluations.scoring_services import Week6ScoringError, Week6ScoringServ
 from api.evaluations.certificate_services import generate_certificate
 from api.interviews.package_services import PackageArchitectureService
 from api.payments.entitlement_services import EntitlementService
-from api.payments.models import SlotReservation
+from api.payments.models import PackageBalance, SlotReservation
+from api.payments.notifications import send_reservation_failed_email, maybe_send_low_balance_warning
 from api.interviews.voice_services import (
     SpeechToTextService,
     TextToSpeechService,
@@ -478,7 +479,21 @@ class InterviewSessionService:
         # raises ValueError (no Slot available) if the owner has none,
         # rolling back this entire (still-atomic) session creation rather
         # than letting the candidate discover "no balance" only at Start.
-        EntitlementService.reserve_slot(session=session, actor=created_by)
+        try:
+            EntitlementService.reserve_slot(session=session, actor=created_by)
+        except ValueError as exc:
+            send_reservation_failed_email(
+                candidate=candidate, created_by=created_by, company=candidate.company,
+                role_name=config.role_name, reason=str(exc),
+            )
+            raise
+
+        owner_type, owner = EntitlementService.resolve_owner(session)
+        slot_summary = EntitlementService.get_balance_summary(owner_type, owner)[PackageBalance.SLOTS]
+        maybe_send_low_balance_warning(
+            created_by=created_by, company=candidate.company,
+            remaining=slot_summary["remaining"], limit=slot_summary["limit"],
+        )
         QuestionGenerationService.generate_questions(session)
         TaskObservationService.assign_tasks(session)
         cls._ensure_linked_evaluation(session, status=EvaluationStatus.SCHEDULED)

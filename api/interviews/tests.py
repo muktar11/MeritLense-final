@@ -8,6 +8,7 @@ from unittest.mock import patch
 import requests
 
 from asgiref.testing import ApplicationCommunicator
+from django.core import mail
 from django.core.files.base import ContentFile
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -589,6 +590,45 @@ class InterviewSessionApiTests(APITestCase):
         self.assertFalse(SlotReservation.objects.filter(session=session).exists())
         balance = PackageBalance.objects.get(owner_user=self.user, balance_type=PackageBalance.SLOTS)
         self.assertEqual(balance.current_balance, balance_before - 1)
+
+    def test_reservation_failure_emails_the_account_owner(self):
+        PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(current_balance=0)
+        mail.outbox = []
+
+        response = self.client.post(
+            "/api/v1/interviews/",
+            {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("scheduling blocked", mail.outbox[0].subject.lower())
+        self.assertEqual(mail.outbox[0].to, [self.user.email])
+
+    def test_low_balance_warning_fires_once_on_the_crossing_reservation(self):
+        # threshold = max(1, round(10 * 0.1)) = 1
+        PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(
+            fixed_amount=10, current_balance=2,
+        )
+        mail.outbox = []
+
+        first = self.client.post(
+            "/api/v1/interviews/",
+            {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id)},
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201)  # 2 -> 1: crosses the threshold, warning fires
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Low Assessment Slot balance", mail.outbox[0].subject)
+
+        second = self.client.post(
+            "/api/v1/interviews/",
+            {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id)},
+            format="json",
+        )
+        self.assertEqual(second.status_code, 201)  # 1 -> 0: already below threshold, no repeat email
+        self.assertEqual(len(mail.outbox), 1)
 
     def test_create_start_answer_and_complete_interview_session(self):
         create_response = self.client.post(

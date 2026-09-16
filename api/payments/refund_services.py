@@ -5,7 +5,7 @@ import stripe
 
 from api.audit.services import AuditLogService
 from api.core.constants import AuditLogAction, AuditLogCategory, PaymentStatus
-from .models import BalanceTransaction, PackageBalance
+from .models import BalanceTransaction, PackageBalance, SlotReservation
 
 PLATFORM_ERROR = "PLATFORM_ERROR"
 CONFIRMED_BILLING_ERROR = "CONFIRMED_BILLING_ERROR"
@@ -87,7 +87,18 @@ class RefundService:
         period-based) - nothing to revoke here for those. Called from both
         the admin refund action and the charge.refunded webhook, so it must
         be idempotent - naturally is, since it only touches rows that still
-        have something left (current_balance__gt=0)."""
+        have something left (current_balance__gt=0).
+
+        Entitlement Backing (Slot Reservation Lifecycle spec, Section 7):
+        a Reservation drawn from this payment's balance can't remain valid
+        once that balance's purchase is reversed - No valid entitlement ->
+        No valid Reservation. Cancelling those sessions first (which
+        releases their reservation, crediting the Slot back into
+        current_balance the normal way) means the zeroing loop below
+        naturally picks up and revokes that credited-back amount too,
+        without a separate no-credit code path."""
+        cls._cancel_sessions_losing_entitlement_backing(payment)
+
         for balance in PackageBalance.objects.select_for_update().filter(source_payment=payment, current_balance__gt=0):
             credit = balance.current_balance
             balance.current_balance = 0
@@ -98,4 +109,37 @@ class RefundService:
                 amount=-credit,
                 balance_after=0,
                 reference=f"refund:{payment.stripe_payment_intent_id}",
+            )
+
+    @classmethod
+    def _cancel_sessions_losing_entitlement_backing(cls, payment):
+        # Deferred import: api.sessions.services also imports from this
+        # app (api.payments.entitlement_services), so importing it at
+        # module load time here would risk a circular import at Django
+        # app-loading time even though there's no real logical cycle
+        # between these two specific modules.
+        from api.payments.notifications import send_reservation_invalidated_email
+        from api.sessions.services import InterviewSessionService
+
+        reservations = SlotReservation.objects.filter(
+            balance__source_payment=payment,
+            status=SlotReservation.RESERVED,
+        ).select_related("session", "session__candidate")
+        for reservation in reservations:
+            session = reservation.session
+            InterviewSessionService.cancel_session(
+                session, reason="Underlying package purchase was refunded",
+            )
+            AuditLogService.log_system(
+                action=AuditLogAction.SESSION_CANCELLED,
+                category=AuditLogCategory.SESSION,
+                description=(
+                    f"Interview session cancelled for {session.candidate.get_full_name()} - its Slot "
+                    f"reservation lost entitlement backing when payment {payment.stripe_payment_intent_id} was refunded"
+                ),
+                resource=session,
+                data={"session_id": str(session.public_id), "payment_id": payment.id},
+            )
+            send_reservation_invalidated_email(
+                candidate=session.candidate, created_by=session.created_by, company=session.candidate.company,
             )

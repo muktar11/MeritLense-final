@@ -935,6 +935,79 @@ class RefundServiceTests(TestCase):
         mock_stripe.Refund.create.assert_not_called()
 
 
+class RefundEntitlementBackingTests(TestCase):
+    """Entitlement Backing (Slot Reservation Lifecycle spec, Section 7):
+    a Reservation drawn from a refunded purchase can't remain valid -
+    the session it backs must be cancelled and its Slot released as part
+    of the refund itself, not left dangling."""
+
+    def setUp(self):
+        self.b2c_user = User.objects.create_user(
+            email="refund-backing-b2c@example.com", password="Password123!", first_name="Backing", last_name="User",
+            role=Roles.B2C, is_verified=True,
+        )
+        self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_refund_backing", email=self.b2c_user.email)
+        one_time_price = make_price(target_user_type="B2C", billing_type="ONE_TIME", slot_grant=3, points_grant=50)
+        one_time_subscription = make_subscription(self.b2c_user, one_time_price, status="ACTIVE")
+        self.payment = Payment.objects.create(
+            user=self.b2c_user, customer=self.customer, subscription=one_time_subscription, stripe_payment_intent_id="pi_refund_backing_test",
+            amount=Decimal("50.00"), status="SUCCEEDED",
+        )
+        self.balance = PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, source_payment=self.payment, fixed_amount=3, current_balance=3,
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Backing", last_name="Candidate", email="refund-backing-candidate@example.com",
+            passport_id="PASS-BACK-001", job_role="NA", core_skills="care", preferred_language="EN",
+            passport_document=SimpleUploadedFile("passport.pdf", b"%PDF-1.1", content_type="application/pdf"),
+            created_by=self.b2c_user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Nanny", role_code="nanny", language="EN", evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=30, total_questions=1, allow_retries=True, max_retries=1,
+            rubric_version="v1", question_set_version="v1",
+        )
+
+    @patch("api.payments.refund_services.stripe")
+    def test_refund_cancels_the_session_and_releases_the_reservation(self, mock_stripe):
+        session = InterviewSessionService.create_session(candidate=self.candidate, config=self.config, created_by=self.b2c_user)
+        reservation = SlotReservation.objects.get(session=session)
+        mail.outbox = []
+
+        RefundService.refund_payment(payment=self.payment, actor=self.b2c_user, override_reason_code=PLATFORM_ERROR)
+
+        session.refresh_from_db()
+        reservation.refresh_from_db()
+        self.balance.refresh_from_db()
+        self.assertEqual(session.status, InterviewSessionStatus.CANCELLED)
+        self.assertEqual(reservation.status, SlotReservation.RELEASED)
+        self.assertEqual(self.balance.current_balance, 0)  # released back to 3, then the whole refund zeroes it
+        self.assertTrue(any("cancelled" in msg.subject.lower() for msg in mail.outbox))
+
+    @patch("api.payments.refund_services.stripe")
+    def test_refund_does_not_touch_an_already_started_session(self, mock_stripe):
+        session = InterviewSessionService.create_session(candidate=self.candidate, config=self.config, created_by=self.b2c_user)
+        InterviewSessionService.start_session(session, actor=self.b2c_user)
+        reservation = SlotReservation.objects.get(session=session)
+        self.balance.refresh_from_db()
+
+        RefundService.refund_payment(payment=self.payment, actor=self.b2c_user, override_reason_code=PLATFORM_ERROR)
+
+        session.refresh_from_db()
+        reservation.refresh_from_db()
+        self.assertEqual(session.status, InterviewSessionStatus.IN_PROGRESS)
+        self.assertEqual(reservation.status, SlotReservation.CONSUMED)
+
+    @patch("api.payments.refund_services.stripe")
+    def test_refund_without_any_reservation_is_unaffected(self, mock_stripe):
+        # No session was ever scheduled against this balance - the
+        # ordinary revoke-only path must still work exactly as before.
+        RefundService.refund_payment(payment=self.payment, actor=self.b2c_user)
+
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 0)
+
+
 class ChargeRefundedWebhookTests(TestCase):
     """Covers a refund issued directly from the Stripe Dashboard (not
     through our admin action) - the webhook must still sync the local
@@ -1651,3 +1724,50 @@ class SlotBalanceSummaryTests(TestCase):
         after = EntitlementService.get_balance_summary("COMPANY", company)[PackageBalance.SLOTS]
         self.assertEqual(after["consumed"], 0)
         self.assertEqual(after["remaining"], 20)
+
+
+class SlotReservationNotificationTests(TestCase):
+    """Reservation-failure and low-balance emails (Slot Reservation
+    Lifecycle spec, Section 3, #3) - sent to both the Scheduler and the
+    Account/Billing Owner, deduplicated to one email when they're the
+    same person."""
+
+    def setUp(self):
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Nanny", role_code="nanny", language="EN", evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=30, total_questions=1, allow_retries=True, max_retries=1,
+            rubric_version="v1", question_set_version="v1",
+        )
+
+    def test_b2b_reservation_failure_emails_both_scheduler_and_admin_owner_once_each(self):
+        admin_owner = User.objects.create_user(
+            email="notify-b2b-admin@example.com", password="Password123!", first_name="Admin", last_name="Owner",
+            role=Roles.B2B, is_verified=True,
+        )
+        company = make_company(admin_owner)
+        scheduler = User.objects.create_user(
+            email="notify-b2b-scheduler@example.com", password="Password123!", first_name="Team", last_name="Member",
+            role=Roles.B2B_TEAM_MEMBER, is_verified=True,
+        )
+        candidate = Candidate.objects.create(
+            first_name="Notify", last_name="Candidate", email="notify-b2b-candidate@example.com",
+            passport_id="PASS-NOTIFY-001", job_role="NA", core_skills="care", preferred_language="EN",
+            passport_document=SimpleUploadedFile("passport.pdf", b"%PDF-1.1", content_type="application/pdf"),
+            created_by=scheduler, company=company,
+        )
+        # No active subscription/balance at all for this company -> blocked.
+        mail.outbox = []
+
+        with self.assertRaises(ValueError):
+            InterviewSessionService.create_session(candidate=candidate, config=self.config, created_by=scheduler)
+
+        self.assertEqual(len(mail.outbox), 2)
+        recipients = {msg.to[0] for msg in mail.outbox}
+        self.assertEqual(recipients, {admin_owner.email, scheduler.email})
+
+    def test_low_balance_threshold_is_at_least_one(self):
+        from api.payments.notifications import low_balance_threshold
+        self.assertEqual(low_balance_threshold(0), 0)
+        self.assertEqual(low_balance_threshold(None), 0)
+        self.assertEqual(low_balance_threshold(5), 1)  # round(5*0.1)=1, floor is 1
+        self.assertEqual(low_balance_threshold(200), 20)

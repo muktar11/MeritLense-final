@@ -1619,6 +1619,49 @@ class InterviewSessionApiTests(APITestCase):
         self.assertFalse(session.readiness_indicator_enabled)
         self.assertFalse(session.certificate_enabled)
 
+    def test_package_downgrade_to_screening_also_downgrades_question_count(self):
+        # self.config is FULL / 3 questions. A package whose coverage for
+        # this role is only SCREENING must not leave the session still
+        # targeting the FULL config's question count - a SCREENING-tagged
+        # session with a FULL-sized question set can never be scored, since
+        # no SCREENING-tier ScoringRuleSet exists to resolve it against.
+        PackageSessionConfig.objects.create(
+            package_code="basic",
+            package_name="Basic",
+            audience="B2C",
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            min_questions=1,
+            max_questions=2,
+            default_question_count=2,
+            duration_minutes=15,
+            basic_report_enabled=True,
+        )
+        RolePackageCoverage.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            package_code="basic",
+            package_name="Basic",
+            audience="B2C",
+            coverage_level=CoverageLevel.SCREENING,
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+        )
+
+        response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+                "package_code": "basic",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        session = InterviewSession.objects.get(public_id=response.data["id"])
+        self.assertEqual(session.evaluation_tier, InterviewEvaluationTier.SCREENING)
+        self.assertEqual(session.total_questions, 2)
+        self.assertEqual(session.questions.count(), 2)
+
     def test_session_completion_creates_linked_evaluation_with_package_flags(self):
         package = PackageSessionConfig.objects.create(
             package_code="advanced",

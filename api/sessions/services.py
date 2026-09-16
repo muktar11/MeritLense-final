@@ -139,7 +139,11 @@ class QuestionGenerationService:
         if session.questions.exists():
             return list(session.questions.order_by("question_order"))
 
-        target_count = session.config.total_questions
+        # session.total_questions (not session.config.total_questions) is the
+        # source of truth here - it already accounts for a package coverage
+        # downgrade at creation time (see InterviewSessionService.create_session),
+        # so a SCREENING-tier session never targets a FULL-sized question count.
+        target_count = session.total_questions or session.config.total_questions
         tier = session.evaluation_tier or InterviewEvaluationTier.FULL
         queryset = QuestionTemplate.objects.filter(
             is_active=True,
@@ -408,6 +412,7 @@ class InterviewSessionService:
             requested_package_code=package_code,
         )
         session_evaluation_tier = config.evaluation_tier
+        session_total_questions = config.total_questions
         package_session_config = None
         resolved_package_code = ""
         resolved_package_name = ""
@@ -428,6 +433,16 @@ class InterviewSessionService:
             readiness_indicator_enabled = package_context["readiness_indicator_enabled"]
             certificate_enabled = package_context["certificate_enabled"]
             expiry_duration = package_session_config.duration_minutes or config.duration_minutes
+            # The package's coverage can downgrade the tier below what this
+            # InterviewConfiguration was built for (e.g. a FULL, 21-question
+            # config under a package whose coverage for this role is only
+            # SCREENING) - question count must follow that downgrade too, or
+            # the session ends up SCREENING-labeled while still requesting a
+            # FULL-sized question set, which no SCREENING-tier scoring rubric
+            # can ever resolve (the evaluation completes but can never be
+            # scored).
+            if session_evaluation_tier != config.evaluation_tier:
+                session_total_questions = package_session_config.default_question_count or config.total_questions
 
         expiry_anchor = scheduled_start_at or timezone.now()
 
@@ -443,7 +458,7 @@ class InterviewSessionService:
             tts_language_code=LANGUAGE_CODE_MAP.get(language, "en-US"),
             stt_language_code=LANGUAGE_CODE_MAP.get(language, "en-US"),
             translation_target=config.language if config.enable_translation else "",
-            total_questions=config.total_questions,
+            total_questions=session_total_questions,
             evaluation_tier=session_evaluation_tier,
             package_code=resolved_package_code,
             package_name=resolved_package_name,

@@ -9,6 +9,7 @@ from django.core.files.base import ContentFile
 from django.template.loader import render_to_string
 from django.utils import timezone
 
+from api.core.pdf_fonts import arabic_font_context
 from .models import Certificate
 from .readiness_record_services import EvaluationReadinessRecordService
 
@@ -56,9 +57,9 @@ _MAX_ID_ATTEMPTS = 5
 # the raw score. "position" drives the readiness badge's color (1 = red,
 # 3 = green).
 READINESS_GAUGE = {
-    "NOT_READY": {"label": "Readiness Gaps Identified", "position": 1},
-    "PARTIALLY_READY": {"label": "Partially Ready", "position": 2},
-    "READY": {"label": "Ready", "position": 3},
+    "NOT_READY": {"label": "Readiness Gaps Identified", "label_ar": "تم تحديد فجوات في الجاهزية", "position": 1},
+    "PARTIALLY_READY": {"label": "Partially Ready", "label_ar": "جاهز جزئيًا", "position": 2},
+    "READY": {"label": "Ready", "label_ar": "جاهز", "position": 3},
 }
 
 
@@ -173,7 +174,7 @@ def _candidate_photo_context(candidate):
     return None, False
 
 
-def _readiness_gauge_context(evaluation):
+def _readiness_gauge_context(evaluation, language):
     """Reuses EvaluationReportService's own readiness classification (the
     same READY/PARTIALLY_READY/NOT_READY judgment already computed for the
     internal evaluation report - see api/reports/services.py) rather than
@@ -183,7 +184,25 @@ def _readiness_gauge_context(evaluation):
     readiness_record = EvaluationReadinessRecordService.get_existing(evaluation)
     indicator = EvaluationReportService._resolve_readiness_indicator(evaluation, readiness_record)
     gauge = READINESS_GAUGE.get(indicator["code"], READINESS_GAUGE["PARTIALLY_READY"])
-    return {"label": gauge["label"], "position": gauge["position"]}
+    label = gauge["label_ar"] if language == "ar" else gauge["label"]
+    return {"label": label, "position": gauge["position"]}
+
+
+def _certificate_language(session):
+    """The language the candidate actually took the interview in
+    (InterviewSession.candidate_language, the same field that drove their
+    question narration/STT), not their account's UI language preference -
+    the certificate should match what they experienced. Only Arabic has a
+    translated template today; every other language falls back to
+    English."""
+    candidate_language = (session.candidate_language if session else None) or "EN"
+    return "ar" if candidate_language.upper() == "AR" else "en"
+
+
+def _language_context(language):
+    if language != "ar":
+        return {"language": "en"}
+    return {"language": "ar", **arabic_font_context()}
 
 
 def _evaluator_rating_context(evaluation):
@@ -325,8 +344,9 @@ def generate_certificate(evaluation, summary):
     certificate.expires_at = None
 
     session = evaluation.session
-    verification_url = f"{settings.FRONTEND_URL}/en/verify-certificate?id={certificate.certificate_id}"
-    readiness = _readiness_gauge_context(evaluation)
+    language = _certificate_language(session)
+    verification_url = f"{settings.FRONTEND_URL}/{language}/verify-certificate?id={certificate.certificate_id}"
+    readiness = _readiness_gauge_context(evaluation, language)
     candidate_photo_data_uri, candidate_photo_verified = _candidate_photo_context(evaluation.candidate)
 
     context = {
@@ -347,9 +367,11 @@ def generate_certificate(evaluation, summary):
         "qr_data_uri": _build_qr_data_uri(verification_url),
         "generated_at": now.strftime("%Y-%m-%d %H:%M UTC"),
         "evaluator_rating": _evaluator_rating_context(evaluation),
+        **_language_context(language),
     }
 
-    html_string = render_to_string("evaluations/certificate.html", context)
+    template_name = "evaluations/certificate_ar.html" if language == "ar" else "evaluations/certificate.html"
+    html_string = render_to_string(template_name, context)
     pdf_bytes = HTML(string=html_string).write_pdf()
 
     filename = f"{certificate.certificate_id}.pdf"

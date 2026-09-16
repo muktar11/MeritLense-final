@@ -1926,7 +1926,7 @@ class CertificateGenerationTests(TestCase):
         photo_data_uri, photo_verified = _candidate_photo_context(self.candidate)
         self.assertTrue(photo_data_uri.startswith("data:image/jpeg;base64,"))
         self.assertFalse(photo_verified)
-        readiness = _readiness_gauge_context(self.evaluation)
+        readiness = _readiness_gauge_context(self.evaluation, "en")
         self.assertEqual(readiness["label"], "Ready")
         self.assertEqual(readiness["position"], 3)
 
@@ -1971,7 +1971,7 @@ class CertificateGenerationTests(TestCase):
 
         self.evaluation.readiness_status = ReadinessStatus.NOT_READY
         self.evaluation.save(update_fields=["readiness_status"])
-        not_ready = _readiness_gauge_context(self.evaluation)
+        not_ready = _readiness_gauge_context(self.evaluation, "en")
         self.assertEqual(not_ready, {"label": "Readiness Gaps Identified", "position": 1})
 
         # PENDING (the default before scoring rolls it up to READY/NOT_READY)
@@ -1980,7 +1980,7 @@ class CertificateGenerationTests(TestCase):
         # uses for the internal report.
         self.evaluation.readiness_status = ReadinessStatus.PENDING
         self.evaluation.save(update_fields=["readiness_status"])
-        pending = _readiness_gauge_context(self.evaluation)
+        pending = _readiness_gauge_context(self.evaluation, "en")
         self.assertEqual(pending, {"label": "Partially Ready", "position": 2})
 
     def test_regenerating_keeps_the_same_certificate_id(self):
@@ -2014,6 +2014,113 @@ class CertificateGenerationTests(TestCase):
         self.assertEqual(first.certificate_id, second.certificate_id)
         self.assertEqual(first.assessment_id, second.assessment_id)
         self.assertEqual(first.issued_at, second.issued_at)
+
+
+class CertificateArabicLanguageTests(TestCase):
+    """A candidate who interviewed in Arabic (InterviewSession.candidate_language)
+    gets an Arabic certificate - real RTL template, translated labels, a
+    /ar/ verification URL - not the English one with the language silently
+    ignored."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="cert-ar@example.com", password="testpass123", first_name="Cert", last_name="Arabic",
+            role=Roles.B2C, is_verified=True,
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Fatima", last_name="AlRashid", email="cert-ar-candidate@example.com",
+            passport_id="CERTAR0001", job_role="NA", core_skills="safety", preferred_language="AR",
+            passport_document="candidates/documents/passport/test.pdf", created_by=self.user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Housekeeper", role_code="domestic_worker", language="AR",
+            evaluation_tier=InterviewEvaluationTier.FULL, duration_minutes=45, total_questions=1,
+            allow_retries=True, max_retries=1, rubric_version="v2.0", question_set_version="v1.2",
+        )
+        self.session = InterviewSession.objects.create(
+            candidate=self.candidate, organization=self.candidate.company, config=self.config,
+            role_name=self.config.role_name, role_code=self.config.role_code,
+            ui_language="AR", candidate_language="AR", tts_language_code="ar-SA", stt_language_code="ar-SA",
+            total_questions=1, evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0", question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30), created_by=self.user,
+        )
+        self.evaluation = Evaluation.objects.create(
+            session=self.session, candidate=self.candidate, evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now() + timezone.timedelta(days=1), duration_minutes=45, created_by=self.user,
+        )
+        consent_agreement = Agreement.objects.create(
+            user=self.user, agreement_type=AgreementType.CANDIDATE_CONSENT, version="v1",
+            method=AgreementMethod.CHECKBOX, status=AgreementStatus.SIGNED, accepted_at=timezone.now(),
+        )
+        self.session.candidate_consent_agreement = consent_agreement
+        self.session.save(update_fields=["candidate_consent_agreement"])
+
+        from api.core.constants import ReadinessStatus
+        self.evaluation.readiness_status = ReadinessStatus.READY
+        self.evaluation.status = EvaluationStatus.COMPLETED
+        self.evaluation.completed_at = timezone.now()
+        self.evaluation.save(update_fields=["readiness_status", "status", "completed_at"])
+        self.session.identity_verified = True
+        self.session.status = "COMPLETED"
+        self.session.ended_at = timezone.now()
+        self.session.save(update_fields=["identity_verified", "status", "ended_at"])
+        self.summary = SessionEvaluationSummary.objects.create(
+            evaluation=self.evaluation, session=self.session, candidate=self.candidate,
+            rule_set=ScoringRuleSet.objects.create(
+                name="Cert AR Rules", version="v1", role_code="domestic_worker", role_name="Housekeeper",
+                evaluation_tier=InterviewEvaluationTier.FULL, is_active=True, created_by=self.user,
+            ),
+            total_score=Decimal("83"), max_score=Decimal("100"), overall_percentage=Decimal("83.00"),
+            layer_breakdown={
+                "COGNITIVE": {"percentage": 87.0, "weight": 50},
+                "BEHAVIORAL": {"percentage": 82.0, "weight": 30},
+                "TASK_EXECUTION": {"percentage": 90.0, "weight": 20},
+            },
+            competencies_summary=[*covered_competencies()],
+            total_response_count=1, evaluated_response_count=1, status=SessionEvaluationSummary.STATUS_EVALUATED,
+        )
+        add_minimal_response_evidence(
+            evaluation=self.evaluation, session=self.session, candidate=self.candidate, user=self.user,
+        )
+
+    def test_arabic_interview_produces_an_arabic_certificate(self):
+        certificate = generate_certificate(self.evaluation, self.summary)
+
+        self.assertIsNotNone(certificate)
+        pdf_bytes = certificate.pdf_file.read()
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        # A real, non-trivial PDF - not an empty/broken render.
+        self.assertGreater(len(pdf_bytes), 5000)
+
+    def test_arabic_certificate_uses_the_ar_verification_url(self):
+        from unittest.mock import patch
+
+        with patch("api.evaluations.certificate_services.render_to_string") as mock_render:
+            mock_render.return_value = "<html></html>"
+            generate_certificate(self.evaluation, self.summary)
+
+        template_name, context = mock_render.call_args[0]
+        self.assertEqual(template_name, "evaluations/certificate_ar.html")
+        self.assertIn("/ar/verify-certificate?", context["verification_url"])
+        self.assertEqual(context["language"], "ar")
+        self.assertIn("arabic_font_regular_uri", context)
+        self.assertEqual(context["readiness_label"], "جاهز")
+
+    def test_english_interview_still_uses_the_english_template(self):
+        self.session.candidate_language = "EN"
+        self.session.save(update_fields=["candidate_language"])
+
+        from unittest.mock import patch
+        with patch("api.evaluations.certificate_services.render_to_string") as mock_render:
+            mock_render.return_value = "<html></html>"
+            generate_certificate(self.evaluation, self.summary)
+
+        template_name, context = mock_render.call_args[0]
+        self.assertEqual(template_name, "evaluations/certificate.html")
+        self.assertIn("/en/verify-certificate?", context["verification_url"])
+        self.assertEqual(context["language"], "en")
+        self.assertNotIn("arabic_font_regular_uri", context)
 
 
 class CertificateEligibilityTests(TestCase):

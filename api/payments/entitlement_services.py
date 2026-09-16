@@ -480,7 +480,12 @@ class EntitlementService:
                 reserved = SlotReservation.objects.filter(status=SlotReservation.RESERVED, **reservation_filter).count()
                 remaining = summary[balance_type]["remaining"]
                 limit = summary[balance_type]["limit"]
-                consumed = (limit - remaining - reserved) if (limit is not None and remaining is not None) else None
+                # Clamped at 0: an admin_adjust_balance credit can legitimately
+                # push current_balance above fixed_amount (that method never
+                # touches fixed_amount, by design - it's "a stable record of
+                # what was actually granted", not a cap admin corrections
+                # respect), which would otherwise make this go negative.
+                consumed = max(0, limit - remaining - reserved) if (limit is not None and remaining is not None) else None
                 summary[balance_type]["reserved"] = reserved
                 summary[balance_type]["consumed"] = consumed
                 summary[balance_type]["pending_sessions"] = reserved

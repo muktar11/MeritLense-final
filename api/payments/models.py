@@ -670,6 +670,94 @@ class AddonRequest(TimeStampedModel):
         return f"{owner} - {self.addon_code} - {self.status}"
 
 
+class SlotReservation(TimeStampedModel):
+    """A Candidate Assessment Slot reservation for one scheduled interview
+    session (Gap #2 Resolution - Slot Reservation Lifecycle spec):
+    Reserve at scheduling, Consume at session start, Release on
+    cancellation or invite expiry. No confirmed/scheduled session may
+    exist without a successful reservation - this closes the scheduling
+    gap by construction, mirroring the already-approved AddonRequest
+    (Points) Reserve/Consume/Release pattern.
+
+    Reserving deducts PackageBalance.current_balance immediately (via the
+    same _consume_b2b/_consume_b2c path as any other spend, tagged with a
+    RESERVE BalanceTransaction), so current_balance already reflects
+    Total - Consumed - Reserved at all times. Consuming just marks this
+    reservation CONSUMED (no further balance change - the deduction
+    already happened, and it is permanent). Releasing credits that
+    deduction back and marks it RELEASED.
+    """
+    RESERVED = 'RESERVED'
+    CONSUMED = 'CONSUMED'
+    RELEASED = 'RELEASED'
+    STATUS_CHOICES = [
+        (RESERVED, 'Reserved'),
+        (CONSUMED, 'Consumed'),
+        (RELEASED, 'Released'),
+    ]
+
+    owner_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='slot_reservations'
+    )
+    owner_company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='slot_reservations'
+    )
+    session = models.OneToOneField(
+        "interview_sessions.InterviewSession",
+        on_delete=models.CASCADE,
+        related_name='slot_reservation'
+    )
+    candidate = models.ForeignKey(
+        "candidates.Candidate",
+        on_delete=models.CASCADE,
+        related_name='slot_reservations'
+    )
+    balance = models.ForeignKey(
+        PackageBalance,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='slot_reservations',
+        help_text="The specific PackageBalance row this Slot was drawn from."
+    )
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=RESERVED)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+'
+    )
+
+    class Meta:
+        verbose_name = "Slot Reservation"
+        verbose_name_plural = "Slot Reservations"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(owner_user__isnull=False) | models.Q(owner_company__isnull=False),
+                name='slot_reservation_has_owner'
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['owner_user', 'status']),
+            models.Index(fields=['owner_company', 'status']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        owner = self.owner_company.name if self.owner_company else self.owner_user.email
+        return f"{owner} - session {self.session_id} - {self.status}"
+
+
 class DealRecord(TimeStampedModel):
     """The source of truth for a negotiated Custom Enterprise / Starter /
     Trial deal ("How Custom / Per Agreement Works" memo). Ops/Sales creates

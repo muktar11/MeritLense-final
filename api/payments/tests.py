@@ -594,14 +594,14 @@ class EntitlementServiceTests(TestCase):
     def test_b2c_consume_blocks_when_no_balance_exists(self):
         session = self._FakeSession(created_by=self.b2c_user)
         with self.assertRaises(ValueError):
-            EntitlementService.consume_slot(session)
+            EntitlementService.consume_slot_legacy(session)
 
     def test_b2c_consume_decrements_oldest_purchase_first(self):
         older = PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, fixed_amount=3, current_balance=1)
         PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, fixed_amount=20, current_balance=20)
 
         session = self._FakeSession(created_by=self.b2c_user)
-        EntitlementService.consume_slot(session)
+        EntitlementService.consume_slot_legacy(session)
 
         older.refresh_from_db()
         self.assertEqual(older.current_balance, 0)
@@ -612,16 +612,16 @@ class EntitlementServiceTests(TestCase):
         PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, fixed_amount=1, current_balance=1)
         session = self._FakeSession(created_by=self.b2c_user)
 
-        EntitlementService.consume_slot(session)
+        EntitlementService.consume_slot_legacy(session)
         with self.assertRaises(ValueError):
-            EntitlementService.consume_slot(session)
+            EntitlementService.consume_slot_legacy(session)
 
     def test_b2b_consume_decrements_company_wide_balance(self):
         price = make_price(target_user_type="B2B", slot_grant=200, points_grant=2000)
         make_subscription(self.b2b_owner, price, company=self.company, status="ACTIVE")
 
         session = self._FakeSession(organization_id=self.company.id, organization=self.company)
-        EntitlementService.consume_slot(session)
+        EntitlementService.consume_slot_legacy(session)
 
         balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
         self.assertEqual(balance.current_balance, 199)
@@ -632,7 +632,7 @@ class EntitlementServiceTests(TestCase):
         make_subscription(self.b2b_owner, price, company=self.company, status="ACTIVE")
 
         session = self._FakeSession(organization_id=self.company.id, organization=self.company)
-        EntitlementService.consume_slot(session)  # should not raise
+        EntitlementService.consume_slot_legacy(session)  # should not raise
 
         self.assertEqual(PackageBalance.objects.filter(owner_company=self.company).count(), 0)
 
@@ -646,7 +646,7 @@ class EntitlementServiceTests(TestCase):
 
         session = self._FakeSession(organization_id=self.company.id, organization=self.company)
         with self.assertRaises(ValueError):
-            EntitlementService.consume_slot(session)
+            EntitlementService.consume_slot_legacy(session)
 
         balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
         self.assertEqual(balance.current_balance, 50)
@@ -660,7 +660,7 @@ class EntitlementServiceTests(TestCase):
         )
 
         session = self._FakeSession(organization_id=self.company.id, organization=self.company)
-        EntitlementService.consume_slot(session)  # should not raise - grace period is still usable
+        EntitlementService.consume_slot_legacy(session)  # should not raise - grace period is still usable
 
         balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
         self.assertEqual(balance.current_balance, 49)
@@ -688,10 +688,10 @@ class EntitlementServiceTests(TestCase):
         session = self._FakeSession(organization_id=self.company.id, organization=self.company)
 
         with self.assertRaises(ValueError):
-            EntitlementService.consume_slot(session)
+            EntitlementService.consume_slot_legacy(session)
 
         StripeService().handle_subscription_updated({"id": subscription.stripe_subscription_id, "status": "active"})
-        EntitlementService.consume_slot(session)  # should not raise now
+        EntitlementService.consume_slot_legacy(session)  # should not raise now
 
         balance = PackageBalance.objects.get(owner_company=self.company, balance_type=PackageBalance.SLOTS)
         self.assertEqual(balance.current_balance, 49)  # decremented from the 50 that was already there, not reset

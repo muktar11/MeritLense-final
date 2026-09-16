@@ -28,6 +28,7 @@ from api.evaluations.scoring_services import Week6ScoringError, Week6ScoringServ
 from api.evaluations.certificate_services import generate_certificate
 from api.interviews.package_services import PackageArchitectureService
 from api.payments.entitlement_services import EntitlementService
+from api.payments.models import SlotReservation
 from api.interviews.voice_services import (
     SpeechToTextService,
     TextToSpeechService,
@@ -472,6 +473,12 @@ class InterviewSessionService:
             expires_at=InterviewSession.build_expiry(expiry_duration, anchor_time=expiry_anchor),
             created_by=created_by,
         )
+        # Slot Reservation Lifecycle (Gap #2 Resolution): no confirmed/
+        # scheduled session may exist without a successful reservation -
+        # raises ValueError (no Slot available) if the owner has none,
+        # rolling back this entire (still-atomic) session creation rather
+        # than letting the candidate discover "no balance" only at Start.
+        EntitlementService.reserve_slot(session=session, actor=created_by)
         QuestionGenerationService.generate_questions(session)
         TaskObservationService.assign_tasks(session)
         cls._ensure_linked_evaluation(session, status=EvaluationStatus.SCHEDULED)
@@ -566,6 +573,15 @@ class InterviewSessionService:
             ]
         )
 
+        # The status guard above already refused to cancel any session that
+        # ever reached IN_PROGRESS, so a reservation still present here is
+        # guaranteed to still be RESERVED (Start is the only thing that
+        # consumes it) - always safe to release, regardless of which party
+        # initiated the cancellation.
+        reservation = cls._get_slot_reservation(session)
+        if reservation is not None:
+            EntitlementService.release_slot_reservation(reservation=reservation, actor=actor)
+
         evaluation = cls._ensure_linked_evaluation(session, status=EvaluationStatus.CANCELLED)
         evaluation.cancelled_at = now
         evaluation.cancellation_reason = reason or ""
@@ -591,15 +607,42 @@ class InterviewSessionService:
         return session
 
     @classmethod
-    @transaction.atomic
+    def _get_slot_reservation(cls, session):
+        """None for a session scheduled before the Slot Reservation
+        Lifecycle rollout - those have no reservation row at all."""
+        try:
+            return session.slot_reservation
+        except SlotReservation.DoesNotExist:
+            return None
+
+    @classmethod
     def start_session(cls, session, actor=None):
+        # Deliberately outside any atomic block: this must commit even
+        # though it then raises, and a raise that propagates out of an
+        # atomic block rolls back everything written inside it - including
+        # a status flip and reservation release written earlier in the
+        # very same call. Handling expiry before entering the atomic
+        # section below (which guards the actual start) keeps that write
+        # durable regardless of the ValueError raised right after it.
         if session.is_expired():
+            # Expiry must never release a Slot that's already Consumed - a
+            # session that reached this branch by construction has not yet
+            # called EntitlementService.consume_slot_reservation() below, so
+            # its reservation (if one exists) is still RESERVED.
+            reservation = cls._get_slot_reservation(session)
+            if reservation is not None and reservation.status == SlotReservation.RESERVED:
+                EntitlementService.release_slot_reservation(reservation=reservation, actor=actor)
             session.status = InterviewSessionStatus.EXPIRED
             session.save(update_fields=["status", "updated_at"])
             raise ValueError("Cannot start expired session")
         if session.status == InterviewSessionStatus.COMPLETED:
             raise ValueError("Cannot restart completed session")
 
+        return cls._start_session_atomic(session, actor=actor)
+
+    @classmethod
+    @transaction.atomic
+    def _start_session_atomic(cls, session, actor=None):
         events = []
         token_start = actor is None
         if token_start and not session.candidate_prechecks_complete():
@@ -637,7 +680,11 @@ class InterviewSessionService:
             events.append(("SESSION_READY", AuditLogAction.SESSION_READY))
 
         session.start()
-        EntitlementService.consume_slot(session, actor=actor)
+        reservation = cls._get_slot_reservation(session)
+        if reservation is not None:
+            EntitlementService.consume_slot_reservation(reservation=reservation, actor=actor)
+        else:
+            EntitlementService.consume_slot_legacy(session, actor=actor)
         cls._ensure_linked_evaluation(session, status=EvaluationStatus.IN_PROGRESS)
         events.append(("SESSION_STARTED", AuditLogAction.SESSION_STARTED))
         cls._log_and_broadcast(actor, session, events)

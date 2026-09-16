@@ -21,11 +21,11 @@ from api.candidates.models import Candidate
 from api.core.constants import AuditLogAction, CoverageLevel, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, Roles
 from api.interviews.models import InterviewConfiguration, InterviewRubric, PackageSessionConfig, RolePackageCoverage
 from api.interviews.voice_services import VoiceProviderError
-from api.payments.models import PackageBalance
+from api.payments.models import PackageBalance, SlotReservation, BalanceTransaction
 from api.questions.models import QuestionTemplate
 from api.questions.skill_tags import FIXED_QUESTION_SKILL_TAGS
 from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionArtifact, SessionObservedTask, TaskObservationResult
-from api.sessions.services import InterviewSessionService
+from api.sessions.services import InterviewSessionService, QuestionGenerationService
 from api.translation.models import CandidateResponseInterpretation, CandidateResponseTranslation, EvaluationInputArtifact
 from api.translation.services import AIProcessingError, AIProcessingOrchestrationService
 from api.evaluations.models import Evaluation
@@ -409,8 +409,26 @@ class InterviewSessionApiTests(APITestCase):
         )
         self.assertEqual(response.status_code, 403)
 
-    def test_starting_session_blocks_when_no_slots_remain(self):
+    def test_scheduling_blocks_when_no_slots_remain(self):
+        # Slot Reservation Lifecycle (Gap #2 Resolution): the balance check
+        # now happens at scheduling, not discovered later at Start - no
+        # session may be created at all without a successful reservation.
         PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(current_balance=0)
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 400)
+        self.assertIn("slots remaining", str(create_response.data["detail"]).lower())
+        self.assertFalse(InterviewSession.objects.filter(candidate=self.candidate).exists())
+
+    def test_scheduling_reserves_exactly_one_slot_and_starting_consumes_no_further(self):
+        PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(current_balance=1)
 
         create_response = self.client.post(
             "/api/v1/interviews/",
@@ -423,29 +441,8 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(create_response.status_code, 201)
         session_id = create_response.data["id"]
 
-        start_response = self.client.post(
-            f"/api/v1/interviews/{session_id}/start/",
-            {},
-            format="json",
-        )
-        self.assertEqual(start_response.status_code, 400)
-        self.assertIn("slots remaining", str(start_response.data["detail"]).lower())
-
-        session = InterviewSession.objects.get(public_id=session_id)
-        self.assertNotEqual(session.status, "IN_PROGRESS")
-
-    def test_starting_session_consumes_exactly_one_slot(self):
-        PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(current_balance=1)
-
-        create_response = self.client.post(
-            "/api/v1/interviews/",
-            {
-                "candidate_id": str(self.candidate.public_id),
-                "config_id": str(self.config.public_id),
-            },
-            format="json",
-        )
-        session_id = create_response.data["id"]
+        balance = PackageBalance.objects.get(owner_user=self.user, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 0)  # reserved at scheduling, not at start
 
         start_response = self.client.post(
             f"/api/v1/interviews/{session_id}/start/",
@@ -454,8 +451,144 @@ class InterviewSessionApiTests(APITestCase):
         )
         self.assertEqual(start_response.status_code, 200)
 
+        balance.refresh_from_db()
+        self.assertEqual(balance.current_balance, 0)  # unchanged - consuming the reservation is not a new deduction
+
+    def test_scheduling_creates_a_reserved_slot_reservation(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201)
+        session = InterviewSession.objects.get(public_id=create_response.data["id"])
+
+        reservation = SlotReservation.objects.get(session=session)
+        self.assertEqual(reservation.status, SlotReservation.RESERVED)
+        self.assertEqual(reservation.owner_user, self.user)
+        self.assertEqual(reservation.candidate, self.candidate)
+        self.assertTrue(
+            BalanceTransaction.objects.filter(
+                reference=f"slot-reservation:{reservation.public_id}",
+                transaction_type=BalanceTransaction.RESERVE,
+            ).exists()
+        )
+
+    def test_starting_consumes_the_reservation_idempotently(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id)},
+            format="json",
+        )
+        session_id = create_response.data["id"]
+        reservation = SlotReservation.objects.get(session__public_id=session_id)
+
+        first = self.client.post(f"/api/v1/interviews/{session_id}/start/", {}, format="json")
+        self.assertEqual(first.status_code, 200)
+        reservation.refresh_from_db()
+        self.assertEqual(reservation.status, SlotReservation.CONSUMED)
+
+        # A duplicate Start event (retry/duplicate delivery) must not
+        # double-consume or error.
+        second = self.client.post(f"/api/v1/interviews/{session_id}/start/", {}, format="json")
+        self.assertEqual(second.status_code, 200)
+        reservation.refresh_from_db()
+        self.assertEqual(reservation.status, SlotReservation.CONSUMED)
+
+    def test_cancelling_before_start_releases_the_reservation(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id)},
+            format="json",
+        )
+        session_id = create_response.data["id"]
+        reservation = SlotReservation.objects.get(session__public_id=session_id)
+        balance_after_reserve = PackageBalance.objects.get(owner_user=self.user, balance_type=PackageBalance.SLOTS).current_balance
+
+        cancel_response = self.client.post(f"/api/v1/interviews/{session_id}/cancel/", {}, format="json")
+        self.assertEqual(cancel_response.status_code, 200)
+
+        reservation.refresh_from_db()
+        self.assertEqual(reservation.status, SlotReservation.RELEASED)
         balance = PackageBalance.objects.get(owner_user=self.user, balance_type=PackageBalance.SLOTS)
-        self.assertEqual(balance.current_balance, 0)
+        self.assertEqual(balance.current_balance, balance_after_reserve + 1)
+
+    def test_cancelling_after_start_does_not_release_the_consumed_slot(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id)},
+            format="json",
+        )
+        session_id = create_response.data["id"]
+        self.client.post(f"/api/v1/interviews/{session_id}/start/", {}, format="json")
+        balance_after_start = PackageBalance.objects.get(owner_user=self.user, balance_type=PackageBalance.SLOTS).current_balance
+        reservation = SlotReservation.objects.get(session__public_id=session_id)
+
+        cancel_response = self.client.post(f"/api/v1/interviews/{session_id}/cancel/", {}, format="json")
+
+        self.assertEqual(cancel_response.status_code, 400)
+        reservation.refresh_from_db()
+        self.assertEqual(reservation.status, SlotReservation.CONSUMED)
+        balance = PackageBalance.objects.get(owner_user=self.user, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, balance_after_start)
+
+    def test_expiry_releases_the_reservation_and_never_double_releases(self):
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id)},
+            format="json",
+        )
+        session_id = create_response.data["id"]
+        session = InterviewSession.objects.get(public_id=session_id)
+        session.expires_at = timezone.now() - timezone.timedelta(minutes=5)
+        session.save(update_fields=["expires_at"])
+        reservation = SlotReservation.objects.get(session=session)
+        balance_after_reserve = PackageBalance.objects.get(owner_user=self.user, balance_type=PackageBalance.SLOTS).current_balance
+
+        first = self.client.post(f"/api/v1/interviews/{session_id}/start/", {}, format="json")
+        self.assertEqual(first.status_code, 400)
+        reservation.refresh_from_db()
+        self.assertEqual(reservation.status, SlotReservation.RELEASED)
+        balance = PackageBalance.objects.get(owner_user=self.user, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, balance_after_reserve + 1)
+
+        # A duplicate expiry discovery (retried Start attempt) must not
+        # double-release.
+        second = self.client.post(f"/api/v1/interviews/{session_id}/start/", {}, format="json")
+        self.assertEqual(second.status_code, 400)
+        balance.refresh_from_db()
+        self.assertEqual(balance.current_balance, balance_after_reserve + 1)
+
+    def test_legacy_session_without_a_reservation_can_still_start(self):
+        # Simulates a session scheduled before the Slot Reservation
+        # Lifecycle rollout (created directly, bypassing create_session, so
+        # no SlotReservation row exists) - must still be startable via the
+        # backward-compat flat-consume fallback.
+        session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            ui_language="EN",
+            candidate_language="EN",
+            tts_language_code="en-US",
+            stt_language_code="en-US",
+            total_questions=self.config.total_questions,
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+        )
+        QuestionGenerationService.generate_questions(session)
+        balance_before = PackageBalance.objects.get(owner_user=self.user, balance_type=PackageBalance.SLOTS).current_balance
+
+        start_response = self.client.post(f"/api/v1/interviews/{session.public_id}/start/", {}, format="json")
+
+        self.assertEqual(start_response.status_code, 200)
+        self.assertFalse(SlotReservation.objects.filter(session=session).exists())
+        balance = PackageBalance.objects.get(owner_user=self.user, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, balance_before - 1)
 
     def test_create_start_answer_and_complete_interview_session(self):
         create_response = self.client.post(

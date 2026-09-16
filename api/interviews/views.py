@@ -292,13 +292,16 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
     def create(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        session = InterviewSessionService.create_session(
-            candidate=serializer.validated_data["candidate"],
-            config=serializer.validated_data["config"],
-            created_by=request.user,
-            package_code=serializer.validated_data.get("package_code", ""),
-            scheduled_start_at=serializer.validated_data.get("scheduled_start_at"),
-        )
+        try:
+            session = InterviewSessionService.create_session(
+                candidate=serializer.validated_data["candidate"],
+                config=serializer.validated_data["config"],
+                created_by=request.user,
+                package_code=serializer.validated_data.get("package_code", ""),
+                scheduled_start_at=serializer.validated_data.get("scheduled_start_at"),
+            )
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
         output = InterviewSessionSerializer(session, context={"request": request})
         return Response(output.data, status=status.HTTP_201_CREATED)
 

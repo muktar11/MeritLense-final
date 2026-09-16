@@ -15,7 +15,7 @@ from api.contracts.models import Agreement
 from api.evaluations.models import Certificate, CompetencyEvaluationResult, Evaluation, EvaluationReadinessDecisionRecord, EvaluatorRating, ResponseEvaluationResult, ScoringRule, ScoringRuleSet, SessionEvaluationSummary
 from api.evaluations.scoring_services import Week6ScoringService
 from api.evaluations.certificate_services import certificate_eligibility, generate_certificate
-from api.payments.models import Customer, Price, Subscription
+from api.payments.models import Customer, Price, Subscription, PackageBalance
 from api.questions.models import QuestionTemplate
 from api.scores.models import CandidateScore, ScoreSet
 from api.sessions.models import CandidateResponse, InterviewSession, SessionQuestion
@@ -323,6 +323,9 @@ class EvaluationInterviewSchedulingApiTests(TestCase):
             current_period_start=timezone.now(),
             current_period_end=timezone.now() + timezone.timedelta(days=30),
         )
+        PackageBalance.objects.create(
+            owner_user=self.user, balance_type=PackageBalance.SLOTS, fixed_amount=1000, current_balance=1000,
+        )
         self.candidate = Candidate.objects.create(
             first_name="Wondwosen",
             last_name="Beketu",
@@ -601,6 +604,9 @@ class InterviewRoleMappingTests(TestCase):
             status=SubscriptionStatus.ACTIVE,
             current_period_start=timezone.now(),
             current_period_end=timezone.now() + timezone.timedelta(days=30),
+        )
+        PackageBalance.objects.create(
+            owner_user=self.user, balance_type=PackageBalance.SLOTS, fixed_amount=1000, current_balance=1000,
         )
 
     def _create_candidate(self, job_role, passport_id):

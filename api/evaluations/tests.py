@@ -1389,6 +1389,60 @@ class CandidateScoreSummaryApiTests(TestCase):
         self.assertEqual(entry["certificate"]["certificate_id"], self.evaluation.certificate.certificate_id)
         self.assertIn(".pdf", entry["certificate"]["pdf_url"])
 
+    def test_returns_every_scored_evaluation_not_just_the_latest(self):
+        # A candidate re-assessed later (e.g. for a retry, or a different
+        # role) previously had their earlier score silently dropped by a
+        # latest-only collapse - both must now come back, newest first.
+        earlier_session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            role_code=self.config.role_code,
+            ui_language="EN",
+            candidate_language="EN",
+            tts_language_code="en-US",
+            stt_language_code="en-US",
+            total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+        )
+        earlier_evaluation = Evaluation.objects.create(
+            session=earlier_session,
+            candidate=self.candidate,
+            evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now() - timezone.timedelta(days=10),
+            duration_minutes=45,
+            created_by=self.user,
+        )
+        SessionEvaluationSummary.objects.create(
+            evaluation=earlier_evaluation,
+            session=earlier_session,
+            candidate=self.candidate,
+            rule_set=self.rule_set,
+            total_score="6.00",
+            max_score="10.00",
+            overall_percentage="60.00",
+            evaluated_response_count=1,
+            total_response_count=1,
+            status=SessionEvaluationSummary.STATUS_EVALUATED,
+            generated_at=timezone.now() - timezone.timedelta(days=10),
+        )
+
+        self.client.force_authenticate(self.user)
+        response = self.client.get("/api/v1/evaluations/candidate-scores")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data), 2)
+        candidate_id = str(self.candidate.public_id)
+        self.assertTrue(all(entry["candidate_id"] == candidate_id for entry in response.data))
+        # Newest (the setUp evaluation, run through the real scoring
+        # pipeline) must come before the older, manually-inserted one.
+        self.assertGreater(response.data[0]["generated_at"], response.data[1]["generated_at"])
+
     def test_other_user_does_not_see_this_candidate(self):
         self.client.force_authenticate(self.other_user)
         response = self.client.get("/api/v1/evaluations/candidate-scores")

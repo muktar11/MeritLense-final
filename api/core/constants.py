@@ -906,6 +906,7 @@ class AuditLogAction:
     PAYMENT_SUCCEEDED = "PAYMENT_SUCCEEDED"
     PAYMENT_FAILED = "PAYMENT_FAILED"
     PAYMENT_REFUNDED = "PAYMENT_REFUNDED"
+    RESERVATION_ANOMALY_DETECTED = "RESERVATION_ANOMALY_DETECTED"
     VIEW_PRICES_LIST = "VIEW_PRICES_LIST"
     VIEW_PRICES_FOR_USER = "VIEW_PRICES_FOR_USER"
     SYNC_PRICES_FROM_STRIPE = "SYNC_PRICES_FROM_STRIPE"
@@ -1092,6 +1093,7 @@ class AuditLogAction:
         (PAYMENT_SUCCEEDED, "Payment Succeeded"),
         (PAYMENT_FAILED, "Payment Failed"),
         (PAYMENT_REFUNDED, "Payment Refunded"),
+        (RESERVATION_ANOMALY_DETECTED, "Reservation Anomaly Detected"),
         (VIEW_PRICES_LIST, "Viewed Prices List"),
         (VIEW_PRICES_FOR_USER, "Viewed Filtered Prices"),
         (SYNC_PRICES_FROM_STRIPE, "Synced Prices from Stripe"),

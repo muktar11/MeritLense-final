@@ -440,20 +440,32 @@ class EntitlementService:
 
     @classmethod
     def get_balance_summary(cls, owner_type, owner):
-        """Read-only snapshot for dashboard display. Returns a dict per balance_type."""
+        """Read-only snapshot for dashboard display. Returns a dict per
+        balance_type. The SLOTS entry also carries the Reserved/Consumed/
+        Pending-Sessions breakdown the Slot Reservation Lifecycle spec
+        requires (Section 8) - "remaining" alone ("Available") is no
+        longer a sufficient figure once a Reservation can hold a Slot
+        without it being Consumed yet. Consumed is derived, not counted
+        directly (limit - remaining - reserved), so it's automatically
+        exactly 0 right after a B2B period reset zeroes both limit and
+        remaining together - no separate "this period" bookkeeping needed.
+        Reserved and Pending Sessions are, by construction, the same
+        count (every RESERVED SlotReservation is exactly one not-yet-
+        started scheduled session) - shown as two labeled figures per the
+        spec's own example ("1 available slot, 3 reserved, 3 pending
+        sessions"), not because they can ever actually differ."""
         summary = {}
         for balance_type in (PackageBalance.SLOTS, PackageBalance.POINTS):
             if owner_type == "COMPANY":
                 balance = PackageBalance.objects.filter(owner_company=owner, balance_type=balance_type).first()
                 if balance:
                     summary[balance_type] = {"remaining": balance.current_balance, "limit": balance.fixed_amount, "unlimited": False}
-                    continue
-
-                subscription = cls._active_recurring_subscription(owner)
-                grant = None
-                if subscription and subscription.stripe_price:
-                    grant = cls._resolve_grant(subscription.stripe_price, balance_type)
-                summary[balance_type] = {"remaining": None, "limit": None, "unlimited": subscription is not None and grant is None}
+                else:
+                    subscription = cls._active_recurring_subscription(owner)
+                    grant = None
+                    if subscription and subscription.stripe_price:
+                        grant = cls._resolve_grant(subscription.stripe_price, balance_type)
+                    summary[balance_type] = {"remaining": None, "limit": None, "unlimited": subscription is not None and grant is None}
             else:
                 rows = PackageBalance.objects.filter(owner_user=owner, balance_type=balance_type)
                 if rows.exists():
@@ -462,6 +474,16 @@ class EntitlementService:
                     summary[balance_type] = {"remaining": remaining, "limit": total, "unlimited": False}
                 else:
                     summary[balance_type] = {"remaining": None, "limit": None, "unlimited": False}
+
+            if balance_type == PackageBalance.SLOTS:
+                reservation_filter = {"owner_company": owner} if owner_type == "COMPANY" else {"owner_user": owner}
+                reserved = SlotReservation.objects.filter(status=SlotReservation.RESERVED, **reservation_filter).count()
+                remaining = summary[balance_type]["remaining"]
+                limit = summary[balance_type]["limit"]
+                consumed = (limit - remaining - reserved) if (limit is not None and remaining is not None) else None
+                summary[balance_type]["reserved"] = reserved
+                summary[balance_type]["consumed"] = consumed
+                summary[balance_type]["pending_sessions"] = reserved
         return summary
 
     @classmethod

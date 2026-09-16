@@ -578,7 +578,7 @@ class InterviewSessionService:
         # guaranteed to still be RESERVED (Start is the only thing that
         # consumes it) - always safe to release, regardless of which party
         # initiated the cancellation.
-        reservation = cls._get_slot_reservation(session)
+        reservation = cls.get_slot_reservation(session)
         if reservation is not None:
             EntitlementService.release_slot_reservation(reservation=reservation, actor=actor)
 
@@ -607,7 +607,7 @@ class InterviewSessionService:
         return session
 
     @classmethod
-    def _get_slot_reservation(cls, session):
+    def get_slot_reservation(cls, session):
         """None for a session scheduled before the Slot Reservation
         Lifecycle rollout - those have no reservation row at all."""
         try:
@@ -616,24 +616,46 @@ class InterviewSessionService:
             return None
 
     @classmethod
+    @transaction.atomic
+    def expire_session(cls, session, actor=None):
+        """Flip a session to EXPIRED and release its Slot reservation, if
+        it has one that's still RESERVED (never a Consumed one - a session
+        that already started is never subject to expiry). Idempotent
+        against duplicate calls for the same session. Shared by the lazy
+        check-on-access path in start_session and the proactive
+        expire_stale_sessions management command - the only two places a
+        session is ever actually flipped to EXPIRED."""
+        if session.status == InterviewSessionStatus.EXPIRED:
+            return session
+        reservation = cls.get_slot_reservation(session)
+        released = reservation is not None and reservation.status == SlotReservation.RESERVED
+        if released:
+            EntitlementService.release_slot_reservation(reservation=reservation, actor=actor)
+        session.status = InterviewSessionStatus.EXPIRED
+        session.save(update_fields=["status", "updated_at"])
+        AuditLogService.log_system(
+            action=AuditLogAction.SESSION_EXPIRED,
+            category=AuditLogCategory.SESSION,
+            description=f"Interview session expired for {session.candidate.get_full_name()}",
+            resource=session,
+            data=session_event_payload(session, {
+                "slot_reservation_released": released,
+                "triggering_actor_id": actor.id if actor else None,
+            }),
+        )
+        return session
+
+    @classmethod
     def start_session(cls, session, actor=None):
-        # Deliberately outside any atomic block: this must commit even
-        # though it then raises, and a raise that propagates out of an
-        # atomic block rolls back everything written inside it - including
-        # a status flip and reservation release written earlier in the
-        # very same call. Handling expiry before entering the atomic
-        # section below (which guards the actual start) keeps that write
-        # durable regardless of the ValueError raised right after it.
+        # Deliberately outside any atomic block: expire_session must commit
+        # even though this then raises, and a raise that propagates out of
+        # an atomic block rolls back everything written inside it -
+        # including a status flip and reservation release written earlier
+        # in the very same call. Handling expiry before entering the
+        # atomic section below (which guards the actual start) keeps that
+        # write durable regardless of the ValueError raised right after it.
         if session.is_expired():
-            # Expiry must never release a Slot that's already Consumed - a
-            # session that reached this branch by construction has not yet
-            # called EntitlementService.consume_slot_reservation() below, so
-            # its reservation (if one exists) is still RESERVED.
-            reservation = cls._get_slot_reservation(session)
-            if reservation is not None and reservation.status == SlotReservation.RESERVED:
-                EntitlementService.release_slot_reservation(reservation=reservation, actor=actor)
-            session.status = InterviewSessionStatus.EXPIRED
-            session.save(update_fields=["status", "updated_at"])
+            cls.expire_session(session, actor=actor)
             raise ValueError("Cannot start expired session")
         if session.status == InterviewSessionStatus.COMPLETED:
             raise ValueError("Cannot restart completed session")
@@ -680,7 +702,7 @@ class InterviewSessionService:
             events.append(("SESSION_READY", AuditLogAction.SESSION_READY))
 
         session.start()
-        reservation = cls._get_slot_reservation(session)
+        reservation = cls.get_slot_reservation(session)
         if reservation is not None:
             EntitlementService.consume_slot_reservation(reservation=reservation, actor=actor)
         else:

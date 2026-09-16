@@ -11,10 +11,12 @@ from django.utils import timezone
 from api.accounts.models import User
 from api.audit.models import AuditLog
 from api.candidates.models import Candidate
-from api.core.constants import EvaluationStatus, EvaluationType, InterviewEvaluationTier, Roles
+from api.core.constants import EvaluationStatus, EvaluationType, InterviewEvaluationTier, InterviewSessionStatus, Roles
 from api.evaluations.models import Evaluation
 from api.interviews.models import InterviewConfiguration
+from api.payments.models import PackageBalance, SlotReservation
 from api.sessions.models import CandidateResponse, InterviewSession, SessionArtifact, SessionQuestion
+from api.sessions.services import InterviewSessionService
 
 
 def make_file(name="doc.pdf", content=b"%PDF-1.1 test content"):
@@ -190,3 +192,113 @@ class PurgeExpiredMediaCommandTests(TestCase):
         artifact.refresh_from_db()
         self.assertFalse(response.audio_file)
         self.assertFalse(artifact.file)
+
+
+class ExpireStaleSessionsCommandTests(TestCase):
+    """Proactive expiry (Slot Reservation Lifecycle spec, Section 6.1) -
+    a session nobody ever revisits after its invite window passes would
+    otherwise leave its Slot Reserved forever, since the lazy
+    check-on-access path in start_session only fires when someone tries
+    to start it."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="expiry-owner@example.com",
+            password="testpass123",
+            first_name="Owner",
+            last_name="User",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Exp",
+            last_name="Candidate",
+            email="expiry-candidate@example.com",
+            passport_id="PASS-EXP-001",
+            job_role="NA",
+            core_skills="care",
+            preferred_language="EN",
+            passport_document=make_file("passport.pdf"),
+            created_by=self.user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=30,
+            total_questions=1,
+            allow_retries=True,
+            max_retries=1,
+            rubric_version="v1",
+            question_set_version="v1",
+        )
+        self.balance = PackageBalance.objects.create(
+            owner_user=self.user, balance_type=PackageBalance.SLOTS, fixed_amount=5, current_balance=5,
+        )
+
+    def test_expires_a_stale_session_and_releases_its_reservation(self):
+        session = InterviewSessionService.create_session(candidate=self.candidate, config=self.config, created_by=self.user)
+        session.expires_at = timezone.now() - timedelta(minutes=5)
+        session.save(update_fields=["expires_at"])
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 4)
+
+        call_command("expire_stale_sessions")
+
+        session.refresh_from_db()
+        reservation = SlotReservation.objects.get(session=session)
+        self.balance.refresh_from_db()
+        self.assertEqual(session.status, InterviewSessionStatus.EXPIRED)
+        self.assertEqual(reservation.status, SlotReservation.RELEASED)
+        self.assertEqual(self.balance.current_balance, 5)
+
+    def test_does_not_touch_sessions_still_within_their_window(self):
+        session = InterviewSessionService.create_session(candidate=self.candidate, config=self.config, created_by=self.user)
+
+        call_command("expire_stale_sessions")
+
+        session.refresh_from_db()
+        self.assertNotEqual(session.status, InterviewSessionStatus.EXPIRED)
+        self.assertEqual(SlotReservation.objects.get(session=session).status, SlotReservation.RESERVED)
+
+    def test_never_expires_or_releases_an_already_started_session(self):
+        session = InterviewSessionService.create_session(candidate=self.candidate, config=self.config, created_by=self.user)
+        InterviewSessionService.start_session(session, actor=self.user)
+        session.expires_at = timezone.now() - timedelta(minutes=5)
+        session.save(update_fields=["expires_at"])
+        self.balance.refresh_from_db()
+        balance_after_start = self.balance.current_balance
+
+        call_command("expire_stale_sessions")
+
+        session.refresh_from_db()
+        reservation = SlotReservation.objects.get(session=session)
+        self.balance.refresh_from_db()
+        self.assertEqual(session.status, InterviewSessionStatus.IN_PROGRESS)
+        self.assertEqual(reservation.status, SlotReservation.CONSUMED)
+        self.assertEqual(self.balance.current_balance, balance_after_start)
+
+    def test_dry_run_changes_nothing(self):
+        session = InterviewSessionService.create_session(candidate=self.candidate, config=self.config, created_by=self.user)
+        session.expires_at = timezone.now() - timedelta(minutes=5)
+        session.save(update_fields=["expires_at"])
+
+        out = StringIO()
+        call_command("expire_stale_sessions", "--dry-run", stdout=out)
+
+        session.refresh_from_db()
+        self.assertNotEqual(session.status, InterviewSessionStatus.EXPIRED)
+        self.assertEqual(SlotReservation.objects.get(session=session).status, SlotReservation.RESERVED)
+        self.assertIn("dry-run", out.getvalue())
+
+    def test_expiring_the_same_session_twice_does_not_double_release(self):
+        session = InterviewSessionService.create_session(candidate=self.candidate, config=self.config, created_by=self.user)
+        session.expires_at = timezone.now() - timedelta(minutes=5)
+        session.save(update_fields=["expires_at"])
+
+        call_command("expire_stale_sessions")
+        call_command("expire_stale_sessions")
+
+        self.balance.refresh_from_db()
+        self.assertEqual(self.balance.current_balance, 5)

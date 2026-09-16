@@ -3,18 +3,24 @@ from unittest.mock import MagicMock, patch
 
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 
 from api.accounts.models import Company, User
-from api.core.constants import Roles
+from api.audit.models import AuditLog
+from api.candidates.models import Candidate
+from api.core.constants import InterviewEvaluationTier, InterviewSessionStatus, Roles
+from api.interviews.models import InterviewConfiguration
 from api.payments.entitlement_services import ADDON_POINTS_CATALOG, EntitlementService
-from api.payments.models import AddonRequest, BalanceTransaction, Customer, DealRecord, Invoice, PackageBalance, Payment, Price, ProcessedStripeEvent, Subscription
+from api.payments.models import AddonRequest, BalanceTransaction, Customer, DealRecord, Invoice, PackageBalance, Payment, Price, ProcessedStripeEvent, SlotReservation, Subscription
 from api.payments.serializers import DealRecordSerializer
 from api.payments.refund_services import CONFIRMED_BILLING_ERROR, PLATFORM_ERROR, RefundEligibilityService, RefundService
 from api.payments.serializers import CreateSubscriptionSerializer
 from api.payments.services import StripeService
+from api.sessions.models import InterviewSession
+from api.sessions.services import InterviewSessionService
 
 
 def make_price(**overrides):
@@ -1472,3 +1478,176 @@ class AdminInvoiceEndpointTests(APITestCase):
         response = self.client.get("/api/v1/payments/admin/invoices")
 
         self.assertEqual(response.status_code, 403)
+
+
+class ReconcileSlotReservationsCommandTests(TestCase):
+    """Safety-net scan (Slot Reservation Lifecycle spec, Section 11) - only
+    ever logs findings, never auto-corrects anything."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="reconcile-owner@example.com", password="Password123!", first_name="Owner", last_name="User",
+            role=Roles.B2C, is_verified=True,
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Rec", last_name="Candidate", email="reconcile-candidate@example.com",
+            passport_id="PASS-REC-001", job_role="NA", core_skills="care", preferred_language="EN",
+            passport_document=SimpleUploadedFile("passport.pdf", b"%PDF-1.1", content_type="application/pdf"),
+            created_by=self.user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Nanny", role_code="nanny", language="EN", evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=30, total_questions=1, allow_retries=True, max_retries=1,
+            rubric_version="v1", question_set_version="v1",
+        )
+        PackageBalance.objects.create(owner_user=self.user, balance_type=PackageBalance.SLOTS, fixed_amount=5, current_balance=5)
+
+    def _make_session(self, *, status):
+        return InterviewSession.objects.create(
+            candidate=self.candidate, organization=self.candidate.company, config=self.config,
+            role_name=self.config.role_name, ui_language="EN", candidate_language="EN",
+            tts_language_code="en-US", stt_language_code="en-US", total_questions=1,
+            status=status, expires_at=InterviewSession.build_expiry(30), created_by=self.user,
+        )
+
+    def test_no_findings_on_a_healthy_reservation(self):
+        InterviewSessionService.create_session(candidate=self.candidate, config=self.config, created_by=self.user)
+
+        call_command("reconcile_slot_reservations")
+
+        self.assertEqual(AuditLog.objects.filter(user_role="SYSTEM").count(), 0)
+
+    def test_flags_an_active_session_with_no_reservation_at_all(self):
+        # Give SlotReservation a real row to anchor the "since" cutoff to
+        # (created before the target session below), otherwise the target
+        # would be treated as pre-rollout and correctly skipped.
+        SlotReservation.objects.create(owner_user=self.user, session=self._make_session(status=InterviewSessionStatus.CANCELLED), candidate=self.candidate)
+        session = self._make_session(status=InterviewSessionStatus.READY)
+
+        call_command("reconcile_slot_reservations")
+
+        findings = AuditLog.objects.filter(action="RESERVATION_ANOMALY_DETECTED")
+        self.assertTrue(any(f.data.get("session_id") == str(session.public_id) for f in findings))
+
+    def test_flags_a_reservation_still_reserved_on_a_cancelled_session(self):
+        session = self._make_session(status=InterviewSessionStatus.CANCELLED)
+        reservation = SlotReservation.objects.create(owner_user=self.user, session=session, candidate=self.candidate)
+
+        call_command("reconcile_slot_reservations")
+
+        findings = AuditLog.objects.filter(action="RESERVATION_ANOMALY_DETECTED")
+        self.assertTrue(any(f.data.get("reservation_id") == str(reservation.public_id) for f in findings))
+        # Never auto-corrects.
+        reservation.refresh_from_db()
+        self.assertEqual(reservation.status, SlotReservation.RESERVED)
+
+    def test_flags_a_consumed_reservation_whose_session_never_started(self):
+        session = self._make_session(status=InterviewSessionStatus.READY)
+        reservation = SlotReservation.objects.create(
+            owner_user=self.user, session=session, candidate=self.candidate, status=SlotReservation.CONSUMED,
+        )
+
+        call_command("reconcile_slot_reservations")
+
+        findings = AuditLog.objects.filter(action="RESERVATION_ANOMALY_DETECTED")
+        self.assertTrue(any(f.data.get("reservation_id") == str(reservation.public_id) for f in findings))
+
+    def test_does_not_flag_pre_rollout_sessions_with_no_reservation(self):
+        # No SlotReservation exists anywhere yet -> "since" cutoff is None
+        # -> finding #1 (missing reservation) must not fire at all for a
+        # session that legitimately predates the rollout.
+        self._make_session(status=InterviewSessionStatus.READY)
+
+        call_command("reconcile_slot_reservations")
+
+        self.assertEqual(AuditLog.objects.filter(action="RESERVATION_ANOMALY_DETECTED").count(), 0)
+
+
+class SlotBalanceSummaryTests(TestCase):
+    """get_balance_summary's SLOTS entry (Slot Reservation Lifecycle spec,
+    Section 8): Available/Reserved/Consumed/Pending Sessions must be
+    separately visible, not collapsed into one ambiguous "remaining"
+    figure."""
+
+    def setUp(self):
+        self.b2c_user = User.objects.create_user(
+            email="slot-summary-b2c@example.com", password="Password123!", first_name="B2C", last_name="User",
+            role=Roles.B2C, is_verified=True,
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Sum", last_name="Candidate", email="slot-summary-candidate@example.com",
+            passport_id="PASS-SUM-001", job_role="NA", core_skills="care", preferred_language="EN",
+            passport_document=SimpleUploadedFile("passport.pdf", b"%PDF-1.1", content_type="application/pdf"),
+            created_by=self.b2c_user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Nanny", role_code="nanny", language="EN", evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=30, total_questions=1, allow_retries=True, max_retries=1,
+            rubric_version="v1", question_set_version="v1",
+        )
+
+    def test_b2c_reports_available_reserved_consumed_and_pending(self):
+        PackageBalance.objects.create(owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, fixed_amount=10, current_balance=10)
+
+        reserved_session = InterviewSessionService.create_session(candidate=self.candidate, config=self.config, created_by=self.b2c_user)
+        consumed_session = InterviewSessionService.create_session(candidate=self.candidate, config=self.config, created_by=self.b2c_user)
+        InterviewSessionService.start_session(consumed_session, actor=self.b2c_user)
+
+        summary = EntitlementService.get_balance_summary("USER", self.b2c_user)[PackageBalance.SLOTS]
+
+        self.assertEqual(summary["remaining"], 8)  # 10 - 1 reserved - 1 consumed
+        self.assertEqual(summary["limit"], 10)
+        self.assertEqual(summary["reserved"], 1)
+        self.assertEqual(summary["consumed"], 1)
+        self.assertEqual(summary["pending_sessions"], 1)
+
+    def test_b2b_reports_available_reserved_consumed_and_pending(self):
+        b2b_owner = User.objects.create_user(
+            email="slot-summary-b2b@example.com", password="Password123!", first_name="B2B", last_name="Owner",
+            role=Roles.B2B, is_verified=True,
+        )
+        company = make_company(b2b_owner)
+        price = make_price(target_user_type="B2B", slot_grant=20, points_grant=200)
+        make_subscription(b2b_owner, price, company=company, status="ACTIVE")
+        b2b_candidate = Candidate.objects.create(
+            first_name="B2B", last_name="Candidate", email="slot-summary-b2b-candidate@example.com",
+            passport_id="PASS-SUM-B2B-001", job_role="NA", core_skills="care", preferred_language="EN",
+            passport_document=SimpleUploadedFile("passport.pdf", b"%PDF-1.1", content_type="application/pdf"),
+            created_by=b2b_owner, company=company,
+        )
+
+        InterviewSessionService.create_session(candidate=b2b_candidate, config=self.config, created_by=b2b_owner)
+
+        summary = EntitlementService.get_balance_summary("COMPANY", company)[PackageBalance.SLOTS]
+
+        self.assertEqual(summary["remaining"], 19)
+        self.assertEqual(summary["limit"], 20)
+        self.assertEqual(summary["reserved"], 1)
+        self.assertEqual(summary["consumed"], 0)
+        self.assertEqual(summary["pending_sessions"], 1)
+
+    def test_consumed_resets_to_zero_right_after_a_b2b_period_reset(self):
+        b2b_owner = User.objects.create_user(
+            email="slot-summary-reset@example.com", password="Password123!", first_name="B2B", last_name="Owner",
+            role=Roles.B2B, is_verified=True,
+        )
+        company = make_company(b2b_owner)
+        price = make_price(target_user_type="B2B", slot_grant=20, points_grant=200)
+        subscription = make_subscription(b2b_owner, price, company=company, status="ACTIVE")
+        b2b_candidate = Candidate.objects.create(
+            first_name="B2B", last_name="Reset", email="slot-summary-reset-candidate@example.com",
+            passport_id="PASS-SUM-RST-001", job_role="NA", core_skills="care", preferred_language="EN",
+            passport_document=SimpleUploadedFile("passport.pdf", b"%PDF-1.1", content_type="application/pdf"),
+            created_by=b2b_owner, company=company,
+        )
+        session = InterviewSessionService.create_session(candidate=b2b_candidate, config=self.config, created_by=b2b_owner)
+        InterviewSessionService.start_session(session, actor=b2b_owner)
+
+        before = EntitlementService.get_balance_summary("COMPANY", company)[PackageBalance.SLOTS]
+        self.assertEqual(before["consumed"], 1)
+
+        EntitlementService.reset_b2b_balances(subscription)
+
+        after = EntitlementService.get_balance_summary("COMPANY", company)[PackageBalance.SLOTS]
+        self.assertEqual(after["consumed"], 0)
+        self.assertEqual(after["remaining"], 20)

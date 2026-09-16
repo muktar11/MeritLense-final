@@ -72,9 +72,11 @@ def _accessible_evaluations_queryset(user):
 
 
 class CandidateScoreSummaryView(APIView):
-    """GET /evaluations/candidate-scores - each accessible candidate's most
-    recent scored evaluation, including both certificate and transcript report
-    artifacts when they exist."""
+    """GET /evaluations/candidate-scores - every scored evaluation for each
+    accessible candidate (not just the latest - a candidate re-assessed for a
+    different role, or re-scored after a retry, keeps all of their prior
+    scores visible), ordered most-recent-first per candidate, including both
+    certificate and transcript report artifacts when they exist."""
 
     permission_classes = [IsAuthenticated]
 
@@ -114,12 +116,8 @@ class CandidateScoreSummaryView(APIView):
         else:
             summaries = summaries.none()
 
-        latest_by_candidate = {}
-        for summary in summaries:
-            latest_by_candidate.setdefault(summary.candidate_id, summary)
-
         results = []
-        for summary in latest_by_candidate.values():
+        for summary in summaries:
             evaluation = summary.evaluation
             cert = getattr(evaluation, "certificate", None) if evaluation else None
             active_report = next(iter(evaluation.reports.all()), None) if evaluation else None

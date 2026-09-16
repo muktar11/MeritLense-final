@@ -1725,6 +1725,27 @@ class SlotBalanceSummaryTests(TestCase):
         self.assertEqual(after["consumed"], 0)
         self.assertEqual(after["remaining"], 20)
 
+    def test_consumed_never_goes_negative_after_an_admin_credit_above_the_original_grant(self):
+        # admin_adjust_balance only ever moves current_balance, never
+        # fixed_amount ("a stable record of what was actually granted") -
+        # so a positive correction can legitimately push current_balance
+        # above fixed_amount. The derived Consumed figure must clamp at 0
+        # instead of going negative in that case.
+        balance = PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, fixed_amount=3, current_balance=3,
+        )
+        admin = User.objects.create_user(
+            email="slot-summary-admin@example.com", password="Password123!", first_name="Super", last_name="Admin",
+            role=Roles.SUPERADMIN, is_verified=True,
+        )
+        EntitlementService.admin_adjust_balance(balance=balance, delta=20, reason="support grant", actor=admin)
+
+        summary = EntitlementService.get_balance_summary("USER", self.b2c_user)[PackageBalance.SLOTS]
+
+        self.assertEqual(summary["remaining"], 23)
+        self.assertEqual(summary["limit"], 3)
+        self.assertEqual(summary["consumed"], 0)
+
 
 class SlotReservationNotificationTests(TestCase):
     """Reservation-failure and low-balance emails (Slot Reservation

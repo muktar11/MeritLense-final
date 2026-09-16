@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8" />
+<style>
+  @page { size: 297mm 195mm; margin: 0; }
+  * { box-sizing: border-box; }
+  @font-face {
+    font-family: "Noto Naskh Arabic";
+    src: url({{ arabic_font_regular_uri }}) format("truetype");
+    font-weight: 400;
+  }
+  @font-face {
+    font-family: "Noto Naskh Arabic";
+    src: url({{ arabic_font_bold_uri }}) format("truetype");
+    font-weight: 700;
+  }
+  body { font-family: "Noto Naskh Arabic", "Helvetica Neue", Arial, sans-serif; direction: rtl; text-align: right; font-size: 10pt; color: #1e2a3a; margin: 0; background: #eef2fb; }
+
+  .card { margin: 7mm; padding: 8mm 14mm; background: #fff; border: 1.5px solid #dbe4f7; border-radius: 18px; box-shadow: 0 0 0 6px #f0f4fd; }
+
+  /* ---------- Header ---------- */
+  .header { display: flex; justify-content: space-between; align-items: flex-start; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand img { width: 40px; height: auto; }
+  .wordmark { font-size: 15pt; font-weight: 800; color: #1e2a3a; direction: ltr; unicode-bidi: embed; display: inline-block; }
+  .wordmark-accent { color: #2563eb; }
+  .brand-tagline { font-size: 7.5pt; color: #888; margin-top: 1px; }
+
+  .ribbon { position: relative; background: linear-gradient(135deg, #1e40af, #1e3a8a); color: #fff; font-size: 8pt; font-weight: 700; letter-spacing: 0.01em; text-align: center; padding: 7px 16px 9px; border-radius: 6px 6px 0 0; }
+  .ribbon-tail { display: flex; justify-content: space-between; }
+  .ribbon-tail span { width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 7px solid #1e3a8a; }
+
+  /* ---------- Title ---------- */
+  .title-block { text-align: center; margin-top: 6px; }
+  .title-sub { font-size: 12pt; font-weight: 600; color: #1e3a8a; margin-top: -2px; }
+
+  /* ---------- Body: photo + statement ---------- */
+  .body-row { display: flex; align-items: center; gap: 22px; margin-top: 8px; padding: 0 10mm; }
+  .photo-block { display: flex; flex-direction: column; align-items: center; gap: 8px; flex-shrink: 0; }
+  .photo-frame { width: 96px; height: 126px; border-radius: 10px; overflow: hidden; border: 2px solid #dbe4f7; background: #eef2fb; display: flex; align-items: center; justify-content: center; }
+  .photo-frame img { width: 100%; height: 100%; object-fit: cover; }
+  .photo-placeholder { font-size: 26pt; font-weight: 700; color: #93aee0; }
+  .photo-verified { font-size: 7pt; font-weight: 700; color: #14532d; background: #dcfce7; border: 1px solid #86efac; border-radius: 999px; padding: 4px 8px; }
+  .statement-col { flex: 1; text-align: center; }
+  .statement-intro { font-size: 9.5pt; color: #666; }
+  .candidate-name { font-family: "Noto Naskh Arabic", Georgia, serif; font-size: 20pt; font-weight: 700; color: #1e2a3a; margin: 3px 0; }
+  .statement-body { font-size: 9.3pt; color: #444; line-height: 1.5; max-width: 480px; margin: 0 auto; }
+
+  /* ---------- Stats row ---------- */
+  .stats-row { display: flex; gap: 14px; margin-top: 10px; }
+  .stats-card { flex: 1; background: #f6f8fd; border: 1px solid #e3e9f7; border-radius: 12px; padding: 12px 16px; }
+
+  .info-item { display: flex; justify-content: space-between; gap: 10px; font-size: 8.3pt; padding: 4px 0; border-bottom: 1px solid #e7ecf9; }
+  .info-item:last-child { border-bottom: none; }
+  .info-item span:first-child { color: #888; white-space: nowrap; flex-shrink: 0; }
+  .info-item span:last-child { font-weight: 700; color: #1e2a3a; text-align: left; }
+
+  /* Deliberately plain block flow, not flex-direction:column like the
+     English template's .readiness-card - a flex item that's also its own
+     flex container renders with a collapsed/miscalculated width under
+     WeasyPrint once its ancestor sets direction:rtl, overflowing its
+     content into the neighboring card. text-align:center on a block
+     achieves the same centered, stacked layout without hitting that. */
+  .readiness-card { text-align: center; }
+  .readiness-label { font-size: 7.8pt; text-transform: uppercase; letter-spacing: 0.03em; color: #475569; margin-bottom: 8px; }
+  .readiness-badge { display: inline-block; font-size: 11pt; font-weight: 800; padding: 7px 16px; border-radius: 100px; }
+  .readiness-badge.level-1 { background: #fee2e2; color: #991b1b; }
+  .readiness-badge.level-2 { background: #fef3c7; color: #92400e; }
+  .readiness-badge.level-3 { background: #dcfce7; color: #166534; }
+  .readiness-caption { font-size: 7.4pt; color: #888; margin-top: 8px; }
+
+  /* ---------- Evaluator rating row ---------- */
+  .evaluator-row { margin-top: 8px; padding: 8px 12px; background: #f6f8fd; border: 1px solid #e3e9f7; border-radius: 10px; display: flex; align-items: center; gap: 12px; }
+  .evaluator-row-label { font-size: 7pt; text-transform: uppercase; letter-spacing: 0.02em; color: #888; white-space: nowrap; flex-shrink: 0; }
+  .evaluator-chips { display: flex; gap: 8px; flex: 1; }
+  .evaluator-chip { flex: 1; text-align: center; background: #fff; border: 1px solid #e7ecf9; border-radius: 8px; padding: 4px 6px; }
+  .evaluator-chip span { display: block; font-size: 6.2pt; color: #888; }
+  .evaluator-chip b { font-size: 10pt; color: #1e2a3a; direction: ltr; display: block; }
+  .evaluator-row-note { font-size: 5.6pt; color: #9aa4b8; margin-top: 4px; }
+
+  /* ---------- Footer ---------- */
+  .footer-row { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid #e7ecf9; }
+  .verify-col { display: flex; align-items: center; gap: 12px; }
+  .verify-col img { width: 56px; height: 56px; }
+  .verify-title { font-size: 8.5pt; font-weight: 700; color: #1e2a3a; }
+  .verify-desc { font-size: 7.2pt; color: #888; max-width: 260px; margin-top: 1px; }
+  .verify-link { font-size: 7.5pt; color: #1e40af; font-weight: 600; margin-top: 2px; direction: ltr; text-align: right; }
+
+  .sign-col { text-align: left; display: flex; align-items: center; gap: 16px; }
+  .issued-by { font-size: 7.5pt; color: #888; line-height: 1.4; flex-shrink: 0; }
+  .issued-by b { color: #1e2a3a; }
+  .signature { font-family: "Noto Naskh Arabic", Georgia, serif; font-size: 13pt; color: #1e3a8a; flex-shrink: 0; direction: ltr; unicode-bidi: embed; }
+  .issuer-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; height: 54px; border-radius: 999px; background: #dbeafe; border: 1px solid #93c5fd; color: #1d4ed8; font-size: 6pt; font-weight: 800; letter-spacing: 0.02em; padding: 0 10px; }
+
+  .disclaimer { font-size: 6.6pt; color: #999; text-align: center; margin-top: 8px; line-height: 1.4; }
+  .cert-id-footer { text-align: center; font-size: 7pt; color: #bbb; margin-top: 4px; direction: ltr; }
+</style>
+</head>
+<body>
+
+  <div class="card">
+
+    <div class="header">
+      <div class="brand">
+        <img src="{{ logo_data_uri }}" alt="MeritLense" />
+        <div>
+          <div class="wordmark">Merit<span class="wordmark-accent">Lense</span></div>
+          <div class="brand-tagline">منصة MeritLense لتقييم جاهزية القوى العاملة</div>
+        </div>
+      </div>
+      <div>
+        <div class="ribbon">شهادة MeritLense لتقييم<br />جاهزية القوى العاملة</div>
+        <div class="ribbon-tail"><span></span><span></span></div>
+      </div>
+    </div>
+
+    <div class="title-block">
+      <div class="title-sub">شهادة MeritLense لتقييم جاهزية القوى العاملة</div>
+    </div>
+
+    <div class="body-row">
+      <div class="photo-block">
+        <div class="photo-frame">
+          {% if candidate_photo_data_uri %}
+          <img src="{{ candidate_photo_data_uri }}" alt="{{ candidate_name }}" />
+          {% else %}
+          <span class="photo-placeholder">{{ candidate_name|first|upper }}</span>
+          {% endif %}
+        </div>
+        {% if candidate_photo_verified %}
+        <div class="photo-verified">صورة هوية موثّقة</div>
+        {% endif %}
+      </div>
+      <div class="statement-col">
+        <div class="statement-intro">تشهد هذه الشهادة بأن</div>
+        <div class="candidate-name">{{ candidate_name }}</div>
+        <div class="statement-body">
+          قد أكمل/أكملت تقييم MeritLense لجاهزية القوى العاملة الخاص بدور {{ role_name }}، وتم تقييمه/تقييمها وفقًا لمعيار MeritLense لجاهزية القوى العاملة.
+        </div>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stats-card">
+        <div class="info-item"><span>رقم الشهادة</span><span>{{ certificate_id }}</span></div>
+        <div class="info-item"><span>تاريخ الإصدار</span><span>{{ issue_date }}</span></div>
+        <div class="info-item"><span>رقم التقييم</span><span style="font-size:7pt;">{{ assessment_id }}</span></div>
+      </div>
+      <div class="stats-card">
+        <div class="info-item"><span>الدور الوظيفي</span><span>{{ role_name }}</span></div>
+        <div class="info-item"><span>إصدار ملف الدور</span><span>{{ role_profile_version }}</span></div>
+        <div class="info-item"><span>تاريخ التقييم</span><span>{{ assessment_date }}</span></div>
+      </div>
+      <div class="stats-card readiness-card">
+        <div class="readiness-label">مستوى جاهزية القوى العاملة</div>
+        <div class="readiness-badge level-{{ readiness_position }}">{{ readiness_label }}</div>
+        <div class="readiness-caption">تم التقييم وفقًا لمعيار MeritLense لجاهزية القوى العاملة.</div>
+      </div>
+    </div>
+
+    {% if evaluator_rating %}
+    <div class="evaluator-row">
+      <div class="evaluator-row-label">تقييم<br />المُقيِّم</div>
+      <div class="evaluator-chips">
+        <div class="evaluator-chip"><span>الوعي بالسلامة</span><b>{{ evaluator_rating.safety_awareness }}</b></div>
+        <div class="evaluator-chip"><span>النظافة والمعايير</span><b>{{ evaluator_rating.hygiene|default:"غير متاح" }}</b></div>
+        <div class="evaluator-chip"><span>القدرة على التواصل</span><b>{{ evaluator_rating.communication|default:"غير متاح" }}</b></div>
+        <div class="evaluator-chip"><span>تنفيذ المهام العملية</span><b>{{ evaluator_rating.task_execution }}</b></div>
+        <div class="evaluator-chip"><span>المؤشرات السلوكية</span><b>{{ evaluator_rating.behavioral_risk_level }}</b></div>
+      </div>
+    </div>
+    <div class="evaluator-row-note">تُعرض المؤشرات السلوكية كمستوى مخاطرة (مرتفع/متوسط/منخفض)، وليست نتيجة رقمية، وفقًا لمعيار MeritLense لجاهزية القوى العاملة. اتساق الإجابات ({{ evaluator_rating.consistency }}/100) هو مقياس موثوقية داعم، وليس أحد الكفاءات الخمس المذكورة أعلاه.</div>
+    {% endif %}
+
+    <div class="footer-row">
+      <div class="verify-col">
+        <img src="{{ qr_data_uri }}" alt="رمز التحقق" />
+        <div>
+          <div class="verify-title">التحقق من الشهادة</div>
+          <div class="verify-desc">امسح رمز الاستجابة السريعة للتحقق من صحة هذه الشهادة، أو قم بزيارة الرابط أدناه.</div>
+          <div class="verify-link">{{ verification_url }}</div>
+        </div>
+      </div>
+      <div class="sign-col">
+        <div class="issued-by">صادرة عن:<br /><b>منصة MeritLense لتقييم القوى العاملة</b></div>
+        <div class="signature">MeritLense</div>
+        <div class="issuer-badge">سجل رقمي</div>
+      </div>
+    </div>
+
+    <div class="disclaimer">
+      تؤكد هذه الشهادة إتمام المرشح/المرشحة للتقييم ومستوى جاهزيته/جاهزيتها للعمل بناءً على معيار MeritLense لجاهزية القوى العاملة. وهي تقدّم دليل تقييم فقط، ولا تشكّل ترخيصًا مهنيًا أو تصريح عمل أو ضمانًا للتوظيف. تبقى قرارات التوظيف النهائية بيد صاحب العمل وحده.
+    </div>
+    <div class="cert-id-footer">Generated {{ generated_at }} &middot; MeritLense Workforce Readiness Standard {{ system_version }}</div>
+
+  </div>
+
+</body>
+</html>

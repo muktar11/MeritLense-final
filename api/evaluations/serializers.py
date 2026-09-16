@@ -197,12 +197,15 @@ class EvaluationCreateSerializer(PublicIdModelSerializer):
         if validated_data.get("evaluation_type") == EvaluationType.INTERVIEW:
             scheduled_date = validated_data["scheduled_date"]
             duration_minutes = validated_data.get("duration_minutes") or 60
-            session = InterviewSessionService.create_session(
-                candidate=candidate,
-                config=self._resolve_interview_config(candidate),
-                created_by=request.user,
-                scheduled_start_at=scheduled_date,
-            )
+            try:
+                session = InterviewSessionService.create_session(
+                    candidate=candidate,
+                    config=self._resolve_interview_config(candidate),
+                    created_by=request.user,
+                    scheduled_start_at=scheduled_date,
+                )
+            except ValueError as exc:
+                raise serializers.ValidationError({"detail": str(exc)}) from exc
             session.expires_at = InterviewSession.build_expiry(duration_minutes, anchor_time=scheduled_date)
             session.token_expires_at = session.expires_at
             session.save(update_fields=["expires_at", "token_expires_at", "updated_at"])

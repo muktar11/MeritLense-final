@@ -1,7 +1,7 @@
 from django.db import transaction
 from django.utils import timezone
 
-from .models import PackageBalance, BalanceTransaction, Subscription, AddonRequest
+from .models import PackageBalance, BalanceTransaction, Subscription, AddonRequest, SlotReservation
 
 ADDON_POINTS_CATALOG = {
     "practical_simulation_test": 30,
@@ -28,7 +28,102 @@ class EntitlementService:
         return "USER", session.candidate.created_by
 
     @classmethod
-    def consume_slot(cls, session, actor=None):
+    def reserve_slot(cls, *, session, actor=None):
+        """Reserve one Slot for a newly scheduled session (Gap #2
+        Resolution - Slot Reservation Lifecycle spec): deducts
+        current_balance immediately, same as any spend, but only marks the
+        reservation RESERVED - consume_slot_reservation() or
+        release_slot_reservation() resolve it. Raises ValueError (no Slot
+        available) if the owner has no balance to draw from - scheduling
+        must be blocked at this point, not discovered later at Start."""
+        owner_type, owner = cls.resolve_owner(session)
+        with transaction.atomic():
+            reservation = SlotReservation.objects.create(
+                owner_company=owner if owner_type == "COMPANY" else None,
+                owner_user=None if owner_type == "COMPANY" else owner,
+                session=session,
+                candidate=session.candidate,
+                actor=actor,
+            )
+            reference = f"slot-reservation:{reservation.public_id}"
+            if owner_type == "COMPANY":
+                balance = cls._consume_b2b(
+                    owner, PackageBalance.SLOTS, reference=reference,
+                    actor=actor, amount=1, transaction_type=BalanceTransaction.RESERVE,
+                )
+            else:
+                balance = cls._consume_b2c(
+                    owner, PackageBalance.SLOTS, reference=reference,
+                    actor=actor, amount=1, transaction_type=BalanceTransaction.RESERVE,
+                )
+            reservation.balance = balance
+            reservation.save(update_fields=["balance", "updated_at"])
+            return reservation
+
+    @classmethod
+    def consume_slot_reservation(cls, *, reservation, actor=None):
+        """Mark a reserved Slot as consumed when its session actually
+        starts. No balance change - the Slot already left current_balance
+        when reserved; this just makes that deduction permanent.
+        Idempotent: a duplicate Start event for an already-consumed
+        reservation is a no-op (Start must be safe against duplicate
+        delivery, per the Slot Reservation Lifecycle spec's acceptance
+        criteria)."""
+        if reservation.status == SlotReservation.CONSUMED:
+            return reservation
+        if reservation.status != SlotReservation.RESERVED:
+            raise ValueError(f"Cannot consume a slot reservation in status {reservation.status}")
+        reservation.status = SlotReservation.CONSUMED
+        reservation.resolved_at = timezone.now()
+        reservation.save(update_fields=["status", "resolved_at", "updated_at"])
+        return reservation
+
+    @classmethod
+    def release_slot_reservation(cls, *, reservation, actor=None):
+        """Reverse a Slot reservation on cancellation or invite expiry,
+        crediting back exactly what was reserved (per PackageBalance row
+        touched, via the RESERVE ledger entry). Idempotent if already
+        released (Cancel and Expiry must each be safe against duplicate
+        delivery); refuses to release an already-consumed (started)
+        session's slot, since a started session's slot is never
+        returned."""
+        if reservation.status == SlotReservation.RELEASED:
+            return reservation
+        if reservation.status != SlotReservation.RESERVED:
+            raise ValueError(f"Cannot release a slot reservation in status {reservation.status}")
+
+        reference = f"slot-reservation:{reservation.public_id}"
+        with transaction.atomic():
+            reserved_txns = list(
+                BalanceTransaction.objects.filter(reference=reference, transaction_type=BalanceTransaction.RESERVE)
+            )
+            for txn in reserved_txns:
+                balance = PackageBalance.objects.select_for_update().get(pk=txn.balance_id)
+                credit = -txn.amount
+                balance.current_balance += credit
+                balance.save(update_fields=["current_balance", "updated_at"])
+                BalanceTransaction.objects.create(
+                    balance=balance,
+                    transaction_type=BalanceTransaction.RELEASE,
+                    amount=credit,
+                    balance_after=balance.current_balance,
+                    reference=reference,
+                    actor=actor,
+                )
+            reservation.status = SlotReservation.RELEASED
+            reservation.resolved_at = timezone.now()
+            reservation.save(update_fields=["status", "resolved_at", "updated_at"])
+        return reservation
+
+    @classmethod
+    def consume_slot_legacy(cls, session, actor=None):
+        """Transitional-only fallback for a session that was scheduled
+        before the Slot Reservation Lifecycle rollout and so has no
+        SlotReservation row - falls back to the old flat consume-at-start
+        behavior it was actually scheduled under, so already-pending
+        interviews aren't broken by this change. Every session created
+        after the rollout always has a reservation and never reaches this
+        path; safe to delete once no pre-rollout session remains pending."""
         owner_type, owner = cls.resolve_owner(session)
         if owner_type == "COMPANY":
             cls._consume_b2b(owner, PackageBalance.SLOTS, reference=f"session:{session.public_id}", actor=actor)

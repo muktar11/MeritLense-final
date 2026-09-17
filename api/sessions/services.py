@@ -407,7 +407,13 @@ class InterviewSessionService:
     @classmethod
     @transaction.atomic
     def create_session(cls, *, candidate, config, created_by, package_code="", scheduled_start_at=None):
-        language = candidate.preferred_language or config.language or "EN"
+        # The InterviewConfiguration chosen for THIS interview wins over the
+        # candidate's general profile-level preferred_language - the latter
+        # is a separate, unrelated form field that defaults to "EN" and is
+        # essentially always set, so candidate-first precedence here silently
+        # discarded an admin's explicit AR (or any non-English) config choice
+        # on every candidate whose profile hadn't also been flipped to AR.
+        language = config.language or candidate.preferred_language or "EN"
         package_context = PackageArchitectureService.resolve_session_package_context(
             user=created_by,
             role_code=config.role_code,
@@ -455,7 +461,7 @@ class InterviewSessionService:
             package_session_config=package_session_config,
             role_name=config.role_name or candidate.get_job_role_display(),
             role_code=config.role_code,
-            ui_language=config.language or language,
+            ui_language=language,
             candidate_language=language,
             tts_language_code=LANGUAGE_CODE_MAP.get(language, "en-US"),
             stt_language_code=LANGUAGE_CODE_MAP.get(language, "en-US"),

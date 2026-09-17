@@ -441,16 +441,26 @@ class InterviewSessionService:
             readiness_indicator_enabled = package_context["readiness_indicator_enabled"]
             certificate_enabled = package_context["certificate_enabled"]
             expiry_duration = package_session_config.duration_minutes or config.duration_minutes
-            # The package's coverage can downgrade the tier below what this
-            # InterviewConfiguration was built for (e.g. a FULL, 21-question
-            # config under a package whose coverage for this role is only
-            # SCREENING) - question count must follow that downgrade too, or
-            # the session ends up SCREENING-labeled while still requesting a
-            # FULL-sized question set, which no SCREENING-tier scoring rubric
-            # can ever resolve (the evaluation completes but can never be
-            # scored).
-            if session_evaluation_tier != config.evaluation_tier:
-                session_total_questions = package_session_config.default_question_count or config.total_questions
+            # The package's coverage can be lower than what this
+            # InterviewConfiguration was explicitly built/selected for (e.g.
+            # a FULL config picked under a package whose coverage for this
+            # role is only SCREENING). This used to silently downgrade the
+            # session to the lower tier - confusing (the admin picked Full
+            # and got Screening with no explanation) and, worse, previously
+            # unscoreable (no SCREENING-tier scoring rule set existed for
+            # any role). Refuse instead: the admin must either pick a
+            # config that matches what their package actually covers, or
+            # upgrade the package - never a silent swap.
+            if (
+                config.evaluation_tier == InterviewEvaluationTier.FULL
+                and session_evaluation_tier != InterviewEvaluationTier.FULL
+            ):
+                raise ValueError(
+                    f"The {package_session_config.package_name} package only covers Screening-tier "
+                    f"interviews for {config.role_name or config.role_code}, not Full. Select a "
+                    "Screening configuration, or upgrade the package to unlock Full evaluations for "
+                    "this role."
+                )
 
         expiry_anchor = scheduled_start_at or timezone.now()
 

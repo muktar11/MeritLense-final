@@ -7,6 +7,8 @@ class DashboardStatsSerializer(serializers.Serializer):
     total_candidates = serializers.IntegerField()
     total_evaluations = serializers.IntegerField()
     completed_evaluations = serializers.IntegerField()
+    completed_ai_interviews = serializers.IntegerField(required=False)
+    completed_scheduled_assessments = serializers.IntegerField(required=False)
     certificates_issued = serializers.IntegerField()
     success_rate = serializers.FloatField()
     team_members_count = serializers.IntegerField(required=False)

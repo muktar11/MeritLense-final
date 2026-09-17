@@ -39,13 +39,23 @@ class B2CDashboardStatsView(APIView):
         successful_evaluations = completed_evaluations.filter(score__gte=70).count()
         total_completed = completed_evaluations.count()
         success_rate = (successful_evaluations / total_completed * 100) if total_completed > 0 else 0
-        
+
+        # AI interviews (self-serve, async) vs. scheduled assessments
+        # (evaluator-conducted live calls) - see the matching comment in
+        # B2BDashboardStatsView for why session__isnull=False is explicit.
+        completed_ai_interviews = completed_evaluations.filter(
+            session__isnull=False, session__scheduled_start_at__isnull=True
+        ).count()
+        completed_scheduled_assessments = completed_evaluations.filter(session__scheduled_start_at__isnull=False).count()
+
         balances = EntitlementService.get_balance_summary("USER", user)
 
         stats = {
             'total_candidates': candidates.count(),
             'total_evaluations': evaluations.count(),
             'completed_evaluations': total_completed,
+            'completed_ai_interviews': completed_ai_interviews,
+            'completed_scheduled_assessments': completed_scheduled_assessments,
             'certificates_issued': certificates_issued,
             'success_rate': round(success_rate, 2),
             'remaining_slots': balances[PackageBalance.SLOTS]['remaining'],

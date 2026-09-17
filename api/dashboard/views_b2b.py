@@ -50,7 +50,19 @@ class B2BDashboardStatsView(APIView):
         successful_evaluations = completed_evaluations.filter(score__gte=70).count()
         total_completed = completed_evaluations.count()
         success_rate = (successful_evaluations / total_completed * 100) if total_completed > 0 else 0
-        
+
+        # AI interviews (self-serve, async) vs. scheduled assessments
+        # (evaluator-conducted live calls) - distinguished by whether the
+        # linked session was ever scheduled (InterviewSession.is_scheduled_interview).
+        # A completed evaluation with no linked session at all (session=SET_NULL
+        # on delete) falls into neither bucket - session__isnull=False is
+        # required explicitly, since a NULL session would otherwise also
+        # satisfy session__scheduled_start_at__isnull=True via the outer join.
+        completed_ai_interviews = completed_evaluations.filter(
+            session__isnull=False, session__scheduled_start_at__isnull=True
+        ).count()
+        completed_scheduled_assessments = completed_evaluations.filter(session__scheduled_start_at__isnull=False).count()
+
         team_members = User.objects.filter(
             company=company,
             role=Roles.B2B_TEAM_MEMBER,
@@ -63,6 +75,8 @@ class B2BDashboardStatsView(APIView):
             'total_candidates': candidates.count(),
             'total_evaluations': evaluations.count(),
             'completed_evaluations': total_completed,
+            'completed_ai_interviews': completed_ai_interviews,
+            'completed_scheduled_assessments': completed_scheduled_assessments,
             'certificates_issued': certificates_issued,
             'success_rate': round(success_rate, 2),
             'team_members_count': team_members,

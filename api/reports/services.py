@@ -51,13 +51,21 @@ class EvaluationReportService:
         "This report provides decision support only and does not constitute an employment decision. "
         "Final hiring decisions remain with the employer."
     )
+    LEGAL_DISCLAIMER_AR = (
+        "يقدم هذا التقرير دعمًا لاتخاذ القرار فقط ولا يشكل قرار توظيف. "
+        "تبقى قرارات التوظيف النهائية من مسؤولية صاحب العمل."
+    )
     EVALUATION_FLOW_REFERENCE = (
         "Interview Session -> Responses -> AI Processing -> Deterministic Scoring -> Rule Engine -> Evaluation Report"
     )
     CLASSIFICATION = "CONFIDENTIAL - Internal Use Only"
+    CLASSIFICATION_AR = "سرّي - للاستخدام الداخلي فقط"
     REPORT_NAME = "MeritLense Workforce Readiness Assessment Report"
+    REPORT_NAME_AR = "تقرير ميريت لينس لتقييم جاهزية القوى العاملة"
     GENERATED_BY = "MeritLense Platform"
+    GENERATED_BY_AR = "منصة ميريت لينس"
     GENERIC_COMPETENCY_LABEL = "Overall Workforce Readiness"
+    GENERIC_COMPETENCY_LABEL_AR = "الجاهزية العامة للقوى العاملة"
     MINIMUM_ASSESSED_COMPETENCIES = 4
     """Of the 5 canonical dimensions in _build_critical_competency_status - matches
     the certificate eligibility gate's MINIMUM_REQUIRED_DIMENSIONS. A report whose
@@ -77,9 +85,44 @@ class EvaluationReportService:
     an unapproved name (e.g. "Integrity") in one place while another says
     "Behavioral Indicators". Report-layer only - does not touch the separate
     skill_tags.py taxonomy the AI scoring pipeline itself normalizes into."""
+    CANONICAL_COMPETENCY_DIMENSIONS_AR = (
+        "الوعي بالسلامة",
+        "النظافة والمعايير",
+        "القدرة على التواصل",
+        "تنفيذ المهام العملية",
+        "المؤشرات السلوكية",
+    )
+    COMPETENCY_LABEL_TRANSLATIONS_AR = {
+        "Patient Safety Awareness": "الوعي بسلامة المرضى",
+        "Hygiene Standards": "معايير النظافة",
+        "Communication Ability": "القدرة على التواصل",
+        "Behavioral Indicators": "المؤشرات السلوكية",
+        "Practical Task Execution": "تنفيذ المهام العملية",
+        "Safety Awareness": "الوعي بالسلامة",
+        "Knowledge & Comprehension": "المعرفة والاستيعاب",
+    }
+    """Only covers the fixed label set `_friendly_competency_name` can
+    produce (see its `mappings`) - not a general-purpose glossary. A
+    competency code/name that falls through to `_titleize_code` (no
+    keyword match) has no enumerable Arabic form and stays in English in
+    both languages, same as raw scoring-rule indicator phrases (see
+    `_format_indicator_list`)."""
     PUBLIC_VERIFY_FRONTEND_URL = "https://www.meritlense.com"
     LOGO_PATH = Path(__file__).resolve().parents[1] / "evaluations" / "assets" / "meritlense-logo.png"
     _logo_data_uri_cache = None
+
+    @classmethod
+    def _report_language(cls, session):
+        """Matches the certificate's language selection (see
+        api.evaluations.certificate_services._certificate_language) - the
+        language the candidate actually took the interview in, not their
+        account UI preference. Only Arabic has a translated report template
+        today; every other language falls back to English. The report's
+        stored payload carries this under "language" so a later
+        render_existing_pdf (which only has the saved payload, not the
+        original session) can still pick the right template."""
+        candidate_language = (session.candidate_language if session else None) or "EN"
+        return "ar" if candidate_language.upper() == "AR" else "en"
 
     @classmethod
     def generate_for_evaluation(cls, *, evaluation, actor):
@@ -116,13 +159,15 @@ class EvaluationReportService:
 
                 stale_count = cls._mark_previous_reports_stale(evaluation=evaluation, actor=actor)
                 report_number = cls._build_report_number(evaluation=evaluation)
-                competency_breakdown = cls._build_competency_breakdown(competency_results)
-                response_evidence_summary = cls._build_response_evidence(response_results)
+                language = cls._report_language(evaluation.session)
+                competency_breakdown = cls._build_competency_breakdown(competency_results, language=language)
+                response_evidence_summary = cls._build_response_evidence(response_results, language=language)
                 human_review_flags = cls._build_human_review_flags(
                     evaluation=evaluation,
                     summary=summary,
                     response_results=response_results,
                     competency_results=competency_results,
+                    language=language,
                 )
                 requires_human_review = bool(
                     human_review_flags or summary.status == SessionEvaluationSummary.STATUS_REQUIRES_HUMAN_REVIEW
@@ -135,6 +180,7 @@ class EvaluationReportService:
                     response_evidence_summary=response_evidence_summary,
                     human_review_flags=human_review_flags,
                     stale_previous_reports=stale_count,
+                    language=language,
                 )
                 pdf_bytes, pdf_hash = cls._render_employer_pdf(
                     report_payload=report_payload,
@@ -201,6 +247,7 @@ class EvaluationReportService:
     @classmethod
     def export_employer_payload(cls, report):
         allowed_keys = [
+            "language",
             "classification",
             "report_name",
             "report_version",
@@ -286,13 +333,32 @@ class EvaluationReportService:
         return sanitized
 
     @classmethod
-    def _display_report_status(cls, report_status):
+    def _display_report_status(cls, report_status, language="en"):
+        mapping_ar = {
+            EvaluationReport.STATUS_ACTIVE: "نشط",
+            EvaluationReport.STATUS_SUPERSEDED: "مستبدل",
+            EvaluationReport.STATUS_REVOKED: "ملغى",
+        }
         mapping = {
             EvaluationReport.STATUS_ACTIVE: "Active",
             EvaluationReport.STATUS_SUPERSEDED: "Superseded",
             EvaluationReport.STATUS_REVOKED: "Revoked",
         }
+        if language == "ar":
+            return mapping_ar.get(report_status, str(report_status or ""))
         return mapping.get(report_status, str(report_status or "").title())
+
+    @classmethod
+    def _localize_assessment_status(cls, assessment_status, language):
+        if language != "ar":
+            return assessment_status
+        mapping_ar = {
+            "COMPLETED": "مكتمل",
+            "INVALIDATED": "ملغى",
+            "ABANDONED": "متروك",
+            "IN_PROGRESS": "قيد التنفيذ",
+        }
+        return mapping_ar.get(assessment_status, assessment_status)
 
     @classmethod
     def render_existing_pdf(cls, report):
@@ -369,7 +435,7 @@ class EvaluationReportService:
         return len(reports)
 
     @classmethod
-    def _friendly_competency_name(cls, competency_code=None, competency_name=None):
+    def _friendly_competency_name(cls, competency_code=None, competency_name=None, language="en"):
         haystack = " ".join(
             [
                 str(competency_code or "").lower(),
@@ -398,8 +464,20 @@ class EvaluationReportService:
         ]
         for tokens, label in mappings:
             if all(token in haystack for token in tokens):
-                return label
+                return cls._localize_competency_label(label, language)
+        # No keyword match - falls back to a titleized version of the raw
+        # code/name, which has no enumerable Arabic form (see
+        # COMPETENCY_LABEL_TRANSLATIONS_AR's docstring), so it stays in
+        # English even when language == "ar".
         return cls._titleize_code(competency_name or competency_code or "Readiness Competency")
+
+    @classmethod
+    def _localize_competency_label(cls, label, language):
+        if language != "ar":
+            return label
+        if label == cls.GENERIC_COMPETENCY_LABEL:
+            return cls.GENERIC_COMPETENCY_LABEL_AR
+        return cls.COMPETENCY_LABEL_TRANSLATIONS_AR.get(label, label)
 
     @classmethod
     def _titleize_code(cls, value):
@@ -473,11 +551,15 @@ class EvaluationReportService:
         return " ".join(cls._normalize_text_list(items))
 
     @classmethod
-    def _strength_statement(cls, label):
+    def _strength_statement(cls, label, language="en"):
+        if language == "ar":
+            return f"أداء قوي في {label}"
         return f"Strong {label.lower()}"
 
     @classmethod
-    def _risk_statement(cls, label):
+    def _risk_statement(cls, label, language="en"):
+        if language == "ar":
+            return f"تم تحديد فجوة في الجاهزية ضمن {label}"
         return f"Readiness gap identified in {label.lower()}"
 
     @classmethod
@@ -508,48 +590,86 @@ class EvaluationReportService:
         return f"{', '.join(cleaned[:-1])}, and {cleaned[-1]}"
 
     @classmethod
-    def _employer_evidence_finding(cls, item):
+    def _employer_evidence_finding(cls, item, language="en"):
+        """The sentence scaffolding is translated, but the indicator phrases
+        it wraps (`_format_indicator_list`'s output) are authored in the
+        scoring-rule config across every role package and stay in English
+        in both languages - see COMPETENCY_LABEL_TRANSLATIONS_AR's
+        docstring for the same tradeoff on unmapped competency labels."""
         matched = cls._normalize_text_list(item.get("matched_indicators") or item.get("observed_indicators") or [])
         missing = cls._normalize_text_list(item.get("missing_indicators") or [])
         if matched and missing:
+            if language == "ar":
+                return (
+                    f"أظهر المرشح: {cls._format_indicator_list(matched)}. "
+                    f"الأدلة المتوفرة غير كافية بشأن: {cls._format_indicator_list(missing)}."
+                )
             return (
                 f"Candidate demonstrated {cls._format_indicator_list(matched)}. "
                 f"Additional evidence is needed to {cls._format_indicator_list(missing)}."
             )
         if missing:
+            if language == "ar":
+                return f"الأدلة المتوفرة غير كافية بشأن: {cls._format_indicator_list(missing)}."
             return f"Additional evidence is needed to {cls._format_indicator_list(missing)}."
         if matched:
+            if language == "ar":
+                return f"أظهر المرشح: {cls._format_indicator_list(matched)}."
             return f"Candidate demonstrated {cls._format_indicator_list(matched)}."
-        return cls._normalize_text(item.get("explanation") or "Readiness gap identified from the candidate response.")
+        if item.get("explanation"):
+            return cls._normalize_text(item.get("explanation"))
+        return "تم تحديد فجوة في الجاهزية بناءً على إجابة المرشح." if language == "ar" else "Readiness gap identified from the candidate response."
 
     @classmethod
-    def _build_competency_breakdown(cls, competency_results):
+    def _build_competency_breakdown(cls, competency_results, language="en"):
         rows = []
         for item in competency_results:
-            display_name = cls._friendly_competency_name(item.competency_code, item.competency_name)
+            display_name = cls._friendly_competency_name(item.competency_code, item.competency_name, language=language)
             max_score = cls._decimal(item.max_score)
             completed_response_count = item.completed_response_count or 0
             if max_score <= 0:
                 assessment_status = "NOT_ASSESSED"
-                score_display = "Not Assessed"
-                explanation = "This competency was not assessed in this session."
+                score_display = "غير مقيَّم" if language == "ar" else "Not Assessed"
+                explanation = (
+                    "لم يتم تقييم هذه الكفاءة في هذه الجلسة."
+                    if language == "ar"
+                    else "This competency was not assessed in this session."
+                )
             elif completed_response_count <= 0:
                 assessment_status = "INSUFFICIENT_EVIDENCE"
-                score_display = "Insufficient Evidence"
-                explanation = "There was insufficient completed evidence to assess this competency."
+                score_display = "أدلة غير كافية" if language == "ar" else "Insufficient Evidence"
+                explanation = (
+                    "لم تتوفر أدلة مكتملة كافية لتقييم هذه الكفاءة."
+                    if language == "ar"
+                    else "There was insufficient completed evidence to assess this competency."
+                )
             elif item.status == CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD:
                 assessment_status = item.status
                 score_display = f"{cls._decimal(item.total_score)}/{max_score} ({cls._decimal(item.percentage)}%)"
                 explanation = (
-                    f"This competency is below threshold because the score is {item.percentage} percent "
-                    f"and the configured threshold is {item.pass_threshold} percent."
+                    (
+                        f"هذه الكفاءة دون الحد الأدنى المطلوب لأن الدرجة المحققة {item.percentage} بالمئة "
+                        f"بينما الحد الأدنى المعتمد {item.pass_threshold} بالمئة."
+                    )
+                    if language == "ar"
+                    else (
+                        f"This competency is below threshold because the score is {item.percentage} percent "
+                        f"and the configured threshold is {item.pass_threshold} percent."
+                    )
                 )
             else:
                 assessment_status = item.status
                 score_display = f"{cls._decimal(item.total_score)}/{max_score} ({cls._decimal(item.percentage)}%)"
                 explanation = (
-                    f"This competency scored {item.total_score} out of {item.max_score} "
-                    f"({item.percentage} percent) across {item.completed_response_count} completed responses."
+                    (
+                        f"حققت هذه الكفاءة {item.total_score} من {item.max_score} "
+                        f"({item.percentage} بالمئة) عبر {item.completed_response_count} من الإجابات المكتملة."
+                    )
+                    if language == "ar"
+                    else (
+                        f"This competency scored {item.total_score} out of {item.max_score} "
+                        f"({item.percentage} percent) across {item.completed_response_count} completed responses."
+                    )
                 )
             rows.append(
                 {
@@ -602,7 +722,7 @@ class EvaluationReportService:
         }
 
     @classmethod
-    def _derive_authoritative_score(cls, *, is_scheduled_interview, summary, evaluator_rating_payload, base_score_available):
+    def _derive_authoritative_score(cls, *, is_scheduled_interview, summary, evaluator_rating_payload, base_score_available, language="en"):
         """Which score is headline for the report. AI Interview mode is
         unchanged - the rule-engine score is always authoritative. Scheduled
         Interview mode requires an evaluator rating to have a headline score
@@ -615,7 +735,7 @@ class EvaluationReportService:
             "source": "AI_ASSESSMENT",
             "value": ai_value,
             "display": f"{ai_value}%",
-            "label": "AI Assessment Score (Reference)",
+            "label": "درجة تقييم الذكاء الاصطناعي (مرجعية)" if language == "ar" else "AI Assessment Score (Reference)",
         }
         if not is_scheduled_interview:
             return {
@@ -654,7 +774,7 @@ class EvaluationReportService:
         }
 
     @classmethod
-    def _build_response_evidence(cls, response_results):
+    def _build_response_evidence(cls, response_results, language="en"):
         rows = []
         for result in response_results:
             response = result.response
@@ -672,7 +792,7 @@ class EvaluationReportService:
                     ),
                     "competency_code": result.competency_code,
                     "competency_name": result.competency_name,
-                    "display_name": cls._friendly_competency_name(result.competency_code, result.competency_name),
+                    "display_name": cls._friendly_competency_name(result.competency_code, result.competency_name, language=language),
                     "question_text": result.question.question_text,
                     "score": cls._decimal(result.score),
                     "max_score": cls._decimal(result.max_score),
@@ -716,12 +836,25 @@ class EvaluationReportService:
         return rows
 
     @classmethod
-    def _build_human_review_flags(cls, *, evaluation, summary, response_results, competency_results):
+    def _build_human_review_flags(cls, *, evaluation, summary, response_results, competency_results, language="en"):
+        """Only the "critical_failure" and "low_confidence_interpretation"
+        flag types can reach the Arabic PDF (via _build_risk_indicators'
+        integrity_flag_messages), so only their own Python-authored
+        fallback text is translated here - the rest of this method's
+        messages are API-only and/or wrap raw external text (rule-engine
+        reasons, transcript issues) that stays in English regardless of
+        language, per the same policy as _employer_evidence_finding."""
         flags = []
         for failure in summary.critical_failures:
             competency = cls._friendly_competency_name(
                 failure.get("competency_code"),
                 failure.get("competency_name"),
+                language=language,
+            )
+            fallback_message = (
+                f"لم يتم استيفاء دليل الجاهزية المطلوب لـ {competency}."
+                if language == "ar"
+                else f"Required readiness evidence was not met for {competency}."
             )
             flags.append(
                 {
@@ -729,9 +862,7 @@ class EvaluationReportService:
                     "severity": "high",
                     "source": "scoring_engine",
                     "candidate_response_id": failure.get("response_id"),
-                    "message": cls._normalize_text(
-                        failure.get("reason") or f"Required readiness evidence was not met for {competency}."
-                    ),
+                    "message": cls._normalize_text(failure.get("reason")) or fallback_message,
                     "requires_review": True,
                 }
             )
@@ -741,7 +872,9 @@ class EvaluationReportService:
             interpretation = getattr(response, "ai_interpretation", None)
             review_message = cls._normalize_text(getattr(evaluation_input, "review_reason", ""))
             if "confidence" in review_message.lower() or "threshold" in review_message.lower():
-                review_message = "Response interpretation requires manual review."
+                review_message = (
+                    "تتطلب تفسير الإجابة مراجعة يدوية." if language == "ar" else "Response interpretation requires manual review."
+                )
             if result.requires_human_review:
                 flags.append(
                     {
@@ -749,7 +882,8 @@ class EvaluationReportService:
                         "severity": "medium",
                         "source": "ai_processing",
                         "candidate_response_id": str(response.public_id),
-                        "message": review_message or "Human review is required for this response.",
+                        "message": review_message
+                        or ("تتطلب هذه الإجابة مراجعة بشرية." if language == "ar" else "Human review is required for this response."),
                         "requires_review": True,
                     }
                 )
@@ -829,6 +963,7 @@ class EvaluationReportService:
         response_evidence_summary,
         human_review_flags,
         stale_previous_reports,
+        language,
     ):
         candidate = evaluation.candidate
         session = evaluation.session
@@ -844,32 +979,38 @@ class EvaluationReportService:
         top_strengths, top_risks = cls._derive_top_strengths_and_risks(
             competency_breakdown=competency_breakdown,
             critical_failures=summary.critical_failures,
+            language=language,
         )
         evidence_summary = cls._build_evidence_summary(
             response_evidence_summary=response_evidence_summary,
             competency_breakdown=competency_breakdown,
             critical_failures=summary.critical_failures,
+            language=language,
         )
         risk_indicators = cls._build_risk_indicators(
             competency_breakdown=competency_breakdown,
             response_evidence_summary=response_evidence_summary,
             human_review_flags=human_review_flags,
             critical_failures=summary.critical_failures,
+            language=language,
         )
         improvement_plan = cls._build_improvement_plan(
             readiness_indicator=readiness_indicator,
             competency_breakdown=competency_breakdown,
             risk_indicators=risk_indicators,
             critical_failures=summary.critical_failures,
+            language=language,
         )
         employer_message = cls._build_employer_readiness_message(
             readiness_indicator=readiness_indicator,
             risk_indicators=risk_indicators,
             override_triggered=override_triggered,
+            language=language,
         )
         suggested_action, suggested_action_display = cls._derive_suggested_action(
             readiness_indicator=readiness_indicator,
             override_triggered=override_triggered,
+            language=language,
         )
         assessment_completeness = cls._derive_assessment_completeness(summary)
         reliability, reliability_factors = cls._derive_evaluation_reliability(
@@ -877,25 +1018,28 @@ class EvaluationReportService:
             summary=summary,
             human_review_flags=human_review_flags,
             response_evidence_summary=response_evidence_summary,
+            language=language,
         )
         assessment_quality = cls._derive_assessment_quality(
             session=session,
             summary=summary,
             human_review_flags=human_review_flags,
             response_evidence_summary=response_evidence_summary,
+            language=language,
         )
-        consent_summary = cls._build_consent_summary(session)
-        identity_verification = cls._build_identity_verification_summary(session)
+        consent_summary = cls._build_consent_summary(session, language=language)
+        identity_verification = cls._build_identity_verification_summary(session, language=language)
         candidate_snapshot = cls._build_candidate_snapshot(candidate, session)
         evaluation_bands = cls._build_evaluation_bands(
             competency_breakdown=competency_breakdown,
             response_evidence_summary=response_evidence_summary,
             overall_percentage=summary.overall_percentage,
         )
-        assessment_methodology = cls._build_assessment_methodology()
+        assessment_methodology = cls._build_assessment_methodology(language=language)
         critical_competency_status = cls._build_critical_competency_status(
             competency_breakdown=competency_breakdown,
             risk_indicators=risk_indicators,
+            language=language,
         )
         competency_coverage = cls._derive_competency_coverage(critical_competency_status)
         overall_score_available = (
@@ -907,6 +1051,7 @@ class EvaluationReportService:
             summary=summary,
             evaluator_rating_payload=evaluator_rating_payload,
             base_score_available=overall_score_available,
+            language=language,
         )
         role_fit = cls._build_role_fit_summary(
             evaluation=evaluation,
@@ -917,18 +1062,19 @@ class EvaluationReportService:
         qr_verification_url = cls._build_qr_verification_url(report_number=report_number)
 
         payload = {
-            "classification": cls.CLASSIFICATION,
-            "report_name": cls.REPORT_NAME,
+            "language": language,
+            "classification": cls.CLASSIFICATION_AR if language == "ar" else cls.CLASSIFICATION,
+            "report_name": cls.REPORT_NAME_AR if language == "ar" else cls.REPORT_NAME,
             "report_version": cls.REPORT_VERSION,
             "api_schema_version": cls.API_SCHEMA_VERSION,
             "assessment_framework_version": cls.ASSESSMENT_FRAMEWORK_VERSION,
             "rule_engine_version": rule_engine_version,
             "role_profile_version": cls._derive_role_profile_version(session),
-            "report_status": EvaluationReport.STATUS_ACTIVE,
+            "report_status": cls._display_report_status(EvaluationReport.STATUS_ACTIVE, language=language),
             "generated_at": generated_at.isoformat(),
-            "generated_by": cls.GENERATED_BY,
+            "generated_by": cls.GENERATED_BY_AR if language == "ar" else cls.GENERATED_BY,
             "legal_record_id": cls._get_readiness_record_id(evaluation),
-            "legal_disclaimer": cls.LEGAL_DISCLAIMER,
+            "legal_disclaimer": cls.LEGAL_DISCLAIMER_AR if language == "ar" else cls.LEGAL_DISCLAIMER,
             "document_integrity": {
                 "hash_algorithm": "SHA-256",
                 "hash_value": "",
@@ -939,15 +1085,15 @@ class EvaluationReportService:
                 "candidate_email": candidate_snapshot["email"],
                 "candidate_passport_id": candidate_snapshot["passport_id"],
                 "assessment_session_id": str(session.public_id),
-                "assessment_status": assessment_status,
+                "assessment_status": cls._localize_assessment_status(assessment_status, language),
                 "target_role": session.role_name or evaluation.get_candidate_job_role_display(),
                 "role_profile_version": cls._derive_role_profile_version(session),
-                "assessment_type": "Pre-Employment Readiness",
-                "assessment_language": cls._display_language(session.ui_language or evaluation.candidate_preferred_language),
+                "assessment_type": "تقييم ما قبل التوظيف" if language == "ar" else "Pre-Employment Readiness",
+                "assessment_language": cls._display_language(session.ui_language or evaluation.candidate_preferred_language, language=language),
                 "assessment_mode": (
-                    "Scheduled Interview (Evaluator-Conducted)"
+                    ("مقابلة مجدولة (يجريها مقيّم)" if language == "ar" else "Scheduled Interview (Evaluator-Conducted)")
                     if is_scheduled_interview
-                    else "Guided Digital Simulation"
+                    else ("محاكاة رقمية موجهة" if language == "ar" else "Guided Digital Simulation")
                 ),
                 "assessment_date": (session.ended_at or generated_at).date().isoformat(),
                 "assessment_duration_minutes": cls._derive_assessment_duration_minutes(session),
@@ -966,6 +1112,7 @@ class EvaluationReportService:
                     overall_percentage=score_result["value"],
                     overall_score_available=score_result["available"],
                     unavailable_reason=score_result["unavailable_reason"],
+                    language=language,
                 ),
                 "overall_score_available": score_result["available"],
                 "score_source": score_result["source"],
@@ -983,10 +1130,10 @@ class EvaluationReportService:
                 },
                 "top_strengths": top_strengths,
                 "top_risks": top_risks,
-                "top_source": "Rule Engine - competency score ranking",
+                "top_source": "محرك القواعد - ترتيب درجات الكفاءة" if language == "ar" else "Rule Engine - competency score ranking",
                 "suggested_action": suggested_action,
                 "suggested_action_display": suggested_action_display,
-                "assessment_scope": "Pre-employment Workforce Readiness Only",
+                "assessment_scope": "تقييم جاهزية القوى العاملة لما قبل التوظيف فقط" if language == "ar" else "Pre-employment Workforce Readiness Only",
                 "evaluation_reliability": reliability,
                 "reliability_factors": reliability_factors,
             },
@@ -1004,7 +1151,7 @@ class EvaluationReportService:
                 "privacy_commitments": cls._build_privacy_commitments(),
                 "compliance_badges": cls._build_compliance_badges(),
             },
-            "verification_status": cls._derive_qr_verification_status(EvaluationReport.STATUS_ACTIVE),
+            "verification_status": cls._derive_qr_verification_status(EvaluationReport.STATUS_ACTIVE, language=language),
             "qr_verification_url": qr_verification_url,
             "candidate_id": str(candidate.public_id),
             "overall_score": cls._decimal(summary.overall_percentage),
@@ -1120,18 +1267,19 @@ class EvaluationReportService:
         return {"value": "جاهزية جزئية", "display": "Partially Ready", "code": "PARTIALLY_READY", "level": 2}
 
     @classmethod
-    def _derive_top_strengths_and_risks(cls, *, competency_breakdown, critical_failures):
-        generic_label = cls.GENERIC_COMPETENCY_LABEL
+    def _derive_top_strengths_and_risks(cls, *, competency_breakdown, critical_failures, language="en"):
+        generic_label = cls.GENERIC_COMPETENCY_LABEL_AR if language == "ar" else cls.GENERIC_COMPETENCY_LABEL
         risk_labels = set()
         risks = []
         for failure in critical_failures:
             label = cls._friendly_competency_name(
                 failure.get("competency_code") or failure.get("topic"),
                 failure.get("competency_name"),
+                language=language,
             )
             if label and label != generic_label:
                 risk_labels.add(label)
-                statement = cls._risk_statement(label)
+                statement = cls._risk_statement(label, language=language)
                 if statement not in risks:
                     risks.append(statement)
 
@@ -1143,7 +1291,7 @@ class EvaluationReportService:
                 and item.get("assessment_status") == CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD
             ):
                 risk_labels.add(label)
-                statement = cls._risk_statement(label)
+                statement = cls._risk_statement(label, language=language)
                 if statement not in risks:
                     risks.append(statement)
 
@@ -1174,13 +1322,17 @@ class EvaluationReportService:
                 or percentage < threshold
             ):
                 continue
-            statement = cls._strength_statement(label)
+            statement = cls._strength_statement(label, language=language)
             if statement not in strengths:
                 strengths.append(statement)
             if len(strengths) >= 3:
                 break
         if not strengths:
-            strengths = ["No significant strengths identified in this assessment."]
+            strengths = [
+                "لم يتم تحديد نقاط قوة جوهرية في هذا التقييم."
+                if language == "ar"
+                else "No significant strengths identified in this assessment."
+            ]
 
         weakest = sorted(
             competency_breakdown,
@@ -1198,7 +1350,7 @@ class EvaluationReportService:
                 or percentage >= threshold
             ):
                 continue
-            statement = cls._risk_statement(label)
+            statement = cls._risk_statement(label, language=language)
             if statement not in risks:
                 risks.append(statement)
             if len(risks) >= 3:
@@ -1206,7 +1358,7 @@ class EvaluationReportService:
         return strengths[:3], risks[:3]
 
     @classmethod
-    def _build_evidence_summary(cls, *, response_evidence_summary, competency_breakdown, critical_failures):
+    def _build_evidence_summary(cls, *, response_evidence_summary, competency_breakdown, critical_failures, language="en"):
         items = []
         for failure in critical_failures:
             items.append(
@@ -1214,11 +1366,11 @@ class EvaluationReportService:
                     "category": cls._friendly_competency_name(
                         failure.get("competency_code"),
                         failure.get("competency_name"),
+                        language=language,
                     ),
-                    "finding": cls._normalize_text(
-                        failure.get("reason") or "Critical readiness requirement was not met."
-                    ),
-                    "source": "Assessment requirement",
+                    "finding": cls._normalize_text(failure.get("reason"))
+                    or ("لم يتم استيفاء متطلب جاهزية أساسي." if language == "ar" else "Critical readiness requirement was not met."),
+                    "source": "متطلب التقييم" if language == "ar" else "Assessment requirement",
                     "severity": "High",
                 }
             )
@@ -1227,8 +1379,8 @@ class EvaluationReportService:
                 items.append(
                     {
                         "category": item.get("display_name") or item.get("competency_name") or item.get("competency_code"),
-                        "finding": cls._employer_evidence_finding(item),
-                        "source": f"Simulation {item.get('question_order')}",
+                        "finding": cls._employer_evidence_finding(item, language=language),
+                        "source": f"محاكاة {item.get('question_order')}" if language == "ar" else f"Simulation {item.get('question_order')}",
                         "severity": "High" if item.get("critical_failure") else "Medium",
                     }
                 )
@@ -1243,7 +1395,7 @@ class EvaluationReportService:
         return deduped[:10]
 
     @classmethod
-    def _build_risk_indicators(cls, *, competency_breakdown, response_evidence_summary, human_review_flags, critical_failures):
+    def _build_risk_indicators(cls, *, competency_breakdown, response_evidence_summary, human_review_flags, critical_failures, language="en"):
         def competency_percentage(name_matches):
             for item in competency_breakdown:
                 code = (item.get("competency_code") or "").lower()
@@ -1273,40 +1425,52 @@ class EvaluationReportService:
         ]
 
         return {
-            "note": "Risk scores use a 0 to 100 scale. Higher scores indicate greater readiness concern.",
+            "note": (
+                "تستخدم درجات المخاطر مقياسًا من 0 إلى 100. الدرجات الأعلى تشير إلى قلق أكبر بشأن الجاهزية."
+                if language == "ar"
+                else "Risk scores use a 0 to 100 scale. Higher scores indicate greater readiness concern."
+            ),
             "safety_risk": cls._risk_block(
                 competency_item=safety_item,
                 competency_percentage=safety_pct,
                 has_critical_failure=any("safety" in str((f.get("competency_code") or f.get("competency_name") or "")).lower() for f in critical_failures),
                 fallback_evidence=[f.get("reason") for f in critical_failures],
+                language=language,
             ),
             "hygiene_risk": cls._risk_block(
                 competency_item=hygiene_item,
                 competency_percentage=hygiene_pct,
                 has_critical_failure=any("hygiene" in str((f.get("competency_code") or f.get("competency_name") or "")).lower() for f in critical_failures),
                 fallback_evidence=[],
+                language=language,
             ),
             "communication_risk": cls._communication_risk_block(
                 avg_language_quality=avg_language_quality,
                 competency_item=communication_item,
                 competency_percentage=communication_pct,
+                language=language,
             ),
             "integrity_risk": cls._integrity_risk_block(
                 integrity_item=integrity_item,
                 integrity_percentage=integrity_pct,
                 human_review_flags=human_review_flags,
                 integrity_flag_messages=integrity_flag_messages,
+                language=language,
             ),
         }
 
     @classmethod
-    def _risk_block(cls, *, competency_item, competency_percentage, has_critical_failure, fallback_evidence):
+    def _risk_block(cls, *, competency_item, competency_percentage, has_critical_failure, fallback_evidence, language="en"):
         if not competency_item or competency_item.get("assessment_status") in {"NOT_ASSESSED", "INSUFFICIENT_EVIDENCE"}:
             return {
                 "level": "Not Assessed",
                 "risk_score": None,
-                "risk_score_display": "Not Assessed",
-                "evidence": ["Insufficient evidence was available to assess this risk category."],
+                "risk_score_display": "غير مقيَّم" if language == "ar" else "Not Assessed",
+                "evidence": [
+                    "لم تتوفر أدلة كافية لتقييم فئة المخاطر هذه."
+                    if language == "ar"
+                    else "Insufficient evidence was available to assess this risk category."
+                ],
             }
         risk_score = max(0, min(100, int(round(100 - float(competency_percentage or 0)))))
         if has_critical_failure or competency_percentage < 40:
@@ -1318,7 +1482,10 @@ class EvaluationReportService:
         evidence = []
         if competency_item and competency_item.get("status") == "BELOW_THRESHOLD":
             label = competency_item.get("display_name") or competency_item.get("competency_name") or competency_item.get("competency_code")
-            evidence.append(f"{label} is below the required threshold.")
+            evidence.append(f"{label} دون الحد الأدنى المطلوب." if language == "ar" else f"{label} is below the required threshold.")
+        # fallback_evidence carries raw critical-failure "reason" text authored
+        # by the scoring/rule engine - not owned by this service, so it stays
+        # in English even when language == "ar" (see _employer_evidence_finding).
         evidence.extend(cls._normalize_text_list(fallback_evidence))
         return {
             "level": level,
@@ -1328,13 +1495,17 @@ class EvaluationReportService:
         }
 
     @classmethod
-    def _communication_risk_block(cls, *, avg_language_quality, competency_item, competency_percentage):
+    def _communication_risk_block(cls, *, avg_language_quality, competency_item, competency_percentage, language="en"):
         if not competency_item or competency_item.get("assessment_status") in {"NOT_ASSESSED", "INSUFFICIENT_EVIDENCE"}:
             return {
                 "level": "Not Assessed",
                 "risk_score": None,
-                "risk_score_display": "Not Assessed",
-                "evidence": ["Insufficient evidence was available to assess communication risk."],
+                "risk_score_display": "غير مقيَّم" if language == "ar" else "Not Assessed",
+                "evidence": [
+                    "لم تتوفر أدلة كافية لتقييم مخاطر التواصل."
+                    if language == "ar"
+                    else "Insufficient evidence was available to assess communication risk."
+                ],
             }
         risk_score = max(0, min(100, int(round((1 - avg_language_quality) * 100))))
         if avg_language_quality < 0.5:
@@ -1346,18 +1517,25 @@ class EvaluationReportService:
         evidence = []
         if competency_item and competency_percentage < 70:
             label = competency_item.get("display_name") or competency_item.get("competency_name") or competency_item.get("competency_code")
-            evidence.append(f"{label} requires additional communication support.")
+            evidence.append(
+                f"{label} يحتاج إلى دعم إضافي في التواصل." if language == "ar" else f"{label} requires additional communication support."
+            )
         return {"level": level, "risk_score": risk_score, "risk_score_display": str(risk_score), "evidence": evidence}
 
     @classmethod
-    def _integrity_risk_block(cls, *, integrity_item, integrity_percentage, human_review_flags, integrity_flag_messages):
+    def _integrity_risk_block(cls, *, integrity_item, integrity_percentage, human_review_flags, integrity_flag_messages, language="en"):
         if not integrity_item or integrity_item.get("assessment_status") in {"NOT_ASSESSED", "INSUFFICIENT_EVIDENCE"}:
             evidence = cls._normalize_text_list(integrity_flag_messages)[:5]
             return {
                 "level": "Not Assessed",
                 "risk_score": None,
-                "risk_score_display": "Not Assessed",
-                "evidence": evidence or ["Insufficient evidence was available to assess integrity risk."],
+                "risk_score_display": "غير مقيَّم" if language == "ar" else "Not Assessed",
+                "evidence": evidence
+                or [
+                    "لم تتوفر أدلة كافية لتقييم مخاطر النزاهة."
+                    if language == "ar"
+                    else "Insufficient evidence was available to assess integrity risk."
+                ],
             }
         has_integrity_flag = any(flag.get("requires_review") for flag in human_review_flags)
         risk_score = max(0, min(100, int(round(100 - float(integrity_percentage or 92)))))
@@ -1370,7 +1548,7 @@ class EvaluationReportService:
         evidence = cls._normalize_text_list(integrity_flag_messages)[:5]
         if integrity_item and integrity_item.get("status") == "BELOW_THRESHOLD":
             label = integrity_item.get("display_name") or integrity_item.get("competency_name") or integrity_item.get("competency_code")
-            evidence.append(f"{label} is below the required threshold.")
+            evidence.append(f"{label} دون الحد الأدنى المطلوب." if language == "ar" else f"{label} is below the required threshold.")
         return {
             "level": level,
             "risk_score": risk_score,
@@ -1379,7 +1557,7 @@ class EvaluationReportService:
         }
 
     @classmethod
-    def _build_improvement_plan(cls, *, readiness_indicator, competency_breakdown, risk_indicators, critical_failures):
+    def _build_improvement_plan(cls, *, readiness_indicator, competency_breakdown, risk_indicators, critical_failures, language="en"):
         if readiness_indicator["code"] == "READY":
             return []
         items = []
@@ -1387,9 +1565,15 @@ class EvaluationReportService:
         for block_name, risk in risk_indicators.items():
             if block_name == "note" or risk["level"] not in {"High", "Medium"}:
                 continue
-            competency = cls._friendly_competency_name(block_name.replace("_risk", ""))
-            gap = cls._join_evidence_sentences(risk.get("evidence") or []) or f"{competency} readiness gap identified."
-            recommended_action = "Targeted critical training" if risk["level"] == "High" else "Focused training"
+            competency = cls._friendly_competency_name(block_name.replace("_risk", ""), language=language)
+            default_gap = (
+                f"تم تحديد فجوة في جاهزية {competency}." if language == "ar" else f"{competency} readiness gap identified."
+            )
+            gap = cls._join_evidence_sentences(risk.get("evidence") or []) or default_gap
+            if language == "ar":
+                recommended_action = "تدريب حرج موجّه" if risk["level"] == "High" else "تدريب مركّز"
+            else:
+                recommended_action = "Targeted critical training" if risk["level"] == "High" else "Focused training"
             items.append(
                 {
                     "competency": competency,
@@ -1402,21 +1586,37 @@ class EvaluationReportService:
             competency = cls._friendly_competency_name(
                 failure.get("competency_code"),
                 failure.get("competency_name"),
+                language=language,
             )
             if any(item["competency"] == competency for item in items):
                 continue
+            gap_fallback = "لم يتم استيفاء متطلب جاهزية أساسي." if language == "ar" else "Critical readiness requirement not met."
+            if language == "ar":
+                recommended_action = "تدريب أساسي على السلامة" if "safety" in competency.lower() else "تدريب علاجي موجّه"
+            else:
+                recommended_action = "Basic safety training" if "safety" in competency.lower() else "Targeted remedial training"
             items.append(
                 {
                     "competency": competency,
-                    "gap": cls._normalize_text(failure.get("reason") or "Critical readiness requirement not met."),
-                    "recommended_action": "Basic safety training" if "safety" in competency.lower() else "Targeted remedial training",
+                    "gap": cls._normalize_text(failure.get("reason")) or gap_fallback,
+                    "recommended_action": recommended_action,
                     "priority": "High",
                 }
             )
         return items[:5]
 
     @classmethod
-    def _build_employer_readiness_message(cls, *, readiness_indicator, risk_indicators, override_triggered):
+    def _build_employer_readiness_message(cls, *, readiness_indicator, risk_indicators, override_triggered, language="en"):
+        if language == "ar":
+            if override_triggered:
+                return "لم يتم استيفاء متطلب جاهزية أساسي."
+            if risk_indicators["safety_risk"]["level"] == "High":
+                return "تم تحديد فجوة في جاهزية السلامة"
+            if readiness_indicator["code"] == "READY":
+                return "يستوفي المرشح معايير التقييم لهذا الدور."
+            if readiness_indicator["code"] == "PARTIALLY_READY":
+                return "تم تحديد فجوات في الجاهزية. يُنصح بالتدريب في مجالات محددة."
+            return "تم تحديد فجوات في الجاهزية. يُنصح بإعادة التقييم بعد التدريب."
         if override_triggered:
             return "A critical readiness requirement was not met."
         if risk_indicators["safety_risk"]["level"] == "High":
@@ -1428,7 +1628,15 @@ class EvaluationReportService:
         return "Readiness gaps identified. Re-evaluation after training is recommended."
 
     @classmethod
-    def _derive_suggested_action(cls, *, readiness_indicator, override_triggered):
+    def _derive_suggested_action(cls, *, readiness_indicator, override_triggered, language="en"):
+        if language == "ar":
+            if readiness_indicator["code"] == "READY" and not override_triggered:
+                return "PROCEED", "المضي قدمًا"
+            if readiness_indicator["code"] == "PARTIALLY_READY" and not override_triggered:
+                return "CONSIDER_TRAINING", "النظر في التدريب"
+            if override_triggered:
+                return "RE_EVALUATE_CRITICAL", "إعادة التقييم بعد تدريب حرج"
+            return "RE_EVALUATE", "إعادة التقييم"
         if readiness_indicator["code"] == "READY" and not override_triggered:
             return "PROCEED", "Proceed"
         if readiness_indicator["code"] == "PARTIALLY_READY" and not override_triggered:
@@ -1438,7 +1646,7 @@ class EvaluationReportService:
         return "RE_EVALUATE", "Re-evaluate"
 
     @classmethod
-    def _derive_evaluation_reliability(cls, *, session, summary, human_review_flags, response_evidence_summary):
+    def _derive_evaluation_reliability(cls, *, session, summary, human_review_flags, response_evidence_summary, language="en"):
         factors = []
         completeness = cls._derive_assessment_completeness(summary)
         stt_scores = [
@@ -1447,6 +1655,17 @@ class EvaluationReportService:
             if item.get("traceability", {}).get("transcript_reference", {}).get("confidence") is not None
         ]
         avg_stt = sum(float(score) for score in stt_scores) / len(stt_scores) if stt_scores else 0.9
+        if language == "ar":
+            factors.append("مقابلة مكتملة" if completeness >= 90 else f"اكتمال المقابلة {completeness}%")
+            if session.task_observation_enabled:
+                factors.append("تضمنت ملاحظة عملية")
+            factors.append("جودة صوت جيدة" if avg_stt >= 0.8 else "جودة الصوت تتطلب مراجعة")
+            factors.append("اتساق عالٍ في الإجابات" if not human_review_flags else "اتساق الإجابات يتطلب مراجعة")
+            if human_review_flags:
+                return "متوسطة", factors
+            if completeness >= 90 and avg_stt >= 0.8:
+                return "مرتفعة", factors
+            return "منخفضة", factors
         if completeness >= 90:
             factors.append("Complete interview")
         else:
@@ -1468,7 +1687,7 @@ class EvaluationReportService:
         return "Low", factors
 
     @classmethod
-    def _derive_assessment_quality(cls, *, session, summary, human_review_flags, response_evidence_summary):
+    def _derive_assessment_quality(cls, *, session, summary, human_review_flags, response_evidence_summary, language="en"):
         completeness = cls._derive_assessment_completeness(summary)
         duration_minutes = cls._derive_assessment_duration_minutes(session)
         target_duration = (
@@ -1485,6 +1704,12 @@ class EvaluationReportService:
         avg_stt = sum(float(score) for score in stt_scores) / len(stt_scores) if stt_scores else 0.9
         has_evidence = bool(response_evidence_summary)
 
+        if language == "ar":
+            if completeness >= 90 and has_evidence and avg_stt >= 0.85 and duration_ratio >= 0.5 and not human_review_flags:
+                return "ممتازة"
+            if completeness >= 75 and has_evidence and avg_stt >= 0.7 and duration_ratio >= 0.35:
+                return "جيدة"
+            return "محدودة"
         if completeness >= 90 and has_evidence and avg_stt >= 0.85 and duration_ratio >= 0.5 and not human_review_flags:
             return "Excellent"
         if completeness >= 75 and has_evidence and avg_stt >= 0.7 and duration_ratio >= 0.35:
@@ -1492,21 +1717,31 @@ class EvaluationReportService:
         return "Limited"
 
     @classmethod
-    def _build_assessment_methodology(cls):
-        evaluated_and_method = [
-            ("Emergency response, hazard identification, protocol knowledge", "Scenario-based Q&A + Simulation"),
-            ("Cleanliness procedures, cross-contamination prevention", "Scenario-based Q&A"),
-            ("Language clarity, instruction following, response quality", "Communication Assessment Module + Speech Processing"),
-            ("Step sequence, completion rate, time management", "Task Observation Module"),
-            ("Integrity, reliability, consistency under pressure", "Behavioral Assessment Module"),
-        ]
+    def _build_assessment_methodology(cls, language="en"):
+        if language == "ar":
+            evaluated_and_method = [
+                ("الاستجابة للطوارئ، تحديد المخاطر، معرفة البروتوكولات", "أسئلة مبنية على سيناريوهات + محاكاة"),
+                ("إجراءات النظافة، منع التلوث المتبادل", "أسئلة مبنية على سيناريوهات"),
+                ("وضوح اللغة، اتباع التعليمات، جودة الإجابة", "وحدة تقييم التواصل + معالجة الكلام"),
+                ("تسلسل الخطوات، معدل الإنجاز، إدارة الوقت", "وحدة ملاحظة المهام"),
+                ("النزاهة، الموثوقية، الاتساق تحت الضغط", "وحدة التقييم السلوكي"),
+            ]
+        else:
+            evaluated_and_method = [
+                ("Emergency response, hazard identification, protocol knowledge", "Scenario-based Q&A + Simulation"),
+                ("Cleanliness procedures, cross-contamination prevention", "Scenario-based Q&A"),
+                ("Language clarity, instruction following, response quality", "Communication Assessment Module + Speech Processing"),
+                ("Step sequence, completion rate, time management", "Task Observation Module"),
+                ("Integrity, reliability, consistency under pressure", "Behavioral Assessment Module"),
+            ]
+        dimensions = cls.CANONICAL_COMPETENCY_DIMENSIONS_AR if language == "ar" else cls.CANONICAL_COMPETENCY_DIMENSIONS
         return [
             {"domain": domain, "evaluated": evaluated, "method": method}
-            for domain, (evaluated, method) in zip(cls.CANONICAL_COMPETENCY_DIMENSIONS, evaluated_and_method)
+            for domain, (evaluated, method) in zip(dimensions, evaluated_and_method)
         ]
 
     @classmethod
-    def _build_critical_competency_status(cls, *, competency_breakdown, risk_indicators):
+    def _build_critical_competency_status(cls, *, competency_breakdown, risk_indicators, language="en"):
         # Labels come from CANONICAL_COMPETENCY_DIMENSIONS - not hardcoded
         # short names - so this section can't drift out of sync with the
         # full names Assessment Methodology and Full Competency Breakdown
@@ -1518,9 +1753,10 @@ class EvaluationReportService:
             (["practical", "task"], "practical_tasks_risk"),
             (["integrity", "reliability", "behavior"], "integrity_risk"),
         )
+        dimensions = cls.CANONICAL_COMPETENCY_DIMENSIONS_AR if language == "ar" else cls.CANONICAL_COMPETENCY_DIMENSIONS
         categories = [
             (label, tokens, risk_key)
-            for label, (tokens, risk_key) in zip(cls.CANONICAL_COMPETENCY_DIMENSIONS, matchers)
+            for label, (tokens, risk_key) in zip(dimensions, matchers)
         ]
         items = []
         for label, tokens, risk_key in categories:
@@ -1538,22 +1774,28 @@ class EvaluationReportService:
             risk = risk_indicators.get(risk_key, {}) if isinstance(risk_indicators, dict) else {}
             risk_level = risk.get("level", "Low")
             assessment_status = competency.get("assessment_status") if competency else "NOT_ASSESSED"
+            if language == "ar":
+                not_assessed_label, insufficient_label = "غير مقيَّم", "أدلة غير كافية"
+                meets_label, review_label, attention_label = "يستوفي المعيار", "مراجعة مطلوبة", "يتطلب اهتمامًا"
+            else:
+                not_assessed_label, insufficient_label = "Not Assessed", "Insufficient Evidence"
+                meets_label, review_label, attention_label = "Meets Standard", "Review Needed", "Attention Required"
             if assessment_status in {"NOT_ASSESSED", "INSUFFICIENT_EVIDENCE"}:
-                status_label = "Not Assessed" if assessment_status == "NOT_ASSESSED" else "Insufficient Evidence"
+                status_label = not_assessed_label if assessment_status == "NOT_ASSESSED" else insufficient_label
                 tone = "neutral"
                 score_display = status_label
             elif risk_level == "Low" and competency.get("status") != "BELOW_THRESHOLD":
-                status_label = "Meets Standard"
+                status_label = meets_label
                 tone = "good"
                 score_display = competency.get("score_display")
             elif risk_level == "Medium":
-                status_label = "Review Needed"
+                status_label = review_label
                 tone = "warn"
                 score_display = competency.get("score_display")
             else:
-                status_label = "Attention Required"
+                status_label = attention_label
                 tone = "danger"
-                score_display = competency.get("score_display") if competency else "Not Assessed"
+                score_display = competency.get("score_display") if competency else not_assessed_label
             items.append(
                 {
                     "label": label,
@@ -1566,24 +1808,27 @@ class EvaluationReportService:
                     "score": competency.get("score") if competency else 0,
                     "max_score": competency.get("max_score") if competency else 0,
                     "pass_threshold": competency.get("pass_threshold") if competency else 0,
-                    "summary": cls._join_evidence_sentences(risk.get("evidence") or []) or "No risk factors identified for this dimension.",
+                    "summary": cls._join_evidence_sentences(risk.get("evidence") or [])
+                    or ("لا توجد عوامل خطر محددة لهذا البُعد." if language == "ar" else "No risk factors identified for this dimension."),
                 }
             )
         return items
 
     @classmethod
-    def _build_consent_summary(cls, session):
+    def _build_consent_summary(cls, session, language="en"):
         agreement = session.candidate_consent_agreement
         candidate_consented = bool(agreement and agreement.status == "SIGNED")
+        completed_label = "مكتمل" if language == "ar" else "Completed"
+        not_completed_label = "غير مكتمل" if language == "ar" else "Not Completed"
         return {
             "candidate_consented": candidate_consented,
-            "employer_status": "Completed" if candidate_consented else "Not Completed",
+            "employer_status": completed_label if candidate_consented else not_completed_label,
             "consent_timestamp": agreement.accepted_at.isoformat() if agreement and agreement.accepted_at else None,
             "consent_version": agreement.version if agreement else None,
         }
 
     @classmethod
-    def _build_identity_verification_summary(cls, session):
+    def _build_identity_verification_summary(cls, session, language="en"):
         candidate = session.candidate
         captured_artifact = session.artifacts.filter(
             artifact_type__in=["WEBCAM_FRAME", "SELFIE_IMAGE"],
@@ -1603,7 +1848,7 @@ class EvaluationReportService:
             "verification_status": verification_status,
             "verification_label": cls._verification_status_label(verification_status),
             "employer_completed": employer_completed,
-            "employer_status": "Completed" if employer_completed else "Not Completed",
+            "employer_status": ("مكتمل" if language == "ar" else "Completed") if employer_completed else ("غير مكتمل" if language == "ar" else "Not Completed"),
             "face_match_score": cls._decimal(session.face_match_score),
             "single_face_detected": bool(session.single_face_detected),
             "liveness_passed": cls._resolve_liveness_passed(session),
@@ -1980,7 +2225,13 @@ class EvaluationReportService:
         return f"{frontend_url}/en/verify-report?id={report_number}"
 
     @classmethod
-    def _derive_qr_verification_status(cls, report_status):
+    def _derive_qr_verification_status(cls, report_status, language="en"):
+        if language == "ar":
+            if report_status == EvaluationReport.STATUS_SUPERSEDED:
+                return "مستبدل"
+            if report_status == EvaluationReport.STATUS_REVOKED:
+                return "ملغى"
+            return "أصلي"
         if report_status == EvaluationReport.STATUS_SUPERSEDED:
             return "Superseded"
         if report_status == EvaluationReport.STATUS_REVOKED:
@@ -2010,7 +2261,17 @@ class EvaluationReportService:
         }
 
     @classmethod
-    def _display_language(cls, value):
+    def _display_language(cls, value, language="en"):
+        if language == "ar":
+            mapping_ar = {
+                "EN": "الإنجليزية",
+                "AR": "العربية",
+                "FR": "الفرنسية",
+                "ES": "الإسبانية",
+                "DE": "الألمانية",
+                "ZH": "الصينية",
+            }
+            return mapping_ar.get((value or "").upper(), mapping_ar["EN"])
         mapping = {
             "EN": "English",
             "AR": "Arabic",
@@ -2036,8 +2297,12 @@ class EvaluationReportService:
         return int(round((summary.evaluated_response_count / summary.total_response_count) * 100))
 
     @classmethod
-    def _derive_overall_score_display(cls, *, overall_percentage, overall_score_available, unavailable_reason=None):
+    def _derive_overall_score_display(cls, *, overall_percentage, overall_score_available, unavailable_reason=None, language="en"):
         if not overall_score_available:
+            if language == "ar":
+                if unavailable_reason == "EVALUATOR_RATING_PENDING":
+                    return "بانتظار تقييم المقيّم"
+                return "غير متوفر بالكامل"
             if unavailable_reason == "EVALUATOR_RATING_PENDING":
                 return "Pending Evaluator Rating"
             return "Not fully available"
@@ -2073,15 +2338,19 @@ class EvaluationReportService:
     @classmethod
     def _render_employer_pdf(cls, *, report_payload, report_number):
         employer_payload = cls._sanitize_employer_payload(report_payload)
-        html = render_to_string(
-            "reports/employer_report.html",
-            {
-                "report": employer_payload,
-                "report_number": report_number,
-                "qr_data_uri": cls._build_qr_data_uri(employer_payload.get("qr_verification_url", "")),
-                "logo_data_uri": cls._logo_data_uri(),
-            },
-        )
+        language = report_payload.get("language", "en")
+        template_name = "reports/employer_report_ar.html" if language == "ar" else "reports/employer_report.html"
+        context = {
+            "report": employer_payload,
+            "report_number": report_number,
+            "qr_data_uri": cls._build_qr_data_uri(employer_payload.get("qr_verification_url", "")),
+            "logo_data_uri": cls._logo_data_uri(),
+        }
+        if language == "ar":
+            from api.core.pdf_fonts import arabic_font_context
+
+            context.update(arabic_font_context())
+        html = render_to_string(template_name, context)
 
         if HTML is not None:
             try:

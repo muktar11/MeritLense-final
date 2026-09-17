@@ -109,7 +109,13 @@ class EvaluationReportApiTests(TestCase):
             role_name=self.config.role_name,
             role_code=self.config.role_code,
             ui_language="EN",
-            candidate_language="AR",
+            # Independent of the response-level Arabic transcript/translation
+            # fixtures below (transcript_language="ar", source_language="AR")
+            # - this drives EvaluationReportService's report-language
+            # selection (see _report_language), and these existing tests
+            # assert English report_payload strings, so it stays "EN" here;
+            # ReportArabicLanguageTests below covers the Arabic report path.
+            candidate_language="EN",
             tts_language_code="en-US",
             stt_language_code="ar-SA",
             translation_target="EN",
@@ -995,6 +1001,272 @@ class EvaluationReportApiTests(TestCase):
             scheduled_response.data["report_payload"]["assessment_context"]["assessment_mode"],
             "Scheduled Interview (Evaluator-Conducted)",
         )
+
+
+class ReportArabicLanguageTests(TestCase):
+    """A candidate who interviewed in Arabic (InterviewSession.candidate_language)
+    gets an Arabic employer report - real RTL template, translated labels
+    and dynamically-generated content - not the English one with the
+    language silently ignored. Mirrors
+    api.evaluations.tests.CertificateArabicLanguageTests."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._media_dir = tempfile.mkdtemp(prefix="report-ar-tests-")
+        cls._override = override_settings(MEDIA_ROOT=cls._media_dir)
+        cls._override.enable()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._override.disable()
+        shutil.rmtree(cls._media_dir, ignore_errors=True)
+        super().tearDownClass()
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="report-ar@example.com",
+            password="testpass123",
+            first_name="Report",
+            last_name="Arabic",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.client.force_authenticate(self.user)
+        self.candidate = Candidate.objects.create(
+            first_name="Fatima",
+            last_name="AlRashid",
+            email="report-ar-candidate@example.com",
+            passport_id="REPORTAR001",
+            job_role="NA",
+            core_skills="safety",
+            preferred_language="AR",
+            passport_document="candidates/documents/passport/test.pdf",
+            created_by=self.user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            language="AR",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=45,
+            total_questions=1,
+            allow_retries=True,
+            max_retries=1,
+            enable_translation=True,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+        )
+        self.session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            role_code=self.config.role_code,
+            ui_language="AR",
+            candidate_language="AR",
+            tts_language_code="ar-SA",
+            stt_language_code="ar-SA",
+            translation_target="EN",
+            total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            package_code="premium",
+            package_name="Premium",
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            started_at=timezone.now(),
+            ended_at=timezone.now(),
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+            status="COMPLETED",
+        )
+        consent_agreement = Agreement.objects.create(
+            user=self.user,
+            agreement_type=AgreementType.CANDIDATE_CONSENT,
+            version="v1",
+            method=AgreementMethod.CHECKBOX,
+            status=AgreementStatus.SIGNED,
+            accepted_at=timezone.now(),
+        )
+        self.session.candidate_consent_agreement = consent_agreement
+        self.session.save(update_fields=["candidate_consent_agreement"])
+        self.template = QuestionTemplate.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            question_code="HK-SAF-AR-003",
+            question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE,
+            domain="Safety & Hygiene",
+            skill_tag="safety_awareness",
+            skill="Safety Awareness",
+            sequence_number=1,
+            difficulty=QuestionDifficulty.MEDIUM,
+            question_text="What do you do when a child slips near a spill?",
+            question_type="safety",
+            question_format="SCENARIO",
+            language="AR",
+            scoring_type="0/3/5",
+            difficulty_score=2,
+            estimated_time_seconds=60,
+            expected_answer_type="multi_step",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            critical_question=False,
+            is_active=True,
+        )
+        self.session_question = SessionQuestion.objects.create(
+            session=self.session,
+            question_template=self.template,
+            question_text=self.template.question_text,
+            domain=self.template.domain,
+            skill=self.template.skill_tag,
+            difficulty=self.template.difficulty,
+            question_order=1,
+            status="ANSWERED",
+            is_mandatory=True,
+            asked_at=timezone.now(),
+            answered_at=timezone.now(),
+        )
+        self.response = CandidateResponse.objects.create(
+            session=self.session,
+            question=self.session_question,
+            response_type=CandidateResponseType.TEXT,
+            transcript="I would move the child away, dry the floor, and warn others.",
+            original_transcript="سأبعد الطفل وأنشف الأرض وأنبه الآخرين",
+            transcript_language="ar",
+            translated_transcript="I would move the child away, dry the floor, and warn others.",
+            translation_status="COMPLETED",
+            text_response="I would move the child away, dry the floor, and warn others.",
+            interpretation_status="COMPLETED",
+            processing_status="RULE_INPUT_PREPARED",
+            stt_status="COMPLETED",
+            stt_confidence="0.9100",
+        )
+        CandidateResponseTranslation.objects.create(
+            response=self.response,
+            session=self.session,
+            question=self.session_question,
+            source_language="AR",
+            target_language="EN",
+            original_transcript=self.response.original_transcript,
+            translated_transcript=self.response.translated_transcript,
+            provider="fake-translate",
+            provider_model="v1",
+            status="COMPLETED",
+        )
+        self.evaluation = Evaluation.objects.create(
+            session=self.session,
+            candidate=self.candidate,
+            evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now() + timezone.timedelta(days=1),
+            duration_minutes=45,
+            created_by=self.user,
+            status="COMPLETED",
+            completed_at=timezone.now(),
+        )
+        self.rule_set = ScoringRuleSet.objects.create(
+            name="Report AR Default",
+            version="report-ar-v1",
+            role_code="domestic_worker",
+            role_name="Housekeeper",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            is_active=True,
+            created_by=self.user,
+        )
+        ScoringRule.objects.create(
+            rule_set=self.rule_set,
+            competency_code="safety_awareness",
+            competency_name="Safety Awareness",
+            question_template=self.template,
+            question_code="HK-SAF-AR-003",
+            expected_indicators=["move child away", "dry floor", "warn others"],
+            required_indicators=["move child away"],
+            weighted_indicators={
+                "move child away": "4",
+                "dry floor": "3",
+                "warn others": "3",
+            },
+            max_score="10.00",
+            pass_threshold="8.00",
+            scoring_method=ScoringRule.SCORING_METHOD_WEIGHTED_MATCH,
+            is_active=True,
+        )
+        Week6ScoringService.run_for_evaluation(
+            evaluation=self.evaluation,
+            actor=self.user,
+            rule_set=self.rule_set,
+        )
+
+    def test_arabic_interview_produces_a_real_arabic_pdf(self):
+        response = self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["report_payload"]["language"], "ar")
+        report = EvaluationReport.objects.get(evaluation=self.evaluation)
+        pdf_bytes = report.employer_pdf.read()
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        # A real, non-trivial multi-page PDF - not an empty/broken render.
+        self.assertGreater(len(pdf_bytes), 20000)
+
+    def test_arabic_report_uses_the_arabic_template_and_font_context(self):
+        from unittest.mock import patch
+
+        with patch("api.reports.services.render_to_string") as mock_render:
+            mock_render.return_value = "<html></html>"
+            self.client.post(
+                f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+                {},
+                format="json",
+            )
+
+        template_name, context = mock_render.call_args[0]
+        self.assertEqual(template_name, "reports/employer_report_ar.html")
+        self.assertIn("arabic_font_regular_uri", context)
+        self.assertEqual(context["report"]["language"], "ar")
+
+    def test_arabic_report_translates_dynamic_payload_content(self):
+        response = self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+
+        payload = response.data["report_payload"]
+        self.assertEqual(payload["assessment_context"]["assessment_status"], "مكتمل")
+        self.assertEqual(payload["classification"], EvaluationReportService.CLASSIFICATION_AR)
+        self.assertIn(
+            payload["assessment_context"]["assessment_quality"],
+            ("ممتازة", "جيدة", "محدودة"),
+        )
+        self.assertIn(
+            payload["executive_summary"]["evaluation_reliability"],
+            ("مرتفعة", "متوسطة", "منخفضة"),
+        )
+
+    def test_english_interview_still_uses_the_english_template(self):
+        self.session.candidate_language = "EN"
+        self.session.save(update_fields=["candidate_language"])
+
+        from unittest.mock import patch
+
+        with patch("api.reports.services.render_to_string") as mock_render:
+            mock_render.return_value = "<html></html>"
+            self.client.post(
+                f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+                {},
+                format="json",
+            )
+
+        template_name, context = mock_render.call_args[0]
+        self.assertEqual(template_name, "reports/employer_report.html")
+        self.assertNotIn("arabic_font_regular_uri", context)
+        self.assertEqual(context["report"]["language"], "en")
 
 
 class TopStrengthsAndRisksTests(TestCase):

@@ -1747,30 +1747,34 @@ class InterviewSessionApiTests(APITestCase):
         self.assertFalse(CandidateResponse.objects.filter(question=question).exists())
 
     def test_create_session_applies_package_architecture_context(self):
+        # self.config is FULL, so the package's coverage for this role must
+        # also be FULL here - a lower-coverage package is exactly the
+        # mismatch test_package_coverage_below_config_tier_blocks_session_creation
+        # covers below.
         package = PackageSessionConfig.objects.create(
-            package_code="basic",
-            package_name="Basic",
+            package_code="advanced",
+            package_name="Advanced",
             audience="B2C",
-            evaluation_tier=InterviewEvaluationTier.SCREENING,
-            min_questions=5,
-            max_questions=8,
-            default_question_count=8,
-            duration_minutes=15,
-            task_observation_enabled=False,
-            readiness_indicator_enabled=False,
-            certificate_enabled=False,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            min_questions=10,
+            max_questions=12,
+            default_question_count=12,
+            duration_minutes=30,
+            task_observation_enabled=True,
+            readiness_indicator_enabled=True,
+            certificate_enabled=True,
             basic_report_enabled=True,
         )
         RolePackageCoverage.objects.create(
             role_name="Nanny",
             role_code="nanny",
-            package_code="basic",
-            package_name="Basic",
+            package_code="advanced",
+            package_name="Advanced",
             audience="B2C",
-            coverage_level=CoverageLevel.SCREENING,
-            evaluation_tier=InterviewEvaluationTier.SCREENING,
-            readiness_indicator_enabled=False,
-            certificate_enabled=False,
+            coverage_level=CoverageLevel.FULL,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            readiness_indicator_enabled=True,
+            certificate_enabled=True,
         )
 
         response = self.client.post(
@@ -1778,7 +1782,7 @@ class InterviewSessionApiTests(APITestCase):
             {
                 "candidate_id": str(self.candidate.public_id),
                 "config_id": str(self.config.public_id),
-                "package_code": "basic",
+                "package_code": "advanced",
             },
             format="json",
         )
@@ -1786,18 +1790,20 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(response.status_code, 201, response.data)
         session = InterviewSession.objects.get(public_id=response.data["id"])
         self.assertEqual(session.package_session_config, package)
-        self.assertEqual(session.package_code, "basic")
-        self.assertEqual(session.coverage_level, CoverageLevel.SCREENING)
-        self.assertEqual(session.evaluation_tier, InterviewEvaluationTier.SCREENING)
-        self.assertFalse(session.readiness_indicator_enabled)
-        self.assertFalse(session.certificate_enabled)
+        self.assertEqual(session.package_code, "advanced")
+        self.assertEqual(session.coverage_level, CoverageLevel.FULL)
+        self.assertEqual(session.evaluation_tier, InterviewEvaluationTier.FULL)
+        self.assertTrue(session.readiness_indicator_enabled)
+        self.assertTrue(session.certificate_enabled)
 
-    def test_package_downgrade_to_screening_also_downgrades_question_count(self):
-        # self.config is FULL / 3 questions. A package whose coverage for
-        # this role is only SCREENING must not leave the session still
-        # targeting the FULL config's question count - a SCREENING-tagged
-        # session with a FULL-sized question set can never be scored, since
-        # no SCREENING-tier ScoringRuleSet exists to resolve it against.
+    def test_package_coverage_below_config_tier_blocks_session_creation(self):
+        # self.config is FULL. A package whose coverage for this role is
+        # only SCREENING must not silently swap the session down to
+        # SCREENING (confusing - the admin picked Full and got Screening
+        # with no explanation - and previously unscoreable, since no
+        # SCREENING-tier ScoringRuleSet existed for any role). It must
+        # refuse instead, so the admin picks a matching config or upgrades
+        # the package.
         PackageSessionConfig.objects.create(
             package_code="basic",
             package_name="Basic",
@@ -1829,11 +1835,10 @@ class InterviewSessionApiTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 201, response.data)
-        session = InterviewSession.objects.get(public_id=response.data["id"])
-        self.assertEqual(session.evaluation_tier, InterviewEvaluationTier.SCREENING)
-        self.assertEqual(session.total_questions, 2)
-        self.assertEqual(session.questions.count(), 2)
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("Screening", response.data["detail"])
+        self.assertIn("Basic", response.data["detail"])
+        self.assertFalse(InterviewSession.objects.filter(candidate=self.candidate).exists())
 
     def test_session_completion_creates_linked_evaluation_with_package_flags(self):
         package = PackageSessionConfig.objects.create(
@@ -1916,14 +1921,58 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(evaluation.status, "COMPLETED")
 
     def test_screening_package_creates_gated_evaluation_end_to_end(self):
+        # Uses a dedicated SCREENING config (matching this package's
+        # SCREENING coverage) rather than self.config (FULL) - a FULL
+        # config paired with SCREENING-only coverage is now refused at
+        # creation (see test_package_coverage_below_config_tier_blocks_session_creation),
+        # so this end-to-end test needs a config the package actually covers.
+        screening_config = InterviewConfiguration.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            duration_minutes=15,
+            total_questions=2,
+            allow_retries=True,
+            max_retries=1,
+            rubric_version="v1",
+            question_set_version="v1",
+        )
+        for index in range(1, 3):
+            skill_label = FIXED_QUESTION_SKILL_TAGS[index - 1]
+            QuestionTemplate.objects.create(
+                role_name="Nanny",
+                role_code="nanny",
+                question_code=f"NAN-SCR-{index:03d}",
+                question_version="1.0",
+                question_status=QuestionLifecycleStatus.ACTIVE,
+                domain="Child Care",
+                skill_tag=skill_label,
+                skill=skill_label,
+                sequence_number=index,
+                difficulty=QuestionDifficulty.MEDIUM,
+                question_text=f"Screening question text {index}",
+                question_type="knowledge",
+                question_format="TEXT",
+                expected_steps=["step1", "step2"],
+                keywords=["care", "safe"],
+                language="EN",
+                scoring_type="0/3/5",
+                difficulty_score=2,
+                estimated_time_seconds=30,
+                expected_answer_type="structured",
+                evaluation_tier=InterviewEvaluationTier.SCREENING,
+                rubric_version="v1",
+                question_set_version="v1",
+            )
         PackageSessionConfig.objects.create(
             package_code="basic",
             package_name="Basic",
             audience="B2C",
             evaluation_tier=InterviewEvaluationTier.SCREENING,
-            min_questions=5,
-            max_questions=8,
-            default_question_count=8,
+            min_questions=1,
+            max_questions=2,
+            default_question_count=2,
             duration_minutes=15,
             task_observation_enabled=False,
             readiness_indicator_enabled=False,
@@ -1948,7 +1997,7 @@ class InterviewSessionApiTests(APITestCase):
             "/api/v1/interviews/",
             {
                 "candidate_id": str(self.candidate.public_id),
-                "config_id": str(self.config.public_id),
+                "config_id": str(screening_config.public_id),
                 "package_code": "basic",
             },
             format="json",

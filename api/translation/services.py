@@ -6,7 +6,7 @@ from html import unescape
 
 import requests
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from api.audit.services import AuditLogService
@@ -21,6 +21,7 @@ from .models import (
     CandidateResponseInterpretation,
     CandidateResponseTranslation,
     EvaluationInputArtifact,
+    IndicatorPhraseTranslation,
 )
 
 
@@ -365,6 +366,42 @@ class TranslationService:
             source_language=source_language,
             target_language=target_language,
         )
+
+    @classmethod
+    def translate_indicator_phrase(cls, phrase_en):
+        """Cache-or-translate one scoring-rule indicator phrase into Arabic
+        for the employer report's Evidence Summary - see
+        IndicatorPhraseTranslation's docstring. Never raises: any
+        translation failure (provider not configured, network error, etc.)
+        falls back to the original English phrase, matching the
+        non-blocking contract report generation already uses for its other
+        side effects (see complete_session()/generate_certificate())."""
+        phrase_en = (phrase_en or "").strip()
+        if not phrase_en:
+            return phrase_en
+
+        cached = IndicatorPhraseTranslation.objects.filter(phrase_en=phrase_en).first()
+        if cached:
+            return cached.phrase_ar
+
+        try:
+            result = cls.translate(text=phrase_en, source_language="en", target_language="ar")
+            translated = result.get("translated_text") or phrase_en
+        except Exception:
+            return phrase_en
+
+        try:
+            IndicatorPhraseTranslation.objects.create(
+                phrase_en=phrase_en,
+                phrase_ar=translated,
+                provider=result.get("provider", ""),
+            )
+        except IntegrityError:
+            # Another concurrent report render already cached this exact
+            # phrase - fine, the freshly-translated text is still correct
+            # for this render.
+            pass
+        return translated
 
 
 class ResponseInterpretationService:

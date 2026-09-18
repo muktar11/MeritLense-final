@@ -100,6 +100,7 @@ class EvaluationReportService:
         "Practical Task Execution": "تنفيذ المهام العملية",
         "Safety Awareness": "الوعي بالسلامة",
         "Knowledge & Comprehension": "المعرفة والاستيعاب",
+        "Psych & Professional": "الجوانب النفسية والمهنية",
     }
     """Only covers the fixed label set `_friendly_competency_name` can
     produce (see its `mappings`) - not a general-purpose glossary. A
@@ -460,6 +461,8 @@ class EvaluationReportService:
             (["logic"], "Knowledge & Comprehension"),
             (["comprehension"], "Knowledge & Comprehension"),
             (["cognitive"], "Knowledge & Comprehension"),
+            (["psych"], "Psych & Professional"),
+            (["professional"], "Psych & Professional"),
             (["unmapped"], cls.GENERIC_COMPETENCY_LABEL),
         ]
         for tokens, label in mappings:

@@ -545,6 +545,29 @@ class EvaluationReportService:
                 cleaned.append(normalized)
         return cleaned
 
+    # The AI interpretation model is asked for a list of transcript issues
+    # and, when it finds none, sometimes returns a placeholder string like
+    # "none" or "None" instead of an empty list - confirmed against
+    # production data (20+ interpretations returned the literal string
+    # "none"). Downstream code only checked truthiness, so this placeholder
+    # was treated as a real reported issue: it both leaked the literal word
+    # "None"/"none" into evidence text and spuriously flagged the response
+    # for human review, which factors into certificate_eligibility. Matched
+    # as a whole normalized string, never a substring, so a genuine finding
+    # that happens to mention "none" (e.g. "none of the required steps were
+    # followed") is never misclassified as this placeholder.
+    _NO_ISSUE_PLACEHOLDERS = {
+        "none", "none noted", "none identified", "n/a", "na",
+        "no issues", "no issues identified", "no issues identified in the transcript",
+        "no clear issues", "no clear issues identified", "no transcript issues",
+        "لا توجد مشاكل", "لا توجد مشاكل واضحة في النص",
+    }
+
+    @classmethod
+    def _is_no_issue_placeholder(cls, text):
+        normalized = cls._normalize_text(text).strip().rstrip(".").lower()
+        return not normalized or normalized in cls._NO_ISSUE_PLACEHOLDERS
+
     @classmethod
     def _join_evidence_sentences(cls, items):
         # Each item here is already a complete, punctuated sentence (e.g.
@@ -904,6 +927,10 @@ class EvaluationReportService:
             transcript_issues = []
             if interpretation is not None:
                 transcript_issues = interpretation.structured_output.get("transcript_issues", []) if interpretation.structured_output else []
+            transcript_issues = [
+                issue for issue in cls._normalize_text_list(transcript_issues)
+                if not cls._is_no_issue_placeholder(issue)
+            ]
             if transcript_issues:
                 flags.append(
                     {
@@ -911,7 +938,7 @@ class EvaluationReportService:
                         "severity": "medium",
                         "source": "ai_processing",
                         "candidate_response_id": str(response.public_id),
-                        "message": ", ".join(cls._normalize_text_list(transcript_issues)),
+                        "message": ", ".join(transcript_issues),
                         "requires_review": True,
                     }
                 )

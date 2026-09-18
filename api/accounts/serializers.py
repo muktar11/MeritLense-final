@@ -274,7 +274,7 @@ class CompanyProfileSerializer(PublicIdModelSerializer):
             'id', 'email', 'first_name', 'last_name', 'admin_full_name', 'role',
             'company_name', 'company_registration_number', 'company_size',
             'industry', 'phone_number', 'country', 'city', 'address',
-            'website', 'preferred_language',
+            'website', 'preferred_language', 'notification_preference',
             'registration_certificate', 'resachetified_license',
             'tax_id_document', 'additional_documents',
             'documents_verified', 'verified_at', 'verification_notes',

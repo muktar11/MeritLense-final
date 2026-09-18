@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import uuid
 from decimal import Decimal, InvalidOperation
 from html import unescape
@@ -375,9 +376,20 @@ class TranslationService:
         translation failure (provider not configured, network error, etc.)
         falls back to the original English phrase, matching the
         non-blocking contract report generation already uses for its other
-        side effects (see complete_session()/generate_certificate())."""
+        side effects (see complete_session()/generate_certificate()).
+
+        `observed_indicators` isn't always the canonical English rubric
+        wording - the AI interpretation step sometimes free-forms a
+        paraphrase in the candidate's own response language when nothing in
+        the fixed vocabulary cleanly matches, so an Arabic-language session
+        can produce an already-Arabic "indicator phrase" here. Translating
+        Arabic text with target=ar isn't a no-op - it comes back as a
+        garbled near-duplicate - so any phrase that already contains Arabic
+        script is returned unchanged rather than sent to the provider."""
         phrase_en = (phrase_en or "").strip()
         if not phrase_en:
+            return phrase_en
+        if re.search(r"[؀-ۿ]", phrase_en):
             return phrase_en
 
         cached = IndicatorPhraseTranslation.objects.filter(phrase_en=phrase_en).first()

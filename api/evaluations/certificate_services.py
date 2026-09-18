@@ -280,14 +280,22 @@ def _evaluator_rating_context(evaluation, language="en"):
     }
 
 
-def _role_profile_version(session):
+def _role_profile_version(session, language="en"):
     """Same version string the internal evaluation report uses (role code
-    + question set version) - see EvaluationReportService._derive_role_profile_version."""
+    + question set version) - see EvaluationReportService._derive_role_profile_version.
+    On an Arabic certificate, the role_code segment (e.g. "RESTAURANT_STAFF")
+    is swapped for its Arabic name via ROLE_NAME_AR, same as role_name
+    elsewhere on this document - the version suffix stays as-is, it's a
+    plain number, not English text."""
     from api.reports.services import EvaluationReportService
 
     if session is None:
         return "N/A"
-    return EvaluationReportService._derive_role_profile_version(session)
+    version_string = EvaluationReportService._derive_role_profile_version(session)
+    if language == "ar" and session.role_code in ROLE_NAME_AR:
+        version = session.question_set_version or "1.0"
+        return f"{ROLE_NAME_AR[session.role_code]}-{version}"
+    return version_string
 
 
 def certificate_eligibility(evaluation, summary):
@@ -406,7 +414,7 @@ def generate_certificate(evaluation, summary):
         "certificate_id": certificate.certificate_id,
         "candidate_name": evaluation.candidate.get_full_name().title(),
         "role_name": _localized_role_name(session, evaluation.candidate, language),
-        "role_profile_version": _role_profile_version(session),
+        "role_profile_version": _role_profile_version(session, language),
         "candidate_photo_data_uri": candidate_photo_data_uri,
         "candidate_photo_verified": candidate_photo_verified,
         "readiness_label": readiness["label"],

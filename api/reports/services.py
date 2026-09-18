@@ -1086,7 +1086,7 @@ class EvaluationReportService:
                 "candidate_passport_id": candidate_snapshot["passport_id"],
                 "assessment_session_id": str(session.public_id),
                 "assessment_status": cls._localize_assessment_status(assessment_status, language),
-                "target_role": session.role_name or evaluation.get_candidate_job_role_display(),
+                "target_role": cls._localized_target_role(session, evaluation, language),
                 "role_profile_version": cls._derive_role_profile_version(session),
                 "assessment_type": "تقييم ما قبل التوظيف" if language == "ar" else "Pre-Employment Readiness",
                 "assessment_language": cls._display_language(session.ui_language or evaluation.candidate_preferred_language, language=language),
@@ -2243,6 +2243,24 @@ class EvaluationReportService:
         role_code = (session.role_code or "ROLE").upper().replace(" ", "-")
         version = session.question_set_version or "1.0"
         return f"{role_code}-{version}"
+
+    @classmethod
+    def _localized_target_role(cls, session, evaluation, language):
+        """Employer-facing role name (assessment_context.target_role) - the
+        only role-name field actually rendered on the Arabic report
+        template. ROLE_NAME_AR lives in evaluations/certificate_services.py
+        (translation need came up there first, for the certificate) and is
+        imported lazily here to avoid a module-level import cycle - that
+        module already imports from this one lazily for the same reason,
+        in its own _role_profile_version."""
+        role_name = (session.role_name if session else "") or evaluation.get_candidate_job_role_display()
+        if language == "ar" and session and session.role_code:
+            from api.evaluations.certificate_services import ROLE_NAME_AR
+
+            translated = ROLE_NAME_AR.get(session.role_code)
+            if translated:
+                return translated
+        return role_name
 
     @classmethod
     def _build_candidate_reference(cls, candidate):

@@ -534,7 +534,8 @@ class B2BCandidateComparisonView(APIView):
         if not candidates.exists():
             return Response([])
 
-        result = [build_candidate_comparison_entry(c) for c in candidates]
+        language = "ar" if request.query_params.get('lang') == "ar" else "en"
+        result = [build_candidate_comparison_entry(c, language=language) for c in candidates]
 
         if requested_ids:
             return Response(result)

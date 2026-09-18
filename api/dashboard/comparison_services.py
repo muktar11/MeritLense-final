@@ -1,4 +1,4 @@
-def build_candidate_comparison_entry(candidate):
+def build_candidate_comparison_entry(candidate, language="en"):
     """One candidate's row for the multi-candidate comparison view.
 
     Reads api.evaluations.models.SessionEvaluationSummary - the real,
@@ -9,6 +9,12 @@ def build_candidate_comparison_entry(candidate):
     already used for the internal evaluation report, so a candidate's
     "unmapped" competency reads as "Overall Workforce Readiness" here too
     rather than as a raw internal code.
+
+    `language` is the viewer's own dashboard locale (this compares
+    candidates who may have taken their interview in different languages,
+    so there's no single "the candidate's language" to fall back to here
+    the way the certificate/report generators do) - passed through by the
+    view from the frontend's current next-intl locale.
     """
     from api.evaluations.models import SessionEvaluationSummary
     from api.reports.services import EvaluationReportService
@@ -23,7 +29,7 @@ def build_candidate_comparison_entry(candidate):
         scores_by_area = {}
         for item in latest_summary.competencies_summary or []:
             label = EvaluationReportService._friendly_competency_name(
-                item.get('competency_code'), item.get('competency_name')
+                item.get('competency_code'), item.get('competency_name'), language=language
             )
             percentage = item.get('percentage')
             if label and percentage is not None:

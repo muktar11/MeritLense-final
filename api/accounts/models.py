@@ -192,7 +192,13 @@ class CompanyEmployerProfile(TimeStampedModel, SoftDeleteModel):
     website = models.URLField(blank=True)
     
     preferred_language = models.CharField(max_length=3, choices=Languages.CHOICES, default=Languages.ENGLISH)
-    
+
+    notification_preference = models.CharField(
+        max_length=10,
+        choices=[('email', 'Email'), ('push', 'Push'), ('both', 'Both')],
+        default='email',
+    )
+
     registration_certificate = models.FileField(
         upload_to='b2b/documents/registration/',
         validators=[FileExtensionValidator(['pdf', 'jpg', 'jpeg', 'png'])]

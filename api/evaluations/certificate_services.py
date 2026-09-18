@@ -62,6 +62,54 @@ READINESS_GAUGE = {
     "READY": {"label": "Ready", "label_ar": "جاهز", "position": 3},
 }
 
+# Mirrors MeritLense-ui/messages/ar/common.json's
+# shared.startSessionModal.roles - kept in sync manually since the
+# certificate PDF is rendered server-side with no access to those i18n
+# files. A role_code missing here (not yet translated) falls back to the
+# English role_name rather than failing certificate generation.
+ROLE_NAME_AR = {
+    "domestic_worker": "عامل منزلي (مدبرة منزل)",
+    "child_caregiver": "مربية أطفال",
+    "elderly_caregiver": "مرافق كبار السن",
+    "special_needs_caregiver": "مرافق ذوي الاحتياجات الخاصة",
+    "nursing_assistant": "مساعد تمريض",
+    "home_care_assistant": "مساعد رعاية منزلية",
+    "elderly_medical_support": "الدعم الطبي لكبار السن",
+    "basic_patient_support": "الدعم الأساسي للمرضى",
+    "hotel_housekeeper": "عاملة نظافة فندقية",
+    "front_desk_agent": "موظف استقبال وخدمة الضيوف",
+    "restaurant_staff": "طاقم مطعم",
+    "security_guard": "حارس أمن",
+    "event_security": "أمن الفعاليات",
+    "commercial_cleaner": "عامل نظافة تجارية",
+    "industrial_cleaner": "عامل نظافة صناعية",
+    "warehouse_staff": "طاقم المستودع",
+    "driver": "سائق",
+    "general_labor": "عامل عام",
+    "skilled_trades": "الحرف المهنية والصيانة",
+    "farm_worker": "عامل مزرعة",
+    "livestock_support": "دعم تربية الماشية",
+}
+
+# Mirrors the frontend's shared.evaluatorRatingCard.riskLevel translations
+# (same file as above) - behavioral_risk_level() itself must keep returning
+# the raw English enum value (the frontend's EvaluatorRatingCard translates
+# it client-side), so this only applies at the point a document is actually
+# rendered in Arabic.
+BEHAVIORAL_RISK_LEVEL_AR = {
+    "Low": "منخفض",
+    "Medium": "متوسط",
+    "High": "مرتفع",
+    "Not Assessed": "لم يُقيَّم",
+}
+
+
+def _localized_role_name(session, candidate, language):
+    role_name = session.role_name if session else candidate.job_role
+    if language == "ar" and session and session.role_code in ROLE_NAME_AR:
+        return ROLE_NAME_AR[session.role_code]
+    return role_name
+
 
 class CertificateGenerationError(Exception):
     pass
@@ -205,7 +253,7 @@ def _language_context(language):
     return {"language": "ar", **arabic_font_context()}
 
 
-def _evaluator_rating_context(evaluation):
+def _evaluator_rating_context(evaluation, language="en"):
     """The evaluator's manual 0-100 ratings on the 5 approved report
     dimensions, if any have been submitted (see EvaluatorRating in
     models.py) - purely additional display data, never a factor in
@@ -218,12 +266,16 @@ def _evaluator_rating_context(evaluation):
         return None
     from .evaluator_rating_services import behavioral_risk_level, calculate_response_consistency
 
+    risk_level = behavioral_risk_level(rating.behavior_integrity)
+    if language == "ar":
+        risk_level = BEHAVIORAL_RISK_LEVEL_AR.get(risk_level, risk_level)
+
     return {
         "safety_awareness": rating.safety_awareness,
         "hygiene": rating.hygiene,
         "communication": rating.communication,
         "task_execution": rating.task_execution,
-        "behavioral_risk_level": behavioral_risk_level(rating.behavior_integrity),
+        "behavioral_risk_level": risk_level,
         "consistency": calculate_response_consistency(evaluation, fallback_rating=rating),
     }
 
@@ -353,7 +405,7 @@ def generate_certificate(evaluation, summary):
         "logo_data_uri": _logo_data_uri(),
         "certificate_id": certificate.certificate_id,
         "candidate_name": evaluation.candidate.get_full_name().title(),
-        "role_name": session.role_name if session else evaluation.candidate.job_role,
+        "role_name": _localized_role_name(session, evaluation.candidate, language),
         "role_profile_version": _role_profile_version(session),
         "candidate_photo_data_uri": candidate_photo_data_uri,
         "candidate_photo_verified": candidate_photo_verified,
@@ -366,7 +418,7 @@ def generate_certificate(evaluation, summary):
         "verification_url": verification_url,
         "qr_data_uri": _build_qr_data_uri(verification_url),
         "generated_at": now.strftime("%Y-%m-%d %H:%M UTC"),
-        "evaluator_rating": _evaluator_rating_context(evaluation),
+        "evaluator_rating": _evaluator_rating_context(evaluation, language),
         **_language_context(language),
     }
 

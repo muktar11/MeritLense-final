@@ -576,7 +576,7 @@ class EvaluationReportService:
         return replacements.get(lowered, lowered or text)
 
     @classmethod
-    def _format_indicator_list(cls, items):
+    def _format_indicator_list(cls, items, language="en"):
         cleaned = []
         seen = set()
         for item in items:
@@ -584,41 +584,52 @@ class EvaluationReportService:
             if phrase and phrase not in seen:
                 seen.add(phrase)
                 cleaned.append(phrase)
+        if language == "ar":
+            from api.translation.services import TranslationService
+
+            cleaned = [TranslationService.translate_indicator_phrase(phrase) for phrase in cleaned]
         if not cleaned:
             return ""
         if len(cleaned) == 1:
             return cleaned[0]
+        if language == "ar":
+            if len(cleaned) == 2:
+                return f"{cleaned[0]} و{cleaned[1]}"
+            return f"{'، '.join(cleaned[:-1])}، و{cleaned[-1]}"
         if len(cleaned) == 2:
             return f"{cleaned[0]} and {cleaned[1]}"
         return f"{', '.join(cleaned[:-1])}, and {cleaned[-1]}"
 
     @classmethod
     def _employer_evidence_finding(cls, item, language="en"):
-        """The sentence scaffolding is translated, but the indicator phrases
-        it wraps (`_format_indicator_list`'s output) are authored in the
-        scoring-rule config across every role package and stay in English
-        in both languages - see COMPETENCY_LABEL_TRANSLATIONS_AR's
-        docstring for the same tradeoff on unmapped competency labels."""
+        """The sentence scaffolding is translated, and (unlike an unmapped
+        competency label - see COMPETENCY_LABEL_TRANSLATIONS_AR's docstring)
+        the indicator phrases _format_indicator_list wraps are translated
+        too, via TranslationService.translate_indicator_phrase - these are
+        authored freely in the scoring-rule config across every role
+        package (~1,500 distinct phrases system-wide), too large a set to
+        hand-maintain a lookup table for the way ROLE_NAME_AR does for the
+        21 role codes."""
         matched = cls._normalize_text_list(item.get("matched_indicators") or item.get("observed_indicators") or [])
         missing = cls._normalize_text_list(item.get("missing_indicators") or [])
         if matched and missing:
             if language == "ar":
                 return (
-                    f"أظهر المرشح: {cls._format_indicator_list(matched)}. "
-                    f"الأدلة المتوفرة غير كافية بشأن: {cls._format_indicator_list(missing)}."
+                    f"أظهر المرشح: {cls._format_indicator_list(matched, language)}. "
+                    f"الأدلة المتوفرة غير كافية بشأن: {cls._format_indicator_list(missing, language)}."
                 )
             return (
-                f"Candidate demonstrated {cls._format_indicator_list(matched)}. "
-                f"Additional evidence is needed to {cls._format_indicator_list(missing)}."
+                f"Candidate demonstrated {cls._format_indicator_list(matched, language)}. "
+                f"Additional evidence is needed to {cls._format_indicator_list(missing, language)}."
             )
         if missing:
             if language == "ar":
-                return f"الأدلة المتوفرة غير كافية بشأن: {cls._format_indicator_list(missing)}."
-            return f"Additional evidence is needed to {cls._format_indicator_list(missing)}."
+                return f"الأدلة المتوفرة غير كافية بشأن: {cls._format_indicator_list(missing, language)}."
+            return f"Additional evidence is needed to {cls._format_indicator_list(missing, language)}."
         if matched:
             if language == "ar":
-                return f"أظهر المرشح: {cls._format_indicator_list(matched)}."
-            return f"Candidate demonstrated {cls._format_indicator_list(matched)}."
+                return f"أظهر المرشح: {cls._format_indicator_list(matched, language)}."
+            return f"Candidate demonstrated {cls._format_indicator_list(matched, language)}."
         if item.get("explanation"):
             return cls._normalize_text(item.get("explanation"))
         return "تم تحديد فجوة في الجاهزية بناءً على إجابة المرشح." if language == "ar" else "Readiness gap identified from the candidate response."

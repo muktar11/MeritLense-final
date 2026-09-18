@@ -132,6 +132,29 @@ class EvaluationInputArtifact(TimeStampedModel):
         return f"{self.response_id} - {self.competency_code}"
 
 
+class IndicatorPhraseTranslation(TimeStampedModel):
+    """Cached English->Arabic translation for one scoring-rule indicator
+    phrase (e.g. "apologize sincerely"), used to render the Arabic employer
+    report's Evidence Summary findings. These phrases are authored once per
+    scoring rule across every role package (~1,500 distinct phrases
+    system-wide) rather than drawn from a small enumerable set like a
+    competency or role name, so unlike ROLE_NAME_AR/COMPETENCY_LABEL_
+    TRANSLATIONS_AR there's no hand-maintained lookup table - each phrase is
+    translated once via TranslationService the first time it's cited in an
+    Arabic report, then persisted here so every later report reads the
+    cached translation instead of re-calling the provider."""
+    phrase_en = models.CharField(max_length=500, unique=True)
+    phrase_ar = models.TextField()
+    provider = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        verbose_name = "Indicator Phrase Translation"
+        verbose_name_plural = "Indicator Phrase Translations"
+
+    def __str__(self):
+        return self.phrase_en
+
+
 class AIProcessingJob(TimeStampedModel):
     response = models.ForeignKey(
         "interview_sessions.CandidateResponse",

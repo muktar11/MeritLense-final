@@ -1539,7 +1539,10 @@
               <div class="risk-card card">
                 <div class="risk-head">
                   <div>
-                    <div class="risk-title">{{ key|cut:"_risk"|title }} Risk</div>
+                    <div class="risk-title">
+                      {% if key == "practical_tasks_risk" %}Practical Tasks Risk
+                      {% else %}{{ key|cut:"_risk"|title }} Risk{% endif %}
+                    </div>
                     {% if risk.level == "Low" %}
                       <div style="margin-top: 6px;"><span class="risk-level tone-good"><span class="level-dot">&#10003;</span>{{ risk.level }} Risk</span></div>
                     {% elif risk.level == "Medium" %}

@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import re
 from decimal import Decimal
 from pathlib import Path
 
@@ -51,6 +52,35 @@ def _invoice_language(invoice):
     profile = getattr(invoice.user, "company_profile", None) or getattr(invoice.user, "individual_profile", None)
     language = getattr(profile, "preferred_language", None) or "EN"
     return "ar" if str(language).upper() == "AR" else "en"
+
+
+def _is_arabic_text(text):
+    return bool(text) and bool(re.search(r"[؀-ۿ]", text))
+
+
+def _translate_address_to_arabic(address):
+    """Company/individual addresses are stored in whatever script the
+    profile was filled in with (almost always English/Latin - city and
+    country names, street names) - on an Arabic invoice this read as
+    English text sitting inside an Arabic document, not a translated one.
+    Live-translates via the same TranslationService/Google provider
+    already used for Evidence Summary phrases (see
+    TranslationService.translate_indicator_phrase) - no caching table here
+    since addresses are per-company and generated rarely (once per
+    invoice), unlike the unbounded free-form rubric vocabulary that needed
+    one. Never raises: falls back to the original address on any failure
+    (missing provider config, network error, etc.), same non-blocking
+    contract every other translation call in report/certificate
+    generation already follows."""
+    if not address or _is_arabic_text(address):
+        return address
+    try:
+        from api.translation.services import TranslationService
+
+        result = TranslationService.translate(text=address, source_language="en", target_language="ar")
+        return result.get("translated_text") or address
+    except Exception:
+        return address
 
 
 def _billing_party_context(invoice):
@@ -121,15 +151,28 @@ def _build_snapshot(invoice):
     line_items = _line_items_context(invoice, fallback_period_start=issue_date, fallback_period_end=due_date)
     subtotal = sum((item["net_amount"] for item in line_items), Decimal("0.00"))
     vat_total = sum((item["vat_amount"] for item in line_items), Decimal("0.00"))
+    language = _invoice_language(invoice)
+    billing_party = _billing_party_context(invoice)
+    if language == "ar":
+        # The company/individual's own name is a proper noun (like
+        # "MeritLense" itself, never translated on this document) and
+        # stays as entered - only the address (city/country/street names)
+        # gets translated, since that's descriptive text, not an identity.
+        billing_party["address"] = _translate_address_to_arabic(billing_party["address"])
+    # Drives whether invoice_ar.html isolates this as an LTR run - only
+    # needed when translation didn't happen/failed and the address is
+    # still Latin script; real Arabic text must stay in the normal RTL
+    # flow, not be forced into an LTR box.
+    billing_party["address_is_latin"] = bool(billing_party["address"]) and not _is_arabic_text(billing_party["address"])
     return {
-        "language": _invoice_language(invoice),
+        "language": language,
         "invoice_number": invoice.number or invoice.stripe_invoice_id,
         "issue_date": issue_date.strftime("%Y-%m-%d") if issue_date else "",
         "supply_date": issue_date.strftime("%Y-%m-%d") if issue_date else "",
         "due_date": due_date.strftime("%Y-%m-%d") if due_date else "",
         "payable_by": due_date.strftime("%Y-%m-%d") if due_date else "",
         "currency": invoice.currency.upper(),
-        "billing_party": _billing_party_context(invoice),
+        "billing_party": billing_party,
         "line_items": [
             {
                 "description": item["description"],

@@ -115,7 +115,12 @@
       <div class="party-cell">
         <div class="party-label">بيانات العميل</div>
         <div class="party-name">{{ invoice.billing_party.name }}</div>
-        <div class="party-line">عنوان الفاتورة &mdash; {% if invoice.billing_party.address %}<span class="ltr-isolate">{{ invoice.billing_party.address }}</span>{% else %}يُستكمل{% endif %}</div>
+        <div class="party-line">
+          عنوان الفاتورة &mdash;
+          {% if invoice.billing_party.address %}
+            {% if invoice.billing_party.address_is_latin %}<span class="ltr-isolate">{{ invoice.billing_party.address }}</span>{% else %}{{ invoice.billing_party.address }}{% endif %}
+          {% else %}يُستكمل{% endif %}
+        </div>
         <div class="party-line">الرقم الضريبي &mdash; {% if invoice.billing_party.tax_id %}<span class="ltr-isolate">{{ invoice.billing_party.tax_id }}</span>{% else %}غير مُقدَّم{% endif %}</div>
         <div class="party-line"><span class="ltr-isolate">{{ invoice.billing_party.email }}</span></div>
       </div>

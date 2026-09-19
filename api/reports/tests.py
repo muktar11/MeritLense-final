@@ -421,7 +421,7 @@ class EvaluationReportApiTests(TestCase):
         self.assertNotIn("passport_id", employer_payload.data["candidate_snapshot"])
         self.assertNotIn("internal_reason", employer_payload.data["executive_summary"]["readiness_reason"])
         self.assertNotIn("top_source", employer_payload.data["executive_summary"])
-        self.assertIn("face_match_score", employer_payload.data["identity_verification"])
+        self.assertNotIn("face_match_score", employer_payload.data["identity_verification"])
         self.assertNotIn("liveness_passed", employer_payload.data["identity_verification"])
         self.assertEqual(employer_payload.data["identity_verification"]["employer_status"], "Not Completed")
 
@@ -1408,14 +1408,15 @@ class CompetencyRowMergeTests(TestCase):
 
 
 class EmployerPayloadFaceMatchScoreTests(TestCase):
-    """face_match_score is recorded during identity verification, before
-    the interview even starts, and the employer-facing report now surfaces
-    it as the "Face Match Accuracy" metric next to identity verification
-    status - _sanitize_employer_payload must let the value through (it
-    still strips method/timestamp/liveness_passed/etc, which stay
-    internal-only)."""
+    """face_match_score is an internal biometric confidence score, not an
+    assessment result - exposing the exact number in a document an
+    employer receives risks letting the underlying acceptance/rejection
+    threshold be inferred over time, and it's sensitive biometric detail
+    about the candidate with no operational need to be shown.
+    _sanitize_employer_payload must always strip it; only the pass/fail
+    employer_status ("Completed"/"Not Completed") is employer-facing."""
 
-    def test_face_match_score_survives_employer_sanitization(self):
+    def test_face_match_score_is_stripped_from_employer_payload(self):
         payload = {
             "identity_verification": {
                 "employer_status": "Completed",
@@ -1427,13 +1428,7 @@ class EmployerPayloadFaceMatchScoreTests(TestCase):
 
         sanitized = EvaluationReportService._sanitize_employer_payload(payload)
 
-        self.assertEqual(sanitized["identity_verification"]["face_match_score"], 92.5)
+        self.assertNotIn("face_match_score", sanitized["identity_verification"])
         self.assertNotIn("method", sanitized["identity_verification"])
         self.assertNotIn("liveness_passed", sanitized["identity_verification"])
-
-    def test_missing_face_match_score_stays_none(self):
-        payload = {"identity_verification": {"employer_status": "Not Completed", "face_match_score": None}}
-
-        sanitized = EvaluationReportService._sanitize_employer_payload(payload)
-
-        self.assertIsNone(sanitized["identity_verification"]["face_match_score"])
+        self.assertEqual(sanitized["identity_verification"]["employer_status"], "Completed")

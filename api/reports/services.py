@@ -330,6 +330,15 @@ class EvaluationReportService:
         identity = sanitized.get("identity_verification") or {}
         identity.pop("method", None)
         identity.pop("timestamp", None)
+        # An internal confidence score, not an assessment result - exposing
+        # the exact number to an employer risks letting the underlying
+        # acceptance/rejection threshold be inferred over time (same
+        # principle that keeps scoring thresholds out of any public-facing
+        # document), and it's sensitive biometric detail about the
+        # candidate with no operational need to be shown. Only the
+        # pass/fail employer_status ("Completed"/"Not Completed") is
+        # employer-facing; the exact match percentage never should be.
+        identity.pop("face_match_score", None)
         identity.pop("single_face_detected", None)
         identity.pop("liveness_passed", None)
         identity.pop("verification_duration_seconds", None)

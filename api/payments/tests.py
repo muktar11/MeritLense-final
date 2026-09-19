@@ -112,6 +112,51 @@ class HandleInvoicePaidTests(TestCase):
         self.subscription.refresh_from_db()
         self.assertEqual(self.subscription.status, "ACTIVE")
 
+    def test_due_date_is_populated_from_the_stripe_payload(self):
+        """Regression: timezone.utc doesn't exist on this Django version
+        (only datetime.timezone.utc does) - the original fix crashed
+        handle_invoice_paid's whole try block silently (caught by the
+        method's own outer except) the first time a real due_date was
+        ever passed, discovered by actually simulating a live webhook
+        against production rather than by this test suite, since no
+        existing fixture included a due_date key at all."""
+        invoice_data = {
+            "id": "in_test_due_date",
+            "number": "INV-DUE-1",
+            "amount_due": 200000,
+            "amount_paid": 200000,
+            "amount_remaining": 0,
+            "currency": "eur",
+            "subscription": self.subscription.stripe_subscription_id,
+            "due_date": 1893456000,  # 2030-01-01T00:00:00Z
+            "invoice_pdf": "",
+            "hosted_invoice_url": "",
+        }
+
+        invoice = self.service.handle_invoice_paid(invoice_data)
+
+        self.assertIsNotNone(invoice)
+        self.assertEqual(invoice.due_date.year, 2030)
+
+    def test_local_pdf_is_generated_automatically_for_a_new_paid_invoice(self):
+        invoice_data = {
+            "id": "in_test_auto_pdf",
+            "number": "INV-AUTO-PDF-1",
+            "amount_due": 200000,
+            "amount_paid": 200000,
+            "amount_remaining": 0,
+            "currency": "eur",
+            "subscription": self.subscription.stripe_subscription_id,
+            "invoice_pdf": "",
+            "hosted_invoice_url": "",
+        }
+
+        invoice = self.service.handle_invoice_paid(invoice_data)
+
+        self.assertIsNotNone(invoice)
+        self.assertTrue(invoice.local_pdf_file)
+        self.assertTrue(invoice.pdf_hash)
+
     def test_creates_invoice_when_subscription_is_nested_under_parent(self):
         """Confirmed live: a newer Stripe API version stopped sending a
         top-level 'subscription' field on invoice webhook payloads

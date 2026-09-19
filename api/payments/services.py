@@ -1,3 +1,4 @@
+import datetime
 import logging
 import stripe
 from django.conf import settings
@@ -877,7 +878,7 @@ class StripeService:
                     'currency': invoice_data['currency'],
                     'paid_at': timezone.now(),
                     'due_date': (
-                        timezone.datetime.fromtimestamp(invoice_data['due_date'], tz=timezone.utc)
+                        timezone.datetime.fromtimestamp(invoice_data['due_date'], tz=datetime.timezone.utc)
                         if invoice_data.get('due_date') else None
                     ),
                     'invoice_pdf': invoice_data.get('invoice_pdf', ''),

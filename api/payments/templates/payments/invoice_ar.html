@@ -49,6 +49,12 @@
   .party-label { font-size: 7pt; letter-spacing: 0.02em; color: #8a97ad; margin-bottom: 2mm; }
   .party-name { font-size: 11pt; font-weight: 700; color: #111827; margin-bottom: 1.5mm; }
   .party-line { font-size: 8.5pt; color: #4b5563; line-height: 1.6; }
+  /* Raw Latin-script data (addresses, emails, company names) embedded in
+     an RTL paragraph confuses the bidi algorithm once it has multiple
+     comma-separated words (e.g. "Concord Tower, Dubai, United Arab
+     Emirates") - it can reorder/garble instead of just reading left to
+     right. Isolate it as its own LTR run so it renders as written. */
+  .ltr-isolate { direction: ltr; unicode-bidi: isolate; display: inline-block; text-align: left; }
 
   table.items { width: 100%; margin-top: 8mm; border-collapse: collapse; font-size: 8.5pt; direction: rtl; }
   table.items th { text-align: right; font-size: 7pt; letter-spacing: 0.02em; color: #8a97ad; padding: 2mm 2mm; border-bottom: 1px solid #d7deec; }
@@ -102,16 +108,16 @@
         <div class="party-label">بيانات المورّد</div>
         <div class="party-name">{{ supplier.name }}</div>
         <div class="party-line">{{ supplier.description_ar }}</div>
-        <div class="party-line">العنوان المسجّل &mdash; {% if supplier.address %}{{ supplier.address }}{% else %}يُستكمل{% endif %}</div>
-        <div class="party-line">الرقم الضريبي &mdash; {% if supplier.tax_id %}{{ supplier.tax_id }}{% else %}يُستكمل{% endif %}</div>
-        <div class="party-line">{{ supplier.email }}</div>
+        <div class="party-line">العنوان المسجّل &mdash; {% if supplier.address %}<span class="ltr-isolate">{{ supplier.address }}</span>{% else %}يُستكمل{% endif %}</div>
+        <div class="party-line">الرقم الضريبي &mdash; {% if supplier.tax_id %}<span class="ltr-isolate">{{ supplier.tax_id }}</span>{% else %}يُستكمل{% endif %}</div>
+        <div class="party-line"><span class="ltr-isolate">{{ supplier.email }}</span></div>
       </div>
       <div class="party-cell">
         <div class="party-label">بيانات العميل</div>
         <div class="party-name">{{ invoice.billing_party.name }}</div>
-        <div class="party-line">عنوان الفاتورة &mdash; {% if invoice.billing_party.address %}{{ invoice.billing_party.address }}{% else %}يُستكمل{% endif %}</div>
-        <div class="party-line">الرقم الضريبي &mdash; {% if invoice.billing_party.tax_id %}{{ invoice.billing_party.tax_id }}{% else %}غير مُقدَّم{% endif %}</div>
-        <div class="party-line">{{ invoice.billing_party.email }}</div>
+        <div class="party-line">عنوان الفاتورة &mdash; {% if invoice.billing_party.address %}<span class="ltr-isolate">{{ invoice.billing_party.address }}</span>{% else %}يُستكمل{% endif %}</div>
+        <div class="party-line">الرقم الضريبي &mdash; {% if invoice.billing_party.tax_id %}<span class="ltr-isolate">{{ invoice.billing_party.tax_id }}</span>{% else %}غير مُقدَّم{% endif %}</div>
+        <div class="party-line"><span class="ltr-isolate">{{ invoice.billing_party.email }}</span></div>
       </div>
     </div>
 

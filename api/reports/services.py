@@ -66,12 +66,19 @@ class EvaluationReportService:
     GENERATED_BY_AR = "منصة ميريت لينس"
     GENERIC_COMPETENCY_LABEL = "Overall Workforce Readiness"
     GENERIC_COMPETENCY_LABEL_AR = "الجاهزية العامة للقوى العاملة"
-    MINIMUM_ASSESSED_COMPETENCIES = 4
-    """Of the 5 canonical dimensions in _build_critical_competency_status - matches
-    the certificate eligibility gate's MINIMUM_REQUIRED_DIMENSIONS. A report whose
-    evidence covers fewer than this can't produce a meaningful overall score even
-    if every response that WAS submitted got scored (assessment_completeness=100%
-    only measures the latter, not per-competency coverage)."""
+    @classmethod
+    def _minimum_assessed_competencies(cls):
+        """Of the 5 canonical dimensions in _build_critical_competency_status -
+        the single source of truth is certificate_services.MINIMUM_REQUIRED_DIMENSIONS
+        (imported lazily to avoid a module-level import cycle - that module
+        already imports from this one lazily, in its own _role_profile_version),
+        so the two gates can no longer drift apart. A report whose evidence
+        covers fewer than this can't produce a meaningful overall score even
+        if every response that WAS submitted got scored (assessment_completeness=100%
+        only measures the latter, not per-competency coverage)."""
+        from api.evaluations.certificate_services import MINIMUM_REQUIRED_DIMENSIONS
+
+        return MINIMUM_REQUIRED_DIMENSIONS
     CANONICAL_COMPETENCY_DIMENSIONS = (
         "Safety Awareness",
         "Hygiene & Standards",
@@ -100,7 +107,6 @@ class EvaluationReportService:
         "Practical Task Execution": "تنفيذ المهام العملية",
         "Safety Awareness": "الوعي بالسلامة",
         "Knowledge & Comprehension": "المعرفة والاستيعاب",
-        "Psych & Professional": "الجوانب النفسية والمهنية",
     }
     """Only covers the fixed label set `_friendly_competency_name` can
     produce (see its `mappings`) - not a general-purpose glossary. A
@@ -461,8 +467,13 @@ class EvaluationReportService:
             (["logic"], "Knowledge & Comprehension"),
             (["comprehension"], "Knowledge & Comprehension"),
             (["cognitive"], "Knowledge & Comprehension"),
-            (["psych"], "Psych & Professional"),
-            (["professional"], "Psych & Professional"),
+            # "Psych & Professional" is a legacy skill_tags.py category, not
+            # one of the 5 approved CANONICAL_COMPETENCY_DIMENSIONS - its
+            # evidence is folded into Behavioral Indicators for display,
+            # same governance-approved dimension as integrity/behavior
+            # above, instead of surfacing as its own competency line.
+            (["psych"], "Behavioral Indicators"),
+            (["professional"], "Behavioral Indicators"),
             (["unmapped"], cls.GENERIC_COMPETENCY_LABEL),
         ]
         for tokens, label in mappings:
@@ -726,7 +737,104 @@ class EvaluationReportService:
                     "explanation": explanation,
                 }
             )
-        return rows
+        return cls._merge_rows_by_display_name(rows, language=language)
+
+    @classmethod
+    def _merge_rows_by_display_name(cls, rows, language="en"):
+        """Some raw competency_code values intentionally share one
+        display label (see _friendly_competency_name - legacy
+        behavior_integrity and psych_professional both read as
+        "Behavioral Indicators") so this table never shows two rows with
+        the same name and different scores. Rows are combined per
+        display_name; anything with no collision passes through as-is."""
+        grouped = {}
+        for row in rows:
+            grouped.setdefault(row["display_name"], []).append(row)
+        merged = []
+        for group in grouped.values():
+            merged.append(group[0] if len(group) == 1 else cls._merge_competency_rows(group, language=language))
+        return merged
+
+    @classmethod
+    def _merge_competency_rows(cls, group, language="en"):
+        total_score = sum(row["score"] or 0 for row in group)
+        total_max = sum(row["max_score"] or 0 for row in group)
+        response_count = sum(row["response_count"] or 0 for row in group)
+        completed_response_count = sum(row["completed_response_count"] or 0 for row in group)
+        incomplete_response_count = sum(row["incomplete_response_count"] or 0 for row in group)
+        pass_threshold = max((row["pass_threshold"] or 0) for row in group)
+        percentage = cls._decimal(round(total_score / total_max * 100, 2)) if total_max else 0.0
+
+        # Most severe assessment_status among the group wins, rather than
+        # averaging a failure away - a below-threshold sub-dimension
+        # still reads as below-threshold once merged.
+        severity = (
+            CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD,
+            "INSUFFICIENT_EVIDENCE",
+            "NOT_ASSESSED",
+        )
+        assessment_status = next(
+            (s for s in severity if any(row["assessment_status"] == s for row in group)),
+            next(row["assessment_status"] for row in group if row["assessment_status"] not in severity),
+        )
+
+        if assessment_status == "NOT_ASSESSED":
+            score_display = "غير مقيَّم" if language == "ar" else "Not Assessed"
+            explanation = (
+                "لم يتم تقييم هذه الكفاءة في هذه الجلسة."
+                if language == "ar"
+                else "This competency was not assessed in this session."
+            )
+        elif assessment_status == "INSUFFICIENT_EVIDENCE":
+            score_display = "أدلة غير كافية" if language == "ar" else "Insufficient Evidence"
+            explanation = (
+                "لم تتوفر أدلة مكتملة كافية لتقييم هذه الكفاءة."
+                if language == "ar"
+                else "There was insufficient completed evidence to assess this competency."
+            )
+        elif assessment_status == CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD:
+            score_display = f"{total_score}/{total_max} ({percentage}%)"
+            explanation = (
+                (
+                    f"هذه الكفاءة دون الحد الأدنى المطلوب لأن الدرجة المحققة {percentage} بالمئة "
+                    f"بينما الحد الأدنى المعتمد {pass_threshold} بالمئة."
+                )
+                if language == "ar"
+                else (
+                    f"This competency is below threshold because the score is {percentage} percent "
+                    f"and the configured threshold is {pass_threshold} percent."
+                )
+            )
+        else:
+            score_display = f"{total_score}/{total_max} ({percentage}%)"
+            explanation = (
+                (
+                    f"حققت هذه الكفاءة {total_score} من {total_max} "
+                    f"({percentage} بالمئة) عبر {completed_response_count} من الإجابات المكتملة."
+                )
+                if language == "ar"
+                else (
+                    f"This competency scored {total_score} out of {total_max} "
+                    f"({percentage} percent) across {completed_response_count} completed responses."
+                )
+            )
+
+        return {
+            "competency_code": "+".join(sorted({row["competency_code"] for row in group if row["competency_code"]})),
+            "competency_name": group[0]["display_name"],
+            "display_name": group[0]["display_name"],
+            "score": total_score,
+            "max_score": total_max,
+            "percentage": percentage,
+            "status": assessment_status,
+            "assessment_status": assessment_status,
+            "score_display": score_display,
+            "response_count": response_count,
+            "completed_response_count": completed_response_count,
+            "incomplete_response_count": incomplete_response_count,
+            "pass_threshold": pass_threshold,
+            "explanation": explanation,
+        }
 
     @classmethod
     def _build_evaluator_rating(cls, evaluation):
@@ -1085,7 +1193,7 @@ class EvaluationReportService:
         competency_coverage = cls._derive_competency_coverage(critical_competency_status)
         overall_score_available = (
             assessment_completeness >= 100
-            and competency_coverage >= cls.MINIMUM_ASSESSED_COMPETENCIES
+            and competency_coverage >= cls._minimum_assessed_competencies()
         )
         score_result = cls._derive_authoritative_score(
             is_scheduled_interview=is_scheduled_interview,
@@ -1143,7 +1251,7 @@ class EvaluationReportService:
                 "assessment_coverage": cls._derive_assessment_coverage(critical_competency_status),
                 "competencies_assessed_count": competency_coverage,
                 "competencies_required_count": len(critical_competency_status),
-                "competencies_minimum_required": cls.MINIMUM_ASSESSED_COMPETENCIES,
+                "competencies_minimum_required": cls._minimum_assessed_competencies(),
                 "human_review_required": bool(human_review_flags),
             },
             "executive_summary": {
@@ -1448,7 +1556,13 @@ class EvaluationReportService:
         safety_pct, safety_item = competency_percentage(["safety"])
         hygiene_pct, hygiene_item = competency_percentage(["hygiene", "clean", "sanitation"])
         communication_pct, communication_item = competency_percentage(["communication", "language"])
-        integrity_pct, integrity_item = competency_percentage(["integrity", "reliability", "behavior"])
+        practical_pct, practical_item = competency_percentage(["practical", "task"])
+        # "psych"/"professional" is the legacy "Psych & Professional" tag -
+        # its evidence folds into Behavioral Indicators (see
+        # _friendly_competency_name), so it must match here too or a role
+        # whose only behavioral evidence is psych_professional (no separate
+        # behavior_integrity rows) would wrongly read as "Not Assessed".
+        integrity_pct, integrity_item = competency_percentage(["integrity", "reliability", "behavior", "psych", "professional"])
 
         interpretation_confidences = []
         for item in response_evidence_summary:
@@ -1489,6 +1603,16 @@ class EvaluationReportService:
                 avg_language_quality=avg_language_quality,
                 competency_item=communication_item,
                 competency_percentage=communication_pct,
+                language=language,
+            ),
+            "practical_tasks_risk": cls._risk_block(
+                competency_item=practical_item,
+                competency_percentage=practical_pct,
+                has_critical_failure=any(
+                    any(token in str((f.get("competency_code") or f.get("competency_name") or "")).lower() for token in ("practical", "task"))
+                    for f in critical_failures
+                ),
+                fallback_evidence=[],
                 language=language,
             ),
             "integrity_risk": cls._integrity_risk_block(
@@ -1792,7 +1916,7 @@ class EvaluationReportService:
             (["hygiene", "clean", "sanitation"], "hygiene_risk"),
             (["communication", "language"], "communication_risk"),
             (["practical", "task"], "practical_tasks_risk"),
-            (["integrity", "reliability", "behavior"], "integrity_risk"),
+            (["integrity", "reliability", "behavior", "psych", "professional"], "integrity_risk"),
         )
         dimensions = cls.CANONICAL_COMPETENCY_DIMENSIONS_AR if language == "ar" else cls.CANONICAL_COMPETENCY_DIMENSIONS
         categories = [

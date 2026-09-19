@@ -878,6 +878,45 @@ class Week6ScoringServiceTests(TestCase):
             ).exists()
         )
 
+    def test_rescoring_after_a_retag_drops_the_stale_competency_row(self):
+        """A question's skill_tag can be retagged onto a different
+        competency between two scoring runs of the same evaluation (e.g.
+        a taxonomy migration). _aggregate_competencies must not leave the
+        OLD competency_code behind as an orphaned CompetencyEvaluationResult
+        row once no response maps to it anymore - it would still surface on
+        a regenerated report/certificate alongside the correct new row."""
+        Week6ScoringService.run_for_evaluation(evaluation=self.evaluation, actor=self.user, rule_set=self.rule_set)
+        self.assertTrue(
+            CompetencyEvaluationResult.objects.filter(
+                evaluation=self.evaluation, rule_set=self.rule_set, competency_code="safety_awareness"
+            ).exists()
+        )
+
+        self.template.skill_tag = "hygiene_standards"
+        self.template.skill = "Hygiene & Standards"
+        self.template.skill_id = "hygiene_standards"
+        self.template.save(update_fields=["skill_tag", "skill", "skill_id"])
+        rule = ScoringRule.objects.get(question_template=self.template)
+        rule.competency_code = "hygiene_standards"
+        rule.competency_name = "Hygiene & Standards"
+        rule.save(update_fields=["competency_code", "competency_name"])
+        artifact = EvaluationInputArtifact.objects.get(response=self.response)
+        artifact.competency_code = "hygiene_standards"
+        artifact.save(update_fields=["competency_code"])
+
+        Week6ScoringService.run_for_evaluation(evaluation=self.evaluation, actor=self.user, rule_set=self.rule_set)
+
+        self.assertFalse(
+            CompetencyEvaluationResult.objects.filter(
+                evaluation=self.evaluation, rule_set=self.rule_set, competency_code="safety_awareness"
+            ).exists()
+        )
+        self.assertTrue(
+            CompetencyEvaluationResult.objects.filter(
+                evaluation=self.evaluation, rule_set=self.rule_set, competency_code="hygiene_standards"
+            ).exists()
+        )
+
     def test_week6_scoring_normalizes_legacy_competency_codes(self):
         self.rule_set.rules.all().delete()
         legacy_rule = ScoringRule.objects.create(

@@ -328,6 +328,17 @@ class Week6ScoringService:
                 },
             )
             saved.append(competency_result)
+
+        # A re-score can change WHICH competency_code values a response
+        # maps to (e.g. a question's skill_tag was retagged since the last
+        # run) - update_or_create above only ever creates/updates the
+        # codes seen THIS run, so a code from a prior run that's no longer
+        # produced would otherwise survive as an orphaned, stale row (still
+        # visible on reports/certificates generated from this evaluation).
+        CompetencyEvaluationResult.objects.filter(evaluation=evaluation, rule_set=rule_set).exclude(
+            competency_code__in=grouped.keys()
+        ).delete()
+
         return saved
 
     @classmethod

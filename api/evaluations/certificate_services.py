@@ -138,7 +138,11 @@ def _canonical_dimension(*values):
         return "COMMUNICATION"
     if any(token in haystack for token in ("practical", "task execution", "task")):
         return "PRACTICAL_TASKS"
-    if any(token in haystack for token in ("behavior", "integrity", "reliability")):
+    # "psych"/"professional" is the legacy skill_tags.py "Psych &
+    # Professional" category, not one of the 5 approved
+    # CANONICAL_COMPETENCY_DIMENSIONS - its evidence counts toward
+    # BEHAVIORAL, same governance-approved dimension as integrity/behavior.
+    if any(token in haystack for token in ("behavior", "integrity", "reliability", "psych", "professional")):
         return "BEHAVIORAL"
     return None
 

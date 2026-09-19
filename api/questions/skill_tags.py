@@ -1,11 +1,22 @@
 import re
 
 
+# "Behavior & Integrity"/"Psych & Professional" are the legacy 4-dimension
+# taxonomy; "Hygiene & Standards"/"Communication Ability" are 2 of the 5
+# CANONICAL_COMPETENCY_DIMENSIONS (api/reports/services.py) added to close
+# the gap where no role scored those dimensions at all. This is a
+# transitional 6-tag set: only a handful of roles have been retagged onto
+# the new pair so far (see the retag script/data migration that shipped
+# alongside this), so "Behavior & Integrity"/"Psych & Professional" stay
+# here - removing them would break scoring for every role not yet
+# migrated. Retire them once every role's question bank has been.
 FIXED_QUESTION_SKILL_TAGS = (
     "Safety Awareness",
     "Behavior & Integrity",
     "Psych & Professional",
     "Task Execution",
+    "Hygiene & Standards",
+    "Communication Ability",
 )
 CONSISTENCY_SKILL_TAG = "Consistency"
 ALL_CANONICAL_SKILL_TAGS = FIXED_QUESTION_SKILL_TAGS + (CONSISTENCY_SKILL_TAG,)
@@ -15,6 +26,8 @@ SKILL_TAG_CODES = {
     "Behavior & Integrity": "behavior_integrity",
     "Psych & Professional": "psych_professional",
     "Task Execution": "task_execution",
+    "Hygiene & Standards": "hygiene_standards",
+    "Communication Ability": "communication_ability",
     "Consistency": "consistency",
 }
 
@@ -101,6 +114,21 @@ _register_aliases(
     "Task Execution",
     "task_execution",
     "task_score",
+)
+# Deliberately no legacy raw-label variants re-pointed here yet (e.g. the
+# "Hygiene & Infection Control"/"Service & Hygiene Knowledge" labels above
+# still alias into Safety Awareness) - only questions explicitly retagged
+# to this literal canonical label pick it up, so roles not part of this
+# migration pass keep scoring exactly as before.
+_register_aliases(
+    "Hygiene & Standards",
+    "Hygiene & Standards",
+    "hygiene_standards",
+)
+_register_aliases(
+    "Communication Ability",
+    "Communication Ability",
+    "communication_ability",
 )
 _register_aliases(
     "Consistency",

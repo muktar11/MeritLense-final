@@ -330,7 +330,6 @@ class EvaluationReportService:
         identity = sanitized.get("identity_verification") or {}
         identity.pop("method", None)
         identity.pop("timestamp", None)
-        identity.pop("face_match_score", None)
         identity.pop("single_face_detected", None)
         identity.pop("liveness_passed", None)
         identity.pop("verification_duration_seconds", None)

@@ -421,7 +421,7 @@ class EvaluationReportApiTests(TestCase):
         self.assertNotIn("passport_id", employer_payload.data["candidate_snapshot"])
         self.assertNotIn("internal_reason", employer_payload.data["executive_summary"]["readiness_reason"])
         self.assertNotIn("top_source", employer_payload.data["executive_summary"])
-        self.assertNotIn("face_match_score", employer_payload.data["identity_verification"])
+        self.assertIn("face_match_score", employer_payload.data["identity_verification"])
         self.assertNotIn("liveness_passed", employer_payload.data["identity_verification"])
         self.assertEqual(employer_payload.data["identity_verification"]["employer_status"], "Not Completed")
 
@@ -1405,3 +1405,35 @@ class CompetencyRowMergeTests(TestCase):
         merged = EvaluationReportService._merge_rows_by_display_name(rows, language="en")
 
         self.assertEqual(merged, rows)
+
+
+class EmployerPayloadFaceMatchScoreTests(TestCase):
+    """face_match_score is recorded during identity verification, before
+    the interview even starts, and the employer-facing report now surfaces
+    it as the "Face Match Accuracy" metric next to identity verification
+    status - _sanitize_employer_payload must let the value through (it
+    still strips method/timestamp/liveness_passed/etc, which stay
+    internal-only)."""
+
+    def test_face_match_score_survives_employer_sanitization(self):
+        payload = {
+            "identity_verification": {
+                "employer_status": "Completed",
+                "face_match_score": 92.5,
+                "method": "SESSION_IDENTITY_VERIFICATION",
+                "liveness_passed": True,
+            },
+        }
+
+        sanitized = EvaluationReportService._sanitize_employer_payload(payload)
+
+        self.assertEqual(sanitized["identity_verification"]["face_match_score"], 92.5)
+        self.assertNotIn("method", sanitized["identity_verification"])
+        self.assertNotIn("liveness_passed", sanitized["identity_verification"])
+
+    def test_missing_face_match_score_stays_none(self):
+        payload = {"identity_verification": {"employer_status": "Not Completed", "face_match_score": None}}
+
+        sanitized = EvaluationReportService._sanitize_employer_payload(payload)
+
+        self.assertIsNone(sanitized["identity_verification"]["face_match_score"])

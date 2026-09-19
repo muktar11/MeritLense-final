@@ -731,6 +731,10 @@
       grid-template-columns: 1fr;
     }
 
+    .identity-metrics.two {
+      grid-template-columns: 1fr 1fr;
+    }
+
     .mini-metric {
       padding: 7px 8px;
       border-radius: 11px;
@@ -1372,10 +1376,14 @@
               </div>
             </div>
 
-            <div class="identity-metrics single">
+            <div class="identity-metrics two">
               <div class="mini-metric">
                 <div class="mini-label">حالة التحقق من الهوية</div>
                 <div class="mini-value">{{ identity.employer_status }}</div>
+              </div>
+              <div class="mini-metric">
+                <div class="mini-label">نسبة تطابق الوجه</div>
+                <div class="mini-value">{% if identity.face_match_score is not None %}{{ identity.face_match_score }}%{% else %}غير متاح{% endif %}</div>
               </div>
             </div>
           </div>

@@ -294,7 +294,7 @@ def _role_profile_version(session, language="en"):
     version_string = EvaluationReportService._derive_role_profile_version(session)
     if language == "ar" and session.role_code in ROLE_NAME_AR:
         version = session.question_set_version or "1.0"
-        return f"{ROLE_NAME_AR[session.role_code]}-{version}"
+        return f"{ROLE_NAME_AR[session.role_code]} - {version}"
     return version_string
 
 

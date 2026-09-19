@@ -1,6 +1,7 @@
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
-from api.core.constants import CertificateStatus
+from api.accounts.models import User
+from api.core.constants import CertificateStatus, Roles
 from api.evaluations.certificate_services import generate_certificate
 from api.evaluations.models import Evaluation
 from api.evaluations.scoring_services import Week6ScoringError, Week6ScoringService
@@ -51,6 +52,15 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         identifiers = options["identifiers"]
         dry_run = options["dry_run"]
+        # generate_for_evaluation's audit-log call requires a real user
+        # (unlike most actor=None-tolerant services in this codebase), so a
+        # management-command run attributes to a super admin account rather
+        # than skipping the log entry.
+        actor = None
+        if not dry_run:
+            actor = User.objects.filter(role=Roles.SUPERADMIN, is_active=True).order_by("id").first()
+            if actor is None:
+                raise CommandError("No active SUPERADMIN user found to attribute this action to.")
 
         for identifier in identifiers:
             evaluation = self._resolve_evaluation(identifier)
@@ -71,7 +81,7 @@ class Command(BaseCommand):
                 continue
 
             try:
-                report = EvaluationReportService.generate_for_evaluation(evaluation=evaluation, actor=None)
+                report = EvaluationReportService.generate_for_evaluation(evaluation=evaluation, actor=actor)
             except EvaluationReportError as e:
                 self.stderr.write(self.style.ERROR(f"{identifier}: report generation failed - {e}"))
                 continue

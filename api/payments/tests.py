@@ -1917,6 +1917,93 @@ class InvoicePdfBillingPartyTests(TestCase):
         self.assertIsNone(billing_party["tax_id"])
 
 
+class InvoiceAddressTranslationTests(TestCase):
+    """The billing address (city/country/street names - descriptive text,
+    not an identity) gets translated to Arabic on an Arabic invoice, same
+    non-blocking contract as every other TranslationService call in this
+    codebase: never raises, falls back to the original text on any
+    failure. The company/individual NAME never gets translated - same
+    treatment as "MeritLense" itself, which stays untranslated on every
+    Arabic document in the app."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="address-translation@example.com", password="Password123!",
+            first_name="Addr", last_name="Test", role=Roles.B2C, is_verified=True,
+        )
+        customer = Customer.objects.create(user=self.user, stripe_customer_id="cus_addr_translation")
+        self.invoice = Invoice.objects.create(
+            user=self.user, customer=customer, stripe_invoice_id="in_addr_translation",
+            number="INV-ADDR-1", status="PAID", amount_due=Decimal("100.00"),
+            amount_paid=Decimal("100.00"), amount_remaining=Decimal("0.00"), currency="eur",
+        )
+
+    @patch("api.translation.services.TranslationService.translate")
+    def test_address_is_translated_on_arabic_invoice(self, mock_translate):
+        from api.accounts.models import IndividualEmployerProfile
+        from api.core.constants import JobRoles, Nationalities
+        from api.payments.invoice_services import _build_snapshot
+
+        IndividualEmployerProfile.objects.create(
+            user=self.user, passport_id="PASS-ADDR-1", phone_number="+10000000000",
+            address="Concord Tower, Dubai, United Arab Emirates",
+            job_role=JobRoles.CHOICES[0][0], nationality=Nationalities.CHOICES[0][0],
+            preferred_language="AR",
+            id_document=SimpleUploadedFile("id.pdf", b"%PDF-1.1", content_type="application/pdf"),
+            resume_document=SimpleUploadedFile("resume.pdf", b"%PDF-1.1", content_type="application/pdf"),
+        )
+        mock_translate.return_value = {"translated_text": "برج كونكورد، دبي، الإمارات العربية المتحدة", "provider": "GOOGLE"}
+
+        snapshot = _build_snapshot(self.invoice)
+
+        mock_translate.assert_called_once_with(
+            text="Concord Tower, Dubai, United Arab Emirates", source_language="en", target_language="ar",
+        )
+        self.assertEqual(snapshot["billing_party"]["address"], "برج كونكورد، دبي، الإمارات العربية المتحدة")
+        self.assertFalse(snapshot["billing_party"]["address_is_latin"])
+
+    @patch("api.translation.services.TranslationService.translate")
+    def test_translation_failure_falls_back_to_original_address(self, mock_translate):
+        from api.accounts.models import IndividualEmployerProfile
+        from api.core.constants import JobRoles, Nationalities
+        from api.payments.invoice_services import _build_snapshot
+
+        IndividualEmployerProfile.objects.create(
+            user=self.user, passport_id="PASS-ADDR-2", phone_number="+10000000000",
+            address="Concord Tower, Dubai, United Arab Emirates",
+            job_role=JobRoles.CHOICES[0][0], nationality=Nationalities.CHOICES[0][0],
+            preferred_language="AR",
+            id_document=SimpleUploadedFile("id.pdf", b"%PDF-1.1", content_type="application/pdf"),
+            resume_document=SimpleUploadedFile("resume.pdf", b"%PDF-1.1", content_type="application/pdf"),
+        )
+        mock_translate.side_effect = RuntimeError("provider unavailable")
+
+        snapshot = _build_snapshot(self.invoice)
+
+        self.assertEqual(snapshot["billing_party"]["address"], "Concord Tower, Dubai, United Arab Emirates")
+        self.assertTrue(snapshot["billing_party"]["address_is_latin"])
+
+    @patch("api.translation.services.TranslationService.translate")
+    def test_english_invoice_never_calls_translate(self, mock_translate):
+        from api.accounts.models import IndividualEmployerProfile
+        from api.core.constants import JobRoles, Nationalities
+        from api.payments.invoice_services import _build_snapshot
+
+        IndividualEmployerProfile.objects.create(
+            user=self.user, passport_id="PASS-ADDR-3", phone_number="+10000000000",
+            address="Concord Tower, Dubai, United Arab Emirates",
+            job_role=JobRoles.CHOICES[0][0], nationality=Nationalities.CHOICES[0][0],
+            preferred_language="EN",
+            id_document=SimpleUploadedFile("id.pdf", b"%PDF-1.1", content_type="application/pdf"),
+            resume_document=SimpleUploadedFile("resume.pdf", b"%PDF-1.1", content_type="application/pdf"),
+        )
+
+        snapshot = _build_snapshot(self.invoice)
+
+        mock_translate.assert_not_called()
+        self.assertEqual(snapshot["billing_party"]["address"], "Concord Tower, Dubai, United Arab Emirates")
+
+
 class GenerateInvoicePdfsCommandTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(

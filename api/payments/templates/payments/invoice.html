@@ -119,7 +119,7 @@
           <td>{{ forloop.counter|stringformat:"02d" }}</td>
           <td>
             <div class="item-desc-main">{{ item.description }}</div>
-            <div class="item-desc-sub">Service period: {{ invoice.supply_date }} &ndash; {{ invoice.due_date }}</div>
+            <div class="item-desc-sub">Service period: {{ item.period_start }} &ndash; {{ item.period_end }}</div>
           </td>
           <td class="num">{{ item.qty }}</td>
           <td class="num">{{ item.unit_price }}</td>

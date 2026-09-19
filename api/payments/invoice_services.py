@@ -79,14 +79,22 @@ def _billing_party_context(invoice):
     return {"name": name, "address": address, "tax_id": None, "email": user.email}
 
 
-def _line_items_context(invoice):
+def _line_items_context(invoice, *, fallback_period_start, fallback_period_end):
     """One synthetic line item per invoice - no LineItem model exists.
     VAT is always 0%/0.00, matching MeritLense not charging VAT today;
     revisit if that ever changes rather than deriving it from Stripe's own
-    tax data, which isn't persisted on Invoice."""
+    tax data, which isn't persisted on Invoice. Service period prefers the
+    linked Subscription's current billing period (the real one this
+    invoice was for) over the issue/due-date fallback, which would
+    otherwise show the same single day twice."""
     description = None
-    if invoice.subscription_id and invoice.subscription and invoice.subscription.stripe_price:
-        description = invoice.subscription.stripe_price.name
+    period_start, period_end = fallback_period_start, fallback_period_end
+    if invoice.subscription_id and invoice.subscription:
+        if invoice.subscription.stripe_price:
+            description = invoice.subscription.stripe_price.name
+        if invoice.subscription.current_period_start and invoice.subscription.current_period_end:
+            period_start = invoice.subscription.current_period_start
+            period_end = invoice.subscription.current_period_end
     description = description or "MeritLense subscription"
     net_amount = invoice.amount_due
     return [
@@ -97,6 +105,8 @@ def _line_items_context(invoice):
             "net_amount": net_amount,
             "vat_percent": Decimal("0.00"),
             "vat_amount": Decimal("0.00"),
+            "period_start": period_start.strftime("%Y-%m-%d") if period_start else "",
+            "period_end": period_end.strftime("%Y-%m-%d") if period_end else "",
         }
     ]
 
@@ -108,7 +118,7 @@ def _money(value):
 def _build_snapshot(invoice):
     issue_date = invoice.paid_at or invoice.created_at
     due_date = invoice.due_date or issue_date
-    line_items = _line_items_context(invoice)
+    line_items = _line_items_context(invoice, fallback_period_start=issue_date, fallback_period_end=due_date)
     subtotal = sum((item["net_amount"] for item in line_items), Decimal("0.00"))
     vat_total = sum((item["vat_amount"] for item in line_items), Decimal("0.00"))
     return {
@@ -128,6 +138,8 @@ def _build_snapshot(invoice):
                 "net_amount": _money(item["net_amount"]),
                 "vat_percent": str(item["vat_percent"]),
                 "vat_amount": _money(item["vat_amount"]),
+                "period_start": item["period_start"],
+                "period_end": item["period_end"],
             }
             for item in line_items
         ],

@@ -775,8 +775,14 @@ class EvaluationReportService:
         )
         assessment_status = next(
             (s for s in severity if any(row["assessment_status"] == s for row in group)),
-            next(row["assessment_status"] for row in group if row["assessment_status"] not in severity),
+            None,
         )
+        if assessment_status is None:
+            # No row hit a severity case (e.g. both are MEETS_THRESHOLD/
+            # EVALUATED) - they're computed the same way for the same
+            # evaluation/rule_set, so they should already agree; take the
+            # first one rather than assuming a specific "passing" constant.
+            assessment_status = group[0]["assessment_status"]
 
         if assessment_status == "NOT_ASSESSED":
             score_display = "غير مقيَّم" if language == "ar" else "Not Assessed"

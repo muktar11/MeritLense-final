@@ -1330,3 +1330,78 @@ class TopStrengthsAndRisksTests(TestCase):
 
         self.assertIn("Strong patient safety awareness", strengths)
         self.assertNotIn("Readiness gap identified in patient safety awareness", risks)
+
+
+class CompetencyRowMergeTests(TestCase):
+    """behavior_integrity and psych_professional both display as
+    "Behavioral Indicators" (see _friendly_competency_name), so
+    _build_competency_breakdown merges same-named rows instead of
+    showing two rows with the same label and different scores."""
+
+    def _row(self, *, score, max_score, assessment_status, competency_code, pass_threshold=70):
+        completed = 1 if max_score else 0
+        return {
+            "competency_code": competency_code,
+            "competency_name": competency_code,
+            "display_name": "Behavioral Indicators",
+            "score": score,
+            "max_score": max_score,
+            "percentage": round(score / max_score * 100, 2) if max_score else 0,
+            "status": assessment_status,
+            "assessment_status": assessment_status,
+            "score_display": f"{score}/{max_score}",
+            "response_count": 1,
+            "completed_response_count": completed,
+            "incomplete_response_count": 0,
+            "pass_threshold": pass_threshold,
+            "explanation": "",
+        }
+
+    def test_two_passing_rows_merge_into_one_summed_row(self):
+        rows = [
+            self._row(score=8, max_score=10, assessment_status="MEETS_THRESHOLD", competency_code="behavior_integrity"),
+            self._row(score=9, max_score=10, assessment_status="MEETS_THRESHOLD", competency_code="psych_professional"),
+        ]
+
+        merged = EvaluationReportService._merge_rows_by_display_name(rows, language="en")
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["display_name"], "Behavioral Indicators")
+        self.assertEqual(merged[0]["score"], 17)
+        self.assertEqual(merged[0]["max_score"], 20)
+        self.assertEqual(merged[0]["assessment_status"], "MEETS_THRESHOLD")
+
+    def test_below_threshold_row_wins_even_when_the_other_passed(self):
+        rows = [
+            self._row(score=2, max_score=10, assessment_status="BELOW_THRESHOLD", competency_code="behavior_integrity"),
+            self._row(score=9, max_score=10, assessment_status="MEETS_THRESHOLD", competency_code="psych_professional"),
+        ]
+
+        merged = EvaluationReportService._merge_rows_by_display_name(rows, language="en")
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["assessment_status"], "BELOW_THRESHOLD")
+
+    def test_two_below_threshold_rows_merge_without_crashing(self):
+        # Regression: the first version of this merge crashed with
+        # StopIteration when every row in the group already matched a
+        # severity case (nothing left to fall back to).
+        rows = [
+            self._row(score=1, max_score=10, assessment_status="BELOW_THRESHOLD", competency_code="behavior_integrity"),
+            self._row(score=2, max_score=10, assessment_status="BELOW_THRESHOLD", competency_code="psych_professional"),
+        ]
+
+        merged = EvaluationReportService._merge_rows_by_display_name(rows, language="en")
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["assessment_status"], "BELOW_THRESHOLD")
+        self.assertEqual(merged[0]["score"], 3)
+
+    def test_row_with_no_collision_passes_through_unchanged(self):
+        rows = [
+            {**self._row(score=8, max_score=10, assessment_status="MEETS_THRESHOLD", competency_code="safety_awareness"), "display_name": "Safety Awareness"},
+        ]
+
+        merged = EvaluationReportService._merge_rows_by_display_name(rows, language="en")
+
+        self.assertEqual(merged, rows)

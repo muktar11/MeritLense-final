@@ -225,7 +225,7 @@ class InvoiceSerializer(PublicIdModelSerializer):
             'stripe_invoice_id', 'stripe_payment_intent',
             'number', 'status', 'amount_due', 'amount_paid',
             'amount_remaining', 'currency', 'due_date', 'paid_at',
-            'voided_at', 'invoice_pdf', 'hosted_invoice_url',
+            'voided_at', 'invoice_pdf', 'hosted_invoice_url', 'local_pdf_file',
             'metadata', 'created_at', 'updated_at'
         ]
 

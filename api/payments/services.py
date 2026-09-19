@@ -876,6 +876,10 @@ class StripeService:
                     'amount_remaining': Decimal(invoice_data['amount_remaining']) / 100,
                     'currency': invoice_data['currency'],
                     'paid_at': timezone.now(),
+                    'due_date': (
+                        timezone.datetime.fromtimestamp(invoice_data['due_date'], tz=timezone.utc)
+                        if invoice_data.get('due_date') else None
+                    ),
                     'invoice_pdf': invoice_data.get('invoice_pdf', ''),
                     'hosted_invoice_url': invoice_data.get('hosted_invoice_url', ''),
                 }
@@ -888,6 +892,17 @@ class StripeService:
                 _notify_package_activated(subscription.user, subscription.stripe_price.name if subscription.stripe_price else "")
 
             if created and invoice.status == 'PAID':
+                from .invoice_services import generate_invoice_pdf
+
+                try:
+                    generate_invoice_pdf(invoice)
+                except Exception:
+                    # Never let a PDF-rendering bug swallow a paid invoice or
+                    # the entitlement/subscription logic below - this whole
+                    # method already has an outer try/except that would
+                    # otherwise turn a rendering failure into a silently
+                    # dropped webhook.
+                    logger.exception(f"Failed to generate local PDF for invoice {invoice.stripe_invoice_id}")
                 _notify_invoice_generated(invoice)
 
             # A 'manual' billing_reason is the mid-cycle proration invoice

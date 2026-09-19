@@ -1792,3 +1792,146 @@ class SlotReservationNotificationTests(TestCase):
         self.assertEqual(low_balance_threshold(None), 0)
         self.assertEqual(low_balance_threshold(5), 1)  # round(5*0.1)=1, floor is 1
         self.assertEqual(low_balance_threshold(200), 20)
+
+
+class InvoicePdfBillingPartyTests(TestCase):
+    """_billing_party_context reads CompanyEmployerProfile/IndividualEmployerProfile
+    directly off Invoice.user - never through CompanyEmployerProfile.company,
+    a separate, optional, nullable verified-Company record."""
+
+    def setUp(self):
+        self.customer_kwargs = {"stripe_customer_id": "cus_billing_party_test"}
+
+    def _invoice_for(self, user):
+        customer = Customer.objects.create(user=user, **self.customer_kwargs)
+        return Invoice.objects.create(
+            user=user, customer=customer, stripe_invoice_id=f"in_billing_{user.id}",
+            number=f"INV-BP-{user.id}", status="PAID", amount_due=Decimal("100.00"),
+            amount_paid=Decimal("100.00"), amount_remaining=Decimal("0.00"), currency="eur",
+        )
+
+    def test_b2b_billing_party_uses_company_profile_not_company(self):
+        from api.accounts.models import CompanyEmployerProfile
+        from api.core.constants import CompanySize
+        from api.payments.invoice_services import _billing_party_context
+
+        user = User.objects.create_user(
+            email="b2b-billing-party@example.com", password="Password123!",
+            first_name="Jordan", last_name="Owner", role=Roles.B2B, is_verified=True,
+        )
+        CompanyEmployerProfile.objects.create(
+            user=user, company_name="Acme Corp", company_registration_number="REG-BP-1",
+            company_size=CompanySize.CHOICES[0][0], phone_number="+10000000000",
+            country="United Arab Emirates", city="Dubai", address="Concord Tower",
+        )
+        invoice = self._invoice_for(user)
+
+        billing_party = _billing_party_context(invoice)
+
+        self.assertEqual(billing_party["name"], "Acme Corp")
+        self.assertEqual(billing_party["address"], "Concord Tower, Dubai, United Arab Emirates")
+        self.assertIsNone(billing_party["tax_id"])
+        self.assertEqual(billing_party["email"], user.email)
+
+    def test_b2c_billing_party_uses_individual_profile_address(self):
+        from api.accounts.models import IndividualEmployerProfile
+        from api.core.constants import JobRoles, Nationalities
+        from api.payments.invoice_services import _billing_party_context
+
+        user = User.objects.create_user(
+            email="b2c-billing-party@example.com", password="Password123!",
+            first_name="Sam", last_name="Customer", role=Roles.B2C, is_verified=True,
+        )
+        IndividualEmployerProfile.objects.create(
+            user=user, passport_id="PASS-BP-1", phone_number="+10000000000",
+            address="123 Main St, Springfield",
+            job_role=JobRoles.CHOICES[0][0], nationality=Nationalities.CHOICES[0][0],
+            id_document=SimpleUploadedFile("id.pdf", b"%PDF-1.1", content_type="application/pdf"),
+            resume_document=SimpleUploadedFile("resume.pdf", b"%PDF-1.1", content_type="application/pdf"),
+        )
+        invoice = self._invoice_for(user)
+
+        billing_party = _billing_party_context(invoice)
+
+        self.assertEqual(billing_party["name"], user.get_full_name())
+        self.assertEqual(billing_party["address"], "123 Main St, Springfield")
+
+    def test_blank_address_falls_back_to_none(self):
+        from api.payments.invoice_services import _billing_party_context
+
+        user = User.objects.create_user(
+            email="no-profile-billing-party@example.com", password="Password123!",
+            first_name="No", last_name="Profile", role=Roles.B2C, is_verified=True,
+        )
+        invoice = self._invoice_for(user)
+
+        billing_party = _billing_party_context(invoice)
+
+        self.assertEqual(billing_party["name"], user.get_full_name())
+        self.assertIsNone(billing_party["address"])
+        self.assertIsNone(billing_party["tax_id"])
+
+
+class GenerateInvoicePdfsCommandTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="invoice-pdf-command@example.com", password="Password123!",
+            first_name="Cmd", last_name="Test", role=Roles.B2C, is_verified=True,
+        )
+        self.customer = Customer.objects.create(user=self.user, stripe_customer_id="cus_command_test")
+        self.invoice = Invoice.objects.create(
+            user=self.user, customer=self.customer, stripe_invoice_id="in_command_test",
+            number="INV-CMD-1", status="PAID", amount_due=Decimal("50.00"),
+            amount_paid=Decimal("50.00"), amount_remaining=Decimal("0.00"), currency="eur",
+        )
+
+    def test_dry_run_does_not_write(self):
+        call_command("generate_invoice_pdfs", "in_command_test", "--dry-run")
+
+        self.invoice.refresh_from_db()
+        self.assertFalse(self.invoice.local_pdf_file)
+
+    def test_generates_pdf_for_named_invoice(self):
+        call_command("generate_invoice_pdfs", "in_command_test")
+
+        self.invoice.refresh_from_db()
+        self.assertTrue(self.invoice.local_pdf_file)
+        self.assertTrue(self.invoice.pdf_hash)
+        self.assertEqual(self.invoice.pdf_render_snapshot["invoice_number"], "INV-CMD-1")
+
+    def test_skips_already_generated_without_force(self):
+        call_command("generate_invoice_pdfs", "in_command_test")
+        self.invoice.refresh_from_db()
+        first_hash = self.invoice.pdf_hash
+
+        self.invoice.amount_due = Decimal("999.00")
+        self.invoice.save(update_fields=["amount_due"])
+        call_command("generate_invoice_pdfs", "in_command_test")
+
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.pdf_hash, first_hash)
+
+    def test_force_regenerates(self):
+        call_command("generate_invoice_pdfs", "in_command_test")
+        self.invoice.refresh_from_db()
+
+        self.invoice.amount_due = Decimal("999.00")
+        self.invoice.amount_remaining = Decimal("999.00")
+        self.invoice.save(update_fields=["amount_due", "amount_remaining"])
+        call_command("generate_invoice_pdfs", "in_command_test", "--force")
+
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.pdf_render_snapshot["amount_due_display"], "999.00")
+
+    def test_all_missing_only_targets_invoices_without_a_local_pdf(self):
+        already_done = Invoice.objects.create(
+            user=self.user, customer=self.customer, stripe_invoice_id="in_command_already_done",
+            number="INV-CMD-2", status="PAID", amount_due=Decimal("10.00"),
+            amount_paid=Decimal("10.00"), amount_remaining=Decimal("0.00"), currency="eur",
+        )
+        call_command("generate_invoice_pdfs", "in_command_already_done")
+
+        call_command("generate_invoice_pdfs", "--all-missing")
+
+        self.invoice.refresh_from_db()
+        self.assertTrue(self.invoice.local_pdf_file)

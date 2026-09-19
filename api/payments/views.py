@@ -3,7 +3,9 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from django.http import HttpResponse, JsonResponse
+from io import BytesIO
+
+from django.http import FileResponse, HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.db.models import Q
@@ -1422,10 +1424,47 @@ class PaymentViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class InvoiceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
+class InvoicePdfDownloadMixin:
+    """Shared "download-pdf" action for InvoiceViewSet/AdminInvoiceViewSet -
+    serves the locally-rendered PDF (see api/payments/invoice_services.py)
+    directly when already generated, else rebuilds it from the invoice's
+    stored render snapshot rather than failing outright."""
+
+    @action(detail=True, methods=["get"], url_path="download-pdf")
+    def download_pdf(self, request, id=None):
+        from .invoice_services import InvoicePdfError, render_existing_invoice_pdf
+
+        invoice = self.get_object()
+        filename = f"{invoice.number or invoice.stripe_invoice_id}.pdf"
+
+        if invoice.local_pdf_file and invoice.local_pdf_file.storage.exists(invoice.local_pdf_file.name):
+            invoice.local_pdf_file.open("rb")
+            return FileResponse(
+                invoice.local_pdf_file,
+                content_type="application/pdf",
+                as_attachment=True,
+                filename=filename,
+            )
+
+        try:
+            pdf_bytes, _pdf_hash = render_existing_invoice_pdf(invoice)
+        except InvoicePdfError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        pdf_stream = BytesIO(pdf_bytes)
+        pdf_stream.seek(0)
+        return FileResponse(
+            pdf_stream,
+            content_type="application/pdf",
+            as_attachment=True,
+            filename=filename,
+        )
+
+
+class InvoiceViewSet(InvoicePdfDownloadMixin, PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = InvoiceSerializer
-    
+
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Invoice.objects.none()
@@ -1487,13 +1526,16 @@ class InvoiceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
         return response
 
 
-class AdminInvoiceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
+class AdminInvoiceViewSet(InvoicePdfDownloadMixin, PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
     """Admin/SuperAdmin-only visibility over ALL invoices, with search/status
     filtering and a manual "send to customer" action - the user-facing
     InvoiceViewSet above only ever shows a customer their own invoices, and
-    has no send action. Invoice PDFs themselves are Stripe's own
-    hosted/generated PDFs (Invoice.invoice_pdf / hosted_invoice_url) - this
-    just gives admins a way to find one and re-send its link."""
+    has no send action. Invoice PDFs are generated locally (see
+    api/payments/invoice_services.py) at payment time, falling back to
+    Stripe's own hosted/generated PDF (Invoice.invoice_pdf /
+    hosted_invoice_url) only for invoices that predate this feature and
+    haven't been backfilled yet (see the generate_invoice_pdfs management
+    command)."""
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
     serializer_class = InvoiceSerializer
 
@@ -1522,7 +1564,11 @@ class AdminInvoiceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=['post'])
     def send(self, request, id=None):
         invoice = self.get_object()
-        pdf_link = invoice.invoice_pdf or invoice.hosted_invoice_url
+        pdf_link = (
+            (invoice.local_pdf_file.url if invoice.local_pdf_file else None)
+            or invoice.invoice_pdf
+            or invoice.hosted_invoice_url
+        )
         if not pdf_link:
             return Response(
                 {'error': 'This invoice has no PDF or hosted link yet - it may still be pending from Stripe.'},

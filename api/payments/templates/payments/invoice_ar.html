@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<style>
+  @page {
+    size: A4;
+    margin: 0 0 16mm 0;
+    @bottom-center {
+      content: "MeritLense — الذكاء الاصطناعي يساعد. القواعد تحكم. أصحاب العمل يقررون.    صفحة " counter(page) " من " counter(pages) " \00B7 فاتورة {{ invoice.invoice_number }}";
+      font-size: 7pt; color: #8a97ad;
+    }
+  }
+
+  {% if arabic_font_regular_uri %}
+  @font-face {
+    font-family: "Noto Naskh Arabic";
+    src: url("{{ arabic_font_regular_uri }}") format("truetype");
+    font-weight: 400;
+  }
+  @font-face {
+    font-family: "Noto Naskh Arabic";
+    src: url("{{ arabic_font_bold_uri }}") format("truetype");
+    font-weight: 700;
+  }
+  {% endif %}
+
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Noto Naskh Arabic", Arial, sans-serif; color: #1f2937; font-size: 9.5pt; direction: rtl; text-align: right; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .content { padding: 0 14mm; }
+
+  .header-bar { height: 6mm; background: linear-gradient(90deg, #2f6fe8, #7b56f5); }
+  .header-row { display: table; width: 100%; margin-top: 8mm; direction: rtl; }
+  .header-cell { display: table-cell; vertical-align: top; }
+  .logo-cell { width: 55%; }
+  .logo-cell img { height: 30px; }
+  .tagline { margin-top: 3mm; font-size: 7pt; letter-spacing: 0.02em; color: #6b7280; }
+  .invoice-title-cell { width: 45%; text-align: left; }
+  .invoice-title { font-size: 22pt; font-weight: 800; color: #111827; }
+
+  .meta-box { margin-top: 6mm; margin-right: auto; width: 66mm; border: 1px solid #e2e8f5; border-radius: 8px; padding: 3mm 4mm; }
+  .meta-row { display: table; width: 100%; font-size: 8pt; padding: 0.8mm 0; direction: rtl; }
+  .meta-row .meta-label { display: table-cell; color: #6880ab; }
+  .meta-row .meta-value { display: table-cell; text-align: left; font-weight: 700; color: #1f2937; }
+  .meta-row.due .meta-value { color: #6d3ff5; }
+
+  .parties-row { display: table; width: 100%; margin-top: 8mm; border-collapse: separate; border-spacing: 4mm 0; direction: rtl; }
+  .party-cell { display: table-cell; width: 50%; vertical-align: top; border: 1px solid #e2e8f5; border-radius: 8px; padding: 4mm; }
+  .party-label { font-size: 7pt; letter-spacing: 0.02em; color: #8a97ad; margin-bottom: 2mm; }
+  .party-name { font-size: 11pt; font-weight: 700; color: #111827; margin-bottom: 1.5mm; }
+  .party-line { font-size: 8.5pt; color: #4b5563; line-height: 1.6; }
+
+  table.items { width: 100%; margin-top: 8mm; border-collapse: collapse; font-size: 8.5pt; direction: rtl; }
+  table.items th { text-align: right; font-size: 7pt; letter-spacing: 0.02em; color: #8a97ad; padding: 2mm 2mm; border-bottom: 1px solid #d7deec; }
+  table.items td { padding: 3mm 2mm; border-bottom: 1px solid #eef1f8; vertical-align: top; }
+  table.items td.num, table.items th.num { text-align: left; }
+  .item-desc-main { font-weight: 700; color: #1f2937; }
+  .item-desc-sub { font-size: 7.5pt; color: #8a97ad; margin-top: 1mm; }
+
+  .lower-row { display: table; width: 100%; margin-top: 8mm; border-spacing: 4mm 0; direction: rtl; }
+  .lower-left { display: table-cell; width: 55%; vertical-align: top; }
+  .lower-right { display: table-cell; width: 45%; vertical-align: top; }
+
+  .info-box { border: 1px solid #e2e8f5; border-radius: 8px; padding: 3.5mm 4mm; margin-bottom: 4mm; }
+  .info-box-title { font-size: 7pt; letter-spacing: 0.02em; color: #8a97ad; margin-bottom: 1.5mm; }
+  .info-box-body { font-size: 8.3pt; color: #4b5563; line-height: 1.65; }
+
+  .totals-row { display: table; width: 100%; font-size: 8.7pt; padding: 1.2mm 0; direction: rtl; }
+  .totals-row .t-label { display: table-cell; color: #6b7280; }
+  .totals-row .t-value { display: table-cell; text-align: left; color: #1f2937; }
+  .totals-row.total .t-label, .totals-row.total .t-value { font-weight: 800; font-size: 10pt; color: #111827; border-top: 1px solid #d7deec; padding-top: 2mm; }
+  .amount-due-bar { margin-top: 3mm; border-radius: 8px; padding: 3.5mm 4mm; background: linear-gradient(90deg, #2f6fe8, #7b56f5); display: table; width: 100%; direction: rtl; }
+  .amount-due-bar .t-label, .amount-due-bar .t-value { color: #ffffff; font-weight: 800; font-size: 11pt; }
+  .payable-by { text-align: left; font-size: 7.5pt; color: #8a97ad; margin-top: 2mm; }
+
+  .disclaimer { margin-top: 10mm; border: 1px solid #eef1f8; background: #f8faff; border-radius: 8px; padding: 3.5mm 4mm; font-size: 7.3pt; color: #6b7280; line-height: 1.7; }
+</style>
+</head>
+<body>
+  <div class="header-bar"></div>
+  <div class="content">
+    <div class="header-row">
+      <div class="header-cell logo-cell">
+        <img src="{{ logo_data_uri }}" alt="MeritLense" />
+        <div class="tagline">الذكاء الاصطناعي يساعد &middot; القواعد تحكم &middot; أصحاب العمل يقررون</div>
+      </div>
+      <div class="header-cell invoice-title-cell">
+        <div class="invoice-title">فاتورة</div>
+      </div>
+    </div>
+
+    <div class="meta-box">
+      <div class="meta-row"><span class="meta-label">رقم الفاتورة</span><span class="meta-value">{{ invoice.invoice_number }}</span></div>
+      <div class="meta-row"><span class="meta-label">تاريخ الإصدار</span><span class="meta-value">{{ invoice.issue_date }}</span></div>
+      <div class="meta-row"><span class="meta-label">تاريخ التوريد</span><span class="meta-value">{{ invoice.supply_date }}</span></div>
+      <div class="meta-row due"><span class="meta-label">تاريخ الاستحقاق</span><span class="meta-value">{{ invoice.due_date }}</span></div>
+      <div class="meta-row"><span class="meta-label">العملة</span><span class="meta-value">{{ invoice.currency }}</span></div>
+    </div>
+
+    <div class="parties-row">
+      <div class="party-cell">
+        <div class="party-label">بيانات المورّد</div>
+        <div class="party-name">{{ supplier.name }}</div>
+        <div class="party-line">{{ supplier.description_ar }}</div>
+        <div class="party-line">العنوان المسجّل &mdash; {% if supplier.address %}{{ supplier.address }}{% else %}يُستكمل{% endif %}</div>
+        <div class="party-line">الرقم الضريبي &mdash; {% if supplier.tax_id %}{{ supplier.tax_id }}{% else %}يُستكمل{% endif %}</div>
+        <div class="party-line">{{ supplier.email }}</div>
+      </div>
+      <div class="party-cell">
+        <div class="party-label">بيانات العميل</div>
+        <div class="party-name">{{ invoice.billing_party.name }}</div>
+        <div class="party-line">عنوان الفاتورة &mdash; {% if invoice.billing_party.address %}{{ invoice.billing_party.address }}{% else %}يُستكمل{% endif %}</div>
+        <div class="party-line">الرقم الضريبي &mdash; {% if invoice.billing_party.tax_id %}{{ invoice.billing_party.tax_id }}{% else %}غير مُقدَّم{% endif %}</div>
+        <div class="party-line">{{ invoice.billing_party.email }}</div>
+      </div>
+    </div>
+
+    <table class="items">
+      <thead>
+        <tr>
+          <th>م</th>
+          <th>الوصف</th>
+          <th class="num">الكمية</th>
+          <th class="num">سعر الوحدة</th>
+          <th class="num">الصافي</th>
+          <th class="num">نسبة الضريبة</th>
+          <th class="num">قيمة الضريبة</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in invoice.line_items %}
+        <tr>
+          <td>{{ forloop.counter }}</td>
+          <td>
+            <div class="item-desc-main">{{ item.description }}</div>
+            <div class="item-desc-sub">فترة الخدمة: {{ invoice.supply_date }} &ndash; {{ invoice.due_date }}</div>
+          </td>
+          <td class="num">{{ item.qty }}</td>
+          <td class="num">{{ item.unit_price }}</td>
+          <td class="num">{{ item.net_amount }}</td>
+          <td class="num">{{ item.vat_percent }}%</td>
+          <td class="num">{{ item.vat_amount }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="lower-row">
+      <div class="lower-left">
+        <div class="info-box">
+          <div class="info-box-title">شروط الدفع</div>
+          <div class="info-box-body">الدفع مستحق فوراً عند الاستلام. يُرجى ذكر رقم الفاتورة {{ invoice.invoice_number }} كمرجع للتحويل.</div>
+        </div>
+        <div class="info-box">
+          <div class="info-box-title">البيانات البنكية</div>
+          <div class="info-box-body">
+            اسم صاحب الحساب &mdash; {% if bank.account_holder %}{{ bank.account_holder }}{% else %}يُستكمل{% endif %}<br />
+            رقم الحساب الدولي IBAN &mdash; {% if bank.iban %}{{ bank.iban }}{% else %}يُستكمل{% endif %}<br />
+            رمز المصرف SWIFT / BIC &mdash; {% if bank.bic_swift %}{{ bank.bic_swift }}{% else %}يُستكمل{% endif %}
+          </div>
+        </div>
+        <div class="info-box">
+          <div class="info-box-title">ملاحظة ضريبية</div>
+          <div class="info-box-body">لا تُحتسب ضريبة قيمة مضافة على هذه الفاتورة. يُرجى تأكيد المعالجة الضريبية المطبّقة قبل الإصدار.</div>
+        </div>
+      </div>
+      <div class="lower-right">
+        <div class="totals-row"><span class="t-label">المجموع قبل الضريبة</span><span class="t-value">&euro;{{ invoice.subtotal }}</span></div>
+        <div class="totals-row"><span class="t-label">ضريبة القيمة المضافة 0%</span><span class="t-value">&euro;{{ invoice.vat_total }}</span></div>
+        <div class="totals-row total"><span class="t-label">الإجمالي</span><span class="t-value">&euro;{{ invoice.total }}</span></div>
+        <div class="totals-row"><span class="t-label">المبلغ المدفوع</span><span class="t-value">&euro;{{ invoice.amount_paid }}</span></div>
+        <div class="amount-due-bar">
+          <div class="t-label">المبلغ المستحق</div>
+          <div class="t-value">&euro;{{ invoice.amount_due_display }}</div>
+        </div>
+        <div class="payable-by">يُسدَّد بحلول {{ invoice.payable_by }}</div>
+      </div>
+    </div>
+
+    <div class="disclaimer">
+      صدرت هذه الفاتورة إلكترونياً وهي صحيحة دون توقيع. يُرجى الإبلاغ عن أي اختلاف خلال 7 أيام من تاريخ الإصدار.
+      جميع المبالغ بعملة {{ invoice.currency }}.
+    </div>
+  </div>
+</body>
+</html>

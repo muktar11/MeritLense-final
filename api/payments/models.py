@@ -828,6 +828,10 @@ class DealRecord(TimeStampedModel):
         return f"{self.company.name} - {self.deal_type} - {self.slot_grant} slots"
 
 
+def invoice_pdf_upload_to(instance, filename):
+    return f"invoices/{instance.user_id}/{instance.stripe_invoice_id}.pdf"
+
+
 class Invoice(TimeStampedModel):
     user = models.ForeignKey(
         User,
@@ -876,7 +880,18 @@ class Invoice(TimeStampedModel):
     
     metadata = models.JSONField(default=dict, blank=True)
     hosted_invoice_url = models.URLField(blank=True)
-    
+
+    local_pdf_file = models.FileField(upload_to=invoice_pdf_upload_to, null=True, blank=True)
+    pdf_render_snapshot = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Exact context local_pdf_file was rendered from - a later "
+                   "regeneration (e.g. a template fix) reproduces this PDF from "
+                   "this stored snapshot rather than live (possibly since-changed) "
+                   "profile data. See api/payments/invoice_services.py.",
+    )
+    pdf_hash = models.CharField(max_length=64, blank=True)
+
     class Meta:
         verbose_name = "Invoice"
         verbose_name_plural = "Invoices"

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8" />
+<style>
+  @page {
+    size: A4;
+    margin: 0 0 16mm 0;
+    @bottom-center {
+      content: "MeritLense — AI Assists. Rules Decide. Employers Decide.    Invoice {{ invoice.invoice_number }} \00B7 Page " counter(page) " of " counter(pages);
+      font-size: 7pt; color: #8a97ad;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Helvetica", "Arial", sans-serif; color: #1f2937; font-size: 9.5pt; }
+  .content { padding: 0 14mm; }
+
+  .header-bar { height: 6mm; background: linear-gradient(90deg, #7b56f5, #2f6fe8); }
+  .header-row { display: table; width: 100%; margin-top: 8mm; }
+  .header-cell { display: table-cell; vertical-align: top; }
+  .logo-cell { width: 55%; }
+  .logo-cell img { height: 30px; }
+  .tagline { margin-top: 3mm; font-size: 7pt; letter-spacing: 0.04em; color: #6b7280; text-transform: uppercase; }
+  .invoice-title-cell { width: 45%; text-align: right; }
+  .invoice-title { font-size: 22pt; font-weight: 800; letter-spacing: 0.08em; color: #111827; }
+
+  .meta-box { margin-top: 6mm; margin-left: auto; width: 62mm; border: 1px solid #e2e8f5; border-radius: 8px; padding: 3mm 4mm; }
+  .meta-row { display: table; width: 100%; font-size: 8pt; padding: 0.8mm 0; }
+  .meta-row .meta-label { display: table-cell; color: #6880ab; }
+  .meta-row .meta-value { display: table-cell; text-align: right; font-weight: 700; color: #1f2937; }
+  .meta-row.due .meta-value { color: #6d3ff5; }
+
+  .parties-row { display: table; width: 100%; margin-top: 8mm; border-collapse: separate; border-spacing: 4mm 0; }
+  .party-cell { display: table-cell; width: 50%; vertical-align: top; border: 1px solid #e2e8f5; border-radius: 8px; padding: 4mm; }
+  .party-label { font-size: 7pt; letter-spacing: 0.05em; color: #8a97ad; text-transform: uppercase; margin-bottom: 2mm; }
+  .party-name { font-size: 11pt; font-weight: 700; color: #111827; margin-bottom: 1.5mm; }
+  .party-line { font-size: 8.5pt; color: #4b5563; line-height: 1.5; }
+
+  table.items { width: 100%; margin-top: 8mm; border-collapse: collapse; font-size: 8.5pt; }
+  table.items th { text-align: left; font-size: 7pt; letter-spacing: 0.04em; color: #8a97ad; text-transform: uppercase; padding: 2mm 2mm; border-bottom: 1px solid #d7deec; }
+  table.items td { padding: 3mm 2mm; border-bottom: 1px solid #eef1f8; vertical-align: top; }
+  table.items td.num, table.items th.num { text-align: right; }
+  .item-desc-main { font-weight: 700; color: #1f2937; }
+  .item-desc-sub { font-size: 7.5pt; color: #8a97ad; margin-top: 1mm; }
+
+  .lower-row { display: table; width: 100%; margin-top: 8mm; border-spacing: 4mm 0; }
+  .lower-left { display: table-cell; width: 55%; vertical-align: top; }
+  .lower-right { display: table-cell; width: 45%; vertical-align: top; }
+
+  .info-box { border: 1px solid #e2e8f5; border-radius: 8px; padding: 3.5mm 4mm; margin-bottom: 4mm; }
+  .info-box-title { font-size: 7pt; letter-spacing: 0.05em; color: #8a97ad; text-transform: uppercase; margin-bottom: 1.5mm; }
+  .info-box-body { font-size: 8.3pt; color: #4b5563; line-height: 1.55; }
+
+  .totals-row { display: table; width: 100%; font-size: 8.7pt; padding: 1.2mm 0; }
+  .totals-row .t-label { display: table-cell; color: #6b7280; }
+  .totals-row .t-value { display: table-cell; text-align: right; color: #1f2937; }
+  .totals-row.total .t-label, .totals-row.total .t-value { font-weight: 800; font-size: 10pt; color: #111827; border-top: 1px solid #d7deec; padding-top: 2mm; }
+  .amount-due-bar { margin-top: 3mm; border-radius: 8px; padding: 3.5mm 4mm; background: linear-gradient(90deg, #7b56f5, #2f6fe8); display: table; width: 100%; }
+  .amount-due-bar .t-label, .amount-due-bar .t-value { color: #ffffff; font-weight: 800; font-size: 11pt; }
+  .payable-by { text-align: right; font-size: 7.5pt; color: #8a97ad; margin-top: 2mm; }
+
+  .disclaimer { margin-top: 10mm; border: 1px solid #eef1f8; background: #f8faff; border-radius: 8px; padding: 3.5mm 4mm; font-size: 7.3pt; color: #6b7280; line-height: 1.6; }
+</style>
+</head>
+<body>
+  <div class="header-bar"></div>
+  <div class="content">
+    <div class="header-row">
+      <div class="header-cell logo-cell">
+        <img src="{{ logo_data_uri }}" alt="MeritLense" />
+        <div class="tagline">AI Assists &middot; Rules Decide &middot; Employers Decide</div>
+      </div>
+      <div class="header-cell invoice-title-cell">
+        <div class="invoice-title">INVOICE</div>
+      </div>
+    </div>
+
+    <div class="meta-box">
+      <div class="meta-row"><span class="meta-label">Invoice no.</span><span class="meta-value">{{ invoice.invoice_number }}</span></div>
+      <div class="meta-row"><span class="meta-label">Issue date</span><span class="meta-value">{{ invoice.issue_date }}</span></div>
+      <div class="meta-row"><span class="meta-label">Supply date</span><span class="meta-value">{{ invoice.supply_date }}</span></div>
+      <div class="meta-row due"><span class="meta-label">Due date</span><span class="meta-value">{{ invoice.due_date }}</span></div>
+      <div class="meta-row"><span class="meta-label">Currency</span><span class="meta-value">{{ invoice.currency }}</span></div>
+    </div>
+
+    <div class="parties-row">
+      <div class="party-cell">
+        <div class="party-label">Supplier / From</div>
+        <div class="party-name">{{ supplier.name }}</div>
+        <div class="party-line">{{ supplier.description }}</div>
+        <div class="party-line">Registered address &mdash; {% if supplier.address %}{{ supplier.address }}{% else %}to be completed{% endif %}</div>
+        <div class="party-line">Tax / VAT ID &mdash; {% if supplier.tax_id %}{{ supplier.tax_id }}{% else %}to be completed{% endif %}</div>
+        <div class="party-line">{{ supplier.email }}</div>
+      </div>
+      <div class="party-cell">
+        <div class="party-label">Customer / Bill To</div>
+        <div class="party-name">{{ invoice.billing_party.name }}</div>
+        <div class="party-line">Billing address &mdash; {% if invoice.billing_party.address %}{{ invoice.billing_party.address }}{% else %}to be completed{% endif %}</div>
+        <div class="party-line">Tax / VAT ID &mdash; {% if invoice.billing_party.tax_id %}{{ invoice.billing_party.tax_id }}{% else %}not provided{% endif %}</div>
+        <div class="party-line">{{ invoice.billing_party.email }}</div>
+      </div>
+    </div>
+
+    <table class="items">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Description</th>
+          <th class="num">Qty</th>
+          <th class="num">Unit price</th>
+          <th class="num">Net amount</th>
+          <th class="num">VAT %</th>
+          <th class="num">VAT amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in invoice.line_items %}
+        <tr>
+          <td>{{ forloop.counter|stringformat:"02d" }}</td>
+          <td>
+            <div class="item-desc-main">{{ item.description }}</div>
+            <div class="item-desc-sub">Service period: {{ invoice.supply_date }} &ndash; {{ invoice.due_date }}</div>
+          </td>
+          <td class="num">{{ item.qty }}</td>
+          <td class="num">{{ item.unit_price }}</td>
+          <td class="num">{{ item.net_amount }}</td>
+          <td class="num">{{ item.vat_percent }}%</td>
+          <td class="num">{{ item.vat_amount }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="lower-row">
+      <div class="lower-left">
+        <div class="info-box">
+          <div class="info-box-title">Payment Terms</div>
+          <div class="info-box-body">Due on receipt (net 0 days). Quote invoice no. {{ invoice.invoice_number }} as the transfer reference.</div>
+        </div>
+        <div class="info-box">
+          <div class="info-box-title">Bank Details</div>
+          <div class="info-box-body">
+            Account holder &mdash; {% if bank.account_holder %}{{ bank.account_holder }}{% else %}to be completed{% endif %}<br />
+            IBAN &mdash; {% if bank.iban %}{{ bank.iban }}{% else %}to be completed{% endif %}<br />
+            BIC / SWIFT &mdash; {% if bank.bic_swift %}{{ bank.bic_swift }}{% else %}to be completed{% endif %}
+          </div>
+        </div>
+        <div class="info-box">
+          <div class="info-box-title">VAT Note</div>
+          <div class="info-box-body">No VAT charged on this invoice. Confirm the applicable VAT treatment before issuing.</div>
+        </div>
+      </div>
+      <div class="lower-right">
+        <div class="totals-row"><span class="t-label">Subtotal (net)</span><span class="t-value">&euro;{{ invoice.subtotal }}</span></div>
+        <div class="totals-row"><span class="t-label">VAT (0%)</span><span class="t-value">&euro;{{ invoice.vat_total }}</span></div>
+        <div class="totals-row total"><span class="t-label">Total</span><span class="t-value">&euro;{{ invoice.total }}</span></div>
+        <div class="totals-row"><span class="t-label">Amount paid</span><span class="t-value">&euro;{{ invoice.amount_paid }}</span></div>
+        <div class="amount-due-bar">
+          <div class="t-label">AMOUNT DUE</div>
+          <div class="t-value">&euro;{{ invoice.amount_due_display }}</div>
+        </div>
+        <div class="payable-by">Payable by {{ invoice.payable_by }}</div>
+      </div>
+    </div>
+
+    <div class="disclaimer">
+      This invoice is issued electronically and is valid without signature. Please report any discrepancy within 7 days of the issue date.
+      Amounts are stated in {{ invoice.currency }}.
+    </div>
+  </div>
+</body>
+</html>

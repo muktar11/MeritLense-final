@@ -775,7 +775,8 @@ class AuditLogCategory:
     TEAM = "TEAM"
     BILLING = "BILLING"
     SYSTEM = "SYSTEM"
-    
+    KNOWLEDGE_BASE = "KNOWLEDGE_BASE"
+
     CHOICES = [
         (USER, "User Management"),
         (CANDIDATE, "Candidate Management"),
@@ -792,6 +793,7 @@ class AuditLogCategory:
         (COMPANY, "Company"),
         (TEAM, "Team"),
         (BILLING, "Billing"),
+        (KNOWLEDGE_BASE, "Knowledge Base"),
         (SYSTEM, "System"),
     ]
 
@@ -869,6 +871,10 @@ class AuditLogAction:
     CERTIFICATE_ISSUED = "CERTIFICATE_ISSUED"
     CERTIFICATE_REVOKED = "CERTIFICATE_REVOKED"
     CERTIFICATE_SUPERSEDED = "CERTIFICATE_SUPERSEDED"
+
+    KNOWLEDGE_ENTRY_CREATED = "KNOWLEDGE_ENTRY_CREATED"
+    KNOWLEDGE_ENTRY_UPDATED = "KNOWLEDGE_ENTRY_UPDATED"
+    KNOWLEDGE_ENTRY_ARCHIVED = "KNOWLEDGE_ENTRY_ARCHIVED"
     TASK_OBSERVATION_STARTED = "TASK_OBSERVATION_STARTED"
     TASK_OBSERVATION_COMPLETED = "TASK_OBSERVATION_COMPLETED"
     TASK_OBSERVATION_FAILED = "TASK_OBSERVATION_FAILED"
@@ -1059,6 +1065,12 @@ class AuditLogAction:
         (PREVIOUS_REPORT_MARKED_STALE, "Previous Report Marked Stale"),
         (REPORT_EXPORT_PAYLOAD_REQUESTED, "Report Export Payload Requested"),
         (REPORT_ACCESS_DENIED, "Report Access Denied"),
+        (CERTIFICATE_ISSUED, "Certificate Issued"),
+        (CERTIFICATE_REVOKED, "Certificate Revoked"),
+        (CERTIFICATE_SUPERSEDED, "Certificate Superseded"),
+        (KNOWLEDGE_ENTRY_CREATED, "Knowledge Entry Created"),
+        (KNOWLEDGE_ENTRY_UPDATED, "Knowledge Entry Updated"),
+        (KNOWLEDGE_ENTRY_ARCHIVED, "Knowledge Entry Archived"),
         (TASK_OBSERVATION_STARTED, "Task Observation Started"),
         (TASK_OBSERVATION_COMPLETED, "Task Observation Completed"),
         (TASK_OBSERVATION_FAILED, "Task Observation Failed"),

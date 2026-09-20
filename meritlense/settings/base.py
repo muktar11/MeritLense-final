@@ -86,6 +86,7 @@ INSTALLED_APPS = [
     "api.questions",
     "api.notifications",
     "api.translation",
+    "api.knowledge",
     "api.monitoring",
     "api.storage",
     "api.live_calls",

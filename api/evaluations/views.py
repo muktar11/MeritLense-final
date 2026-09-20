@@ -803,12 +803,20 @@ class CertificateVerifyView(APIView):
 
         certificate_status = certificate.evaluation.certificate_status
         is_expired = bool(certificate.expires_at and certificate.expires_at < timezone.now())
+        if certificate_status == CertificateStatus.REVOKED:
+            display_status = "REVOKED"
+        elif certificate_status == CertificateStatus.SUPERSEDED:
+            display_status = "SUPERSEDED"
+        elif is_expired:
+            display_status = "EXPIRED"
+        else:
+            display_status = "VALID"
         return Response({
             "certificate_id": certificate.certificate_id,
             "candidate_name": certificate.candidate.get_full_name(),
             "issued_at": certificate.issued_at,
             "expires_at": certificate.expires_at,
-            "status": "REVOKED" if certificate_status == CertificateStatus.REVOKED else ("EXPIRED" if is_expired else "VALID"),
+            "status": display_status,
             "pdf_hash": certificate.pdf_hash,
         })
 

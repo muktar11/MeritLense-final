@@ -458,6 +458,8 @@ def generate_certificate(evaluation, summary):
     evaluation.certificate_issued_at = certificate.issued_at
     evaluation.save(update_fields=["certificate_status", "certificate_issued_at"])
 
+    _supersede_previous_certificates(evaluation)
+
     if created:
         from api.audit.services import AuditLogService
         from api.core.constants import AuditLogAction, AuditLogCategory
@@ -471,3 +473,48 @@ def generate_certificate(evaluation, summary):
         )
 
     return certificate
+
+
+def _supersede_previous_certificates(evaluation):
+    """A retake of the same role produces a new Evaluation (and its own
+    Certificate, since Certificate is one-to-one with Evaluation) rather
+    than reusing the old one. The older certificate wasn't invalidated for
+    cause - that's REVOKED - it was simply replaced by a newer credential
+    for the same candidate+role, so it must read as SUPERSEDED instead of
+    staying (incorrectly) VALID forever. Mirrors
+    EvaluationReportService._mark_previous_reports_stale's pattern, just
+    across sibling evaluations instead of across regenerations of one."""
+    from api.core.constants import CertificateStatus
+    from api.evaluations.models import Evaluation
+
+    siblings = Evaluation.objects.filter(
+        candidate_id=evaluation.candidate_id,
+        candidate_job_role=evaluation.candidate_job_role,
+        certificate_status=CertificateStatus.ISSUED,
+    ).exclude(pk=evaluation.pk).select_related("certificate")
+
+    for sibling in siblings:
+        sibling.certificate_status = CertificateStatus.SUPERSEDED
+        sibling.save(update_fields=["certificate_status"])
+
+        certificate = getattr(sibling, "certificate", None)
+        if certificate is None:
+            continue
+
+        from api.audit.services import AuditLogService
+        from api.core.constants import AuditLogAction, AuditLogCategory
+
+        AuditLogService.log_system(
+            action=AuditLogAction.CERTIFICATE_SUPERSEDED,
+            category=AuditLogCategory.EVALUATION,
+            description=(
+                f"Certificate {certificate.certificate_id} superseded by a newer certificate "
+                f"for the same candidate/role (evaluation {evaluation.id})"
+            ),
+            resource=certificate,
+            data={
+                "superseded_certificate_id": certificate.certificate_id,
+                "superseding_evaluation_id": evaluation.id,
+                "candidate_id": str(evaluation.candidate_id),
+            },
+        )

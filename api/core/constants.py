@@ -536,13 +536,20 @@ class CertificateStatus:
     ISSUED = "ISSUED"
     REVOKED = "REVOKED"
     EXPIRED = "EXPIRED"
-    
+    # A candidate retaking the same role produces a new evaluation and its
+    # own certificate; the older certificate for that candidate+role wasn't
+    # invalidated for cause (that's REVOKED) - it was simply replaced by a
+    # newer one. Knowledge Layer security spec v1.1 section 6.3 requires
+    # this as a distinct status on the certificate lifecycle.
+    SUPERSEDED = "SUPERSEDED"
+
     CHOICES = [
         (NOT_ISSUED, "Not Issued"),
         (PENDING, "Pending"),
         (ISSUED, "Issued"),
         (REVOKED, "Revoked"),
         (EXPIRED, "Expired"),
+        (SUPERSEDED, "Superseded"),
     ]
 
 
@@ -861,6 +868,7 @@ class AuditLogAction:
     REPORT_ACCESS_DENIED = "REPORT_ACCESS_DENIED"
     CERTIFICATE_ISSUED = "CERTIFICATE_ISSUED"
     CERTIFICATE_REVOKED = "CERTIFICATE_REVOKED"
+    CERTIFICATE_SUPERSEDED = "CERTIFICATE_SUPERSEDED"
     TASK_OBSERVATION_STARTED = "TASK_OBSERVATION_STARTED"
     TASK_OBSERVATION_COMPLETED = "TASK_OBSERVATION_COMPLETED"
     TASK_OBSERVATION_FAILED = "TASK_OBSERVATION_FAILED"

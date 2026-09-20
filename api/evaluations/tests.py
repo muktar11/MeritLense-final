@@ -2444,6 +2444,86 @@ class CertificateEligibilityTests(TestCase):
             AuditLog.objects.filter(action=AuditLogAction.CERTIFICATE_REVOKED).exists()
         )
 
+    def test_retaking_the_same_role_supersedes_the_earlier_certificate(self):
+        # A candidate retaking the same role gets a brand new Evaluation
+        # (Certificate is one-to-one with Evaluation, so it gets its own
+        # certificate too) - the older certificate for that candidate+role
+        # must read as SUPERSEDED, not stay VALID forever (Knowledge Layer
+        # security spec v1.1 section 6.3).
+        from api.core.constants import CertificateStatus
+
+        summary = self._summary()
+        first_certificate = generate_certificate(self.evaluation, summary)
+        self.assertIsNotNone(first_certificate)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.certificate_status, CertificateStatus.ISSUED)
+
+        second_session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            role_code=self.config.role_code,
+            ui_language="EN",
+            candidate_language="EN",
+            tts_language_code="en-US",
+            stt_language_code="en-US",
+            total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+            identity_verified=True,
+            status="COMPLETED",
+            ended_at=timezone.now(),
+            candidate_consent_agreement=self.consent_agreement,
+        )
+        second_evaluation = Evaluation.objects.create(
+            session=second_session,
+            candidate=self.candidate,
+            evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now() + timezone.timedelta(days=1),
+            duration_minutes=45,
+            created_by=self.user,
+            status=EvaluationStatus.COMPLETED,
+            completed_at=timezone.now(),
+            candidate_job_role=self.evaluation.candidate_job_role,
+        )
+        add_minimal_response_evidence(
+            evaluation=second_evaluation, session=second_session, candidate=self.candidate, user=self.user,
+        )
+        second_summary = SessionEvaluationSummary.objects.create(
+            evaluation=second_evaluation,
+            session=second_session,
+            candidate=self.candidate,
+            rule_set=ScoringRuleSet.objects.create(
+                name="Cert Elig Rules Retake", version="v1", role_code="domestic_worker", role_name="Housekeeper",
+                evaluation_tier=InterviewEvaluationTier.FULL, is_active=True, created_by=self.user,
+            ),
+            total_score=Decimal("80"), max_score=Decimal("100"), overall_percentage=Decimal("80.00"),
+            competencies_summary=covered_competencies(), status=SessionEvaluationSummary.STATUS_EVALUATED,
+            total_response_count=1,
+            evaluated_response_count=1,
+        )
+
+        second_certificate = generate_certificate(second_evaluation, second_summary)
+        self.assertIsNotNone(second_certificate)
+
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.certificate_status, CertificateStatus.SUPERSEDED)
+
+        second_evaluation.refresh_from_db()
+        self.assertEqual(second_evaluation.certificate_status, CertificateStatus.ISSUED)
+
+        self.assertTrue(
+            AuditLog.objects.filter(action=AuditLogAction.CERTIFICATE_SUPERSEDED).exists()
+        )
+
+        client = APIClient()
+        response = client.get(f"/api/v1/evaluations/certificates/verify/{first_certificate.verification_id}")
+        self.assertEqual(response.data["status"], "SUPERSEDED")
+
 
 class EvaluatorRatingTests(TestCase):
     """The evaluator's manual 0-100 rating on the 5 approved dimensions is

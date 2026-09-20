@@ -208,6 +208,19 @@ class CandidateUpdateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("Maximum 20 skills allowed.")
         return value
 
+    def update(self, instance, validated_data):
+        # verification_photo is the identity-verification reference image
+        # and always wins over profile_photo when both are set (see
+        # InterviewSessionPrecheckService.resolve_reference_image_file). If
+        # a caller uploads a new profile_photo without also supplying a
+        # matching verification_photo, the old one is now a stale photo of
+        # the candidate - clear it so the reference resolution falls
+        # through to the fresh profile_photo instead of silently continuing
+        # to verify against how the candidate looked before this edit.
+        if 'profile_photo' in validated_data and 'verification_photo' not in validated_data:
+            instance.verification_photo = None
+        return super().update(instance, validated_data)
+
 
 class CandidateShareSerializer(serializers.Serializer):
     user_ids = serializers.ListField(

@@ -18,6 +18,16 @@ def make_file(name="document.pdf", content=b"candidate-file", content_type="appl
     return SimpleUploadedFile(name, content, content_type=content_type)
 
 
+def make_image(name="photo.jpg"):
+    from io import BytesIO
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", (10, 10), color="red").save(buffer, format="JPEG")
+    buffer.seek(0)
+    return SimpleUploadedFile(name, buffer.read(), content_type="image/jpeg")
+
+
 class CandidatesWeek2Tests(APITestCase):
     @classmethod
     def setUpClass(cls):
@@ -401,3 +411,204 @@ class CandidatesWeek2Tests(APITestCase):
 
         self.assertEqual(parameter["schema"]["type"], "string")
         self.assertEqual(parameter["schema"]["pattern"], "^[0-9a-fA-F-]{36}$")
+
+
+class CandidateVerificationPhotoStalenessTests(APITestCase):
+    """A candidate's verification_photo (the identity-verification
+    reference image) always wins over profile_photo when both are set
+    (InterviewSessionPrecheckService.resolve_reference_image_file). If an
+    edit replaces profile_photo without also supplying a fresh
+    verification_photo, the old one becomes a stale photo of the candidate
+    that interview-time matching would keep using indefinitely - reported
+    directly by a real user (mengedco@gmail.com): "I changed the photo...
+    the system still shows the previous photo for matching."
+
+    Deliberately NOT a subclass of CandidatesWeek2Tests - unittest discovers
+    every inherited test_* method too, which would silently re-run that
+    entire class's suite a second time under this name. Helper methods are
+    duplicated instead."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._media_dir = tempfile.mkdtemp(prefix="candidate-photo-tests-")
+        cls._override = override_settings(MEDIA_ROOT=cls._media_dir)
+        cls._override.enable()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._override.disable()
+        shutil.rmtree(cls._media_dir, ignore_errors=True)
+        super().tearDownClass()
+
+    def create_active_subscription(self, user, company=None, candidate_limit=50):
+        suffix = f"{user.id}-{Subscription.objects.count()}"
+        price = Price.objects.create(
+            name=f"Candidate Photo Test Plan {suffix}",
+            stripe_price_id=f"price_candidate_photo_test_{suffix}",
+            stripe_product_id=f"prod_candidate_photo_test_{suffix}",
+            target_user_type="B2B" if company else "B2C",
+            unit_amount=0,
+            feature_limits={"candidate_limit": candidate_limit},
+        )
+        customer = Customer.objects.create(
+            user=user,
+            stripe_customer_id=f"cus_candidate_photo_test_{suffix}",
+            email=user.email,
+            name=user.get_full_name(),
+        )
+        return Subscription.objects.create(
+            user=user,
+            company=company,
+            customer=customer,
+            stripe_subscription_id=f"sub_candidate_photo_test_{suffix}",
+            stripe_price=price,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=timezone.now(),
+            current_period_end=timezone.now() + timezone.timedelta(days=30),
+            current_usage={"candidate_limit": 0},
+        )
+
+    def create_b2b_company(self, email, company_name, registration_number):
+        user = User.objects.create_user(
+            email=email,
+            password="Password123!",
+            first_name="Company",
+            last_name="Admin",
+            role=Roles.B2B,
+            is_verified=True,
+        )
+        company = Company.objects.create(
+            name=company_name,
+            registration_number=registration_number,
+            company_size=CompanySize.SMALL,
+            industry="Technology",
+            phone_number="+15550000000",
+            country="US",
+            city="New York",
+            address="1 Company Way",
+            website="https://example.com",
+            admin_user=user,
+            registration_certificate=make_file(f"{registration_number}-certificate.pdf"),
+            is_verified=True,
+        )
+        CompanyEmployerProfile.objects.create(
+            user=user,
+            company_name=company_name,
+            company_registration_number=registration_number,
+            company_size=CompanySize.SMALL,
+            industry="Technology",
+            phone_number="+15550000000",
+            country="US",
+            city="New York",
+            address="1 Company Way",
+            website="https://example.com",
+            preferred_language=Languages.ENGLISH,
+            registration_certificate=make_file(f"{registration_number}-profile-certificate.pdf"),
+            resachetified_license=make_file(f"{registration_number}-license.pdf"),
+            company=company,
+        )
+        self.create_active_subscription(user, company=company)
+        return user, company
+
+    def authenticate(self, user, password="Password123!"):
+        response = self.client.post(
+            "/api/v1/auth/login",
+            {"email": user.email, "password": password},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access']}")
+        return response
+
+    def create_candidate(self, user, **overrides):
+        defaults = {
+            "first_name": "Jane",
+            "last_name": "Candidate",
+            "email": f"candidate-{User.objects.count()}@example.com",
+            "passport_id": f"PASS-{Candidate.objects.count() + 1000}",
+            "job_role": candidateJobRoles.NANNY,
+            "core_skills": "communication, patience",
+            "preferred_language": Languages.ENGLISH,
+            "passport_document": make_file(f"passport-{Candidate.objects.count() + 1}.pdf"),
+        }
+        defaults.update(overrides)
+        self.authenticate(user)
+        response = self.client.post(
+            "/api/v1/candidates/candidates",
+            defaults,
+            format="multipart",
+        )
+        self.client.credentials()
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        return Candidate.objects.get(email=defaults["email"])
+
+    def test_updating_profile_photo_alone_clears_the_stale_verification_photo(self):
+        company_admin, company = self.create_b2b_company(
+            "stale-photo-admin@example.com", "StalePhotoCo", "STALE-1"
+        )
+        candidate = self.create_candidate(company_admin)
+        candidate.verification_photo = make_image("old-verification.jpg")
+        candidate.save(update_fields=["verification_photo"])
+        old_verification_photo_name = candidate.verification_photo.name
+
+        self.authenticate(company_admin)
+        response = self.client.patch(
+            f"/api/v1/candidates/candidates/{candidate.public_id}",
+            {"profile_photo": make_image("new-profile.jpg")},
+            format="multipart",
+        )
+        self.client.credentials()
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+        candidate.refresh_from_db()
+        self.assertTrue(candidate.profile_photo)
+        self.assertNotEqual(candidate.profile_photo.name, "")
+        self.assertFalse(candidate.verification_photo)
+        self.assertNotEqual(candidate.verification_photo.name if candidate.verification_photo else "", old_verification_photo_name)
+
+    def test_updating_profile_photo_with_a_fresh_verification_photo_keeps_the_new_one(self):
+        company_admin, company = self.create_b2b_company(
+            "fresh-photo-admin@example.com", "FreshPhotoCo", "FRESH-1"
+        )
+        candidate = self.create_candidate(company_admin)
+        candidate.verification_photo = make_image("old-verification.jpg")
+        candidate.save(update_fields=["verification_photo"])
+        old_verification_photo_name = candidate.verification_photo.name
+
+        self.authenticate(company_admin)
+        response = self.client.patch(
+            f"/api/v1/candidates/candidates/{candidate.public_id}",
+            {
+                "profile_photo": make_image("new-profile.jpg"),
+                "verification_photo": make_image("new-verification.jpg"),
+            },
+            format="multipart",
+        )
+        self.client.credentials()
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+        candidate.refresh_from_db()
+        self.assertTrue(candidate.verification_photo)
+        self.assertNotEqual(candidate.verification_photo.name, old_verification_photo_name)
+
+    def test_updating_unrelated_fields_does_not_touch_verification_photo(self):
+        company_admin, company = self.create_b2b_company(
+            "unrelated-admin@example.com", "UnrelatedCo", "UNREL-1"
+        )
+        candidate = self.create_candidate(company_admin)
+        candidate.verification_photo = make_image("old-verification.jpg")
+        candidate.save(update_fields=["verification_photo"])
+        old_verification_photo_name = candidate.verification_photo.name
+
+        self.authenticate(company_admin)
+        response = self.client.patch(
+            f"/api/v1/candidates/candidates/{candidate.public_id}",
+            {"core_skills": "communication, patience, teamwork"},
+            format="multipart",
+        )
+        self.client.credentials()
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+        candidate.refresh_from_db()
+        self.assertEqual(candidate.verification_photo.name, old_verification_photo_name)

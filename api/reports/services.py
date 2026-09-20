@@ -702,15 +702,18 @@ class EvaluationReportService:
             elif item.status == CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD:
                 assessment_status = item.status
                 score_display = f"{cls._decimal(item.total_score)}/{max_score} ({cls._decimal(item.percentage)}%)"
+                # Internal scoring thresholds must never appear in
+                # employer-facing content (Knowledge Layer security spec
+                # v1.1 section 3.1) - pass_threshold itself is still kept
+                # on the row for internal comparisons elsewhere in this
+                # file, just never spelled out in rendered prose.
                 explanation = (
                     (
-                        f"هذه الكفاءة دون الحد الأدنى المطلوب لأن الدرجة المحققة {item.percentage} بالمئة "
-                        f"بينما الحد الأدنى المعتمد {item.pass_threshold} بالمئة."
+                        f"هذه الكفاءة دون الحد الأدنى المطلوب للدرجة المحققة {item.percentage} بالمئة."
                     )
                     if language == "ar"
                     else (
-                        f"This competency is below threshold because the score is {item.percentage} percent "
-                        f"and the configured threshold is {item.pass_threshold} percent."
+                        f"This competency is below the required threshold, with a score of {item.percentage} percent."
                     )
                 )
             else:
@@ -810,13 +813,11 @@ class EvaluationReportService:
             score_display = f"{total_score}/{total_max} ({percentage}%)"
             explanation = (
                 (
-                    f"هذه الكفاءة دون الحد الأدنى المطلوب لأن الدرجة المحققة {percentage} بالمئة "
-                    f"بينما الحد الأدنى المعتمد {pass_threshold} بالمئة."
+                    f"هذه الكفاءة دون الحد الأدنى المطلوب للدرجة المحققة {percentage} بالمئة."
                 )
                 if language == "ar"
                 else (
-                    f"This competency is below threshold because the score is {percentage} percent "
-                    f"and the configured threshold is {pass_threshold} percent."
+                    f"This competency is below the required threshold, with a score of {percentage} percent."
                 )
             )
         else:

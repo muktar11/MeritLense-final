@@ -1433,7 +1433,7 @@
             <div class="section-title">Full Competency Breakdown</div>
           </div>
           <div class="section-note">
-            This page presents the detailed competency-by-competency assessment results, including score, threshold status, completion depth, and explanation.
+            This page presents the detailed competency-by-competency assessment results, including score, status, completion depth, and explanation.
           </div>
         </div>
 
@@ -1441,12 +1441,11 @@
           <table>
             <thead>
               <tr>
-                <th style="width: 21%;">Competency</th>
-                <th style="width: 13%;">Score</th>
-                <th style="width: 11%;">Threshold</th>
-                <th style="width: 12%;">Status</th>
-                <th style="width: 12%;">Responses</th>
-                <th style="width: 31%;">Explanation</th>
+                <th style="width: 24%;">Competency</th>
+                <th style="width: 15%;">Score</th>
+                <th style="width: 14%;">Status</th>
+                <th style="width: 13%;">Responses</th>
+                <th style="width: 34%;">Explanation</th>
               </tr>
             </thead>
             <tbody>
@@ -1456,7 +1455,6 @@
                     <div class="score-strong">{{ item.display_name|default:item.competency_name|default:item.competency_code }}</div>
                   </td>
                   <td><span class="score-strong">{{ item.score_display }}</span></td>
-                  <td>{% if item.assessment_status == "NOT_ASSESSED" or item.assessment_status == "INSUFFICIENT_EVIDENCE" %}-{% else %}{{ item.pass_threshold }}%{% endif %}</td>
                   <td>
                     {% if item.assessment_status == "MEETS_THRESHOLD" or item.assessment_status == "EVALUATED" %}
                       <span class="status-text status-good"><span class="dot"></span>Passed</span>
@@ -1475,7 +1473,7 @@
                 </tr>
               {% empty %}
                 <tr>
-                  <td colspan="6" class="empty-copy">No competency breakdown was available for this report.</td>
+                  <td colspan="5" class="empty-copy">No competency breakdown was available for this report.</td>
                 </tr>
               {% endfor %}
             </tbody>

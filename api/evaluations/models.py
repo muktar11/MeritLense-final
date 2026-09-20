@@ -1,3 +1,5 @@
+import uuid
+
 from django.utils import timezone
 from django.db import models
 from django.db.models import Q
@@ -693,6 +695,13 @@ class Certificate(TimeStampedModel):
     # completed assessment record. They must never be derived from each
     # other or from a shared source.
     assessment_id = models.CharField(max_length=50, unique=True, blank=True, null=True, default=None)
+    # The certificate_id/assessment_id above are deliberately human-readable
+    # and sequential - fine for a printed reference number, but per the
+    # Knowledge Layer security spec (v1.1 section 6.2) a *public
+    # verification* identifier must be opaque/non-guessable so it can't be
+    # enumerated. This is the one actually used in the QR code and the
+    # public verify endpoint; certificate_id keeps its display role only.
+    verification_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     pdf_file = models.FileField(upload_to="certificates/", null=True, blank=True)
     pdf_hash = models.CharField(max_length=64, blank=True, help_text="SHA-256 hex digest of the generated PDF binary.")
     issued_at = models.DateTimeField(null=True, blank=True)

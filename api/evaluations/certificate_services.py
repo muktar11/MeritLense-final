@@ -127,6 +127,17 @@ def _revoke_existing_certificate(evaluation, reason):
     evaluation.certificate_status = CertificateStatus.REVOKED
     evaluation.save(update_fields=["certificate_status"])
 
+    from api.audit.services import AuditLogService
+    from api.core.constants import AuditLogAction, AuditLogCategory
+
+    AuditLogService.log_system(
+        action=AuditLogAction.CERTIFICATE_REVOKED,
+        category=AuditLogCategory.EVALUATION,
+        description=f"Certificate revoked for evaluation {evaluation.id}: {reason}",
+        resource=evaluation.certificate,
+        data={"reason": reason},
+    )
+
 
 def _canonical_dimension(*values):
     haystack = " ".join(str(value or "").lower() for value in values)
@@ -409,7 +420,7 @@ def generate_certificate(evaluation, summary):
 
     session = evaluation.session
     language = _certificate_language(session)
-    verification_url = f"{settings.FRONTEND_URL}/{language}/verify-certificate?id={certificate.certificate_id}"
+    verification_url = f"{settings.FRONTEND_URL}/{language}/verify-certificate?id={certificate.verification_id}"
     readiness = _readiness_gauge_context(evaluation, language)
     candidate_photo_data_uri, candidate_photo_verified = _candidate_photo_context(evaluation.candidate)
 
@@ -446,5 +457,17 @@ def generate_certificate(evaluation, summary):
     evaluation.certificate_status = CertificateStatus.ISSUED
     evaluation.certificate_issued_at = certificate.issued_at
     evaluation.save(update_fields=["certificate_status", "certificate_issued_at"])
+
+    if created:
+        from api.audit.services import AuditLogService
+        from api.core.constants import AuditLogAction, AuditLogCategory
+
+        AuditLogService.log_system(
+            action=AuditLogAction.CERTIFICATE_ISSUED,
+            category=AuditLogCategory.EVALUATION,
+            description=f"Certificate {certificate.certificate_id} issued for evaluation {evaluation.id}",
+            resource=certificate,
+            data={"certificate_id": certificate.certificate_id, "candidate_id": str(evaluation.candidate_id)},
+        )
 
     return certificate

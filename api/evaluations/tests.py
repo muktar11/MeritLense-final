@@ -2407,13 +2407,42 @@ class CertificateEligibilityTests(TestCase):
         certificate = generate_certificate(self.evaluation, summary)
         client = APIClient()
 
-        before = client.get(f"/api/v1/evaluations/certificates/verify/{certificate.certificate_id}")
+        before = client.get(f"/api/v1/evaluations/certificates/verify/{certificate.verification_id}")
         self.assertEqual(before.data["status"], "VALID")
 
         _revoke_existing_certificate(self.evaluation, "test revocation")
 
-        after = client.get(f"/api/v1/evaluations/certificates/verify/{certificate.certificate_id}")
+        after = client.get(f"/api/v1/evaluations/certificates/verify/{certificate.verification_id}")
         self.assertEqual(after.data["status"], "REVOKED")
+
+    def test_certificate_verify_rejects_the_sequential_certificate_id(self):
+        # The human-readable certificate_id (ML-YYYY-NNNNNN) is sequential
+        # and must never work as the public verification lookup key - only
+        # the opaque verification_id may (Knowledge Layer security spec
+        # v1.1 section 6.2: verification identifiers must be non-sequential
+        # and non-guessable).
+        summary = self._summary()
+        certificate = generate_certificate(self.evaluation, summary)
+        client = APIClient()
+
+        response = client.get(f"/api/v1/evaluations/certificates/verify/{certificate.certificate_id}")
+        self.assertEqual(response.status_code, 404)
+
+    def test_certificate_issuance_and_revocation_are_audit_logged(self):
+        from api.evaluations.certificate_services import _revoke_existing_certificate
+
+        summary = self._summary()
+        generate_certificate(self.evaluation, summary)
+
+        self.assertTrue(
+            AuditLog.objects.filter(action=AuditLogAction.CERTIFICATE_ISSUED).exists()
+        )
+
+        _revoke_existing_certificate(self.evaluation, "test revocation")
+
+        self.assertTrue(
+            AuditLog.objects.filter(action=AuditLogAction.CERTIFICATE_REVOKED).exists()
+        )
 
 
 class EvaluatorRatingTests(TestCase):

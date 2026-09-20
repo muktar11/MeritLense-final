@@ -11,5 +11,5 @@ urlpatterns = [
     path('candidate-scores', CandidateScoreSummaryView.as_view(), name='candidate-score-summaries'),
     path('', include(router.urls)),
     path('', include(report_urlpatterns)),
-    path('certificates/verify/<str:certificate_id>', CertificateVerifyView.as_view(), name='certificate-verify'),
+    path('certificates/verify/<str:verification_id>', CertificateVerifyView.as_view(), name='certificate-verify'),
 ]

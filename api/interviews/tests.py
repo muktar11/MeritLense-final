@@ -224,6 +224,33 @@ class InterviewSessionApiTests(APITestCase):
         delete_response = self.client.delete(f"/api/v1/interviews/question-templates/{template_id}/")
         self.assertEqual(delete_response.status_code, 204)
 
+    def test_question_template_list_and_retrieve_denied_to_non_setup_roles(self):
+        # Question bank content is proprietary IP and must not be bulk-readable
+        # by a plain candidate account, only by setup roles (ADMIN/SUPERADMIN/
+        # B2B/B2C) - see CanManageInterviewSetupMixin.setup_roles.
+        candidate_user = User.objects.create_user(
+            email="plain-candidate@example.com",
+            password="testpass123",
+            first_name="Plain",
+            last_name="Candidate",
+            role=Roles.CANDIDATE,
+            is_verified=True,
+        )
+        client = APIClient()
+        client.force_authenticate(candidate_user)
+
+        list_response = client.get("/api/v1/interviews/question-templates/")
+        self.assertEqual(list_response.status_code, 403)
+
+        template = QuestionTemplate.objects.filter(role_code="nanny").first()
+        detail_response = client.get(f"/api/v1/interviews/question-templates/{template.public_id}/")
+        self.assertEqual(detail_response.status_code, 403)
+
+        # self.client is authenticated as a B2C (setup role) user and still
+        # has read access.
+        allowed_response = self.client.get("/api/v1/interviews/question-templates/")
+        self.assertEqual(allowed_response.status_code, 200)
+
     def test_question_template_create_normalizes_role_specific_skill_tag(self):
         response = self.client.post(
             "/api/v1/interviews/question-templates/",

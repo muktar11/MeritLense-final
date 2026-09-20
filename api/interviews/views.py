@@ -127,11 +127,23 @@ class RolePackageCoverageViewSet(CanManageInterviewSetupMixin, viewsets.ModelVie
 
 
 class QuestionTemplateViewSet(CanManageInterviewSetupMixin, viewsets.ModelViewSet):
+    """Question bank content is proprietary IP (Knowledge Layer security
+    spec v1.1 section 3.3) - unlike the other CanManageInterviewSetupMixin
+    viewsets, read access here is restricted to the same setup_roles as
+    writes, not just IsAuthenticated. Candidates get questions through the
+    live session flow (InterviewSessionViewSet.current_question), never
+    through this bulk CRUD endpoint."""
+
     queryset = QuestionTemplate.objects.all()
     serializer_class = QuestionTemplateSerializer
     lookup_field = "public_id"
     lookup_url_kwarg = "id"
     lookup_value_regex = PUBLIC_ID_OR_PK_REGEX
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if self.action in {"list", "retrieve"} and request.user.role not in self.setup_roles:
+            raise PermissionDenied("You do not have permission to view the question bank")
 
 
 class ObservedTaskDefinitionViewSet(CanManageInterviewSetupMixin, viewsets.ModelViewSet):

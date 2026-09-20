@@ -1,3 +1,5 @@
+import uuid
+
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -775,16 +777,27 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             evaluation.save(update_fields=["status", "scheduled_date", "duration_minutes", "updated_at"])
 
 class CertificateVerifyView(APIView):
-    """GET /evaluations/certificates/verify/{certificate_id} - public QR
+    """GET /evaluations/certificates/verify/{verification_id} - public QR
     verification, mirroring api/contracts/views.py's agreement_verify.
     No auth, and only the fields already printed on the certificate
     itself - this lets a holder confirm a PDF/printed copy is genuine,
-    not a general-purpose evaluation lookup."""
+    not a general-purpose evaluation lookup.
+
+    Looked up by the opaque verification_id (a UUID), not the
+    human-readable certificate_id - certificate_id is sequential
+    (ML-YYYY-NNNNNN) and would let this endpoint be enumerated to
+    discover other candidates' names/certificate status (Knowledge Layer
+    security spec v1.1 section 6.2: verification identifiers must be
+    non-sequential and non-guessable)."""
 
     permission_classes = [AllowAny]
 
-    def get(self, request, certificate_id):
-        certificate = Certificate.objects.filter(certificate_id=certificate_id).select_related("evaluation").first()
+    def get(self, request, verification_id):
+        try:
+            uuid.UUID(str(verification_id))
+        except ValueError:
+            return Response({"detail": "No certificate found for this ID."}, status=status.HTTP_404_NOT_FOUND)
+        certificate = Certificate.objects.filter(verification_id=verification_id).select_related("evaluation").first()
         if certificate is None or not certificate.pdf_file:
             return Response({"detail": "No certificate found for this ID."}, status=status.HTTP_404_NOT_FOUND)
 

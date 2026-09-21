@@ -1121,6 +1121,71 @@ class InterviewSessionApiTests(APITestCase):
         IDENTITY_VERIFICATION_API_URL="https://identity-provider.example/verify",
         IDENTITY_VERIFICATION_API_KEY="test-key",
     )
+    def test_identity_verification_uses_updated_profile_photo_over_a_perfectly_valid_passport(self):
+        # Direct regression test for the reported bug: a candidate has a
+        # normal, non-broken passport image on file (nothing wrong with
+        # it) but has since updated their profile photo - identity
+        # verification must use the newer profile photo, not silently
+        # keep matching against the old passport scan just because the
+        # passport itself is fine. Unlike the PDF-conversion-failure test
+        # above, this proves the ordering itself changed, not just that
+        # profile_photo is a usable fallback when the passport is broken.
+        self.candidate.passport_document.save("old-passport.jpg", ContentFile(b"old-passport-bytes"), save=True)
+        self.candidate.profile_photo.save("updated-profile.jpg", ContentFile(b"updated-profile-bytes"), save=True)
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        captured = {}
+
+        def fake_provider_call(provider_self, *, session, metadata=None, id_document_file=None, selfie_file=None):
+            captured["id_document_name"] = getattr(id_document_file, "name", None)
+            captured["metadata"] = metadata or {}
+            return provider_self._normalize_result(
+                {
+                    "provider": "AZURE_FACE",
+                    "face_match_score": 95.0,
+                    "single_face_detected": True,
+                    "liveness_passed": True,
+                },
+                metadata=metadata,
+            )
+
+        with patch(
+            "api.sessions.identity_services.DynamicIdentityVerificationProvider._call_remote_provider",
+            autospec=True,
+            side_effect=fake_provider_call,
+        ):
+            response = token_client.post(
+                f"/api/v1/interviews/{session_id}/prechecks/identity-verify/",
+                {
+                    "token": access_token,
+                    "selfie_image_file": make_image("live-selfie.jpg", b"selfie-bytes"),
+                },
+                format="multipart",
+                HTTP_X_SESSION_TOKEN=access_token,
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIn("updated-profile.jpg", captured["id_document_name"])
+        self.assertEqual(captured["metadata"]["reference_document_source"], "candidate_profile_photo")
+        self.assertFalse(captured["metadata"]["reused_candidate_passport"])
+
+    @override_settings(
+        IDENTITY_VERIFICATION_PROVIDER="AZURE_FACE",
+        IDENTITY_VERIFICATION_API_URL="https://identity-provider.example/verify",
+        IDENTITY_VERIFICATION_API_KEY="test-key",
+    )
     def test_identity_verification_converts_stored_pdf_passport_for_provider_flow(self):
         create_response = self.client.post(
             "/api/v1/interviews/",
@@ -1177,7 +1242,12 @@ class InterviewSessionApiTests(APITestCase):
         IDENTITY_VERIFICATION_API_URL="https://identity-provider.example/verify",
         IDENTITY_VERIFICATION_API_KEY="test-key",
     )
-    def test_identity_verification_uses_profile_photo_when_pdf_conversion_fails(self):
+    def test_identity_verification_prefers_profile_photo_over_passport_document(self):
+        # profile_photo now outranks passport_document (see
+        # resolve_reference_image_file's docstring) - the passport is a
+        # broken PDF here specifically to prove it's never even touched
+        # once a profile_photo exists, not just that it's a usable
+        # fallback if the PDF happens to fail conversion.
         self.candidate.profile_photo.save("candidate-profile.jpg", ContentFile(b"profile-image"), save=True)
         self.candidate.passport_document.save("broken-passport.pdf", ContentFile(b"not-a-real-pdf"), save=True)
 
@@ -1226,10 +1296,12 @@ class InterviewSessionApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertIn("candidate-profile.jpg", captured["id_document_name"])
-        self.assertEqual(captured["metadata"]["reference_document_source"], "candidate_passport_document")
+        self.assertEqual(captured["metadata"]["reference_document_source"], "candidate_profile_photo")
         self.assertEqual(captured["metadata"]["provider_reference_source"], "candidate_profile_photo")
-        self.assertEqual(captured["metadata"]["provider_reference_fallback_reason"], "pdf_conversion_failed")
-        self.assertIn("pdf_conversion_error", captured["metadata"])
+        # The broken PDF passport is never attempted - profile_photo already
+        # won, so there's no conversion failure to report.
+        self.assertNotIn("provider_reference_fallback_reason", captured["metadata"])
+        self.assertNotIn("pdf_conversion_error", captured["metadata"])
 
     def test_identity_verification_preserves_zero_face_match_score(self):
         create_response = self.client.post(
@@ -1348,6 +1420,37 @@ class InterviewSessionApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(b"".join(response.streaming_content), b"cropped-face-bytes")
+
+    def test_reference_image_endpoint_prefers_updated_profile_photo_over_a_valid_passport(self):
+        # Direct regression test for the reported bug ("verify id does not
+        # verify identity from the latest picture user has set"): the
+        # passport image itself is perfectly fine here - the point is that
+        # a candidate who has since updated their profile photo should see
+        # THAT photo as their reference, not the old passport scan.
+        self.candidate.passport_document.save("old-passport.jpg", ContentFile(b"old-passport-bytes"), save=True)
+        self.candidate.profile_photo.save("updated-profile.jpg", ContentFile(b"updated-profile-bytes"), save=True)
+
+        create_response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(self.config.public_id),
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        session_id = create_response.data["id"]
+        access_token = create_response.data["access_token"]
+        token_client = APIClient()
+
+        response = token_client.get(
+            f"/api/v1/interviews/{session_id}/prechecks/reference-image/",
+            {"token": access_token},
+            HTTP_X_SESSION_TOKEN=access_token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"updated-profile-bytes")
 
     def test_reference_image_endpoint_converts_pdf_passport_to_png(self):
         self.candidate.passport_document.save("passport.pdf", make_file(), save=True)

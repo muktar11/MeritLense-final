@@ -647,8 +647,16 @@ class InterviewSessionPrecheckService:
     ):
         metadata = dict(metadata or {})
         candidate_verification_photo = getattr(session.candidate, "verification_photo", None)
+        candidate_profile_photo = getattr(session.candidate, "profile_photo", None)
         candidate_passport_document = getattr(session.candidate, "passport_document", None)
-        resolved_id_document_file = id_document_file or candidate_verification_photo or candidate_passport_document
+        # profile_photo outranks passport_document - see
+        # resolve_reference_image_file's docstring below for why (in short:
+        # the passport scan is a one-time upload that's rarely touched
+        # again, while profile_photo is what a candidate/employer actually
+        # updates when they want their current photo used for matching).
+        resolved_id_document_file = (
+            id_document_file or candidate_verification_photo or candidate_profile_photo or candidate_passport_document
+        )
         provider_id_document_file = resolved_id_document_file
 
         if id_document_file is not None:
@@ -660,6 +668,9 @@ class InterviewSessionPrecheckService:
             # fresh upload for this session, but distinct from the raw
             # passport document for audit purposes.
             metadata.setdefault("reference_document_source", "candidate_verification_photo")
+            metadata.setdefault("reused_candidate_passport", False)
+        elif candidate_profile_photo and resolved_id_document_file is candidate_profile_photo:
+            metadata.setdefault("reference_document_source", "candidate_profile_photo")
             metadata.setdefault("reused_candidate_passport", False)
         elif resolved_id_document_file:
             metadata.setdefault("reference_document_source", "candidate_passport_document")
@@ -676,23 +687,21 @@ class InterviewSessionPrecheckService:
             )
         )
         if should_prepare_provider_reference and provider_id_document_file is not None and cls._is_pdf_reference_file(provider_id_document_file):
+            # Only passport_document can ever be a PDF (verification_photo
+            # and profile_photo are always saved as image crops) - and by
+            # this point we already know neither of those took priority
+            # over it, so there's no profile-photo fallback left to try
+            # here; a failed conversion means no usable reference exists.
             try:
                 provider_id_document_file = cls._convert_pdf_reference_to_image(provider_id_document_file)
                 metadata["provider_reference_source"] = "pdf_first_page_image"
                 metadata["provider_reference_fallback_reason"] = "pdf_reference_converted_to_image"
             except IdentityVerificationError as conversion_error:
-                profile_photo = getattr(session.candidate, "profile_photo", None)
-                if profile_photo:
-                    provider_id_document_file = profile_photo
-                    metadata["provider_reference_source"] = "candidate_profile_photo"
-                    metadata["provider_reference_fallback_reason"] = "pdf_conversion_failed"
-                    metadata["pdf_conversion_error"] = str(conversion_error)
-                else:
-                    raise IdentityVerificationError(
-                        "Passport PDF could not be converted into a face-match image and no profile photo is available. Upload an image ID document or add a profile photo.",
-                        code="identity_verification_reference_image_required",
-                        metadata={"conversion_error": str(conversion_error)},
-                    ) from conversion_error
+                raise IdentityVerificationError(
+                    "Passport PDF could not be converted into a face-match image and no profile photo is available. Upload an image ID document or add a profile photo.",
+                    code="identity_verification_reference_image_required",
+                    metadata={"conversion_error": str(conversion_error)},
+                ) from conversion_error
         elif provider_id_document_file is not None:
             metadata.setdefault("provider_reference_source", metadata.get("reference_document_source"))
 
@@ -711,6 +720,20 @@ class InterviewSessionPrecheckService:
         candidate's stored documents (no fresh upload involved), since this is
         used to hand a usable reference image back to the candidate's own
         browser for client-side face matching.
+
+        Priority: verification_photo, then profile_photo, then
+        passport_document. profile_photo deliberately outranks
+        passport_document - passport_document is a one-time identity
+        document scan that's rarely touched again after a candidate is
+        created, while profile_photo is the field a candidate/employer
+        actually updates when they want their current photo used. Ranking
+        the passport scan above it meant that editing only the profile
+        photo (the normal edit flow - see CandidateUpdateSerializer.update,
+        which correctly clears a now-stale verification_photo on that
+        edit) silently fell through to the old passport photo instead of
+        the photo that was just updated - reported directly by a real
+        user ("verify id does not... verify identity from the latest
+        picture user has set").
         """
         verification_photo = getattr(candidate, "verification_photo", None)
         if verification_photo:
@@ -720,12 +743,12 @@ class InterviewSessionPrecheckService:
             # needs PDF conversion (it's always saved as a JPEG crop).
             return verification_photo
 
-        passport = getattr(candidate, "passport_document", None)
         profile_photo = getattr(candidate, "profile_photo", None)
+        if profile_photo:
+            return profile_photo
 
+        passport = getattr(candidate, "passport_document", None)
         if not passport:
-            if profile_photo:
-                return profile_photo
             raise IdentityVerificationError(
                 "No reference image is available for this candidate. Upload a passport or profile photo.",
                 code="identity_verification_reference_image_required",
@@ -737,8 +760,6 @@ class InterviewSessionPrecheckService:
         try:
             return cls._convert_pdf_reference_to_image(passport)
         except IdentityVerificationError as conversion_error:
-            if profile_photo:
-                return profile_photo
             raise IdentityVerificationError(
                 "Passport PDF could not be converted into a face-match image and no profile photo is available. Upload an image ID document or add a profile photo.",
                 code="identity_verification_reference_image_required",

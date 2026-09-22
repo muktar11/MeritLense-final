@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import shutil
 import tempfile
@@ -3107,6 +3108,79 @@ class InterviewSessionApiTests(APITestCase):
         with self.assertRaises(VoiceProviderError) as ctx:
             SpeechToTextService._transcode_to_wav(b"not-real-audio-bytes")
         self.assertEqual(ctx.exception.code, "stt_transcode_failed")
+
+    @override_settings(
+        TTS_API_URL="https://texttospeech.googleapis.com/v1/text:synthesize",
+        GOOGLE_TTS_API_KEY="test-tts-key",
+        TTS_VOICE_MAP={"ar-SA": "ar-XA-Chirp3-HD-Puck"},
+    )
+    def test_tts_service_sends_the_voices_own_locale_not_our_internal_code(self):
+        # Google rejects the request outright if voice.languageCode doesn't
+        # exactly match the requested voice name's own locale (confirmed
+        # against the live API: "ar-SA" + "ar-XA-Chirp3-HD-Puck" is a 400,
+        # "ar-XA" + the same voice succeeds) - our internal language codes
+        # don't always share Google's locale naming for the same language
+        # (ar-SA vs Google's ar-XA), so the outbound languageCode must come
+        # from the voice name itself once one is selected, not be forwarded
+        # unchanged from our own convention.
+        from api.interviews.voice_services import TextToSpeechService
+
+        captured = {}
+
+        class FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return {"audioContent": base64.b64encode(b"mp3-bytes").decode()}
+
+            def raise_for_status(self):
+                pass
+
+        def fake_post(url, json=None, **kwargs):
+            captured["payload"] = json
+            return FakeResponse()
+
+        service = TextToSpeechService()
+        with patch("api.interviews.voice_services.requests.post", side_effect=fake_post):
+            result = service.synthesize(text="مرحبا", language_code="ar-SA")
+
+        self.assertEqual(captured["payload"]["voice"]["languageCode"], "ar-XA")
+        self.assertEqual(captured["payload"]["voice"]["name"], "ar-XA-Chirp3-HD-Puck")
+        self.assertEqual(result["voice_name"], "ar-XA-Chirp3-HD-Puck")
+
+    @override_settings(
+        TTS_API_URL="https://texttospeech.googleapis.com/v1/text:synthesize",
+        GOOGLE_TTS_API_KEY="test-tts-key",
+        TTS_VOICE_MAP={},
+    )
+    def test_tts_service_falls_back_to_our_language_code_when_no_voice_mapped(self):
+        # Regression guard: an unmapped language must keep sending our own
+        # language_code unchanged (letting Google pick a default voice for
+        # it), not silently drop the language hint just because no explicit
+        # voice name exists to derive a locale from.
+        from api.interviews.voice_services import TextToSpeechService
+
+        captured = {}
+
+        class FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return {"audioContent": base64.b64encode(b"mp3-bytes").decode()}
+
+            def raise_for_status(self):
+                pass
+
+        def fake_post(url, json=None, **kwargs):
+            captured["payload"] = json
+            return FakeResponse()
+
+        service = TextToSpeechService()
+        with patch("api.interviews.voice_services.requests.post", side_effect=fake_post):
+            service.synthesize(text="hola", language_code="es-MX")
+
+        self.assertEqual(captured["payload"]["voice"]["languageCode"], "es-MX")
+        self.assertNotIn("name", captured["payload"]["voice"])
 
     def test_question_audio_generation_and_caching(self):
         session = self._create_and_start_session()

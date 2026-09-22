@@ -25,14 +25,13 @@ def _logo_data_uri():
 
 
 # Static "Supplier / From" box content - MeritLense's own info never varies
-# per-invoice. Registered address / VAT ID are genuinely not finalized yet
-# (matches the "to be completed" state on the reference invoice this was
-# modeled from), kept here as a single place to fill in once they are.
+# per-invoice. Tax / VAT ID is still genuinely not finalized (kept here as
+# a single place to fill in once it is) - the registered address is final.
 SUPPLIER = {
-    "name": "MeritLense",
+    "name": "MeritLense OÜ",
     "description": "Workforce Readiness Assessment Platform",
     "description_ar": "منصة تقييم جاهزية القوى العاملة",
-    "address": None,
+    "address": "Ruunaoja tn 3, 11415 Tallinn, Estonia",
     "tax_id": None,
     "email": "info@meritlense.com",
 }

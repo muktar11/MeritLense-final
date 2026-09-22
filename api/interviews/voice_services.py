@@ -314,7 +314,18 @@ class TextToSpeechService:
         # wrong accent or pronunciation. Omitting it lets Google pick an
         # appropriate default voice for the requested language on its own.
         voice_name = self.voice_map.get(language_code, "")
-        voice_payload = {"languageCode": language_code}
+        # Google requires voice.languageCode to exactly match the voice
+        # name's own locale prefix (e.g. "ar-XA" for any ar-XA-* voice) -
+        # it rejects the request outright otherwise. Our own language_code
+        # doesn't always line up with Google's locale naming for the same
+        # language (our "ar-SA" vs Google's "ar-XA"; our "zh-CN" vs
+        # Google's "cmn-CN"), so once a voice is actually selected, derive
+        # the locale Google gets from the voice name itself rather than
+        # forwarding ours - confirmed empirically that Google's newer
+        # Chirp3-HD tier enforces this strictly even though the older
+        # Standard/Wavenet tiers happen to tolerate the mismatch.
+        google_language_code = "-".join(voice_name.split("-")[:2]) if voice_name else language_code
+        voice_payload = {"languageCode": google_language_code}
         if voice_name:
             voice_payload["name"] = voice_name
         payload = {

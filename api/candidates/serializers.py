@@ -14,7 +14,8 @@ class CandidateSerializer(PublicIdModelSerializer):
         fields = [
             'id', 'first_name', 'last_name', 'full_name', 'email',
             'passport_id', 'job_role', 'core_skills', 'skills_list',
-            'preferred_language', 'status', 'passport_document',
+            'preferred_language', 'country_of_residence', 'target_market', 'timezone',
+            'status', 'passport_document',
             'profile_photo', 'verification_photo', 'created_by', 'created_by_name',
             'company', 'company_name', 'shared_with',
             'created_at', 'updated_at'
@@ -80,6 +81,7 @@ class CandidateCreateSerializer(serializers.ModelSerializer):
         fields = [
             'first_name', 'last_name', 'email', 'passport_id',
             'job_role', 'core_skills', 'preferred_language',
+            'country_of_residence', 'target_market', 'timezone',
             'passport_document', 'profile_photo', 'verification_photo'
         ]
 
@@ -169,6 +171,7 @@ class CandidateUpdateSerializer(serializers.ModelSerializer):
         fields = [
             'first_name', 'last_name', 'email', 'passport_id',
             'job_role', 'core_skills', 'preferred_language',
+            'country_of_residence', 'target_market', 'timezone',
             'status', 'passport_document', 'profile_photo', 'verification_photo'
         ]
 

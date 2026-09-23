@@ -216,6 +216,38 @@ class CandidatesWeek2Tests(APITestCase):
         candidate = self.create_candidate(company_admin, email="allowed-candidate@example.com")
         self.assertEqual(candidate.company_id, company.id)
 
+    def test_candidate_creation_persists_location_localization_fields_when_supplied(self):
+        # Country of residence, target market, and timezone are all optional
+        # (client-side detected/suggested at add-time, never forced) - this
+        # confirms they're accepted and actually persisted when supplied.
+        company_admin, company = self.create_b2b_company(
+            "location-admin@example.com", "LocationCo", "LOCATION-1"
+        )
+        self.authenticate(company_admin)
+        response = self.client.post(
+            "/api/v1/candidates/candidates",
+            {
+                "first_name": "Loc",
+                "last_name": "Test",
+                "email": "location-candidate@example.com",
+                "passport_id": "LOC-100",
+                "job_role": candidateJobRoles.NANNY,
+                "core_skills": "communication, patience",
+                "preferred_language": Languages.ENGLISH,
+                "country_of_residence": "AE",
+                "target_market": "SA",
+                "timezone": "Asia/Dubai",
+                "passport_document": make_file("location-candidate.pdf"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+
+        candidate = Candidate.objects.get(passport_id="LOC-100")
+        self.assertEqual(candidate.country_of_residence, "AE")
+        self.assertEqual(candidate.target_market, "SA")
+        self.assertEqual(candidate.timezone, "Asia/Dubai")
+
     def test_b2b_candidate_creation_is_company_scoped_and_duplicate_email_is_rejected(self):
         company_admin, company = self.create_b2b_company(
             "company-admin@example.com", "Acme", "ACME-1"

@@ -511,21 +511,20 @@ class EvaluationReportApiTests(TestCase):
         names = archive.namelist()
         # No certificate has been issued for this evaluation (Week6Scoring
         # alone doesn't issue one - see certificate_services.py) - the zip
-        # must still succeed with the three documents that don't depend on
+        # must still succeed with the two documents that don't depend on
         # a certificate existing.
         self.assertEqual(
             set(names),
             {
                 f"{report.report_number}-transcript.pdf",
-                f"{report.report_number}-questions-and-answers.pdf",
-                f"{report.report_number}-ai-score-and-result.pdf",
+                f"{report.report_number}-questions-answers-and-score.pdf",
             },
         )
         for name in names:
             self.assertTrue(archive.read(name).startswith(b"%PDF"), f"{name} is not a valid PDF")
 
-        qa_pdf_text = archive.read(f"{report.report_number}-questions-and-answers.pdf")
-        self.assertGreater(len(qa_pdf_text), 0)
+        qa_and_score_pdf_bytes = archive.read(f"{report.report_number}-questions-answers-and-score.pdf")
+        self.assertGreater(len(qa_and_score_pdf_bytes), 0)
 
     def test_transcript_issue_text_is_normalized_for_employer_outputs(self):
         interpretation = CandidateResponseInterpretation.objects.get(response=self.response)

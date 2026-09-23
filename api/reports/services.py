@@ -2638,30 +2638,14 @@ class EvaluationReportService:
         return rows
 
     @classmethod
-    def _render_qa_pdf(cls, report):
-        language = (report.report_payload or {}).get("language", "en")
-        template_name = "reports/qa_transcript_ar.html" if language == "ar" else "reports/qa_transcript.html"
-        context = {
-            "rows": cls._build_qa_rows(report),
-            "report_number": report.report_number,
-            "assessment_context": (report.report_payload or {}).get("assessment_context", {}),
-        }
-        if language == "ar":
-            from api.core.pdf_fonts import arabic_font_context
-
-            context.update(arabic_font_context())
-        return cls._render_html_to_pdf(render_to_string(template_name, context))
-
-    @classmethod
-    def _render_score_result_pdf(cls, report):
-        # report.report_payload["evidence_summary"] is a curated, filtered
-        # list of noteworthy findings (see _build_evidence_summary) - not
-        # the full per-question score breakdown. That richer shape
-        # (question_text/score/max_score/explanation/indicators) only ever
-        # existed as the transient response_evidence_summary local built by
-        # _build_response_evidence, never persisted - so it's rebuilt fresh
-        # here from the same ResponseEvaluationResult rows, the same way
-        # generate_for_evaluation itself does.
+    def _build_qa_and_score_rows(cls, report):
+        """One row per question, combining the candidate's actual answer
+        text (see _build_qa_rows) with its score/result/explanation. The
+        score/explanation side can't come from report.report_payload -
+        see _build_response_evidence's docstring at its call site below for
+        why - so it's rebuilt fresh from ResponseEvaluationResult, the same
+        way generate_for_evaluation itself does, then joined to the answer
+        rows by question_order."""
         payload = report.report_payload or {}
         language = payload.get("language", "en")
         summary = report.evaluation.session_summaries.select_related("rule_set").first()
@@ -2675,13 +2659,26 @@ class EvaluationReportService:
                 .select_related("question", "response", "rule_set")
                 .order_by("question__question_order", "created_at")
             )
-        evidence_rows = cls._build_response_evidence(response_results, language=language)
-        template_name = "reports/score_result_ar.html" if language == "ar" else "reports/score_result.html"
+        evidence_by_order = {
+            row["question_order"]: row
+            for row in cls._build_response_evidence(response_results, language=language)
+        }
+        rows = []
+        for qa_row in cls._build_qa_rows(report):
+            evidence = evidence_by_order.get(qa_row["question_order"], {})
+            rows.append({**qa_row, **evidence, "answer_text": qa_row["answer_text"], "scored": bool(evidence)})
+        return rows
+
+    @classmethod
+    def _render_qa_and_score_pdf(cls, report):
+        payload = report.report_payload or {}
+        language = payload.get("language", "en")
+        template_name = "reports/qa_and_score_ar.html" if language == "ar" else "reports/qa_and_score.html"
         context = {
+            "rows": cls._build_qa_and_score_rows(report),
             "report_number": report.report_number,
             "assessment_context": payload.get("assessment_context", {}),
             "executive_summary": payload.get("executive_summary", {}),
-            "evidence_rows": evidence_rows,
         }
         if language == "ar":
             from api.core.pdf_fonts import arabic_font_context
@@ -2694,9 +2691,10 @@ class EvaluationReportService:
         """Bundles every document for one evaluation into a single zip:
         the existing transcript/evidence report PDF, the existing
         certificate PDF (when one has been issued - not every evaluation
-        has one, e.g. a NOT_READY result), and two new files built fresh
-        from live data each time (never cached) - a plain question/answer
-        transcript and a structured AI score & result breakdown."""
+        has one, e.g. a NOT_READY result), and one new file built fresh
+        from live data each time (never cached) - each question paired with
+        the candidate's actual answer and that answer's score/result/
+        explanation together, plus the overall readiness result up top."""
         if not report.employer_pdf or not (
             report.employer_pdf.name and report.employer_pdf.storage.exists(report.employer_pdf.name)
         ):
@@ -2716,8 +2714,7 @@ class EvaluationReportService:
             certificate_bytes = certificate.pdf_file.read()
             certificate.pdf_file.close()
 
-        qa_pdf_bytes = cls._render_qa_pdf(report)
-        score_pdf_bytes = cls._render_score_result_pdf(report)
+        qa_and_score_pdf_bytes = cls._render_qa_and_score_pdf(report)
 
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -2725,8 +2722,7 @@ class EvaluationReportService:
                 archive.writestr(f"{report.report_number}-transcript.pdf", transcript_pdf_bytes)
             if certificate_bytes:
                 archive.writestr(f"{certificate.certificate_id or report.report_number}-certificate.pdf", certificate_bytes)
-            archive.writestr(f"{report.report_number}-questions-and-answers.pdf", qa_pdf_bytes)
-            archive.writestr(f"{report.report_number}-ai-score-and-result.pdf", score_pdf_bytes)
+            archive.writestr(f"{report.report_number}-questions-answers-and-score.pdf", qa_and_score_pdf_bytes)
         buffer.seek(0)
         return buffer.getvalue()
 

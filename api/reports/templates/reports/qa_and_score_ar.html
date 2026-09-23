@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8" />
-  <title>الدرجة والنتيجة</title>
+  <title>الأسئلة والإجابات ودرجة الذكاء الاصطناعي</title>
   <style>
     @page {
       size: A4;
@@ -67,34 +67,62 @@
     .disclaimer {
       color: #9aa8c6;
       font-size: 10px;
-      margin-top: 4px;
+      margin: 4px 0 14px 0;
     }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 4px;
-    }
-    th {
-      background: #f4f8ff;
-      color: #1b2f5c;
-      text-align: right;
-      padding: 6px 6px;
+    .item {
       border: 1px solid #d5e2fb;
-      font-size: 11px;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      page-break-inside: avoid;
     }
-    td {
-      padding: 6px 6px;
-      border: 1px solid #d5e2fb;
-      vertical-align: top;
-      font-size: 11px;
+    .item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 6px;
+    }
+    .q-label {
+      font-weight: 700;
+      color: #2f6fe8;
+    }
+    .q-text {
+      margin-bottom: 8px;
+    }
+    .a-label, .s-label {
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .a-label { color: #21bb71; }
+    .s-label { color: #1b2f5c; margin-top: 8px; }
+    .a-text {
+      white-space: pre-wrap;
+      margin-bottom: 4px;
+    }
+    .no-answer {
+      color: #9aa8c6;
+      font-style: italic;
+    }
+    .score-line {
+      display: flex;
+      gap: 16px;
+      align-items: baseline;
+      margin-bottom: 4px;
+    }
+    .score-value {
+      font-weight: 700;
+    }
+    .explanation {
+      color: #4a5a7a;
     }
     .pass { color: #21bb71; font-weight: 700; }
     .fail { color: #dc5a5a; font-weight: 700; }
     .review { color: #f1aa29; font-weight: 700; }
+    .not-scored { color: #9aa8c6; font-style: italic; }
   </style>
 </head>
 <body>
-  <h1>الدرجة والنتيجة</h1>
+  <h1>الأسئلة والإجابات ودرجة الذكاء الاصطناعي</h1>
   <div class="meta">
     <span>رقم التقرير: {{ report_number }}</span>
     {% if assessment_context.candidate_name %}<span>المرشح: {{ assessment_context.candidate_name }}</span>{% endif %}
@@ -125,44 +153,42 @@
     </div>
     {% endif %}
   </div>
-  <p class="disclaimer">الدرجة والنتيجة أعلاه ناتجتان بالكامل عن محرك القواعد الحتمي بناءً على مؤشرات الأدلة المستخرجة بواسطة الذكاء الاصطناعي. لا يقوم الذكاء الاصطناعي نفسه بتحديد أي درجة أو نجاح/رسوب أو توصية.</p>
+  <p class="disclaimer">الدرجة والنتيجة أدناه ناتجتان بالكامل عن محرك القواعد الحتمي بناءً على مؤشرات الأدلة المستخرجة بواسطة الذكاء الاصطناعي. لا يقوم الذكاء الاصطناعي نفسه بتحديد أي درجة أو نجاح/رسوب أو توصية.</p>
 
-  <h2>التفصيل لكل سؤال</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>الكفاءة</th>
-        <th>السؤال</th>
-        <th>الدرجة</th>
-        <th>النتيجة</th>
-        <th>التوضيح</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in evidence_rows %}
-      <tr>
-        <td>{{ row.question_order }}</td>
-        <td>{{ row.display_name|default:row.competency_name }}</td>
-        <td>{{ row.question_text }}</td>
-        <td>{{ row.score }}&nbsp;/&nbsp;{{ row.max_score }}</td>
-        <td>
-          {% if row.critical_failure %}
-            <span class="fail">فشل حرج</span>
-          {% elif row.requires_human_review %}
-            <span class="review">يتطلب مراجعة بشرية</span>
-          {% elif row.required_indicators_passed %}
-            <span class="pass">نجاح</span>
-          {% else %}
-            <span class="fail">رسوب</span>
-          {% endif %}
-        </td>
-        <td>{{ row.explanation }}</td>
-      </tr>
-      {% empty %}
-      <tr><td colspan="6">لا توجد إجابات مقيّمة متاحة.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <h2>تفاصيل كل سؤال</h2>
+  {% for row in rows %}
+  <div class="item">
+    <div class="item-header">
+      <span class="q-label">السؤال {{ row.question_order }}{% if row.display_name %} &middot; {{ row.display_name }}{% endif %}</span>
+    </div>
+    <div class="q-text">{{ row.question_text }}</div>
+    <div class="a-label">إجابة المرشح</div>
+    {% if row.answer_text %}
+      <div class="a-text">{{ row.answer_text }}</div>
+    {% else %}
+      <div class="no-answer">لا يتوفر نص لهذه الإجابة.</div>
+    {% endif %}
+    <div class="s-label">درجة الذكاء الاصطناعي والنتيجة</div>
+    {% if row.scored %}
+      <div class="score-line">
+        <span class="score-value">{{ row.score }}&nbsp;/&nbsp;{{ row.max_score }}</span>
+        {% if row.critical_failure %}
+          <span class="fail">فشل حرج</span>
+        {% elif row.requires_human_review %}
+          <span class="review">يتطلب مراجعة بشرية</span>
+        {% elif row.required_indicators_passed %}
+          <span class="pass">نجاح</span>
+        {% else %}
+          <span class="fail">رسوب</span>
+        {% endif %}
+      </div>
+      <div class="explanation">{{ row.explanation }}</div>
+    {% else %}
+      <div class="not-scored">لم يتم التقييم بعد.</div>
+    {% endif %}
+  </div>
+  {% empty %}
+  <p>لا توجد إجابات متاحة لهذه الجلسة.</p>
+  {% endfor %}
 </body>
 </html>

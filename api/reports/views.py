@@ -162,6 +162,36 @@ class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet
             filename=filename,
         )
 
+    @action(detail=True, methods=["get"], url_path="documents-bundle")
+    def documents_bundle(self, request, id=None):
+        report = self.get_object()
+        try:
+            zip_bytes = EvaluationReportService.build_documents_zip(report)
+        except EvaluationReportError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        AuditLogService.log(
+            user=request.user,
+            action=AuditLogAction.REPORT_EXPORT_PAYLOAD_REQUESTED,
+            category=AuditLogCategory.EVALUATION,
+            description=f"Documents bundle (zip) requested for evaluation {report.evaluation.public_id}",
+            resource=report,
+            data={
+                "report_id": str(report.public_id),
+                "evaluation_id": str(report.evaluation.public_id),
+                "export_type": "documents_bundle_zip",
+            },
+            request=request,
+        )
+        zip_stream = BytesIO(zip_bytes)
+        zip_stream.seek(0)
+        return FileResponse(
+            zip_stream,
+            content_type="application/zip",
+            as_attachment=True,
+            filename=f"{report.report_number}-documents.zip",
+        )
+
 
 def verify_report(request, report_number):
     report = get_object_or_404(EvaluationReport.objects.select_related("evaluation"), report_number=report_number)

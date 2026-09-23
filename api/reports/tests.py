@@ -1,5 +1,7 @@
 import shutil
 import tempfile
+import zipfile
+from io import BytesIO
 
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError
@@ -489,6 +491,41 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(response["Content-Type"], "application/pdf")
         self.assertIn(f'{report.report_number}.pdf', response["Content-Disposition"])
         self.assertTrue(b"".join(response.streaming_content).startswith(b"%PDF"))
+
+    def test_documents_bundle_zip_contains_transcript_qa_and_score_files(self):
+        self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+        report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status=EvaluationReport.STATUS_ACTIVE)
+
+        response = self.client.get(f"/api/v1/evaluations/reports/{report.public_id}/documents-bundle")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/zip")
+        self.assertIn(f"{report.report_number}-documents.zip", response["Content-Disposition"])
+
+        zip_bytes = b"".join(response.streaming_content)
+        archive = zipfile.ZipFile(BytesIO(zip_bytes))
+        names = archive.namelist()
+        # No certificate has been issued for this evaluation (Week6Scoring
+        # alone doesn't issue one - see certificate_services.py) - the zip
+        # must still succeed with the three documents that don't depend on
+        # a certificate existing.
+        self.assertEqual(
+            set(names),
+            {
+                f"{report.report_number}-transcript.pdf",
+                f"{report.report_number}-questions-and-answers.pdf",
+                f"{report.report_number}-ai-score-and-result.pdf",
+            },
+        )
+        for name in names:
+            self.assertTrue(archive.read(name).startswith(b"%PDF"), f"{name} is not a valid PDF")
+
+        qa_pdf_text = archive.read(f"{report.report_number}-questions-and-answers.pdf")
+        self.assertGreater(len(qa_pdf_text), 0)
 
     def test_transcript_issue_text_is_normalized_for_employer_outputs(self):
         interpretation = CandidateResponseInterpretation.objects.get(response=self.response)

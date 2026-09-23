@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>الدرجة والنتيجة</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 12mm 14mm;
+    }
+
+    {% if arabic_font_regular_uri %}
+    @font-face {
+      font-family: "Noto Naskh Arabic";
+      src: url("{{ arabic_font_regular_uri }}") format("truetype");
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: "Noto Naskh Arabic";
+      src: url("{{ arabic_font_bold_uri }}") format("truetype");
+      font-weight: 700;
+    }
+    {% endif %}
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Noto Naskh Arabic", Arial, sans-serif;
+      color: #1b2f5c;
+      font-size: 12px;
+      direction: rtl;
+    }
+    h1 {
+      font-size: 19px;
+      margin: 0 0 4px 0;
+    }
+    h2 {
+      font-size: 14px;
+      margin: 16px 0 6px 0;
+      color: #2f6fe8;
+    }
+    .meta {
+      color: #6880ab;
+      font-size: 11px;
+      margin-bottom: 10px;
+    }
+    .meta span {
+      margin-left: 14px;
+    }
+    .summary-box {
+      border: 1px solid #d5e2fb;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+    }
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 2px 0;
+    }
+    .summary-label {
+      color: #6880ab;
+    }
+    .summary-value {
+      font-weight: 700;
+    }
+    .disclaimer {
+      color: #9aa8c6;
+      font-size: 10px;
+      margin-top: 4px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 4px;
+    }
+    th {
+      background: #f4f8ff;
+      color: #1b2f5c;
+      text-align: right;
+      padding: 6px 6px;
+      border: 1px solid #d5e2fb;
+      font-size: 11px;
+    }
+    td {
+      padding: 6px 6px;
+      border: 1px solid #d5e2fb;
+      vertical-align: top;
+      font-size: 11px;
+    }
+    .pass { color: #21bb71; font-weight: 700; }
+    .fail { color: #dc5a5a; font-weight: 700; }
+    .review { color: #f1aa29; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1>الدرجة والنتيجة</h1>
+  <div class="meta">
+    <span>رقم التقرير: {{ report_number }}</span>
+    {% if assessment_context.candidate_name %}<span>المرشح: {{ assessment_context.candidate_name }}</span>{% endif %}
+    {% if assessment_context.target_role %}<span>الوظيفة: {{ assessment_context.target_role }}</span>{% endif %}
+    {% if assessment_context.assessment_date %}<span>التاريخ: {{ assessment_context.assessment_date }}</span>{% endif %}
+  </div>
+
+  <h2>النتيجة الإجمالية</h2>
+  <div class="summary-box">
+    <div class="summary-row">
+      <span class="summary-label">مؤشر الجاهزية</span>
+      <span class="summary-value">{{ executive_summary.readiness_indicator.value|default:"غير متاح" }}</span>
+    </div>
+    <div class="summary-row">
+      <span class="summary-label">الدرجة الإجمالية</span>
+      <span class="summary-value">{{ executive_summary.overall_score_display|default:executive_summary.overall_score|default:"غير متاح" }}</span>
+    </div>
+    {% if executive_summary.override_triggered %}
+    <div class="summary-row">
+      <span class="summary-label">تجاوز المتطلب الحرج</span>
+      <span class="summary-value fail">تم التطبيق - يحدد الفشل الحرج النتيجة بغض النظر عن الدرجة الإجمالية</span>
+    </div>
+    {% endif %}
+    {% if executive_summary.readiness_reason.employer_message %}
+    <div class="summary-row">
+      <span class="summary-label">السبب</span>
+      <span class="summary-value">{{ executive_summary.readiness_reason.employer_message }}</span>
+    </div>
+    {% endif %}
+  </div>
+  <p class="disclaimer">الدرجة والنتيجة أعلاه ناتجتان بالكامل عن محرك القواعد الحتمي بناءً على مؤشرات الأدلة المستخرجة بواسطة الذكاء الاصطناعي. لا يقوم الذكاء الاصطناعي نفسه بتحديد أي درجة أو نجاح/رسوب أو توصية.</p>
+
+  <h2>التفصيل لكل سؤال</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>الكفاءة</th>
+        <th>السؤال</th>
+        <th>الدرجة</th>
+        <th>النتيجة</th>
+        <th>التوضيح</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in evidence_rows %}
+      <tr>
+        <td>{{ row.question_order }}</td>
+        <td>{{ row.display_name|default:row.competency_name }}</td>
+        <td>{{ row.question_text }}</td>
+        <td>{{ row.score }}&nbsp;/&nbsp;{{ row.max_score }}</td>
+        <td>
+          {% if row.critical_failure %}
+            <span class="fail">فشل حرج</span>
+          {% elif row.requires_human_review %}
+            <span class="review">يتطلب مراجعة بشرية</span>
+          {% elif row.required_indicators_passed %}
+            <span class="pass">نجاح</span>
+          {% else %}
+            <span class="fail">رسوب</span>
+          {% endif %}
+        </td>
+        <td>{{ row.explanation }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6">لا توجد إجابات مقيّمة متاحة.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

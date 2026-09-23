@@ -167,6 +167,44 @@ class AccountsWeek2Tests(APITestCase):
         self.assertEqual(refresh_response.status_code, status.HTTP_200_OK, refresh_response.data)
         self.assertIn("access", refresh_response.data)
 
+    def test_b2c_registration_persists_location_localization_fields_when_supplied(self):
+        # Country of residence, target market, and timezone are all optional
+        # (client-side detected/suggested, never forced) - this confirms
+        # they're not just accepted but actually persisted when a caller
+        # does supply them, since the registration view picks fields
+        # explicitly off profile_data rather than splatting it wholesale.
+        registration_payload = {
+            "email": "new-b2c-location@example.com",
+            "first_name": "New",
+            "last_name": "Candidate",
+            "password": "Password123!",
+            "confirm_password": "Password123!",
+            "passport_id": "REG-LOC-1001",
+            "job_role": JobRoles.SOFTWARE_ENGINEER,
+            "nationality": Nationalities.US,
+            "preferred_language": Languages.ENGLISH,
+            "phone_number": "+15551112222",
+            "date_of_birth": "1993-04-05",
+            "address": "123 Main Street",
+            "country_of_residence": "AE",
+            "target_market": "SA",
+            "timezone": "Asia/Dubai",
+            "id_document": make_file("registration-id.pdf"),
+            "resume_document": make_file("registration-resume.pdf"),
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/register/b2c",
+            registration_payload,
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+
+        profile = IndividualEmployerProfile.objects.get(passport_id="REG-LOC-1001")
+        self.assertEqual(profile.country_of_residence, "AE")
+        self.assertEqual(profile.target_market, "SA")
+        self.assertEqual(profile.timezone, "Asia/Dubai")
+
     def test_b2c_registration_rejects_duplicate_passport_id_without_creating_user(self):
         existing_user = User.objects.create_user(
             email="existing-b2c@example.com",
@@ -278,6 +316,39 @@ class AccountsWeek2Tests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
         self.assertIn("company_registration_number", response.data)
         self.assertFalse(User.objects.filter(email="new-b2b-duplicate@example.com").exists())
+
+    def test_b2b_registration_persists_target_market_and_timezone_when_supplied(self):
+        # `country` itself already doubles as country-of-residence for B2B
+        # accounts and stays a plain free-text field for backward
+        # compatibility (see CompanyEmployerProfile.country's choices=-only
+        # migration) - this test covers the two genuinely new fields.
+        response = self.client.post(
+            "/api/v1/auth/register/b2b",
+            {
+                "email": "new-b2b-location@example.com",
+                "first_name": "New",
+                "last_name": "Company",
+                "password": "Password123!",
+                "confirm_password": "Password123!",
+                "company_name": "Location Test Co",
+                "company_registration_number": "COMP-REG-LOC-001",
+                "company_size": "1-10",
+                "country": "United Arab Emirates",
+                "city": "Dubai",
+                "preferred_language": Languages.ENGLISH,
+                "phone_number": "+15553334444",
+                "target_market": "SA",
+                "timezone": "Asia/Dubai",
+                "registration_certificate": make_file("new-company-cert.pdf"),
+                "resachetified_license": make_file("new-company-license.pdf"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+
+        profile = CompanyEmployerProfile.objects.get(company_registration_number="COMP-REG-LOC-001")
+        self.assertEqual(profile.target_market, "SA")
+        self.assertEqual(profile.timezone, "Asia/Dubai")
 
     def test_b2b_registration_resend_verification_and_login_flow(self):
         registration_payload = {

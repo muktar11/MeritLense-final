@@ -1,7 +1,7 @@
 from django.db import models
 from django.core.validators import FileExtensionValidator
 from api.core.models import TimeStampedModel, SoftDeleteModel
-from api.core.constants import CandidateJobRoles, Languages, CandidateStatus
+from api.core.constants import CandidateJobRoles, Countries, Languages, CandidateStatus
 from api.accounts.models import User
 
 
@@ -19,7 +19,15 @@ class Candidate(TimeStampedModel, SoftDeleteModel):
         choices=Languages.CHOICES,
         default=Languages.ENGLISH
     )
-    
+
+    # Location & Localization - detected client-side as a suggestion only
+    # (never forced), same pattern as the employer profiles. Kept distinct:
+    # country_of_residence is where the candidate actually lives, target_market
+    # is which country's job market they're being evaluated/placed for.
+    country_of_residence = models.CharField(max_length=2, choices=Countries.CHOICES, null=True, blank=True)
+    target_market = models.CharField(max_length=2, choices=Countries.CHOICES, null=True, blank=True)
+    timezone = models.CharField(max_length=64, null=True, blank=True)
+
     status = models.CharField(
         max_length=10,
         choices=CandidateStatus.CHOICES,

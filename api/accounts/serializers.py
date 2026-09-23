@@ -71,22 +71,30 @@ class B2CRegistrationSerializer(UserRegistrationSerializer):
     phone_number = serializers.CharField(max_length=20)
     date_of_birth = serializers.DateField(required=False, allow_null=True)
     address = serializers.CharField(required=False, allow_blank=True, max_length=255)
-    
+
+    # Location & Localization - all optional, detected/suggested client-side
+    # and confirmed by the user, never forced (see location-detection.ts).
+    country_of_residence = serializers.ChoiceField(choices=[], required=False, allow_null=True, allow_blank=True)
+    target_market = serializers.ChoiceField(choices=[], required=False, allow_null=True, allow_blank=True)
+    timezone = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=64)
+
     id_document = serializers.FileField()
     resume_document = serializers.FileField()
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        from api.core.constants import JobRoles, Nationalities, Languages
+        from api.core.constants import JobRoles, Nationalities, Languages, Countries
         self.fields['job_role'].choices = JobRoles.CHOICES
         self.fields['nationality'].choices = Nationalities.CHOICES
         self.fields['preferred_language'].choices = Languages.CHOICES
+        self.fields['country_of_residence'].choices = Countries.CHOICES
+        self.fields['target_market'].choices = Countries.CHOICES
 
     def validate_passport_id(self, value):
         if IndividualEmployerProfile.objects.filter(passport_id=value).exists():
             raise serializers.ValidationError("Passport ID already exists.")
         return value
-    
+
     def create(self, validated_data):
         profile_data = {
             'passport_id': validated_data.pop('passport_id'),
@@ -96,6 +104,9 @@ class B2CRegistrationSerializer(UserRegistrationSerializer):
             'phone_number': validated_data.pop('phone_number'),
             'date_of_birth': validated_data.pop('date_of_birth', None),
             'address': validated_data.pop('address', ''),
+            'country_of_residence': validated_data.pop('country_of_residence', None) or None,
+            'target_market': validated_data.pop('target_market', None) or None,
+            'timezone': validated_data.pop('timezone', None) or None,
             'id_document': validated_data.pop('id_document'),
             'resume_document': validated_data.pop('resume_document'),
         }
@@ -117,16 +128,23 @@ class B2BRegistrationSerializer(UserRegistrationSerializer):
     website = serializers.URLField(required=False, allow_blank=True, allow_null=True)
     industry = serializers.CharField(required=False, allow_blank=True, max_length=100)
     address = serializers.CharField(required=False, allow_blank=True, max_length=255)
-    
+
+    # Location & Localization - `country` above already serves as this
+    # account's country of residence/registration. target_market/timezone
+    # are new, optional, detected/suggested client-side, never forced.
+    target_market = serializers.ChoiceField(choices=[], required=False, allow_null=True, allow_blank=True)
+    timezone = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=64)
+
     registration_certificate = serializers.FileField()
     resachetified_license = serializers.FileField()
     tax_id_document = serializers.FileField(required=False, allow_null=True)
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        from api.core.constants import CompanySize, Languages
+        from api.core.constants import CompanySize, Languages, Countries
         self.fields['company_size'].choices = CompanySize.CHOICES
         self.fields['preferred_language'].choices = Languages.CHOICES
+        self.fields['target_market'].choices = Countries.CHOICES
 
     def validate_company_registration_number(self, value):
         if CompanyEmployerProfile.objects.filter(company_registration_number=value).exists():
@@ -147,6 +165,8 @@ class B2BRegistrationSerializer(UserRegistrationSerializer):
             'website': validated_data.pop('website', ''),
             'industry': validated_data.pop('industry', ''),
             'address': validated_data.pop('address', ''),
+            'target_market': validated_data.pop('target_market', None) or None,
+            'timezone': validated_data.pop('timezone', None) or None,
             'registration_certificate': validated_data.pop('registration_certificate'),
             'resachetified_license': validated_data.pop('resachetified_license'),
             'tax_id_document': validated_data.pop('tax_id_document', None),
@@ -240,6 +260,7 @@ class IndividualProfileSerializer(PublicIdModelSerializer):
             'id', 'email', 'first_name', 'last_name', 'full_name', 'role',
             'passport_id', 'phone_number', 'date_of_birth', 'address',
             'job_role', 'nationality', 'preferred_language',
+            'country_of_residence', 'target_market', 'timezone',
             'id_document', 'resume_document', 'additional_documents',
             'documents_verified', 'verified_at', 'verification_notes',
             'created_at', 'updated_at'
@@ -274,6 +295,7 @@ class CompanyProfileSerializer(PublicIdModelSerializer):
             'id', 'email', 'first_name', 'last_name', 'admin_full_name', 'role',
             'company_name', 'company_registration_number', 'company_size',
             'industry', 'phone_number', 'country', 'city', 'address',
+            'target_market', 'timezone',
             'website', 'preferred_language', 'notification_preference',
             'registration_certificate', 'resachetified_license',
             'tax_id_document', 'additional_documents',

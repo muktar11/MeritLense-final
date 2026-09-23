@@ -310,6 +310,9 @@ class B2CRegistrationView(APIView):
                         phone_number=profile_data.get('phone_number'),
                         date_of_birth=profile_data.get('date_of_birth'),
                         address=profile_data.get('address'),
+                        country_of_residence=profile_data.get('country_of_residence'),
+                        target_market=profile_data.get('target_market'),
+                        timezone=profile_data.get('timezone'),
                         id_document=profile_data.get('id_document'),
                         resume_document=profile_data.get('resume_document')
                     )
@@ -419,6 +422,8 @@ class B2BRegistrationView(APIView):
                         website=profile_data.get('website'),
                         industry=profile_data.get('industry'),
                         address=profile_data.get('address'),
+                        target_market=profile_data.get('target_market'),
+                        timezone=profile_data.get('timezone'),
                         registration_certificate=profile_data.get('registration_certificate'),
                         resachetified_license=profile_data.get('resachetified_license'),
                         tax_id_document=profile_data.get('tax_id_document')
@@ -526,6 +531,9 @@ class AdminCreateB2CEmployerView(APIView):
                         phone_number=profile_data.get('phone_number'),
                         date_of_birth=profile_data.get('date_of_birth'),
                         address=profile_data.get('address'),
+                        country_of_residence=profile_data.get('country_of_residence'),
+                        target_market=profile_data.get('target_market'),
+                        timezone=profile_data.get('timezone'),
                         id_document=profile_data.get('id_document'),
                         resume_document=profile_data.get('resume_document')
                     )
@@ -602,6 +610,8 @@ class AdminCreateB2BEmployerView(APIView):
                         website=profile_data.get('website'),
                         industry=profile_data.get('industry'),
                         address=profile_data.get('address'),
+                        target_market=profile_data.get('target_market'),
+                        timezone=profile_data.get('timezone'),
                         registration_certificate=profile_data.get('registration_certificate'),
                         resachetified_license=profile_data.get('resachetified_license'),
                         tax_id_document=profile_data.get('tax_id_document')

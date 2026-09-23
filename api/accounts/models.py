@@ -3,7 +3,7 @@ from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseU
 from django.db import models
 from django.core.validators import FileExtensionValidator
 from api.core.models import SoftDeleteModel, TimeStampedModel
-from api.core.constants import CompanySize, CompanyTeamPermissions, DocumentStatus, JobRoles, Languages, Nationalities, Roles
+from api.core.constants import CompanySize, CompanyTeamPermissions, Countries, DocumentStatus, JobRoles, Languages, Nationalities, Roles
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 import random
@@ -149,7 +149,19 @@ class IndividualEmployerProfile(TimeStampedModel, SoftDeleteModel):
     job_role = models.CharField(max_length=2, choices=JobRoles.CHOICES)
     nationality = models.CharField(max_length=2, choices=Nationalities.CHOICES)
     preferred_language = models.CharField(max_length=3, choices=Languages.CHOICES, default=Languages.ENGLISH)
-    
+
+    # Location & Localization - kept distinct from `nationality` above
+    # (citizenship) on purpose: this is where the person actually lives now,
+    # not where they're a citizen of. Detected client-side as a suggestion
+    # only, never forced - see MeritLense-ui/src/lib/location-detection.ts.
+    country_of_residence = models.CharField(max_length=2, choices=Countries.CHOICES, null=True, blank=True)
+    # Which country's job market this account is evaluating/hiring for -
+    # distinct from country_of_residence (e.g. an expat hiring domestic
+    # help back home).
+    target_market = models.CharField(max_length=2, choices=Countries.CHOICES, null=True, blank=True)
+    # IANA name (e.g. "Asia/Dubai"), detected via the browser's Intl API.
+    timezone = models.CharField(max_length=64, null=True, blank=True)
+
     id_document = models.FileField(
         upload_to='b2c/documents/id/',
         validators=[FileExtensionValidator(['pdf', 'jpg', 'jpeg', 'png'])]
@@ -186,12 +198,21 @@ class CompanyEmployerProfile(TimeStampedModel, SoftDeleteModel):
     industry = models.CharField(max_length=100, blank=True)
     
     phone_number = models.CharField(max_length=20)
-    country = models.CharField(max_length=100)
+    # Free text, kept for backward compatibility with existing rows (e.g.
+    # "United Arab Emirates") - `choices` only constrains new writes made
+    # through an updated form, Django never validates it against existing
+    # DB content, so this is a zero-risk metadata-only addition.
+    country = models.CharField(max_length=100, choices=Countries.CHOICES)
     city = models.CharField(max_length=100)
     address = models.CharField(max_length=255, blank=True)
     website = models.URLField(blank=True)
-    
+
     preferred_language = models.CharField(max_length=3, choices=Languages.CHOICES, default=Languages.ENGLISH)
+
+    # Location & Localization - see IndividualEmployerProfile above for the
+    # same fields' rationale.
+    target_market = models.CharField(max_length=2, choices=Countries.CHOICES, null=True, blank=True)
+    timezone = models.CharField(max_length=64, null=True, blank=True)
 
     notification_preference = models.CharField(
         max_length=10,
@@ -258,11 +279,11 @@ class Company(TimeStampedModel):
     company_size = models.CharField(max_length=10)
     industry = models.CharField(max_length=100, blank=True)
     phone_number = models.CharField(max_length=20)
-    country = models.CharField(max_length=100)
+    country = models.CharField(max_length=100, choices=Countries.CHOICES)
     city = models.CharField(max_length=100)
     address = models.CharField(max_length=255, blank=True)
     website = models.URLField(blank=True)
-    
+
     admin_user = models.OneToOneField(
         User,
         on_delete=models.CASCADE,

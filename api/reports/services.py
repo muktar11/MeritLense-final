@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from io import BytesIO
 from pathlib import Path
 from decimal import Decimal
@@ -27,6 +28,7 @@ from api.evaluations.models import (
     SessionEvaluationSummary,
 )
 from api.reports.models import EvaluationReport
+from api.sessions.models import CandidateResponse
 
 try:
     import qrcode
@@ -2578,6 +2580,155 @@ class EvaluationReportService:
         pdf_bytes = cls._build_simple_pdf(pdf_lines)
         pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
         return pdf_bytes, pdf_hash
+
+    @classmethod
+    def _render_html_to_pdf(cls, html):
+        """Generic HTML->PDF for the two documents-bundle files below (see
+        build_documents_zip) - the same WeasyPrint/Playwright/Chrome fallback
+        chain _render_employer_pdf uses, minus its report-payload-specific
+        last-resort text fallback (_build_employer_pdf_lines/_build_simple_pdf
+        only know how to render an employer report's own shape). All three
+        engines unavailable is treated as a real error here rather than
+        silently degrading to a blank document."""
+        if HTML is not None:
+            try:
+                return HTML(string=html, base_url=str(getattr(settings, "BASE_DIR", ""))).write_pdf()
+            except Exception:
+                pass
+
+        playwright_pdf = cls._render_employer_pdf_via_playwright(html=html)
+        if playwright_pdf is not None:
+            return playwright_pdf
+
+        chrome_pdf = cls._render_employer_pdf_via_chrome(html=html)
+        if chrome_pdf is not None:
+            return chrome_pdf
+
+        raise EvaluationReportError("No PDF rendering engine is available on this server.")
+
+    @classmethod
+    def _build_qa_rows(cls, report):
+        """Question + the candidate's own actual answer text, paired in
+        question order - deliberately separate from evidence_summary (which
+        only carries `has_transcript: bool`, never the literal transcript,
+        since that payload is built for the employer-facing structured
+        report). Prefers the translated transcript (most readable to
+        whoever downloads the bundle), falling back to the original-language
+        transcript when no translation exists or it failed."""
+        responses = (
+            CandidateResponse.objects.filter(session_id=report.session_id)
+            .select_related("question")
+            .order_by("question__question_order", "created_at")
+        )
+        rows = []
+        for response in responses:
+            answer = (
+                response.translated_transcript
+                or response.original_transcript
+                or response.transcript
+                or ""
+            ).strip()
+            rows.append(
+                {
+                    "question_order": response.question.question_order,
+                    "question_text": response.question.question_text,
+                    "answer_text": answer,
+                }
+            )
+        return rows
+
+    @classmethod
+    def _render_qa_pdf(cls, report):
+        language = (report.report_payload or {}).get("language", "en")
+        template_name = "reports/qa_transcript_ar.html" if language == "ar" else "reports/qa_transcript.html"
+        context = {
+            "rows": cls._build_qa_rows(report),
+            "report_number": report.report_number,
+            "assessment_context": (report.report_payload or {}).get("assessment_context", {}),
+        }
+        if language == "ar":
+            from api.core.pdf_fonts import arabic_font_context
+
+            context.update(arabic_font_context())
+        return cls._render_html_to_pdf(render_to_string(template_name, context))
+
+    @classmethod
+    def _render_score_result_pdf(cls, report):
+        # report.report_payload["evidence_summary"] is a curated, filtered
+        # list of noteworthy findings (see _build_evidence_summary) - not
+        # the full per-question score breakdown. That richer shape
+        # (question_text/score/max_score/explanation/indicators) only ever
+        # existed as the transient response_evidence_summary local built by
+        # _build_response_evidence, never persisted - so it's rebuilt fresh
+        # here from the same ResponseEvaluationResult rows, the same way
+        # generate_for_evaluation itself does.
+        payload = report.report_payload or {}
+        language = payload.get("language", "en")
+        summary = report.evaluation.session_summaries.select_related("rule_set").first()
+        response_results = []
+        if summary is not None:
+            response_results = list(
+                ResponseEvaluationResult.objects.filter(
+                    evaluation=report.evaluation,
+                    rule_set=summary.rule_set,
+                )
+                .select_related("question", "response", "rule_set")
+                .order_by("question__question_order", "created_at")
+            )
+        evidence_rows = cls._build_response_evidence(response_results, language=language)
+        template_name = "reports/score_result_ar.html" if language == "ar" else "reports/score_result.html"
+        context = {
+            "report_number": report.report_number,
+            "assessment_context": payload.get("assessment_context", {}),
+            "executive_summary": payload.get("executive_summary", {}),
+            "evidence_rows": evidence_rows,
+        }
+        if language == "ar":
+            from api.core.pdf_fonts import arabic_font_context
+
+            context.update(arabic_font_context())
+        return cls._render_html_to_pdf(render_to_string(template_name, context))
+
+    @classmethod
+    def build_documents_zip(cls, report):
+        """Bundles every document for one evaluation into a single zip:
+        the existing transcript/evidence report PDF, the existing
+        certificate PDF (when one has been issued - not every evaluation
+        has one, e.g. a NOT_READY result), and two new files built fresh
+        from live data each time (never cached) - a plain question/answer
+        transcript and a structured AI score & result breakdown."""
+        if not report.employer_pdf or not (
+            report.employer_pdf.name and report.employer_pdf.storage.exists(report.employer_pdf.name)
+        ):
+            try:
+                transcript_pdf_bytes, _hash = cls.render_existing_pdf(report)
+            except EvaluationReportError:
+                transcript_pdf_bytes = None
+        else:
+            report.employer_pdf.open("rb")
+            transcript_pdf_bytes = report.employer_pdf.read()
+            report.employer_pdf.close()
+
+        certificate = getattr(report.evaluation, "certificate", None)
+        certificate_bytes = None
+        if certificate is not None and certificate.pdf_file:
+            certificate.pdf_file.open("rb")
+            certificate_bytes = certificate.pdf_file.read()
+            certificate.pdf_file.close()
+
+        qa_pdf_bytes = cls._render_qa_pdf(report)
+        score_pdf_bytes = cls._render_score_result_pdf(report)
+
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            if transcript_pdf_bytes:
+                archive.writestr(f"{report.report_number}-transcript.pdf", transcript_pdf_bytes)
+            if certificate_bytes:
+                archive.writestr(f"{certificate.certificate_id or report.report_number}-certificate.pdf", certificate_bytes)
+            archive.writestr(f"{report.report_number}-questions-and-answers.pdf", qa_pdf_bytes)
+            archive.writestr(f"{report.report_number}-ai-score-and-result.pdf", score_pdf_bytes)
+        buffer.seek(0)
+        return buffer.getvalue()
 
     @classmethod
     def _logo_data_uri(cls):

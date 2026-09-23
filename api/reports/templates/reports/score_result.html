@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <title>AI Score &amp; Result</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 12mm 14mm;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #1b2f5c;
+      font-size: 11px;
+    }
+    h1 {
+      font-size: 18px;
+      margin: 0 0 4px 0;
+    }
+    h2 {
+      font-size: 13px;
+      margin: 16px 0 6px 0;
+      color: #2f6fe8;
+    }
+    .meta {
+      color: #6880ab;
+      font-size: 11px;
+      margin-bottom: 10px;
+    }
+    .meta span {
+      margin-right: 14px;
+    }
+    .summary-box {
+      border: 1px solid #d5e2fb;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+    }
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 2px 0;
+    }
+    .summary-label {
+      color: #6880ab;
+    }
+    .summary-value {
+      font-weight: bold;
+    }
+    .disclaimer {
+      color: #9aa8c6;
+      font-size: 9px;
+      margin-top: 4px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 4px;
+    }
+    th {
+      background: #f4f8ff;
+      color: #1b2f5c;
+      text-align: left;
+      padding: 6px 6px;
+      border: 1px solid #d5e2fb;
+      font-size: 10px;
+    }
+    td {
+      padding: 6px 6px;
+      border: 1px solid #d5e2fb;
+      vertical-align: top;
+      font-size: 10px;
+    }
+    .pass { color: #21bb71; font-weight: bold; }
+    .fail { color: #dc5a5a; font-weight: bold; }
+    .review { color: #f1aa29; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>AI Score &amp; Result</h1>
+  <div class="meta">
+    <span>Report: {{ report_number }}</span>
+    {% if assessment_context.candidate_name %}<span>Candidate: {{ assessment_context.candidate_name }}</span>{% endif %}
+    {% if assessment_context.target_role %}<span>Role: {{ assessment_context.target_role }}</span>{% endif %}
+    {% if assessment_context.assessment_date %}<span>Date: {{ assessment_context.assessment_date }}</span>{% endif %}
+  </div>
+
+  <h2>Overall Result</h2>
+  <div class="summary-box">
+    <div class="summary-row">
+      <span class="summary-label">Readiness Indicator</span>
+      <span class="summary-value">{{ executive_summary.readiness_indicator.display|default:"N/A" }}</span>
+    </div>
+    <div class="summary-row">
+      <span class="summary-label">Overall Score</span>
+      <span class="summary-value">{{ executive_summary.overall_score_display|default:executive_summary.overall_score|default:"N/A" }}</span>
+    </div>
+    {% if executive_summary.override_triggered %}
+    <div class="summary-row">
+      <span class="summary-label">Critical Requirement Override</span>
+      <span class="summary-value fail">Applied - a critical failure determines the result regardless of overall score</span>
+    </div>
+    {% endif %}
+    {% if executive_summary.readiness_reason.employer_message %}
+    <div class="summary-row">
+      <span class="summary-label">Reason</span>
+      <span class="summary-value">{{ executive_summary.readiness_reason.employer_message }}</span>
+    </div>
+    {% endif %}
+  </div>
+  <p class="disclaimer">The score and result above are produced entirely by the deterministic Rule Engine from AI-extracted evidence indicators. The AI never assigns a score, pass/fail, or recommendation itself.</p>
+
+  <h2>Per-Question Breakdown</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Competency</th>
+        <th>Question</th>
+        <th>Score</th>
+        <th>Result</th>
+        <th>Explanation</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in evidence_rows %}
+      <tr>
+        <td>{{ row.question_order }}</td>
+        <td>{{ row.display_name|default:row.competency_name }}</td>
+        <td>{{ row.question_text }}</td>
+        <td>{{ row.score }}&nbsp;/&nbsp;{{ row.max_score }}</td>
+        <td>
+          {% if row.critical_failure %}
+            <span class="fail">Critical Failure</span>
+          {% elif row.requires_human_review %}
+            <span class="review">Needs Human Review</span>
+          {% elif row.required_indicators_passed %}
+            <span class="pass">Pass</span>
+          {% else %}
+            <span class="fail">Fail</span>
+          {% endif %}
+        </td>
+        <td>{{ row.explanation }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6">No scored responses are available.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

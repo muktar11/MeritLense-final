@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>الأسئلة والإجابات</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 12mm 14mm;
+    }
+
+    {% if arabic_font_regular_uri %}
+    @font-face {
+      font-family: "Noto Naskh Arabic";
+      src: url("{{ arabic_font_regular_uri }}") format("truetype");
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: "Noto Naskh Arabic";
+      src: url("{{ arabic_font_bold_uri }}") format("truetype");
+      font-weight: 700;
+    }
+    {% endif %}
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Noto Naskh Arabic", Arial, sans-serif;
+      color: #1b2f5c;
+      font-size: 12px;
+      direction: rtl;
+    }
+    h1 {
+      font-size: 19px;
+      margin: 0 0 4px 0;
+    }
+    .meta {
+      color: #6880ab;
+      font-size: 11px;
+      margin-bottom: 14px;
+    }
+    .meta span {
+      margin-left: 14px;
+    }
+    .item {
+      border: 1px solid #d5e2fb;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      page-break-inside: avoid;
+    }
+    .q-label {
+      font-weight: 700;
+      color: #2f6fe8;
+      margin-bottom: 4px;
+    }
+    .q-text {
+      margin-bottom: 8px;
+    }
+    .a-label {
+      font-weight: 700;
+      color: #21bb71;
+      margin-bottom: 4px;
+    }
+    .a-text {
+      white-space: pre-wrap;
+    }
+    .no-answer {
+      color: #9aa8c6;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <h1>الأسئلة والإجابات</h1>
+  <div class="meta">
+    <span>رقم التقرير: {{ report_number }}</span>
+    {% if assessment_context.candidate_name %}<span>المرشح: {{ assessment_context.candidate_name }}</span>{% endif %}
+    {% if assessment_context.target_role %}<span>الوظيفة: {{ assessment_context.target_role }}</span>{% endif %}
+    {% if assessment_context.assessment_date %}<span>التاريخ: {{ assessment_context.assessment_date }}</span>{% endif %}
+  </div>
+
+  {% for row in rows %}
+  <div class="item">
+    <div class="q-label">السؤال {{ row.question_order }}</div>
+    <div class="q-text">{{ row.question_text }}</div>
+    <div class="a-label">إجابة المرشح</div>
+    {% if row.answer_text %}
+      <div class="a-text">{{ row.answer_text }}</div>
+    {% else %}
+      <div class="no-answer">لا يتوفر نص لهذه الإجابة.</div>
+    {% endif %}
+  </div>
+  {% empty %}
+  <p>لا توجد إجابات متاحة لهذه الجلسة.</p>
+  {% endfor %}
+</body>
+</html>

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <title>Questions &amp; Answers</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 12mm 14mm;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #1b2f5c;
+      font-size: 11px;
+    }
+    h1 {
+      font-size: 18px;
+      margin: 0 0 4px 0;
+      color: #1b2f5c;
+    }
+    .meta {
+      color: #6880ab;
+      font-size: 11px;
+      margin-bottom: 14px;
+    }
+    .meta span {
+      margin-right: 14px;
+    }
+    .item {
+      border: 1px solid #d5e2fb;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      page-break-inside: avoid;
+    }
+    .q-label {
+      font-weight: bold;
+      color: #2f6fe8;
+      margin-bottom: 4px;
+    }
+    .q-text {
+      margin-bottom: 8px;
+    }
+    .a-label {
+      font-weight: bold;
+      color: #21bb71;
+      margin-bottom: 4px;
+    }
+    .a-text {
+      white-space: pre-wrap;
+    }
+    .no-answer {
+      color: #9aa8c6;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <h1>Questions &amp; Answers</h1>
+  <div class="meta">
+    <span>Report: {{ report_number }}</span>
+    {% if assessment_context.candidate_name %}<span>Candidate: {{ assessment_context.candidate_name }}</span>{% endif %}
+    {% if assessment_context.target_role %}<span>Role: {{ assessment_context.target_role }}</span>{% endif %}
+    {% if assessment_context.assessment_date %}<span>Date: {{ assessment_context.assessment_date }}</span>{% endif %}
+  </div>
+
+  {% for row in rows %}
+  <div class="item">
+    <div class="q-label">Question {{ row.question_order }}</div>
+    <div class="q-text">{{ row.question_text }}</div>
+    <div class="a-label">Candidate's Answer</div>
+    {% if row.answer_text %}
+      <div class="a-text">{{ row.answer_text }}</div>
+    {% else %}
+      <div class="no-answer">No transcript is available for this response.</div>
+    {% endif %}
+  </div>
+  {% empty %}
+  <p>No responses are available for this session.</p>
+  {% endfor %}
+</body>
+</html>

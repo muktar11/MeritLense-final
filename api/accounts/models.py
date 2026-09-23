@@ -198,11 +198,13 @@ class CompanyEmployerProfile(TimeStampedModel, SoftDeleteModel):
     industry = models.CharField(max_length=100, blank=True)
     
     phone_number = models.CharField(max_length=20)
-    # Free text, kept for backward compatibility with existing rows (e.g.
-    # "United Arab Emirates") - `choices` only constrains new writes made
-    # through an updated form, Django never validates it against existing
-    # DB content, so this is a zero-risk metadata-only addition.
-    country = models.CharField(max_length=100, choices=Countries.CHOICES)
+    # Free text (e.g. "United Arab Emirates"), not an ISO code - this field
+    # predates Countries.CHOICES and every existing caller (registration,
+    # the company-profile editor) submits the full country name, not a
+    # 2-letter code, so it deliberately carries no `choices` constraint;
+    # DRF's ModelSerializer would otherwise auto-validate it as a
+    # ChoiceField against Countries.CHOICES' codes and reject every save.
+    country = models.CharField(max_length=100)
     city = models.CharField(max_length=100)
     address = models.CharField(max_length=255, blank=True)
     website = models.URLField(blank=True)
@@ -279,7 +281,9 @@ class Company(TimeStampedModel):
     company_size = models.CharField(max_length=10)
     industry = models.CharField(max_length=100, blank=True)
     phone_number = models.CharField(max_length=20)
-    country = models.CharField(max_length=100, choices=Countries.CHOICES)
+    # Free text, not an ISO code - see the identical field on
+    # CompanyEmployerProfile above for why this carries no `choices`.
+    country = models.CharField(max_length=100)
     city = models.CharField(max_length=100)
     address = models.CharField(max_length=255, blank=True)
     website = models.URLField(blank=True)

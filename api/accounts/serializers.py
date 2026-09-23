@@ -78,8 +78,10 @@ class B2CRegistrationSerializer(UserRegistrationSerializer):
     target_market = serializers.ChoiceField(choices=[], required=False, allow_null=True, allow_blank=True)
     timezone = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=64)
 
-    id_document = serializers.FileField()
-    resume_document = serializers.FileField()
+    # No longer collected at registration - the upload UI is hidden on the
+    # frontend's candidate/page.tsx; can be uploaded later from the profile.
+    id_document = serializers.FileField(required=False, allow_null=True)
+    resume_document = serializers.FileField(required=False, allow_null=True)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -107,10 +109,10 @@ class B2CRegistrationSerializer(UserRegistrationSerializer):
             'country_of_residence': validated_data.pop('country_of_residence', None) or None,
             'target_market': validated_data.pop('target_market', None) or None,
             'timezone': validated_data.pop('timezone', None) or None,
-            'id_document': validated_data.pop('id_document'),
-            'resume_document': validated_data.pop('resume_document'),
+            'id_document': validated_data.pop('id_document', None),
+            'resume_document': validated_data.pop('resume_document', None),
         }
-        
+
         user = self.create_user(Roles.B2C, **validated_data)
         self.context['profile_data'] = profile_data
         self.context['user'] = user

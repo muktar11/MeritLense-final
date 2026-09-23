@@ -167,6 +167,34 @@ class AccountsWeek2Tests(APITestCase):
         self.assertEqual(refresh_response.status_code, status.HTTP_200_OK, refresh_response.data)
         self.assertIn("access", refresh_response.data)
 
+    def test_b2c_registration_succeeds_without_id_document_or_resume(self):
+        # The upload UI for these is hidden on the registration form (see
+        # auth/register/candidate/page.tsx) - registration must succeed
+        # without them, and the profile is created with both left blank.
+        registration_payload = {
+            "email": "new-b2c-no-docs@example.com",
+            "first_name": "New",
+            "last_name": "Candidate",
+            "password": "Password123!",
+            "confirm_password": "Password123!",
+            "passport_id": "REG-NO-DOCS-1001",
+            "job_role": JobRoles.SOFTWARE_ENGINEER,
+            "nationality": Nationalities.US,
+            "preferred_language": Languages.ENGLISH,
+            "phone_number": "+15551112222",
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/register/b2c",
+            registration_payload,
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+
+        profile = IndividualEmployerProfile.objects.get(passport_id="REG-NO-DOCS-1001")
+        self.assertFalse(bool(profile.id_document))
+        self.assertFalse(bool(profile.resume_document))
+
     def test_b2c_registration_persists_location_localization_fields_when_supplied(self):
         # Country of residence, target market, and timezone are all optional
         # (client-side detected/suggested, never forced) - this confirms

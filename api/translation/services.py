@@ -457,9 +457,17 @@ class ResponseInterpretationService:
                 "session.input_transcript_type - 'original' or 'original_untranslated' means it has not been "
                 "machine-translated). Interpret it directly using your own understanding of that language rather "
                 "than assuming prior translation to English. "
+                "Judge whether each expected_steps entry was addressed by the candidate's underlying meaning and "
+                "intent, never by literal keyword or sentence matching against that step's own wording. Credit "
+                "any phrasing, synonym, or valid alternative approach that conveys the same intent as a step - "
+                "for example, 'call the mechanic', 'contact the garage', and 'go to a nearby workshop' should "
+                "all be treated as satisfying a step about contacting a repair professional. Do not withhold "
+                "credit merely because the candidate's wording differs from expected_steps' own phrasing. "
                 "For mentioned_steps and missing_steps, choose entries only from question.expected_steps, copied "
-                "verbatim (exact text, not translated or paraphrased) - do not invent new step phrasing. If a step "
-                "from expected_steps was not clearly addressed, omit it from mentioned_steps rather than guessing."
+                "verbatim (exact text, not translated or paraphrased) - do not invent new step phrasing; this "
+                "verbatim requirement applies only to how you label a matched step, not to how you judge whether "
+                "it was addressed. If a step from expected_steps was not clearly addressed by any reasonable "
+                "reading of the transcript, omit it from mentioned_steps rather than guessing."
             ),
             "legal_disclaimer": LEGAL_DISCLAIMER_TEXT,
             "session": {

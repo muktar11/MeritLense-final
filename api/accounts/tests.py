@@ -704,6 +704,29 @@ class AccountsWeek2Tests(APITestCase):
         self.assertEqual(user.individual_profile.phone_number, "+15559990000")
         self.assertEqual(user.individual_profile.address, "Updated Address")
 
+    def test_b2b_profile_patch_accepts_full_country_name_not_just_an_iso_code(self):
+        # Regression test: CompanyEmployerProfile.country stores full names
+        # like "United States" (see create_verified_b2b_owner), not ISO
+        # codes - it must never gain a `choices=Countries.CHOICES`
+        # constraint again, since DRF's ModelSerializer auto-derives a
+        # ChoiceField from model `choices` and would reject every save
+        # (including one that just re-submits the existing, unchanged
+        # value) with "is not a valid choice".
+        user, _company = self.create_verified_b2b_owner(email="b2b-country-patch@example.com")
+        self.authenticate(user.email, "Password123!")
+
+        patch_response = self.client.patch(
+            "/api/v1/auth/me",
+            {"country": "United Arab Emirates", "target_market": "SA", "timezone": "Asia/Dubai"},
+            format="json",
+        )
+        self.assertEqual(patch_response.status_code, status.HTTP_200_OK, patch_response.data)
+
+        user.company_profile.refresh_from_db()
+        self.assertEqual(user.company_profile.country, "United Arab Emirates")
+        self.assertEqual(user.company_profile.target_market, "SA")
+        self.assertEqual(user.company_profile.timezone, "Asia/Dubai")
+
     def test_document_verification_admin_permission_uses_admin_permissions_json(self):
         target_user = self.create_verified_b2c_user(email="pending-docs@example.com")
         target_user.documents_verification_status = "PENDING"

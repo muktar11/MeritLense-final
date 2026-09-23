@@ -112,9 +112,6 @@
     .score-value {
       font-weight: 700;
     }
-    .explanation {
-      color: #4a5a7a;
-    }
     .pass { color: #21bb71; font-weight: 700; }
     .fail { color: #dc5a5a; font-weight: 700; }
     .review { color: #f1aa29; font-weight: 700; }
@@ -182,7 +179,6 @@
           <span class="fail">رسوب</span>
         {% endif %}
       </div>
-      <div class="explanation">{{ row.explanation }}</div>
     {% else %}
       <div class="not-scored">لم يتم التقييم بعد.</div>
     {% endif %}

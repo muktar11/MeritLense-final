@@ -162,13 +162,20 @@ class IndividualEmployerProfile(TimeStampedModel, SoftDeleteModel):
     # IANA name (e.g. "Asia/Dubai"), detected via the browser's Intl API.
     timezone = models.CharField(max_length=64, null=True, blank=True)
 
+    # No longer collected at registration - the upload UI is hidden there
+    # (see the frontend's candidate/page.tsx) - so these can be blank until
+    # the candidate/employer uploads them later from their profile.
     id_document = models.FileField(
         upload_to='b2c/documents/id/',
-        validators=[FileExtensionValidator(['pdf', 'jpg', 'jpeg', 'png'])]
+        validators=[FileExtensionValidator(['pdf', 'jpg', 'jpeg', 'png'])],
+        null=True,
+        blank=True,
     )
     resume_document = models.FileField(
         upload_to='b2c/documents/resume/',
-        validators=[FileExtensionValidator(['pdf', 'doc', 'docx'])]
+        validators=[FileExtensionValidator(['pdf', 'doc', 'docx'])],
+        null=True,
+        blank=True,
     )
     
     additional_documents = models.FileField(

@@ -4,10 +4,11 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.core.management import call_command
-from django.test import SimpleTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from api.storage.services import AzureQueueService
-from api.translation.services import normalize_language_code
+from api.translation.models import IndicatorPhraseTranslation
+from api.translation.services import EvaluationInputBuilderService, TranslationService, normalize_language_code
 
 
 class LanguageNormalizationTests(SimpleTestCase):
@@ -22,6 +23,69 @@ class LanguageNormalizationTests(SimpleTestCase):
     def test_normalizes_iso_codes(self):
         self.assertEqual(normalize_language_code("EN"), "en")
         self.assertEqual(normalize_language_code("en-US"), "en")
+
+
+class IndicatorPhraseReverseLookupTests(TestCase):
+    def test_resolves_a_cached_arabic_phrase_back_to_its_english_source(self):
+        IndicatorPhraseTranslation.objects.create(
+            phrase_en="pull over safely", phrase_ar="توقف بأمان", provider="GOOGLE"
+        )
+
+        self.assertEqual(
+            TranslationService.resolve_indicator_phrase_to_english("توقف بأمان"),
+            "pull over safely",
+        )
+
+    def test_returns_the_phrase_unchanged_when_no_cached_mapping_exists(self):
+        self.assertEqual(
+            TranslationService.resolve_indicator_phrase_to_english("عبارة غير معروفة"),
+            "عبارة غير معروفة",
+        )
+
+
+class EvaluationInputBuilderLanguageNormalizationTests(TestCase):
+    def _build(self, *, mentioned_steps, missing_steps, input_language):
+        response = SimpleNamespace(
+            question=SimpleNamespace(question_template=None),
+            translated_transcript="",
+            translation_status="NOT_REQUIRED",
+            session=SimpleNamespace(rubric_version="v1"),
+        )
+        interpretation = SimpleNamespace(
+            normalized_indicators={"mentioned_steps": mentioned_steps, "missing_steps": missing_steps},
+            input_language=input_language,
+            confidence_score=None,
+            prompt_version="v1",
+            prompt_hash="hash",
+            risk_flags=[],
+        )
+        return EvaluationInputBuilderService.build(response=response, interpretation=interpretation)
+
+    def test_normalizes_arabic_observed_and_missing_indicators_to_english_for_scoring(self):
+        IndicatorPhraseTranslation.objects.create(
+            phrase_en="report the fault", phrase_ar="أبلغ عن العطل", provider="GOOGLE"
+        )
+        IndicatorPhraseTranslation.objects.create(
+            phrase_en="inform the employer", phrase_ar="أبلغ صاحب العمل", provider="GOOGLE"
+        )
+
+        payload = self._build(
+            mentioned_steps=["أبلغ عن العطل"],
+            missing_steps=["أبلغ صاحب العمل"],
+            input_language="ar",
+        )
+
+        self.assertEqual(payload["observed_indicators"], ["report the fault"])
+        self.assertEqual(payload["missing_indicators"], ["inform the employer"])
+
+    def test_leaves_english_observed_indicators_untouched(self):
+        payload = self._build(
+            mentioned_steps=["report the fault"],
+            missing_steps=[],
+            input_language="en",
+        )
+
+        self.assertEqual(payload["observed_indicators"], ["report the fault"])
 
 
 class AzureQueueWorkerTests(SimpleTestCase):

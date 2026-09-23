@@ -415,6 +415,32 @@ class TranslationService:
             pass
         return translated
 
+    @classmethod
+    def resolve_indicator_phrase_to_english(cls, phrase):
+        """The inverse of translate_indicator_phrase - given a canonical
+        indicator phrase in whatever language the AI extracted it in (e.g.
+        an Arabic QuestionTemplate.expected_steps value), resolve it back to
+        the English phrase ScoringRule's own expected_indicators/
+        required_indicators/critical_failure_indicators are keyed on.
+
+        ScoringRule only ever stores indicator vocabulary in English - it
+        has no per-language variants - so without this step, a non-English
+        session's AI-extracted (correctly-matched-to-the-question's-own-
+        language) indicators can never string-match the rule's English
+        list, and every response scores 0 regardless of answer quality.
+        Every real Arabic expected_steps value was itself produced by
+        translate_indicator_phrase (via the Arabic question-bank backfill,
+        or at report-render time), so this is a cache hit for any genuine
+        canonical value. Fails safe: returns the phrase unchanged (same as
+        today's behavior) if no cached reverse mapping exists, rather than
+        raising - a still-unmatched phrase just stays unmatched, exactly as
+        it was before this normalization step existed."""
+        phrase = (phrase or "").strip()
+        if not phrase:
+            return phrase
+        cached = IndicatorPhraseTranslation.objects.filter(phrase_ar=phrase).first()
+        return cached.phrase_en if cached else phrase
+
 
 class ResponseInterpretationService:
     prompt_version = settings.AI_INTERPRETATION_PROMPT_VERSION
@@ -599,6 +625,19 @@ class EvaluationInputBuilderService:
         expected_indicators = template.expected_steps if template else []
         observed_indicators = interpretation.normalized_indicators.get("mentioned_steps") or []
         missing_indicators = interpretation.normalized_indicators.get("missing_steps") or []
+        # ScoringRule's own indicator lists are English-only (see
+        # TranslationService.resolve_indicator_phrase_to_english) - a
+        # non-English session's indicators, correctly extracted against the
+        # question's own (e.g. Arabic) expected_steps, must be normalized
+        # back to that same English vocabulary before the Rule Engine can
+        # match them against rule.expected_indicators.
+        if (interpretation.input_language or "").lower() not in ("", "en"):
+            observed_indicators = [
+                TranslationService.resolve_indicator_phrase_to_english(phrase) for phrase in observed_indicators
+            ]
+            missing_indicators = [
+                TranslationService.resolve_indicator_phrase_to_english(phrase) for phrase in missing_indicators
+            ]
         competency_code = ""
         if template:
             competency_code = normalize_skill_code(template.skill_id or template.skill_tag or template.skill)

@@ -1,4 +1,5 @@
 from decimal import Decimal
+from types import SimpleNamespace
 
 from django.test import TestCase, override_settings
 from django.db import DatabaseError
@@ -864,10 +865,15 @@ class Week6ScoringServiceTests(TestCase):
         self.assertFalse(response_result.critical_failure)
         self.assertEqual(summary.status, SessionEvaluationSummary.STATUS_EVALUATED)
         self.assertEqual(float(summary.overall_percentage), 70.0)
-        self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.READY)
+        # Only one of the five canonical competencies (Safety) has any
+        # evidence in this fixture - clean scoring with no critical
+        # failures is necessary but not sufficient for READY, so this
+        # correctly lands on INCOMPLETE rather than a premature READY (see
+        # Week6ScoringService._apply_evaluation_rollups' coverage check).
+        self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.INCOMPLETE)
         self.assertEqual(float(self.evaluation.score), 70.0)
         record = EvaluationReadinessDecisionRecord.objects.get(evaluation=self.evaluation)
-        self.assertEqual(record.readiness_indicator, "جاهز")
+        self.assertEqual(record.readiness_indicator, "أدلة غير كافية")
         self.assertFalse(record.override_triggered)
         self.assertEqual(record.rule_engine_version, "v1.0")
         self.assertEqual(record.session, self.session)
@@ -1074,7 +1080,10 @@ class Week6ScoringServiceTests(TestCase):
             f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/readiness-legal-record"
         )
         self.assertEqual(legal_record_response.status_code, 200)
-        self.assertEqual(legal_record_response.data["readiness_indicator"], "جاهز")
+        # Only one of five canonical competencies (Safety) has evidence in
+        # this fixture - see test_week6_scoring_service_generates_response_
+        # and_session_outputs above for the same coverage-gate reasoning.
+        self.assertEqual(legal_record_response.data["readiness_indicator"], "أدلة غير كافية")
 
     def test_screening_evaluation_skips_readiness_override(self):
         self.session.evaluation_tier = InterviewEvaluationTier.SCREENING
@@ -1824,6 +1833,118 @@ class AutomaticScoringOnCompletionTests(TestCase):
         self.assertTrue(evaluation.certificate_enabled)
         self.assertEqual(evaluation.certificate_status, "NOT_ISSUED")
         self.assertFalse(Certificate.objects.filter(evaluation=evaluation).exists())
+        # The certificate gate and the readiness_status the report/PDF
+        # displays must never disagree about whether coverage was
+        # sufficient - only 1 of 5 canonical dimensions (Safety) has any
+        # evidence here, so this must land on INCOMPLETE, not a false READY
+        # (the exact contradiction this fix closes - see
+        # Week6ScoringService._apply_evaluation_rollups).
+        self.assertEqual(evaluation.readiness_status, ReadinessStatus.INCOMPLETE)
+
+    def test_completion_with_sufficient_coverage_still_reaches_ready(self):
+        from api.sessions.services import InterviewSessionService
+
+        competencies = [
+            ("SUF-SAF-001", "safety_awareness", "Safety Awareness"),
+            ("SUF-HYG-001", "hygiene_standards", "Hygiene & Standards"),
+            ("SUF-COM-001", "communication_ability", "Communication Ability"),
+            ("SUF-TSK-001", "task_execution", "Practical Task Execution"),
+        ]
+        rule_set = ScoringRuleSet.objects.create(
+            name="Sufficient Coverage Rules",
+            version="v1",
+            role_code="domestic_worker",
+            role_name="Housekeeper",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            is_active=True,
+            created_by=self.user,
+            company=self.candidate.company,
+        )
+        for order, (question_code, competency_code, competency_name) in enumerate(competencies, start=1):
+            template = QuestionTemplate.objects.create(
+                role_name="Housekeeper",
+                role_code="domestic_worker",
+                question_code=question_code,
+                question_version="1.0",
+                question_status=QuestionLifecycleStatus.ACTIVE,
+                domain=competency_name,
+                skill_tag=competency_code,
+                skill=competency_name,
+                sequence_number=order,
+                difficulty=QuestionDifficulty.MEDIUM,
+                question_text=f"Demonstrate {competency_name}.",
+                question_type="general",
+                question_format="SCENARIO",
+                language="EN",
+                scoring_type="0/3/5",
+                difficulty_score=2,
+                estimated_time_seconds=60,
+                expected_answer_type="multi_step",
+                evaluation_tier=InterviewEvaluationTier.FULL,
+                rubric_version="v2.0",
+                question_set_version="v1.2",
+                critical_question=False,
+                is_active=True,
+            )
+            session_question = SessionQuestion.objects.create(
+                session=self.session,
+                question_template=template,
+                question_text=template.question_text,
+                domain=template.domain,
+                skill=template.skill_tag,
+                difficulty=template.difficulty,
+                question_order=order,
+                status="ANSWERED",
+                is_mandatory=True,
+                asked_at=timezone.now(),
+                answered_at=timezone.now(),
+            )
+            response = CandidateResponse.objects.create(
+                session=self.session,
+                question=session_question,
+                response_type=CandidateResponseType.TEXT,
+                transcript="A complete, correct answer.",
+                text_response="A complete, correct answer.",
+                interpretation_status="COMPLETED",
+                processing_status="RULE_INPUT_PREPARED",
+                stt_confidence=Decimal("0.95"),
+            )
+            EvaluationInputArtifact.objects.create(
+                response=response,
+                session=self.session,
+                question=session_question,
+                competency_code=competency_code,
+                expected_indicators=["do the thing"],
+                observed_indicators=["do the thing"],
+                missing_indicators=[],
+                risk_flags=[],
+                source_interpretation_status="COMPLETED",
+                requires_human_review=False,
+                metadata={"source": "test"},
+            )
+            ScoringRule.objects.create(
+                rule_set=rule_set,
+                competency_code=competency_code,
+                competency_name=competency_name,
+                question_template=template,
+                question_code=question_code,
+                expected_indicators=["do the thing"],
+                required_indicators=["do the thing"],
+                weighted_indicators={"do the thing": "10"},
+                max_score="10.00",
+                pass_threshold="7.00",
+                scoring_method=ScoringRule.SCORING_METHOD_WEIGHTED_MATCH,
+                is_active=True,
+            )
+
+        self.session.identity_verified = True
+        self.session.total_questions = len(competencies)
+        self.session.save(update_fields=["identity_verified", "total_questions"])
+
+        InterviewSessionService.complete_session(self.session, actor=self.user)
+
+        evaluation = Evaluation.objects.get(session=self.session)
+        self.assertEqual(evaluation.readiness_status, ReadinessStatus.READY)
 
 
 class CertificateGenerationTests(TestCase):
@@ -2340,9 +2461,9 @@ class CertificateEligibilityTests(TestCase):
 
     def test_partially_ready_complete_and_verified_gets_a_certificate(self):
         # PARTIALLY_READY isn't a stored readiness_status value (only READY/
-        # NOT_READY/PENDING are) - it's the resolved display classification
-        # for PENDING/unmatched, same as the internal report - see
-        # EvaluationReportService._resolve_readiness_indicator.
+        # NOT_READY/PENDING/INCOMPLETE are) - it's the resolved display
+        # classification for PENDING/unmatched, same as the internal report
+        # - see EvaluationReportService._resolve_readiness_indicator.
         from api.core.constants import CertificateStatus
         summary = self._summary()
 
@@ -2766,3 +2887,29 @@ class EvaluatorRatingTests(TestCase):
         self.assertEqual(payload["task_execution"], 60)
         self.assertEqual(payload["behavioral_risk_level"], "Medium")
         self.assertEqual(payload["consistency"], 91)
+
+
+class InsufficientEvidenceReadinessMappingTests(TestCase):
+    """EvaluationReadinessRecordService and EvaluationReportService must
+    agree on the new INCOMPLETE state's round trip, the same way they
+    already agree on READY/NOT_READY/PENDING."""
+
+    def test_readiness_record_service_round_trips_incomplete(self):
+        from api.evaluations.readiness_record_services import EvaluationReadinessRecordService
+
+        indicator = EvaluationReadinessRecordService._map_indicator(ReadinessStatus.INCOMPLETE)
+        self.assertEqual(indicator, "أدلة غير كافية")
+        self.assertEqual(
+            EvaluationReadinessRecordService.status_from_indicator(indicator),
+            ReadinessStatus.INCOMPLETE,
+        )
+
+    def test_report_service_resolves_incomplete_to_its_own_distinct_code(self):
+        from api.reports.services import EvaluationReportService
+
+        evaluation = SimpleNamespace(readiness_status=ReadinessStatus.INCOMPLETE)
+        resolved = EvaluationReportService._resolve_readiness_indicator(evaluation, readiness_record=None)
+
+        self.assertEqual(resolved["code"], "INCOMPLETE")
+        self.assertNotEqual(resolved["code"], "PARTIALLY_READY")
+        self.assertNotEqual(resolved["code"], "NOT_READY")

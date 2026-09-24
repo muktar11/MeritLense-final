@@ -9,6 +9,7 @@ from api.questions.skill_tags import normalize_skill_code, normalize_skill_tag
 from api.sessions.models import CandidateResponse
 from api.translation.models import EvaluationInputArtifact
 
+from .certificate_services import MINIMUM_REQUIRED_DIMENSIONS, REQUIRED_DIMENSIONS, assessed_dimensions
 from .readiness_record_services import EvaluationReadinessRecordService
 from .models import (
     CompetencyEvaluationResult,
@@ -515,10 +516,32 @@ class Week6ScoringService:
             evaluation.readiness_override_reason = readiness_reason
             update_fields.extend(["readiness_status", "readiness_override_applied", "readiness_override_reason"])
         elif summary.status == SessionEvaluationSummary.STATUS_EVALUATED:
-            evaluation.readiness_status = ReadinessStatus.READY
-            evaluation.readiness_override_applied = False
-            evaluation.readiness_override_reason = ""
-            readiness_reason = "Deterministic scoring completed without critical failures."
+            # Scoring completing cleanly (no critical failures) is necessary
+            # but not sufficient for READY - the assessment must also have
+            # actually covered enough distinct competencies. Every response
+            # can be answered and scored (summary.status == STATUS_EVALUATED
+            # only checks that) while the assigned question set itself never
+            # touches enough of the five canonical dimensions - reusing the
+            # exact same check certificate_eligibility() already applies
+            # (MINIMUM_REQUIRED_DIMENSIONS) so a READY evaluation and an
+            # eligible-for-certificate evaluation never disagree about
+            # whether coverage was sufficient.
+            covered_dimensions = assessed_dimensions(summary)
+            minimum_dimensions = min(MINIMUM_REQUIRED_DIMENSIONS, len(REQUIRED_DIMENSIONS))
+            if len(covered_dimensions) < minimum_dimensions:
+                evaluation.readiness_status = ReadinessStatus.INCOMPLETE
+                evaluation.readiness_override_applied = False
+                evaluation.readiness_override_reason = ""
+                readiness_reason = (
+                    f"Insufficient assessment coverage: {len(covered_dimensions)} of "
+                    f"{len(REQUIRED_DIMENSIONS)} competencies assessed, minimum required is "
+                    f"{minimum_dimensions}."
+                )
+            else:
+                evaluation.readiness_status = ReadinessStatus.READY
+                evaluation.readiness_override_applied = False
+                evaluation.readiness_override_reason = ""
+                readiness_reason = "Deterministic scoring completed without critical failures."
             update_fields.extend(["readiness_status", "readiness_override_applied", "readiness_override_reason"])
         else:
             evaluation.readiness_status = ReadinessStatus.PENDING

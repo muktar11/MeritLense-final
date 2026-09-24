@@ -51,11 +51,15 @@ def _logo_data_uri():
 # and the unique constraint on save.
 _MAX_ID_ATTEMPTS = 5
 
-# Mirrors EvaluationReportService._resolve_readiness_indicator's own three
-# levels - the same real, already-computed readiness classification used
-# in the internal evaluation report, not a second judgment re-derived from
-# the raw score. "position" drives the readiness badge's color (1 = red,
-# 3 = green).
+# Mirrors three of EvaluationReportService._resolve_readiness_indicator's
+# four levels - the same real, already-computed readiness classification
+# used in the internal evaluation report, not a second judgment re-derived
+# from the raw score. "position" drives the readiness badge's color
+# (1 = red, 3 = green). No INCOMPLETE entry: certificate_eligibility()'s
+# own coverage check (MINIMUM_REQUIRED_DIMENSIONS, same check that sets
+# INCOMPLETE in the first place) always blocks certificate generation
+# before this gauge is ever looked up for that state - the .get() fallback
+# below is just defensive, not an expected path.
 READINESS_GAUGE = {
     "NOT_READY": {"label": "Readiness Gaps Identified", "label_ar": "تم تحديد فجوات في الجاهزية", "position": 1},
     "PARTIALLY_READY": {"label": "Partially Ready", "label_ar": "جاهز جزئيًا", "position": 2},
@@ -158,7 +162,7 @@ def _canonical_dimension(*values):
     return None
 
 
-def _assessed_dimensions(summary):
+def assessed_dimensions(summary):
     dimensions = set()
     for item in summary.competencies_summary or []:
         response_count = int(item.get("completed_response_count") or 0)
@@ -352,7 +356,7 @@ def certificate_eligibility(evaluation, summary):
         human_review_flags=human_review_flags,
         response_evidence_summary=EvaluationReportService._build_response_evidence(response_results),
     )
-    covered_dimensions = _assessed_dimensions(summary)
+    covered_dimensions = assessed_dimensions(summary)
     session = evaluation.session
     identity_verified = bool(session and session.identity_verified)
     completion_verified = bool(evaluation.status == "COMPLETED" and session and session.status == "COMPLETED")

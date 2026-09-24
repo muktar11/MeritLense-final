@@ -11,6 +11,7 @@ from api.translation.models import EvaluationInputArtifact
 
 from .certificate_services import (
     assessed_dimensions,
+    below_threshold_dimensions,
     minimum_required_dimensions_for_role,
     required_dimensions_for_role,
 )
@@ -534,6 +535,12 @@ class Week6ScoringService:
             role_code = evaluation.session.role_code
             role_required_dimensions = required_dimensions_for_role(role_code)
             minimum_dimensions = minimum_required_dimensions_for_role(role_code)
+            # A dimension can be "covered" (assessed_dimensions above) yet
+            # still be a real fail: below_threshold_competencies is computed
+            # by _build_session_summary but was previously never consulted
+            # here, so a required competency that was fully assessed and
+            # scored below its own pass_threshold still rolled up to READY.
+            failed_required_dimensions = below_threshold_dimensions(summary) & set(role_required_dimensions)
             if len(covered_dimensions) < minimum_dimensions:
                 evaluation.readiness_status = ReadinessStatus.INCOMPLETE
                 evaluation.readiness_override_applied = False
@@ -543,6 +550,14 @@ class Week6ScoringService:
                     f"{len(role_required_dimensions)} competencies assessed, minimum required is "
                     f"{minimum_dimensions}."
                 )
+            elif failed_required_dimensions:
+                evaluation.readiness_status = ReadinessStatus.NOT_READY
+                evaluation.readiness_override_applied = True
+                override_triggered = True
+                failed_names = ", ".join(sorted(failed_required_dimensions))
+                readiness_reason = f"Required competency below threshold: {failed_names}."
+                record_metadata["below_threshold_dimensions"] = sorted(failed_required_dimensions)
+                evaluation.readiness_override_reason = readiness_reason
             else:
                 evaluation.readiness_status = ReadinessStatus.READY
                 evaluation.readiness_override_applied = False

@@ -884,6 +884,109 @@ class Week6ScoringServiceTests(TestCase):
             ).exists()
         )
 
+    def test_required_competency_below_threshold_blocks_ready(self):
+        """Item 6 QA-closure regression: below_threshold_competencies is
+        computed by _build_session_summary but was previously never
+        consulted by _apply_evaluation_rollups, so a REQUIRED competency
+        that was fully assessed and genuinely scored below its own
+        pass_threshold still rolled up to READY as long as dimension
+        coverage looked sufficient. safety_awareness maps to the SAFETY
+        canonical dimension, which is required for domestic_worker."""
+        safety_rule = ScoringRule.objects.get(rule_set=self.rule_set, competency_code="safety_awareness")
+        safety_rule.pass_threshold = "9.00"
+        safety_rule.save(update_fields=["pass_threshold"])
+
+        task_template = QuestionTemplate.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            question_code="HK-TASK-001",
+            question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE,
+            domain="Practical Tasks",
+            skill_tag="task_execution",
+            skill="Practical Task Execution",
+            sequence_number=2,
+            difficulty=QuestionDifficulty.MEDIUM,
+            question_text="How do you fold laundry?",
+            question_type="practical",
+            question_format="SCENARIO",
+            language="EN",
+            scoring_type="0/3/5",
+            difficulty_score=2,
+            estimated_time_seconds=60,
+            expected_answer_type="multi_step",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            critical_question=False,
+            is_active=True,
+        )
+        task_session_question = SessionQuestion.objects.create(
+            session=self.session,
+            question_template=task_template,
+            question_text=task_template.question_text,
+            domain=task_template.domain,
+            skill=task_template.skill_tag,
+            difficulty=task_template.difficulty,
+            question_order=2,
+            status="ANSWERED",
+            is_mandatory=True,
+            asked_at=timezone.now(),
+            answered_at=timezone.now(),
+        )
+        task_response = CandidateResponse.objects.create(
+            session=self.session,
+            question=task_session_question,
+            response_type=CandidateResponseType.TEXT,
+            transcript="I sort by type and fold neatly.",
+            text_response="I sort by type and fold neatly.",
+            interpretation_status="COMPLETED",
+            processing_status="RULE_INPUT_PREPARED",
+        )
+        EvaluationInputArtifact.objects.create(
+            response=task_response,
+            session=self.session,
+            question=task_session_question,
+            competency_code="task_execution",
+            expected_indicators=["sort by type", "fold neatly"],
+            observed_indicators=["sort by type", "fold neatly"],
+            missing_indicators=[],
+            risk_flags=[],
+            source_interpretation_status="COMPLETED",
+            requires_human_review=False,
+            metadata={"source": "week5"},
+        )
+        ScoringRule.objects.create(
+            rule_set=self.rule_set,
+            competency_code="task_execution",
+            competency_name="Practical Task Execution",
+            question_template=task_template,
+            question_code="HK-TASK-001",
+            expected_indicators=["sort by type", "fold neatly"],
+            required_indicators=["sort by type"],
+            weighted_indicators={"sort by type": "5", "fold neatly": "5"},
+            max_score="10.00",
+            pass_threshold="7.00",
+            scoring_method=ScoringRule.SCORING_METHOD_WEIGHTED_MATCH,
+            is_active=True,
+        )
+
+        summary = Week6ScoringService.run_for_evaluation(
+            evaluation=self.evaluation, actor=self.user, rule_set=self.rule_set,
+        )
+        self.evaluation.refresh_from_db()
+
+        safety_result = CompetencyEvaluationResult.objects.get(
+            evaluation=self.evaluation, competency_code="safety_awareness"
+        )
+        self.assertEqual(safety_result.status, CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD)
+        below_threshold_codes = {row["competency_code"] for row in summary.below_threshold_competencies}
+        self.assertIn("safety_awareness", below_threshold_codes)
+
+        self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.NOT_READY)
+        self.assertTrue(self.evaluation.readiness_override_applied)
+        self.assertIn("SAFETY", self.evaluation.readiness_override_reason)
+
     def test_rescoring_after_a_retag_drops_the_stale_competency_row(self):
         """A question's skill_tag can be retagged onto a different
         competency between two scoring runs of the same evaluation (e.g.

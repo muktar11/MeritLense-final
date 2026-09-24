@@ -1,6 +1,7 @@
 from django.db import transaction
 from django.utils import timezone
 
+from api.core.constants import Roles
 from .models import PackageBalance, BalanceTransaction, Subscription, AddonRequest, SlotReservation
 
 ADDON_POINTS_CATALOG = {
@@ -26,6 +27,38 @@ class EntitlementService:
         if session.organization_id:
             return "COMPANY", session.organization
         return "USER", session.candidate.created_by
+
+    @classmethod
+    def resolve_owner_for_user(cls, user):
+        """Same ('COMPANY', company) / ('USER', user) shape as
+        resolve_owner(session), resolved directly from the acting user
+        instead - for entitlement actions with no session to derive it
+        from (e.g. certificate-reuse Slot spend, which creates no
+        InterviewSession at all)."""
+        if hasattr(user, "company_profile") and user.company_profile:
+            return "COMPANY", user.company_profile.company
+        if user.role == Roles.B2B_TEAM_MEMBER and hasattr(user, "team_member_profile"):
+            return "COMPANY", user.team_member_profile.company
+        return "USER", user
+
+    @classmethod
+    def consume_slot_for_certificate_reuse(cls, *, owner_type, owner, reference, actor=None):
+        """Ledger-only Slot deduction for reusing another account's already-
+        issued certificate (CertificateAccessGrant) - draws from the exact
+        same B2B/B2C balance machinery every other Slot spend uses, just
+        tagged CERT_REUSE and with no session/reservation to release later,
+        since there's nothing left to cancel once the certificate has been
+        handed over. Raises ValueError (same as every other consume path)
+        if the owner has no Slot available."""
+        if owner_type == "COMPANY":
+            return cls._consume_b2b(
+                owner, PackageBalance.SLOTS, reference=reference, actor=actor,
+                amount=1, transaction_type=BalanceTransaction.CERT_REUSE,
+            )
+        return cls._consume_b2c(
+            owner, PackageBalance.SLOTS, reference=reference, actor=actor,
+            amount=1, transaction_type=BalanceTransaction.CERT_REUSE,
+        )
 
     @classmethod
     def reserve_slot(cls, *, session, actor=None):

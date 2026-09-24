@@ -100,6 +100,35 @@ def low_balance_threshold(limit):
     return max(LOW_BALANCE_FLOOR, round(limit * LOW_BALANCE_FRACTION))
 
 
+def send_certificate_reused_email(*, candidate, requested_by, company, remaining):
+    """A business added a candidate who already has an existing, issued
+    certificate from a different account (passport ID match) and chose to
+    reuse it rather than run a new interview - one Slot was charged for
+    that (EntitlementService.consume_slot_for_certificate_reuse). Sent to
+    whoever requested it and the account/billing owner, same recipients
+    and reasoning as send_reservation_failed_email - the owner is the one
+    who notices the Slot count and should know why it moved without a new
+    interview being scheduled."""
+    recipients = _recipients(created_by=requested_by, company=company)
+    subject = "Assessment Slot used: existing certificate reused"
+
+    for email, name in recipients.items():
+        message = f"""
+Hello {name},
+
+An existing certificate was reused instead of running a new interview on MeritLense:
+
+- Candidate: {candidate.get_full_name()}
+- Requested by: {requested_by.get_full_name()} ({requested_by.email})
+
+One Assessment Slot has been deducted from your package for this ({remaining} remaining), the same as it would be for a new interview.
+
+Best regards,
+MeritLense Team
+"""
+        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+
+
 def maybe_send_low_balance_warning(*, created_by, company, remaining, limit, role_name=None):
     """Fires exactly once per crossing - only when this specific
     reservation is the one that pushed Available at-or-below the

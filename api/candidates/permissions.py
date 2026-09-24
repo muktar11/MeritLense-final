@@ -7,7 +7,7 @@ class CanManageCandidate(BasePermission):
         if not request.user.is_authenticated:
             return False
         
-        if view.action == 'create':
+        if view.action in ('create', 'reuse_certificate'):
             return request.user.role in [Roles.B2C, Roles.B2B, Roles.B2B_TEAM_MEMBER]
         
         return True

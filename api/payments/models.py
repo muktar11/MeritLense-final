@@ -560,6 +560,7 @@ class BalanceTransaction(TimeStampedModel):
     RESERVE = 'RESERVE'
     RELEASE = 'RELEASE'
     REFUND = 'REFUND'
+    CERT_REUSE = 'CERT_REUSE'
     TRANSACTION_TYPE_CHOICES = [
         (GRANT, 'Grant'),
         (CONSUME, 'Consume'),
@@ -568,6 +569,7 @@ class BalanceTransaction(TimeStampedModel):
         (RESERVE, 'Reserve'),
         (RELEASE, 'Release'),
         (REFUND, 'Refund'),
+        (CERT_REUSE, 'Certificate Reuse'),
     ]
 
     balance = models.ForeignKey(

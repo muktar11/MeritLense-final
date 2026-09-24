@@ -10,8 +10,19 @@ from rest_framework.test import APITestCase
 
 from api.accounts.models import Company, CompanyEmployerProfile, TeamMemberProfile, User
 from api.candidates.models import Candidate
-from api.core.constants import CompanySize, CompanyTeamPermissions, Languages, Roles, SubscriptionStatus, candidateJobRoles
-from api.payments.models import Customer, Price, Subscription
+from api.core.constants import (
+    CertificateStatus,
+    CompanySize,
+    CompanyTeamPermissions,
+    EvaluationStatus,
+    EvaluationType,
+    Languages,
+    Roles,
+    SubscriptionStatus,
+    candidateJobRoles,
+)
+from api.evaluations.models import Certificate, CertificateAccessGrant, Evaluation
+from api.payments.models import BalanceTransaction, Customer, PackageBalance, Price, Subscription
 
 
 def make_file(name="document.pdf", content=b"candidate-file", content_type="application/pdf"):
@@ -644,3 +655,217 @@ class CandidateVerificationPhotoStalenessTests(APITestCase):
 
         candidate.refresh_from_db()
         self.assertEqual(candidate.verification_photo.name, old_verification_photo_name)
+
+
+class CertificateReuseTests(APITestCase):
+    """Candidate.passport_id is globally unique across the whole platform
+    (not scoped per company), so a second employer adding a candidate the
+    platform has already certified elsewhere can't create their own
+    duplicate Candidate row - see api/candidates/certificate_reuse_services.py.
+    These tests cover the resulting three-way branch: same-scope duplicate
+    (unchanged, ordinary 400), a different account's candidate with no
+    certificate to offer (clear 409, not a raw IntegrityError 500), and a
+    different account's already-certified candidate (409 with a reuse
+    offer, then a separate confirm endpoint that actually spends a Slot)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._media_dir = tempfile.mkdtemp(prefix="cert-reuse-tests-")
+        cls._override = override_settings(MEDIA_ROOT=cls._media_dir)
+        cls._override.enable()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._override.disable()
+        shutil.rmtree(cls._media_dir, ignore_errors=True)
+        super().tearDownClass()
+
+    def setUp(self):
+        # Company A already evaluated and certified this candidate.
+        self.owner_admin, self.owner_company = self._create_b2b_company(
+            "owner-admin@example.com", "OwnerCo", "OWNER-CO-1"
+        )
+        self.owner_candidate = Candidate.objects.create(
+            first_name="Shared", last_name="Person", email="shared-person@example.com",
+            passport_id="SHARED-PASSPORT-1", job_role=candidateJobRoles.DRIVER,
+            company=self.owner_company, created_by=self.owner_admin,
+            passport_document=make_file("owner-passport.pdf"),
+        )
+        evaluation = Evaluation.objects.create(
+            candidate=self.owner_candidate,
+            created_by=self.owner_admin,
+            evaluation_type=EvaluationType.INTERVIEW,
+            status=EvaluationStatus.COMPLETED,
+            scheduled_date=timezone.now(),
+            candidate_first_name="Shared", candidate_last_name="Person",
+            candidate_email="shared-person@example.com",
+            candidate_passport_id="SHARED-PASSPORT-1",
+            candidate_job_role=candidateJobRoles.DRIVER,
+            certificate_status=CertificateStatus.ISSUED,
+            certificate_issued_at=timezone.now(),
+        )
+        self.certificate = Certificate.objects.create(
+            evaluation=evaluation, candidate=self.owner_candidate,
+            certificate_id="CERT-REUSE-TEST-1", issued_at=timezone.now(),
+            pdf_file=make_file("certificate.pdf"),
+        )
+
+        # Company B is the one trying to add the same real person.
+        self.requester_admin, self.requester_company = self._create_b2b_company(
+            "requester-admin@example.com", "RequesterCo", "REQ-CO-1", slot_grant=3
+        )
+
+    def _create_b2b_company(self, email, company_name, registration_number, slot_grant=None):
+        user = User.objects.create_user(
+            email=email, password="Password123!", first_name="Company", last_name="Admin",
+            role=Roles.B2B, is_verified=True,
+        )
+        company = Company.objects.create(
+            name=company_name, registration_number=registration_number, company_size=CompanySize.SMALL,
+            industry="Technology", phone_number="+15550000000", country="US", city="New York",
+            address="1 Company Way", website="https://example.com", admin_user=user,
+            registration_certificate=make_file(f"{registration_number}-certificate.pdf"), is_verified=True,
+        )
+        CompanyEmployerProfile.objects.create(
+            user=user, company_name=company_name, company_registration_number=registration_number,
+            company_size=CompanySize.SMALL, industry="Technology", phone_number="+15550000000",
+            country="US", city="New York", address="1 Company Way", website="https://example.com",
+            preferred_language=Languages.ENGLISH,
+            registration_certificate=make_file(f"{registration_number}-profile-certificate.pdf"),
+            resachetified_license=make_file(f"{registration_number}-license.pdf"),
+            company=company,
+        )
+        price = Price.objects.create(
+            name=f"Candidate Test Plan {registration_number}", stripe_price_id=f"price_{registration_number}",
+            stripe_product_id=f"prod_{registration_number}", target_user_type="B2B", unit_amount=0,
+            feature_limits={"candidate_limit": 50}, slot_grant=slot_grant,
+        )
+        customer = Customer.objects.create(
+            user=user, stripe_customer_id=f"cus_{registration_number}", email=user.email, name=user.get_full_name(),
+        )
+        Subscription.objects.create(
+            user=user, company=company, customer=customer, stripe_subscription_id=f"sub_{registration_number}",
+            stripe_price=price, status=SubscriptionStatus.ACTIVE, current_period_start=timezone.now(),
+            current_period_end=timezone.now() + timezone.timedelta(days=30), current_usage={"candidate_limit": 0},
+        )
+        return user, company
+
+    def _authenticate(self, user):
+        response = self.client.post(
+            "/api/v1/auth/login", {"email": user.email, "password": "Password123!"}, format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access']}")
+
+    def test_adding_a_candidate_with_another_companys_certified_passport_id_offers_reuse(self):
+        self._authenticate(self.requester_admin)
+        response = self.client.post(
+            "/api/v1/candidates/candidates",
+            {
+                "first_name": "Shared", "last_name": "Person", "email": "new-email@example.com",
+                "passport_id": "SHARED-PASSPORT-1", "job_role": candidateJobRoles.DRIVER,
+                "core_skills": "driving", "preferred_language": Languages.ENGLISH,
+                "passport_document": make_file("requester-passport.pdf"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT, response.data)
+        self.assertEqual(response.data["code"], "candidate_certificate_available")
+        self.assertEqual(response.data["certificate"]["candidate_name"], "Shared Person")
+        self.assertFalse(
+            Candidate.objects.filter(email="new-email@example.com").exists(),
+            "no duplicate Candidate row should be created",
+        )
+
+    def test_passport_id_taken_elsewhere_without_a_certificate_is_a_clear_error_not_a_500(self):
+        no_cert_candidate = Candidate.objects.create(
+            first_name="NoCert", last_name="Person", email="no-cert-person@example.com",
+            passport_id="NO-CERT-PASSPORT", job_role=candidateJobRoles.DRIVER,
+            company=self.owner_company, created_by=self.owner_admin,
+            passport_document=make_file("no-cert-passport.pdf"),
+        )
+        Evaluation.objects.create(
+            candidate=no_cert_candidate,
+            created_by=self.owner_admin,
+            evaluation_type=EvaluationType.INTERVIEW,
+            status=EvaluationStatus.SCHEDULED,
+            scheduled_date=timezone.now(),
+            candidate_first_name="NoCert", candidate_last_name="Person",
+            candidate_email="no-cert-person@example.com",
+            candidate_passport_id="NO-CERT-PASSPORT",
+            candidate_job_role=candidateJobRoles.DRIVER,
+        )
+
+        self._authenticate(self.requester_admin)
+        response = self.client.post(
+            "/api/v1/candidates/candidates",
+            {
+                "first_name": "NoCert", "last_name": "Person", "email": "another-email@example.com",
+                "passport_id": "NO-CERT-PASSPORT", "job_role": candidateJobRoles.DRIVER,
+                "core_skills": "driving", "preferred_language": Languages.ENGLISH,
+                "passport_document": make_file("requester-nocert-passport.pdf"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT, response.data)
+        self.assertEqual(response.data["code"], "passport_id_taken_elsewhere")
+
+    def test_same_company_passport_id_duplicate_still_uses_the_ordinary_scoped_error(self):
+        # A same-company re-add is the pre-existing, unrelated scoped
+        # duplicate check (CandidateCreateSerializer.validate) - must stay
+        # a plain 400, not the new cross-company reuse flow.
+        self._authenticate(self.owner_admin)
+        response = self.client.post(
+            "/api/v1/candidates/candidates",
+            {
+                "first_name": "Shared", "last_name": "Person", "email": "same-company-dup@example.com",
+                "passport_id": "SHARED-PASSPORT-1", "job_role": candidateJobRoles.DRIVER,
+                "core_skills": "driving", "preferred_language": Languages.ENGLISH,
+                "passport_document": make_file("same-company-passport.pdf"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
+        self.assertIn("passport_id", response.data)
+
+    def test_reuse_certificate_deducts_one_slot_and_records_the_grant(self):
+        self._authenticate(self.requester_admin)
+        response = self.client.post(
+            "/api/v1/candidates/candidates/reuse-certificate",
+            {"passport_id": "SHARED-PASSPORT-1"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["certificate_id"], "CERT-REUSE-TEST-1")
+        self.assertIsNotNone(response.data["pdf_url"])
+        self.assertEqual(response.data["slots_remaining"], 2)
+
+        balance = PackageBalance.objects.get(owner_company=self.requester_company, balance_type=PackageBalance.SLOTS)
+        self.assertEqual(balance.current_balance, 2)
+        self.assertTrue(
+            BalanceTransaction.objects.filter(balance=balance, transaction_type=BalanceTransaction.CERT_REUSE).exists()
+        )
+
+        grant = CertificateAccessGrant.objects.get(certificate=self.certificate)
+        self.assertEqual(grant.granted_to_company, self.requester_company)
+        self.assertEqual(grant.requested_by, self.requester_admin)
+
+    def test_reuse_certificate_without_slots_is_rejected_and_grants_nothing(self):
+        depleted_admin, depleted_company = self._create_b2b_company(
+            "depleted-admin@example.com", "DepletedCo", "DEP-CO-1", slot_grant=1
+        )
+        PackageBalance.objects.create(
+            owner_company=depleted_company, balance_type=PackageBalance.SLOTS,
+            fixed_amount=1, current_balance=0,
+        )
+
+        self._authenticate(depleted_admin)
+        response = self.client.post(
+            "/api/v1/candidates/candidates/reuse-certificate",
+            {"passport_id": "SHARED-PASSPORT-1"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_402_PAYMENT_REQUIRED, response.data)
+        self.assertEqual(response.data["code"], "no_slots_available")
+        self.assertFalse(CertificateAccessGrant.objects.filter(certificate=self.certificate).exists())

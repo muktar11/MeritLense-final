@@ -716,6 +716,61 @@ class Certificate(TimeStampedModel):
         return self.certificate_id or f"Certificate for {self.candidate.get_full_name()}"
 
 
+class CertificateAccessGrant(TimeStampedModel):
+    """Records a business "reusing" a DIFFERENT company/account's already-
+    issued certificate for a candidate, instead of running a brand new
+    interview. Candidate.passport_id is globally unique across the whole
+    platform (not scoped per company), so the same real person can only
+    ever have one Candidate row and one evaluation history - a second
+    employer who tries to add them by passport ID hits that uniqueness
+    conflict. Rather than a raw error, they're offered this candidate's
+    existing certificate; accepting it charges one Slot (ledger-only via
+    EntitlementService.consume_slot_for_certificate_reuse - no new
+    InterviewSession/Evaluation is created, so the usual reserve/consume
+    session lifecycle doesn't apply) and this row records who now has
+    access and why the Slot was spent."""
+
+    certificate = models.ForeignKey(
+        Certificate, on_delete=models.CASCADE, related_name="access_grants"
+    )
+    granted_to_user = models.ForeignKey(
+        "accounts.User", on_delete=models.CASCADE, null=True, blank=True, related_name="+"
+    )
+    granted_to_company = models.ForeignKey(
+        "accounts.Company", on_delete=models.CASCADE, null=True, blank=True, related_name="+"
+    )
+    requested_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    # The BalanceTransaction.reference used for the Slot deduction (see
+    # EntitlementService.consume_slot_for_certificate_reuse) - a string,
+    # not an FK, matching SlotReservation's own reference-based linkage to
+    # its ledger entries, since the transaction itself belongs to whichever
+    # PackageBalance row absorbed the deduction, not to this grant.
+    slot_transaction_reference = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = "Certificate Access Grant"
+        verbose_name_plural = "Certificate Access Grants"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(granted_to_user__isnull=False) | models.Q(granted_to_company__isnull=False),
+                name="cert_access_grant_has_owner",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["certificate", "granted_to_company"]),
+            models.Index(fields=["certificate", "granted_to_user"]),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        owner = self.granted_to_company.name if self.granted_to_company else (
+            self.granted_to_user.email if self.granted_to_user else "?"
+        )
+        return f"Access to {self.certificate.certificate_id} granted to {owner}"
+
+
 class EvaluatorRating(TimeStampedModel):
     """Evaluator's manual 0-100 rating on the 5 approved report dimensions
     (EvaluationReportService.CANONICAL_COMPETENCY_DIMENSIONS in

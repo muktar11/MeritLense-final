@@ -391,7 +391,11 @@ class InterviewSessionPrecheckService:
     ARTIFACT_VERBAL_CONFIRMATION = "VERBAL_CONFIRMATION"
 
     @classmethod
-    def record_candidate_consent(cls, session, *, signatory_name, ip_address=None, user_agent="", actor=None):
+    def record_candidate_consent(cls, session, *, ip_address=None, user_agent="", actor=None):
+        # signatory_name is always the candidate's own record, never a
+        # client-supplied value - a free-text name here would let anyone
+        # signing the link (including a proxying employer) put down a
+        # different name than the actual candidate being evaluated.
         agreement = Agreement.objects.create(
             user=session.created_by,
             company=session.organization,
@@ -399,7 +403,7 @@ class InterviewSessionPrecheckService:
             version=CURRENT_VERSIONS[AgreementType.CANDIDATE_CONSENT],
             method=AgreementMethod.CHECKBOX,
             status=AgreementStatus.SIGNED,
-            signatory_name=signatory_name.strip(),
+            signatory_name=session.candidate.get_full_name(),
             accepted_at=timezone.now(),
             ip_address=ip_address,
             user_agent=user_agent or "",

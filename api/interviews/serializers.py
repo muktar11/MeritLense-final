@@ -675,7 +675,11 @@ class SessionTranscriptionSerializer(serializers.Serializer):
 
 class SessionConsentCaptureSerializer(serializers.Serializer):
     token = serializers.CharField(required=False, allow_blank=True)
-    signatory_name = serializers.CharField()
+    # Accepted but ignored - kept optional only for backward compatibility
+    # with clients still sending it. signatory_name is always derived
+    # server-side from the candidate's own record (see
+    # InterviewSessionPrecheckService.record_candidate_consent).
+    signatory_name = serializers.CharField(required=False, allow_blank=True)
 
 
 class SessionPrivacyAcknowledgementSerializer(serializers.Serializer):

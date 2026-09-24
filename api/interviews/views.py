@@ -522,7 +522,6 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         serializer.is_valid(raise_exception=True)
         agreement = InterviewSessionPrecheckService.record_candidate_consent(
             session,
-            signatory_name=serializer.validated_data["signatory_name"],
             ip_address=self._client_ip(request),
             user_agent=request.META.get("HTTP_USER_AGENT", ""),
             actor=request.user if request.user.is_authenticated else None,

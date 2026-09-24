@@ -47,6 +47,42 @@ def _generate_one_time_invoice_number():
     return f"{prefix}{count + 1:06d}"
 
 
+def _notify_one_time_payment_confirmed(payment, price, invoice):
+    """Sent right after a one-time B2C package purchase succeeds - a
+    clear "payment received" confirmation, distinct from
+    _notify_invoice_generated (worded "a new invoice has been generated
+    for your subscription" - the wrong framing for a one-time purchase,
+    and not obviously a payment confirmation at all). Replaces that call
+    for this path rather than sending both, so a purchase produces one
+    clear email, not two about the same event."""
+    pdf_link = invoice.invoice_pdf or invoice.hosted_invoice_url
+    if not pdf_link and invoice.local_pdf_file:
+        from .invoice_services import _invoice_language
+
+        pdf_link = f"{settings.FRONTEND_URL}/{_invoice_language(invoice)}/dashboard/indivisual/profile?tab=billing"
+    try:
+        from api.accounts.utils import safe_send_mail
+        safe_send_mail(
+            "Payment Confirmed - Your Meritlense Purchase",
+            f"""Hello {payment.user.get_full_name()},
+
+We've received your payment - thank you!
+
+Package: {price.name}
+Amount paid: {payment.amount} {payment.currency.upper()}
+Invoice: {pdf_link or "available in your Billing settings"}
+
+Your package is now active and ready to use.
+
+Best regards,
+Meritlense Team
+""",
+            [payment.user.email],
+        )
+    except Exception:
+        logger.exception("Failed to send payment-confirmed email for payment %s", payment.stripe_payment_intent_id)
+
+
 def _notify_invoice_generated(invoice):
     pdf_link = invoice.invoice_pdf or invoice.hosted_invoice_url
     if not pdf_link and invoice.local_pdf_file:
@@ -699,18 +735,20 @@ class StripeService:
 
         logger.info(f"Granted one-time package '{price.name}' to user {payment.user.id} via payment {payment.id}")
 
-        self._issue_one_time_purchase_invoice(payment, subscription)
+        self._issue_one_time_purchase_invoice(payment, price, subscription)
 
-    def _issue_one_time_purchase_invoice(self, payment, subscription):
+    def _issue_one_time_purchase_invoice(self, payment, price, subscription):
         """A one-time package purchase (bare Stripe PaymentIntent, not a
         Subscription) never goes through handle_invoice_paid - Stripe only
         emits invoice.payment_succeeded for real Subscription/Invoice
         objects, which this purchase never creates one of. Invoice already
         has a stripe_payment_intent FK for exactly this case; it was just
         never populated. Mirrors handle_invoice_paid's own Invoice.PAID +
-        generate_invoice_pdf + _notify_invoice_generated sequence so both
-        purchase paths leave the customer with a real, downloadable
-        invoice, not just an active package."""
+        generate_invoice_pdf sequence so both purchase paths leave the
+        customer with a real, downloadable invoice, not just an active
+        package - then sends a payment-confirmation email tailored to a
+        one-time purchase (see _notify_one_time_payment_confirmed) rather
+        than the generic subscription-invoice one."""
         if Invoice.objects.filter(stripe_payment_intent=payment).exists():
             return
 
@@ -736,7 +774,7 @@ class StripeService:
             generate_invoice_pdf(invoice)
         except Exception:
             logger.exception(f"Failed to generate local PDF for one-time invoice {invoice.stripe_invoice_id}")
-        _notify_invoice_generated(invoice)
+        _notify_one_time_payment_confirmed(payment, price, invoice)
     
     def handle_payment_failed(self, payment_intent):
         try:

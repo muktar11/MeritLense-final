@@ -230,6 +230,18 @@ def assessed_dimensions(summary):
     return dimensions
 
 
+def below_threshold_dimensions(summary):
+    """Canonical dimensions with at least one BELOW_THRESHOLD competency -
+    distinct from assessed_dimensions(), which only tells us a dimension
+    was touched at all, not whether the candidate actually passed it."""
+    dimensions = set()
+    for item in summary.below_threshold_competencies or []:
+        dimension = _canonical_dimension(item.get("competency_code"), item.get("competency_name"))
+        if dimension:
+            dimensions.add(dimension)
+    return dimensions
+
+
 def _human_review_pending(summary):
     return summary.status == summary.STATUS_REQUIRES_HUMAN_REVIEW
 

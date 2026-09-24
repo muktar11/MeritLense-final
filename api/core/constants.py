@@ -227,7 +227,7 @@ class ReadinessStatus:
     # Distinct from NOT_READY: the assessment didn't cover enough
     # competencies to make ANY readiness determination at all (see
     # Week6ScoringService._apply_evaluation_rollups and
-    # certificate_services.MINIMUM_REQUIRED_DIMENSIONS) - NOT_READY means
+    # certificate_services.minimum_required_dimensions_for_role) - NOT_READY means
     # "we have enough evidence and it says the candidate isn't ready";
     # INCOMPLETE means "we don't have enough evidence to say either way".
     INCOMPLETE = "INCOMPLETE"

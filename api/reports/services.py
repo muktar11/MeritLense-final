@@ -69,18 +69,23 @@ class EvaluationReportService:
     GENERIC_COMPETENCY_LABEL = "Overall Workforce Readiness"
     GENERIC_COMPETENCY_LABEL_AR = "الجاهزية العامة للقوى العاملة"
     @classmethod
-    def _minimum_assessed_competencies(cls):
+    def _minimum_assessed_competencies(cls, role_code=None):
         """Of the 5 canonical dimensions in _build_critical_competency_status -
-        the single source of truth is certificate_services.MINIMUM_REQUIRED_DIMENSIONS
-        (imported lazily to avoid a module-level import cycle - that module
-        already imports from this one lazily, in its own _role_profile_version),
-        so the two gates can no longer drift apart. A report whose evidence
+        the single source of truth is
+        certificate_services.minimum_required_dimensions_for_role() (imported
+        lazily to avoid a module-level import cycle - that module already
+        imports from this one lazily, in its own _role_profile_version), so
+        the two gates can no longer drift apart. A report whose evidence
         covers fewer than this can't produce a meaningful overall score even
         if every response that WAS submitted got scored (assessment_completeness=100%
-        only measures the latter, not per-competency coverage)."""
-        from api.evaluations.certificate_services import MINIMUM_REQUIRED_DIMENSIONS
+        only measures the latter, not per-competency coverage). role_code is
+        the assessed role, not the report language - different roles' own
+        question banks cover different subsets of the 5 dimensions (e.g.
+        driver has no HYGIENE or COMMUNICATION questions at all), so the
+        minimum is role-specific, not one fixed number for every role."""
+        from api.evaluations.certificate_services import minimum_required_dimensions_for_role
 
-        return MINIMUM_REQUIRED_DIMENSIONS
+        return minimum_required_dimensions_for_role(role_code)
     CANONICAL_COMPETENCY_DIMENSIONS = (
         "Safety Awareness",
         "Hygiene & Standards",
@@ -1210,7 +1215,7 @@ class EvaluationReportService:
         competency_coverage = cls._derive_competency_coverage(critical_competency_status)
         overall_score_available = (
             assessment_completeness >= 100
-            and competency_coverage >= cls._minimum_assessed_competencies()
+            and competency_coverage >= cls._minimum_assessed_competencies(session.role_code)
         )
         score_result = cls._derive_authoritative_score(
             is_scheduled_interview=is_scheduled_interview,
@@ -1268,7 +1273,7 @@ class EvaluationReportService:
                 "assessment_coverage": cls._derive_assessment_coverage(critical_competency_status),
                 "competencies_assessed_count": competency_coverage,
                 "competencies_required_count": len(critical_competency_status),
-                "competencies_minimum_required": cls._minimum_assessed_competencies(),
+                "competencies_minimum_required": cls._minimum_assessed_competencies(session.role_code),
                 "human_review_required": bool(human_review_flags),
             },
             "executive_summary": {

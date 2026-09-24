@@ -35,8 +35,29 @@ Meritlense Team
         logger.exception("Failed to send package-activated email to %s", user.email)
 
 
+def _generate_one_time_invoice_number():
+    """Real Stripe Invoices arrive with their own `number` already set
+    (handle_invoice_paid just stores it); a one-time PaymentIntent purchase
+    has no such object, so this mints one in the same sequential style
+    certificate_services._generate_sequential_id uses for certificate/
+    assessment IDs."""
+    year = timezone.now().year
+    prefix = f"INV-{year}-"
+    count = Invoice.objects.filter(number__startswith=prefix).count()
+    return f"{prefix}{count + 1:06d}"
+
+
 def _notify_invoice_generated(invoice):
     pdf_link = invoice.invoice_pdf or invoice.hosted_invoice_url
+    if not pdf_link and invoice.local_pdf_file:
+        # A one-time (non-subscription) purchase has no Stripe-hosted
+        # invoice - the PDF only exists as our own local_pdf_file, which
+        # isn't a public URL an email client can just follow. Link to the
+        # billing tab instead, where InvoiceViewSet's download action
+        # (auth-gated, same as every other invoice) serves it.
+        from .invoice_services import _invoice_language
+
+        pdf_link = f"{settings.FRONTEND_URL}/{_invoice_language(invoice)}/dashboard/indivisual/profile?tab=billing"
     if not pdf_link:
         return
     try:
@@ -677,6 +698,45 @@ class StripeService:
         EntitlementService.grant_b2c_balances(payment, price)
 
         logger.info(f"Granted one-time package '{price.name}' to user {payment.user.id} via payment {payment.id}")
+
+        self._issue_one_time_purchase_invoice(payment, subscription)
+
+    def _issue_one_time_purchase_invoice(self, payment, subscription):
+        """A one-time package purchase (bare Stripe PaymentIntent, not a
+        Subscription) never goes through handle_invoice_paid - Stripe only
+        emits invoice.payment_succeeded for real Subscription/Invoice
+        objects, which this purchase never creates one of. Invoice already
+        has a stripe_payment_intent FK for exactly this case; it was just
+        never populated. Mirrors handle_invoice_paid's own Invoice.PAID +
+        generate_invoice_pdf + _notify_invoice_generated sequence so both
+        purchase paths leave the customer with a real, downloadable
+        invoice, not just an active package."""
+        if Invoice.objects.filter(stripe_payment_intent=payment).exists():
+            return
+
+        amount = payment.amount
+        invoice = Invoice.objects.create(
+            user=payment.user,
+            customer=payment.customer,
+            subscription=subscription,
+            stripe_invoice_id=f"one_time_{payment.stripe_payment_intent_id}",
+            stripe_payment_intent=payment,
+            number=_generate_one_time_invoice_number(),
+            status="PAID",
+            amount_due=amount,
+            amount_paid=amount,
+            amount_remaining=Decimal("0.00"),
+            currency=payment.currency,
+            paid_at=payment.paid_at or timezone.now(),
+        )
+
+        from .invoice_services import generate_invoice_pdf
+
+        try:
+            generate_invoice_pdf(invoice)
+        except Exception:
+            logger.exception(f"Failed to generate local PDF for one-time invoice {invoice.stripe_invoice_id}")
+        _notify_invoice_generated(invoice)
     
     def handle_payment_failed(self, payment_intent):
         try:

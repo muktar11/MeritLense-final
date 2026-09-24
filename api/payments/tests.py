@@ -618,6 +618,35 @@ class GrantB2COneTimePackageTests(TestCase):
 
         self.assertEqual(PackageBalance.objects.filter(owner_user=self.user).count(), 2)
 
+    def test_issues_a_paid_invoice_for_the_purchase(self):
+        # A bare PaymentIntent purchase never fires Stripe's
+        # invoice.payment_succeeded (handle_invoice_paid), so without this
+        # the B2C billing tab's Invoices table stays permanently empty for
+        # one-time package purchases even though the model/PDF/API already
+        # support it end-to-end.
+        payment_intent = {"id": "pi_test_1", "metadata": {"price_id": str(self.price.id)}}
+
+        self.service._grant_one_time_package(self.payment, payment_intent)
+
+        invoice = Invoice.objects.get(stripe_payment_intent=self.payment)
+        self.assertEqual(invoice.status, "PAID")
+        self.assertEqual(invoice.amount_paid, Decimal("50.00"))
+        self.assertEqual(invoice.amount_due, Decimal("50.00"))
+        self.assertEqual(invoice.amount_remaining, Decimal("0.00"))
+        self.assertEqual(invoice.user, self.user)
+        self.assertEqual(invoice.customer, self.customer)
+        self.assertTrue(invoice.number.startswith("INV-"))
+        self.assertTrue(invoice.local_pdf_file)
+
+    def test_invoice_issuance_is_idempotent_on_webhook_redelivery(self):
+        payment_intent = {"id": "pi_test_1", "metadata": {"price_id": str(self.price.id)}}
+
+        self.service._grant_one_time_package(self.payment, payment_intent)
+        self.payment.refresh_from_db()
+        self.service._grant_one_time_package(self.payment, payment_intent)
+
+        self.assertEqual(Invoice.objects.filter(stripe_payment_intent=self.payment).count(), 1)
+
 
 class EntitlementServiceTests(TestCase):
     class _FakeCandidate:

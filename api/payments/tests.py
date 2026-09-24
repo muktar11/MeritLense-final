@@ -647,6 +647,24 @@ class GrantB2COneTimePackageTests(TestCase):
 
         self.assertEqual(Invoice.objects.filter(stripe_payment_intent=self.payment).count(), 1)
 
+    def test_sends_a_payment_confirmation_email_with_amount_and_invoice_link(self):
+        # A one-time purchase previously got no clear "payment received"
+        # email at all - _notify_invoice_generated's "a new invoice has
+        # been generated for your subscription" wording doesn't read as a
+        # payment confirmation and is wrong for a one-time purchase anyway.
+        mail.outbox = []
+        payment_intent = {"id": "pi_test_1", "metadata": {"price_id": str(self.price.id)}}
+
+        self.service._grant_one_time_package(self.payment, payment_intent)
+
+        confirmation_emails = [m for m in mail.outbox if "payment confirmed" in m.subject.lower()]
+        self.assertEqual(len(confirmation_emails), 1)
+        email = confirmation_emails[0]
+        self.assertEqual(email.to, [self.user.email])
+        self.assertIn("50.00", email.body)
+        self.assertIn(self.price.name, email.body)
+        self.assertIn("/dashboard/indivisual/profile", email.body)
+
 
 class EntitlementServiceTests(TestCase):
     class _FakeCandidate:

@@ -1415,12 +1415,29 @@ class EvaluationReportService:
             raw_value = "جاهز"
         elif evaluation.readiness_status == "NOT_READY":
             raw_value = "غير جاهز"
+        elif evaluation.readiness_status == "INCOMPLETE":
+            raw_value = "أدلة غير كافية"
         else:
             raw_value = "متوسط"
 
         normalized = str(raw_value).strip().upper()
         if raw_value in {"جاهز", "READY"} or normalized == "READY":
             return {"value": "جاهز", "display": "Ready", "code": "READY", "level": 1}
+        # Checked before the PARTIALLY_READY fallback below, since this
+        # indicator means "not enough evidence to say either way" - a
+        # meaningfully different claim from "assessed and found gaps",
+        # which the report/certificate/readiness chain must never conflate
+        # (see Week6ScoringService._apply_evaluation_rollups).
+        if raw_value in {"أدلة غير كافية", "INCOMPLETE", "INSUFFICIENT_EVIDENCE"} or normalized in {
+            "INCOMPLETE",
+            "INSUFFICIENT_EVIDENCE",
+        }:
+            return {
+                "value": "أدلة غير كافية",
+                "display": "Insufficient Evidence",
+                "code": "INCOMPLETE",
+                "level": 4,
+            }
         if raw_value in {"متوسط", "PARTIALLY_READY"} or normalized == "PARTIALLY_READY":
             return {"value": "جاهزية جزئية", "display": "Partially Ready", "code": "PARTIALLY_READY", "level": 2}
         if raw_value in {"غير جاهز", "NOT_READY", "توجد فجوات جاهزية"} or normalized == "NOT_READY":
@@ -1798,6 +1815,8 @@ class EvaluationReportService:
                 return "يستوفي المرشح معايير التقييم لهذا الدور."
             if readiness_indicator["code"] == "PARTIALLY_READY":
                 return "تم تحديد فجوات في الجاهزية. يُنصح بالتدريب في مجالات محددة."
+            if readiness_indicator["code"] == "INCOMPLETE":
+                return "التغطية التقييمية غير كافية لتحديد الجاهزية لهذا الدور. يُنصح باستكمال التقييم."
             return "تم تحديد فجوات في الجاهزية. يُنصح بإعادة التقييم بعد التدريب."
         if override_triggered:
             return "A critical readiness requirement was not met."
@@ -1807,6 +1826,8 @@ class EvaluationReportService:
             return "Candidate meets the assessment criteria for this role."
         if readiness_indicator["code"] == "PARTIALLY_READY":
             return "Readiness gaps identified. Training in specific areas is recommended."
+        if readiness_indicator["code"] == "INCOMPLETE":
+            return "Assessment coverage was insufficient to determine readiness for this role. Completing the assessment is recommended."
         return "Readiness gaps identified. Re-evaluation after training is recommended."
 
     @classmethod
@@ -1818,6 +1839,8 @@ class EvaluationReportService:
                 return "CONSIDER_TRAINING", "النظر في التدريب"
             if override_triggered:
                 return "RE_EVALUATE_CRITICAL", "إعادة التقييم بعد تدريب حرج"
+            if readiness_indicator["code"] == "INCOMPLETE":
+                return "COMPLETE_ASSESSMENT", "استكمال التقييم"
             return "RE_EVALUATE", "إعادة التقييم"
         if readiness_indicator["code"] == "READY" and not override_triggered:
             return "PROCEED", "Proceed"
@@ -1825,6 +1848,8 @@ class EvaluationReportService:
             return "CONSIDER_TRAINING", "Consider Training"
         if override_triggered:
             return "RE_EVALUATE_CRITICAL", "Re-evaluate after Critical Training"
+        if readiness_indicator["code"] == "INCOMPLETE":
+            return "COMPLETE_ASSESSMENT", "Complete Assessment"
         return "RE_EVALUATE", "Re-evaluate"
 
     @classmethod

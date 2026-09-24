@@ -12,6 +12,7 @@ class EvaluationReadinessRecordService:
     INDICATOR_READY = "جاهز"
     INDICATOR_MEDIUM = "متوسط"
     INDICATOR_NOT_READY = "غير جاهز"
+    INDICATOR_INCOMPLETE = "أدلة غير كافية"
 
     @classmethod
     def persist_once(
@@ -91,6 +92,8 @@ class EvaluationReadinessRecordService:
             return ReadinessStatus.READY
         if readiness_indicator == cls.INDICATOR_NOT_READY:
             return ReadinessStatus.NOT_READY
+        if readiness_indicator == cls.INDICATOR_INCOMPLETE:
+            return ReadinessStatus.INCOMPLETE
         return ReadinessStatus.PENDING
 
     @classmethod
@@ -99,4 +102,6 @@ class EvaluationReadinessRecordService:
             return cls.INDICATOR_READY
         if readiness_status == ReadinessStatus.NOT_READY:
             return cls.INDICATOR_NOT_READY
+        if readiness_status == ReadinessStatus.INCOMPLETE:
+            return cls.INDICATOR_INCOMPLETE
         return cls.INDICATOR_MEDIUM

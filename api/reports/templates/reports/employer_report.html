@@ -1101,6 +1101,8 @@
                   <span class="status-badge tone-good"><span class="status-dot">R</span>{{ summary.readiness_indicator.display|default:summary.readiness_indicator.value }}</span>
                 {% elif summary.readiness_indicator.code == "PARTIALLY_READY" %}
                   <span class="status-badge tone-warn"><span class="status-dot">P</span>{{ summary.readiness_indicator.display|default:summary.readiness_indicator.value }}</span>
+                {% elif summary.readiness_indicator.code == "INCOMPLETE" %}
+                  <span class="status-badge tone-neutral"><span class="status-dot">I</span>{{ summary.readiness_indicator.display|default:summary.readiness_indicator.value }}</span>
                 {% else %}
                   <span class="status-badge tone-danger"><span class="status-dot">G</span>{{ summary.readiness_indicator.display|default:summary.readiness_indicator.value }}</span>
                 {% endif %}
@@ -1150,6 +1152,8 @@
                   <span class="status-badge tone-good"><span class="status-dot">1</span>Ready</span>
                 {% elif summary.readiness_indicator.code == "PARTIALLY_READY" %}
                   <span class="status-badge tone-warn"><span class="status-dot">2</span>Partially Ready</span>
+                {% elif summary.readiness_indicator.code == "INCOMPLETE" %}
+                  <span class="status-badge tone-neutral"><span class="status-dot">I</span>Insufficient Evidence</span>
                 {% else %}
                   <span class="status-badge tone-danger"><span class="status-dot">3</span>Readiness Gaps Identified</span>
                 {% endif %}
@@ -1617,7 +1621,35 @@
           </div>
         </div>
 
-        {% if summary.readiness_indicator.code != "READY" %}
+        {% if summary.readiness_indicator.code == "READY" %}
+          <div class="plan-card">
+            <div class="plan-title">No Improvement Plan Required</div>
+            <div class="plan-copy">The readiness result is Ready, so no structured remediation plan is required in the current employer-facing report.</div>
+          </div>
+        {% elif summary.readiness_indicator.code == "INCOMPLETE" %}
+          <div class="plan-card">
+            <div class="plan-title">Assessment Incomplete</div>
+            <div class="plan-copy">Assessment coverage was insufficient to determine readiness gaps for this role. The items below reflect only the competencies that were assessed, not a complete picture - completing the assessment is recommended before drawing conclusions.</div>
+          </div>
+          <div class="plan-grid">
+            {% for item in report.improvement_plan %}
+              <div class="plan-card">
+                <div class="plan-head">
+                  <div class="plan-title">{{ item.competency }}</div>
+                  {% if item.priority == "High" %}
+                    <span class="tone-pill tone-danger"><span class="status-dot">!</span>{{ item.priority }} Priority</span>
+                  {% elif item.priority == "Medium" %}
+                    <span class="tone-pill tone-warn"><span class="status-dot">!</span>{{ item.priority }} Priority</span>
+                  {% else %}
+                    <span class="tone-pill tone-good"><span class="status-dot">&#10003;</span>{{ item.priority }} Priority</span>
+                  {% endif %}
+                </div>
+                <div class="plan-copy"><strong>Gap:</strong> {{ item.gap }}</div>
+                <div class="plan-copy"><strong>Recommended Action:</strong> {{ item.recommended_action }}</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
           <div class="plan-grid">
             {% for item in report.improvement_plan %}
               <div class="plan-card">
@@ -1640,11 +1672,6 @@
               </div>
             {% endfor %}
           </div>
-        {% else %}
-          <div class="plan-card">
-            <div class="plan-title">No Improvement Plan Required</div>
-            <div class="plan-copy">The readiness result is Ready, so no structured remediation plan is required in the current employer-facing report.</div>
-          </div>
         {% endif %}
 
         <div class="summary-grid" style="margin-top: 8px;">
@@ -1656,6 +1683,8 @@
                 The candidate met the current readiness requirements for the assessed role. Employers may proceed using standard hiring controls.
               {% elif summary.readiness_indicator.code == "PARTIALLY_READY" %}
                 Readiness gaps were identified. Consider targeted training and then re-check the candidate against the role requirements.
+              {% elif summary.readiness_indicator.code == "INCOMPLETE" %}
+                Assessment coverage was insufficient to determine readiness for this role - this is not a finding of readiness gaps, and no employment decision should be based on it. Completing the assessment is recommended before proceeding.
               {% else %}
                 Readiness gaps were identified. Re-evaluation after targeted training is recommended before proceeding.
               {% endif %}

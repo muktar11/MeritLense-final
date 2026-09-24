@@ -1109,6 +1109,8 @@
                   <span class="status-badge tone-good"><span class="status-dot">R</span>{{ summary.readiness_indicator.value }}</span>
                 {% elif summary.readiness_indicator.code == "PARTIALLY_READY" %}
                   <span class="status-badge tone-warn"><span class="status-dot">P</span>{{ summary.readiness_indicator.value }}</span>
+                {% elif summary.readiness_indicator.code == "INCOMPLETE" %}
+                  <span class="status-badge tone-neutral"><span class="status-dot">I</span>{{ summary.readiness_indicator.value }}</span>
                 {% else %}
                   <span class="status-badge tone-danger"><span class="status-dot">G</span>{{ summary.readiness_indicator.value }}</span>
                 {% endif %}
@@ -1158,6 +1160,8 @@
                   <span class="status-badge tone-good"><span class="status-dot">1</span>جاهز</span>
                 {% elif summary.readiness_indicator.code == "PARTIALLY_READY" %}
                   <span class="status-badge tone-warn"><span class="status-dot">2</span>جاهزية جزئية</span>
+                {% elif summary.readiness_indicator.code == "INCOMPLETE" %}
+                  <span class="status-badge tone-neutral"><span class="status-dot">I</span>أدلة غير كافية</span>
                 {% else %}
                   <span class="status-badge tone-danger"><span class="status-dot">3</span>توجد فجوات جاهزية</span>
                 {% endif %}
@@ -1633,7 +1637,35 @@
           </div>
         </div>
 
-        {% if summary.readiness_indicator.code != "READY" %}
+        {% if summary.readiness_indicator.code == "READY" %}
+          <div class="plan-card">
+            <div class="plan-title">لا حاجة لخطة تحسين</div>
+            <div class="plan-copy">نتيجة الجاهزية هي "جاهز"، لذا لا حاجة لخطة علاجية منظَّمة في التقرير الحالي الموجَّه لصاحب العمل.</div>
+          </div>
+        {% elif summary.readiness_indicator.code == "INCOMPLETE" %}
+          <div class="plan-card">
+            <div class="plan-title">التقييم غير مكتمل</div>
+            <div class="plan-copy">التغطية التقييمية غير كافية لتحديد فجوات الجاهزية لهذا الدور. العناصر أدناه تعكس فقط الكفاءات التي تم تقييمها، وليست صورة كاملة - يُنصح باستكمال التقييم قبل استخلاص أي استنتاجات.</div>
+          </div>
+          <div class="plan-grid">
+            {% for item in report.improvement_plan %}
+              <div class="plan-card">
+                <div class="plan-head">
+                  <div class="plan-title">{{ item.competency }}</div>
+                  {% if item.priority == "High" %}
+                    <span class="tone-pill tone-danger"><span class="status-dot">!</span>أولوية مرتفعة</span>
+                  {% elif item.priority == "Medium" %}
+                    <span class="tone-pill tone-warn"><span class="status-dot">!</span>أولوية متوسطة</span>
+                  {% else %}
+                    <span class="tone-pill tone-good"><span class="status-dot">&#10003;</span>أولوية منخفضة</span>
+                  {% endif %}
+                </div>
+                <div class="plan-copy"><strong>الفجوة:</strong> {{ item.gap }}</div>
+                <div class="plan-copy"><strong>الإجراء الموصى به:</strong> {{ item.recommended_action }}</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
           <div class="plan-grid">
             {% for item in report.improvement_plan %}
               <div class="plan-card">
@@ -1656,11 +1688,6 @@
               </div>
             {% endfor %}
           </div>
-        {% else %}
-          <div class="plan-card">
-            <div class="plan-title">لا حاجة لخطة تحسين</div>
-            <div class="plan-copy">نتيجة الجاهزية هي "جاهز"، لذا لا حاجة لخطة علاجية منظَّمة في التقرير الحالي الموجَّه لصاحب العمل.</div>
-          </div>
         {% endif %}
 
         <div class="summary-grid" style="margin-top: 8px;">
@@ -1672,6 +1699,8 @@
                 استوفى المرشح متطلبات الجاهزية الحالية للدور المقيَّم. يمكن لأصحاب العمل المضي قدمًا باستخدام ضوابط التوظيف المعتادة.
               {% elif summary.readiness_indicator.code == "PARTIALLY_READY" %}
                 تم تحديد فجوات في الجاهزية. يُنصح بالنظر في تدريب موجّه ثم إعادة تقييم المرشح مقابل متطلبات الدور.
+              {% elif summary.readiness_indicator.code == "INCOMPLETE" %}
+                التغطية التقييمية غير كافية لتحديد فجوات الجاهزية لهذا الدور - هذه ليست نتيجة تفيد بوجود فجوات، ولا ينبغي اتخاذ أي قرار توظيف بناءً عليها. يُنصح باستكمال التقييم قبل المضي قدمًا.
               {% else %}
                 تم تحديد فجوات في الجاهزية. يُنصح بإعادة التقييم بعد تدريب موجّه قبل المضي قدمًا.
               {% endif %}

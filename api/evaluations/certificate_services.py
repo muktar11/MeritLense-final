@@ -23,6 +23,58 @@ REQUIRED_DIMENSIONS = (
     "PRACTICAL_TASKS",
     "BEHAVIORAL",
 )
+
+# Which of the 5 canonical dimensions each role's OWN question bank
+# actually contains questions for, audited directly against production
+# QuestionTemplate data (active, English rows; see the role/dimension
+# coverage query this was generated from). A fixed global "4 of 5"
+# requirement is wrong for most roles: e.g. driver's question bank has
+# no HYGIENE or COMMUNICATION questions at all, so a driver candidate
+# could never reach 4 covered dimensions no matter how well they
+# performed. A role missing here (not yet audited, or newly added)
+# falls back to the global REQUIRED_DIMENSIONS above - never silently
+# assumed to cover all 5.
+REQUIRED_DIMENSIONS_BY_ROLE = {
+    "basic_patient_support": ("SAFETY", "HYGIENE", "COMMUNICATION", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "elderly_medical_support": ("SAFETY", "HYGIENE", "COMMUNICATION", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "home_care_assistant": ("SAFETY", "HYGIENE", "COMMUNICATION", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "livestock_support": ("SAFETY", "HYGIENE", "COMMUNICATION", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "restaurant_staff": ("SAFETY", "HYGIENE", "COMMUNICATION", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "child_caregiver": ("SAFETY", "COMMUNICATION", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "security_guard": ("SAFETY", "COMMUNICATION", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "commercial_cleaner": ("SAFETY", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "domestic_worker": ("SAFETY", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "driver": ("SAFETY", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "elderly_caregiver": ("SAFETY", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "event_security": ("SAFETY", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "farm_worker": ("SAFETY", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "front_desk_agent": ("SAFETY", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "general_labor": ("SAFETY", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "hotel_housekeeper": ("SAFETY", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "industrial_cleaner": ("SAFETY", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "nursing_assistant": ("SAFETY", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "skilled_trades": ("SAFETY", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "special_needs_caregiver": ("SAFETY", "PRACTICAL_TASKS", "BEHAVIORAL"),
+    "warehouse_staff": ("SAFETY", "PRACTICAL_TASKS", "BEHAVIORAL"),
+}
+
+
+def required_dimensions_for_role(role_code):
+    return REQUIRED_DIMENSIONS_BY_ROLE.get(role_code, REQUIRED_DIMENSIONS)
+
+
+def minimum_required_dimensions_for_role(role_code):
+    """Same "allow one miss" slack the original global 4-of-5 threshold
+    used, scaled to however many dimensions this role's own question bank
+    can ever cover - a role with only 3 possible dimensions needs 2, not
+    the global 4 (which it could never reach), and a role with just 1
+    needs that 1 (there's no dimension to spare)."""
+    dims = required_dimensions_for_role(role_code)
+    if len(dims) <= 1:
+        return len(dims)
+    return max(1, len(dims) - 1)
+
+
 QUALITY_RANK = {
     "Limited": 1,
     "Good": 2,
@@ -373,7 +425,8 @@ def certificate_eligibility(evaluation, summary):
         return False, "INCOMPLETE"
     if not _minimum_quality_met(assessment_quality):
         return False, "QUALITY_BELOW_THRESHOLD"
-    if len(covered_dimensions) < min(MINIMUM_REQUIRED_DIMENSIONS, len(REQUIRED_DIMENSIONS)):
+    role_code = session.role_code if session else None
+    if len(covered_dimensions) < minimum_required_dimensions_for_role(role_code):
         return False, "INSUFFICIENT_COMPETENCY_COVERAGE"
     if human_review_flags or _human_review_pending(summary):
         return False, "HUMAN_REVIEW_PENDING"

@@ -9,7 +9,11 @@ from api.questions.skill_tags import normalize_skill_code, normalize_skill_tag
 from api.sessions.models import CandidateResponse
 from api.translation.models import EvaluationInputArtifact
 
-from .certificate_services import MINIMUM_REQUIRED_DIMENSIONS, REQUIRED_DIMENSIONS, assessed_dimensions
+from .certificate_services import (
+    assessed_dimensions,
+    minimum_required_dimensions_for_role,
+    required_dimensions_for_role,
+)
 from .readiness_record_services import EvaluationReadinessRecordService
 from .models import (
     CompetencyEvaluationResult,
@@ -521,20 +525,22 @@ class Week6ScoringService:
             # actually covered enough distinct competencies. Every response
             # can be answered and scored (summary.status == STATUS_EVALUATED
             # only checks that) while the assigned question set itself never
-            # touches enough of the five canonical dimensions - reusing the
-            # exact same check certificate_eligibility() already applies
-            # (MINIMUM_REQUIRED_DIMENSIONS) so a READY evaluation and an
-            # eligible-for-certificate evaluation never disagree about
-            # whether coverage was sufficient.
+            # touches enough of this role's required canonical dimensions -
+            # reusing the exact same role-aware check certificate_eligibility()
+            # already applies so a READY evaluation and an eligible-for-
+            # certificate evaluation never disagree about whether coverage
+            # was sufficient.
             covered_dimensions = assessed_dimensions(summary)
-            minimum_dimensions = min(MINIMUM_REQUIRED_DIMENSIONS, len(REQUIRED_DIMENSIONS))
+            role_code = evaluation.session.role_code
+            role_required_dimensions = required_dimensions_for_role(role_code)
+            minimum_dimensions = minimum_required_dimensions_for_role(role_code)
             if len(covered_dimensions) < minimum_dimensions:
                 evaluation.readiness_status = ReadinessStatus.INCOMPLETE
                 evaluation.readiness_override_applied = False
                 evaluation.readiness_override_reason = ""
                 readiness_reason = (
                     f"Insufficient assessment coverage: {len(covered_dimensions)} of "
-                    f"{len(REQUIRED_DIMENSIONS)} competencies assessed, minimum required is "
+                    f"{len(role_required_dimensions)} competencies assessed, minimum required is "
                     f"{minimum_dimensions}."
                 )
             else:

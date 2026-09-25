@@ -440,6 +440,16 @@ def certificate_eligibility(evaluation, summary):
     role_code = session.role_code if session else None
     if len(covered_dimensions) < minimum_required_dimensions_for_role(role_code):
         return False, "INSUFFICIENT_COMPETENCY_COVERAGE"
+    # Re-derived fresh from the actual CompetencyEvaluationResult data every
+    # call, independent of `indicator` (which can come from a stale, locked
+    # EvaluationReadinessDecisionRecord written before this check existed -
+    # see below_threshold_dimensions()/the readiness gate fix in
+    # Week6ScoringService._apply_evaluation_rollups). A required competency
+    # that is genuinely below its own pass_threshold must never be
+    # certificate-eligible, whatever the cached indicator claims.
+    failed_required_dimensions = below_threshold_dimensions(summary) & set(required_dimensions_for_role(role_code))
+    if failed_required_dimensions:
+        return False, "REQUIRED_COMPETENCY_BELOW_THRESHOLD"
     if human_review_flags or _human_review_pending(summary):
         return False, "HUMAN_REVIEW_PENDING"
     if session and session.is_scheduled_interview and getattr(evaluation, "evaluator_rating", None) is None:

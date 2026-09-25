@@ -2496,6 +2496,36 @@ class CertificateEligibilityTests(TestCase):
         self.assertEqual(self.evaluation.certificate_status, CertificateStatus.NOT_ISSUED)
         self.assertFalse(Certificate.objects.filter(evaluation=self.evaluation).exists())
 
+    def test_required_competency_below_threshold_blocks_certificate_even_when_indicator_says_ready(self):
+        """Certificate-protection regression: certificate_eligibility() must
+        not trust a stale/locked READY indicator - it re-derives
+        below_threshold_dimensions from the summary's own competency data on
+        every call, independent of EvaluationReadinessDecisionRecord (which
+        is write-once/immutable and can predate this check, e.g. for
+        evaluations scored before the readiness-gate fix)."""
+        from api.core.constants import ReadinessStatus, CertificateStatus
+        self.evaluation.readiness_status = ReadinessStatus.READY
+        self.evaluation.save(update_fields=["readiness_status"])
+        summary = self._summary()
+        summary.below_threshold_competencies = [
+            {
+                "competency_code": "safety_awareness",
+                "competency_name": "Safety Awareness",
+                "percentage": 30.0,
+                "pass_threshold": 60.0,
+            }
+        ]
+        summary.save(update_fields=["below_threshold_competencies"])
+
+        eligible, reason = certificate_eligibility(self.evaluation, summary)
+        certificate = generate_certificate(self.evaluation, summary)
+
+        self.assertFalse(eligible)
+        self.assertEqual(reason, "REQUIRED_COMPETENCY_BELOW_THRESHOLD")
+        self.assertIsNone(certificate)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.certificate_status, CertificateStatus.NOT_ISSUED)
+
     def test_incomplete_assessment_gets_no_certificate_even_if_ready(self):
         from api.core.constants import ReadinessStatus, CertificateStatus
         self.evaluation.readiness_status = ReadinessStatus.READY

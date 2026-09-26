@@ -1706,7 +1706,8 @@ class AdminInvoiceEndpointTests(APITestCase):
         self.assertEqual(len(results), 0)
 
     @patch("api.accounts.utils.safe_send_mail")
-    def test_admin_can_send_invoice_to_customer(self, mock_send_mail):
+    @patch("api.payments.views.invoice_pdf_email_attachments", return_value=[("invoice.pdf", b"%PDF", "application/pdf")])
+    def test_admin_can_send_invoice_to_customer(self, _mock_attachments, mock_send_mail):
         mock_send_mail.return_value = 1
 
         response = self.client.post(f"/api/v1/payments/admin/invoices/{self.invoice.id}/send", {}, format="json")
@@ -1715,6 +1716,10 @@ class AdminInvoiceEndpointTests(APITestCase):
         mock_send_mail.assert_called_once()
         recipients = mock_send_mail.call_args[0][2]
         self.assertEqual(recipients, [self.b2c_user.email])
+        self.assertEqual(
+            mock_send_mail.call_args.kwargs["attachments"],
+            [("invoice.pdf", b"%PDF", "application/pdf")],
+        )
 
     def test_sending_an_invoice_with_no_pdf_link_is_rejected(self):
         bare_invoice = Invoice.objects.create(

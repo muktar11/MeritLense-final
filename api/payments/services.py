@@ -51,7 +51,7 @@ def _generate_one_time_invoice_number():
     return f"{prefix}{count + 1:06d}"
 
 
-def _local_invoice_pdf_attachment(invoice):
+def invoice_pdf_email_attachments(invoice):
     if not invoice.local_pdf_file:
         return []
 
@@ -79,7 +79,7 @@ def _notify_one_time_payment_confirmed(payment, price, invoice):
         from .invoice_services import _invoice_language
 
         pdf_link = f"{settings.FRONTEND_URL}/{_invoice_language(invoice)}/dashboard/indivisual/profile?tab=billing"
-    attachments = _local_invoice_pdf_attachment(invoice)
+    attachments = invoice_pdf_email_attachments(invoice)
     invoice_message = (
         "A PDF copy of your invoice is attached.\n"
         f"Invoice: {pdf_link or 'available in your Billing settings'}"
@@ -123,7 +123,7 @@ def _notify_invoice_generated(invoice):
         pdf_link = f"{settings.FRONTEND_URL}/{_invoice_language(invoice)}/dashboard/indivisual/profile?tab=billing"
     if not pdf_link:
         return
-    attachments = _local_invoice_pdf_attachment(invoice)
+    attachments = invoice_pdf_email_attachments(invoice)
     invoice_message = (
         f"A PDF copy of your invoice is attached.\n\nInvoice: {pdf_link}"
         if attachments

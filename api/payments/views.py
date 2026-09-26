@@ -27,7 +27,7 @@ from .serializers import (
     CreatePaymentIntentSerializer, AttachPaymentMethodSerializer, CreateSubscriptionSerializer,
     RefundPaymentSerializer, DealRecordSerializer, PackageBalanceSerializer, AdjustBalanceSerializer
 )
-from .services import PaymentIntentInitializationError, StripeService
+from .services import PaymentIntentInitializationError, StripeService, invoice_pdf_email_attachments
 
 
 class PriceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
@@ -1584,11 +1584,12 @@ class AdminInvoiceViewSet(InvoicePdfDownloadMixin, PublicIdLookupMixin, viewsets
         from api.accounts.utils import safe_send_mail
 
         reference = invoice.number or invoice.stripe_invoice_id
+        attachments = invoice_pdf_email_attachments(invoice)
         subject = f"Your MeritLense invoice {reference}"
         message = f"""
         Hello {invoice.user.get_full_name()},
 
-        Your invoice from MeritLense is ready to view and download:
+        Your invoice from MeritLense is ready. A PDF copy is attached.
         {pdf_link}
 
         Amount due: {invoice.amount_due} {invoice.currency.upper()}
@@ -1600,7 +1601,7 @@ class AdminInvoiceViewSet(InvoicePdfDownloadMixin, PublicIdLookupMixin, viewsets
         Best regards,
         MeritLense Team
         """
-        safe_send_mail(subject, message, [invoice.user.email])
+        safe_send_mail(subject, message, [invoice.user.email], attachments=attachments)
 
         AuditLogService.log(
             user=request.user,

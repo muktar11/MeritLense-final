@@ -1095,7 +1095,7 @@ class AdminPriceViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
 class AdminPaymentViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
     """Admin/SuperAdmin-only visibility over ALL payments (unlike the
     user-facing PaymentViewSet above, which is scoped to request.user's own
-    payments) - the manual refund action lives here."""
+    payments) - manual refund and Stripe-verified reconciliation actions live here."""
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
     serializer_class = PaymentSerializer
 
@@ -1103,6 +1103,69 @@ class AdminPaymentViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
         if getattr(self, "swagger_fake_view", False):
             return Payment.objects.none()
         return Payment.objects.all().order_by('-created_at')
+
+    @action(detail=True, methods=['post'])
+    def reconcile(self, request, id=None):
+        payment = self.get_object()
+        if payment.status not in {'PENDING', 'SUCCEEDED'}:
+            return Response(
+                {'error': f'Cannot reconcile a payment with status {payment.status}.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            intent = stripe.PaymentIntent.retrieve(payment.stripe_payment_intent_id)
+        except stripe.error.StripeError:
+            logger.exception(
+                "Failed to retrieve PaymentIntent %s during admin reconciliation",
+                payment.stripe_payment_intent_id,
+            )
+            return Response(
+                {'error': 'Could not verify this payment with Stripe. Please retry later.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        if intent.get('status') != 'succeeded':
+            return Response(
+                {'error': f'Stripe reports this payment as {intent.get("status", "unknown")}; no changes were made.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        expected_amount = int(payment.amount * 100)
+        if intent.get('amount_received', intent.get('amount')) != expected_amount:
+            return Response(
+                {'error': 'The amount confirmed by Stripe does not match the recorded payment; no changes were made.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        stripe_customer_id = intent.get('customer')
+        if isinstance(stripe_customer_id, dict):
+            stripe_customer_id = stripe_customer_id.get('id')
+        if stripe_customer_id != payment.customer.stripe_customer_id:
+            return Response(
+                {'error': 'The Stripe customer does not match the recorded payment; no changes were made.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        if intent.get('currency', '').lower() != payment.currency.lower():
+            return Response(
+                {'error': 'The currency confirmed by Stripe does not match the recorded payment; no changes were made.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        result = StripeService().handle_payment_succeeded(intent)
+        payment.refresh_from_db()
+        if result is None or payment.status != 'SUCCEEDED':
+            return Response(
+                {'error': 'Stripe confirmed payment, but MeritLense could not finish reconciliation. Please contact support.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        invoice = Invoice.objects.filter(stripe_payment_intent=payment).first()
+        return Response({
+            'payment': self.get_serializer(payment).data,
+            'invoice_id': str(invoice.public_id) if invoice else None,
+        })
 
     @action(detail=True, methods=['post'])
     def refund(self, request, id=None):

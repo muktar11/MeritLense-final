@@ -1267,6 +1267,90 @@ class AdminPaymentRefundEndpointTests(APITestCase):
         self.assertEqual(self.payment.status, "REFUNDED")
 
 
+class AdminPaymentReconciliationTests(APITestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            email="payment-reconcile-admin@example.com",
+            first_name="Payment", last_name="Admin",
+            role=Roles.SUPERADMIN, is_verified=True, is_staff=True,
+        )
+        self.client.force_authenticate(self.admin)
+        self.user = User.objects.create_user(
+            email="payment-reconcile-b2c@example.com",
+            first_name="Payment", last_name="Buyer",
+            role=Roles.B2C, is_verified=True,
+        )
+        self.customer = Customer.objects.create(
+            user=self.user,
+            stripe_customer_id="cus_reconcile",
+            email=self.user.email,
+        )
+        self.payment = Payment.objects.create(
+            user=self.user,
+            customer=self.customer,
+            stripe_payment_intent_id="pi_reconcile",
+            amount=Decimal("0.50"),
+            currency="eur",
+            status="PENDING",
+        )
+        self.url = f"/api/v1/payments/admin/payments/{self.payment.id}/reconcile"
+        self.stripe_intent = {
+            "id": self.payment.stripe_payment_intent_id,
+            "status": "succeeded",
+            "amount": 50,
+            "amount_received": 50,
+            "currency": "eur",
+            "customer": self.customer.stripe_customer_id,
+            "metadata": {},
+        }
+
+    @patch("api.payments.views.StripeService.handle_payment_succeeded")
+    @patch("api.payments.views.stripe.PaymentIntent.retrieve")
+    def test_reconciles_only_after_stripe_confirms_matching_success(
+        self, retrieve_intent, handle_success
+    ):
+        retrieve_intent.return_value = self.stripe_intent
+
+        def mark_payment_succeeded(intent):
+            self.payment.status = "SUCCEEDED"
+            self.payment.paid_at = timezone.now()
+            self.payment.save(update_fields=["status", "paid_at"])
+            return self.payment
+
+        handle_success.side_effect = mark_payment_succeeded
+
+        response = self.client.post(self.url, {}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        retrieve_intent.assert_called_once_with(self.payment.stripe_payment_intent_id)
+        handle_success.assert_called_once_with(self.stripe_intent)
+        self.assertEqual(response.data["payment"]["status"], "SUCCEEDED")
+
+    @patch("api.payments.views.StripeService.handle_payment_succeeded")
+    @patch("api.payments.views.stripe.PaymentIntent.retrieve")
+    def test_does_not_reconcile_payment_not_succeeded_in_stripe(
+        self, retrieve_intent, handle_success
+    ):
+        retrieve_intent.return_value = {**self.stripe_intent, "status": "processing"}
+
+        response = self.client.post(self.url, {}, format="json")
+
+        self.assertEqual(response.status_code, 409)
+        handle_success.assert_not_called()
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "PENDING")
+
+    @patch("api.payments.views.stripe.PaymentIntent.retrieve")
+    def test_rejects_mismatched_stripe_amount(self, retrieve_intent):
+        retrieve_intent.return_value = {**self.stripe_intent, "amount_received": 500}
+
+        response = self.client.post(self.url, {}, format="json")
+
+        self.assertEqual(response.status_code, 409)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "PENDING")
+
+
 class RetireAndReplacePriceTests(TestCase):
     """Editing a package's amount/currency/interval retires the old Stripe
     Price and mints a new local Price row (Stripe Prices are immutable) -

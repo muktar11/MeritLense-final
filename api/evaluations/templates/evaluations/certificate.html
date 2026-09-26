@@ -17,37 +17,31 @@
   .wordmark-accent { color: #2563eb; }
   .brand-tagline { font-size: 7.5pt; color: #888; margin-top: 1px; }
 
-  .ribbon { position: relative; background: linear-gradient(135deg, #1e40af, #1e3a8a); color: #fff; font-size: 8pt; font-weight: 700; letter-spacing: 0.03em; text-align: center; padding: 7px 16px 9px; border-radius: 6px 6px 0 0; }
-  .ribbon-tail { display: flex; justify-content: space-between; }
-  .ribbon-tail span { width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 7px solid #1e3a8a; }
-
   /* ---------- Title ---------- */
-  .title-block { text-align: center; margin-top: 6px; }
-  .title-word { font-size: 26pt; font-weight: 800; color: #1e2a3a; }
-  .title-sub { font-size: 12pt; font-weight: 600; color: #1e3a8a; margin-top: -2px; }
+  .title-block { text-align: center; margin-top: 10px; }
+  .title-sub { font-size: 12pt; font-weight: 600; color: #1e3a8a; }
 
   /* ---------- Body: photo + statement ---------- */
-  .body-row { display: flex; align-items: center; gap: 22px; margin-top: 14px; padding: 0 10mm; }
+  .body-row { display: flex; align-items: center; gap: 22px; margin-top: 16px; padding: 0 10mm; }
   .photo-block { display: flex; flex-direction: column; align-items: center; gap: 8px; flex-shrink: 0; }
   .photo-frame { width: 96px; height: 126px; border-radius: 10px; overflow: hidden; border: 2px solid #dbe4f7; background: #eef2fb; display: flex; align-items: center; justify-content: center; }
-  .photo-frame img { width: 100%; height: 100%; object-fit: cover; }
-  .photo-placeholder { font-size: 26pt; font-weight: 700; color: #93aee0; }
+  .photo-frame img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
   .photo-verified { font-size: 7pt; font-weight: 700; color: #14532d; background: #dcfce7; border: 1px solid #86efac; border-radius: 999px; padding: 4px 8px; }
   .statement-col { flex: 1; text-align: center; }
-  .statement-intro { font-size: 9.5pt; color: #666; }
-  .candidate-name { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 20pt; font-weight: 700; color: #1e2a3a; margin: 3px 0; }
-  .statement-body { font-size: 9.3pt; color: #444; line-height: 1.5; max-width: 480px; margin: 0 auto; }
+  .statement-intro { font-size: 9.5pt; color: #64748b; margin-bottom: 3px; }
+  .candidate-name { font-family: Georgia, "Times New Roman", serif; font-size: 23pt; font-weight: 700; color: #1e2a3a; line-height: 1.15; margin: 6px 0 8px; }
+  .statement-body { font-size: 9.5pt; color: #444; line-height: 1.5; max-width: 480px; margin: 0 auto; }
 
   /* ---------- Stats row ---------- */
-  .stats-row { display: flex; gap: 14px; margin-top: 18px; }
-  .stats-card { flex: 1; background: #f6f8fd; border: 1px solid #e3e9f7; border-radius: 12px; padding: 12px 16px; }
+  .stats-row { display: flex; align-items: stretch; gap: 12px; margin-top: 16px; }
+  .stats-card { flex: 1; min-height: 72px; background: #f6f8fd; border: 1px solid #e3e9f7; border-radius: 12px; padding: 9px 14px; display: flex; flex-direction: column; justify-content: center; }
 
-  .info-item { display: flex; justify-content: space-between; gap: 10px; font-size: 8.3pt; padding: 4px 0; border-bottom: 1px solid #e7ecf9; }
+  .info-item { display: flex; justify-content: space-between; gap: 10px; font-size: 8.1pt; padding: 3px 0; border-bottom: 1px solid #e7ecf9; }
   .info-item:last-child { border-bottom: none; }
   .info-item span:first-child { color: #888; white-space: nowrap; flex-shrink: 0; }
   .info-item span:last-child { font-weight: 700; color: #1e2a3a; text-align: right; }
 
-  .readiness-card { text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+  .readiness-card { text-align: center; align-items: center; }
   .readiness-label { font-size: 7.8pt; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; margin-bottom: 8px; }
   .readiness-badge { display: inline-block; font-size: 11pt; font-weight: 800; padding: 7px 16px; border-radius: 100px; }
   .readiness-badge.level-1 { background: #fee2e2; color: #991b1b; }
@@ -65,20 +59,19 @@
   .evaluator-row-note { font-size: 5.6pt; color: #9aa4b8; margin-top: 4px; }
 
   /* ---------- Footer ---------- */
-  .footer-row { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; padding-top: 14px; border-top: 1px solid #e7ecf9; }
-  .verify-col { display: flex; align-items: center; gap: 12px; }
+  .footer-row { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-top: 16px; padding-top: 12px; border-top: 1px solid #e7ecf9; }
+  .verify-col { display: flex; align-items: center; gap: 12px; flex: 1; }
   .verify-col img { width: 56px; height: 56px; }
   .verify-title { font-size: 8.5pt; font-weight: 700; color: #1e2a3a; }
   .verify-desc { font-size: 7.2pt; color: #888; max-width: 260px; margin-top: 1px; }
-  .verify-link { font-size: 7.5pt; color: #1e40af; font-weight: 600; margin-top: 2px; }
+  .verify-link { font-size: 7.5pt; color: #1e40af; font-weight: 600; margin-top: 3px; }
 
-  .sign-col { text-align: right; display: flex; align-items: center; gap: 16px; }
-  .issued-by { font-size: 7.5pt; color: #888; line-height: 1.4; flex-shrink: 0; }
+  .sign-col { text-align: left; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .issued-by { font-size: 7.2pt; color: #64748b; line-height: 1.4; }
   .issued-by b { color: #1e2a3a; }
-  .signature { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 13pt; color: #1e3a8a; flex-shrink: 0; }
-  .issuer-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; height: 54px; border-radius: 999px; background: #dbeafe; border: 1px solid #93c5fd; color: #1d4ed8; font-size: 6pt; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; padding: 0 10px; }
+  .digital-record { min-width: 78px; padding: 5px 7px; border: 1px solid #dbe4f7; border-radius: 4px; color: #64748b; font-size: 5.3pt; font-weight: 700; line-height: 1.35; letter-spacing: 0.02em; text-align: center; }
 
-  .disclaimer { font-size: 6.6pt; color: #999; text-align: center; margin-top: 12px; line-height: 1.5; }
+  .disclaimer { font-size: 7pt; color: #64748b; text-align: center; margin: 12px auto 0; padding: 0 5mm; line-height: 1.5; }
   .cert-id-footer { text-align: center; font-size: 7pt; color: #bbb; margin-top: 4px; }
 </style>
 </head>
@@ -94,10 +87,6 @@
           <div class="brand-tagline">MeritLense Workforce Readiness Assessment Platform</div>
         </div>
       </div>
-      <div>
-        <div class="ribbon">MERITLENSE WORKFORCE READINESS<br />ASSESSMENT CERTIFICATE</div>
-        <div class="ribbon-tail"><span></span><span></span></div>
-      </div>
     </div>
 
     <div class="title-block">
@@ -109,8 +98,6 @@
         <div class="photo-frame">
           {% if candidate_photo_data_uri %}
           <img src="{{ candidate_photo_data_uri }}" alt="{{ candidate_name }}" />
-          {% else %}
-          <span class="photo-placeholder">{{ candidate_name|first|upper }}</span>
           {% endif %}
         </div>
         {% if candidate_photo_verified %}
@@ -163,14 +150,13 @@
         <img src="{{ qr_data_uri }}" alt="Verification QR code" />
         <div>
           <div class="verify-title">Verify Certificate</div>
-          <div class="verify-desc">Scan the QR code to verify this certificate's authenticity, or visit the link below.</div>
-          <div class="verify-link">{{ verification_url }}</div>
+          <div class="verify-desc">Scan the QR code to verify this certificate's authenticity, or visit:</div>
+          <div class="verify-link">meritlense.com/verify</div>
         </div>
       </div>
       <div class="sign-col">
-        <div class="issued-by">Issued by:<br /><b>MeritLense OÜ, Estonia</b><br />MeritLense Workforce Assessment Platform<br />Registry Code: 17607462</div>
-        <div class="signature">MeritLense</div>
-        <div class="issuer-badge">Digital Record</div>
+        <div class="issued-by">Issued by:<br /><b>MeritLense OÜ, Estonia</b><br />MeritLense Workforce Readiness Assessment Platform<br />Registry Code: 17607462</div>
+        <div class="digital-record">MERITLENSE OÜ<br />DIGITAL RECORD<br />ESTONIA<br />17607462</div>
       </div>
     </div>
 

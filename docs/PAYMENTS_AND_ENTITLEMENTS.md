@@ -195,6 +195,49 @@ live mode is also required before going live (see `docs/DEPLOYMENT.md` /
 `AdminPriceViewSet`) — test-mode `stripe_price_id`s don't exist in live
 mode.
 
+### Controlled switch from Stripe test mode to live mode
+
+Changing the Stripe Dashboard from test data to live data does not change
+which credentials the application uses. Stripe maintains separate API keys,
+webhook endpoints, Products, Prices, Customers, and payment records for each
+mode. The production VM currently uses test mode; do not replace its
+credentials until the complete live configuration below is ready.
+
+1. In Stripe Dashboard, switch to live mode and retrieve the live **publishable**
+   (`pk_live_...`) and **secret** (`sk_live_...`) API keys. Store the secret only
+   in the production VM's protected `.env`; never commit it or paste it into
+   chat, a ticket, or a source file.
+2. Set `STRIPE_PUBLISHABLE_KEY` to the live publishable key and
+   `STRIPE_SECRET_KEY` to the live secret key in that backend environment.
+   Also set the frontend build/deployment variable
+   `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` to the same live publishable key, then
+   rebuild/redeploy the frontend. The frontend and backend must not mix test
+   and live keys.
+3. Create a **separate live-mode** Stripe webhook endpoint at
+   `https://api.meritlense.com/api/v1/payments/webhook`, subscribed to the
+   event types listed in the webhook section above. Set the endpoint's
+   `whsec_...` signing secret as `STRIPE_WEBHOOK_SECRET` on the backend. The
+   test-mode webhook signing secret will not validate live events.
+4. Create and verify the Products and Prices required by the application in
+   live mode. Test-mode `price_...` IDs are not usable with live API keys.
+   After setting the live backend key, use the admin Stripe price-sync flow
+   (`PriceViewSet.sync_from_stripe`) to import the live prices, then verify
+   each intended product's target user type, amount, currency, interval, and
+   entitlement limits before making it available to customers.
+5. Apply the settings to the intended environment, restart the backend, and
+   verify a live webhook delivery is accepted and recorded. Use only an
+   authorized tester and a payment method they control; live charges move real
+   money. Confirm the payment, entitlement, invoice, and refund paths before
+   opening checkout to customers.
+
+The checked-in `deploy-backend-vm.yml` workflow deploys `main` directly to the
+production VM. Do not use a production deployment as a staging test, and do
+not merge/deploy until the live keys, frontend key, webhook endpoint, and live
+Price rows are deliberately configured and verified. For rollback, restore
+the previous matching test-mode key set and frontend build configuration as
+one coordinated change; never pair a test key with live Price IDs or webhook
+secret.
+
 ### Lessons from live verification (2026-09-04)
 
 Before the webhook endpoint existed, none of the webhook-driven paths ever

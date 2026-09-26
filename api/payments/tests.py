@@ -77,7 +77,11 @@ def make_subscription(user, price, **overrides):
 
 class CreatePaymentIntentInitializationTests(SimpleTestCase):
     def setUp(self):
-        self.user = SimpleNamespace(id=123)
+        self.user = SimpleNamespace(
+            id=123,
+            email="candidate@example.com",
+            get_full_name=lambda: "Candidate",
+        )
         self.service = StripeService()
 
     @patch.object(StripeService, "get_or_create_customer", return_value=None)
@@ -106,6 +110,51 @@ class CreatePaymentIntentInitializationTests(SimpleTestCase):
         with self.assertLogs("api.payments.services", level="ERROR"):
             with self.assertRaisesRegex(PaymentIntentInitializationError, "Stripe unavailable"):
                 self.service.create_payment_intent(self.user, amount=Decimal("10.00"))
+
+    @patch("api.payments.services.PaymentMethod.objects.filter")
+    @patch("api.payments.services.Customer.objects.update_or_create")
+    @patch("api.payments.services.Customer.objects.get")
+    @patch("api.payments.services.stripe.Customer.create")
+    @patch("api.payments.services.stripe.Customer.retrieve")
+    def test_replaces_customer_missing_from_configured_stripe_account(
+        self, retrieve, create, get_customer, update_or_create, payment_methods
+    ):
+        stored_customer = SimpleNamespace(
+            id=1,
+            stripe_customer_id="cus_test",
+            email="candidate@example.com",
+            name="Candidate",
+            metadata={},
+            default_payment_method_id="pm_test",
+            save=MagicMock(),
+        )
+        get_customer.return_value = stored_customer
+
+        def update_customer(user, defaults):
+            for key, value in defaults.items():
+                setattr(stored_customer, key, value)
+            return stored_customer, False
+
+        update_or_create.side_effect = update_customer
+        retrieve.side_effect = stripe.error.InvalidRequestError(
+            "No such customer",
+            "customer",
+            code="resource_missing",
+        )
+        create.return_value = SimpleNamespace(id="cus_live")
+        update_or_create.return_value = (stored_customer, False)
+
+        customer = self.service.get_or_create_customer(self.user)
+
+        self.assertIs(customer, stored_customer)
+        self.assertEqual(customer.stripe_customer_id, "cus_live")
+        self.assertEqual(customer.default_payment_method_id, "")
+        self.assertEqual(customer.metadata["previous_stripe_customer_ids"], ["cus_test"])
+        customer.save.assert_called_once()
+        payment_methods.return_value.update.assert_called_once_with(
+            is_active=False,
+            is_default=False,
+        )
 
 
 class HandleInvoicePaidTests(TestCase):

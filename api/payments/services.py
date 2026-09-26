@@ -153,9 +153,41 @@ class StripeService:
     def get_or_create_customer(self, user):
         try:
             customer = Customer.objects.get(user=user)
-            return customer
         except Customer.DoesNotExist:
             return self.create_customer(user)
+
+        try:
+            stripe_customer = stripe.Customer.retrieve(customer.stripe_customer_id)
+        except stripe.error.InvalidRequestError as exc:
+            if getattr(exc, "code", None) != "resource_missing":
+                raise
+            stripe_customer = None
+
+        if stripe_customer is None or getattr(stripe_customer, "deleted", False):
+            previous_customer_id = customer.stripe_customer_id
+            logger.warning(
+                "Stripe customer %s for user %s is unavailable in the configured Stripe account; creating a replacement",
+                previous_customer_id,
+                user.id,
+            )
+            replacement = self.create_customer(user)
+            if replacement is None:
+                return None
+
+            metadata = dict(replacement.metadata or {})
+            previous_ids = metadata.get("previous_stripe_customer_ids", [])
+            if previous_customer_id not in previous_ids:
+                metadata["previous_stripe_customer_ids"] = [*previous_ids, previous_customer_id]
+            replacement.metadata = metadata
+            replacement.default_payment_method_id = ""
+            replacement.save()
+            PaymentMethod.objects.filter(customer=replacement).update(
+                is_active=False,
+                is_default=False,
+            )
+            return replacement
+
+        return customer
     
     def create_setup_intent(self, user):
         customer = self.get_or_create_customer(user)

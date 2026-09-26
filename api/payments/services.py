@@ -17,6 +17,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class PaymentIntentInitializationError(Exception):
+    """Raised when a payment intent cannot be initialized for a known reason."""
+
+
 def _notify_package_activated(user, package_name):
     try:
         from api.accounts.utils import safe_send_mail
@@ -142,8 +146,8 @@ class StripeService:
             )
             
             return db_customer
-        except stripe.error.StripeError as e:
-            print(f"Stripe error creating customer: {e}")
+        except stripe.error.StripeError:
+            logger.exception("Stripe error creating customer for user %s", user.id)
             return None
     
     def get_or_create_customer(self, user):
@@ -258,16 +262,24 @@ class StripeService:
     
     def create_payment_intent(self, user, amount=None, price_id=None, currency='eur'):
         customer = self.get_or_create_customer(user)
+        if customer is None:
+            raise PaymentIntentInitializationError(
+                "Unable to initialize the Stripe customer for this payment."
+            )
         
         if price_id:
             try:
                 price = get_by_identifier(Price.objects.all(), price_id)
                 amount = price.unit_amount
             except Price.DoesNotExist:
-                return None
+                raise PaymentIntentInitializationError(
+                    "The selected package could not be found."
+                )
         
-        if not amount:
-            return None
+        if amount is None or amount <= 0:
+            raise PaymentIntentInitializationError(
+                "A payment intent requires a package with a positive price."
+            )
         
         try:
             intent = stripe.PaymentIntent.create(
@@ -297,8 +309,16 @@ class StripeService:
                 'payment': payment
             }
         except stripe.error.StripeError as e:
-            print(f"Stripe error creating payment intent: {e}")
-            return None
+            logger.exception(
+                "Stripe failed to create a PaymentIntent for user %s (code=%s, request_id=%s)",
+                user.id,
+                getattr(e, "code", None),
+                getattr(e, "request_id", None),
+            )
+            raise PaymentIntentInitializationError(
+                getattr(e, "user_message", None)
+                or "Stripe could not initialize this payment. Please contact support."
+            ) from e
     
     def confirm_payment_intent(self, payment_intent_id):
         try:

@@ -27,7 +27,7 @@ from .serializers import (
     CreatePaymentIntentSerializer, AttachPaymentMethodSerializer, CreateSubscriptionSerializer,
     RefundPaymentSerializer, DealRecordSerializer, PackageBalanceSerializer, AdjustBalanceSerializer
 )
-from .services import StripeService
+from .services import PaymentIntentInitializationError, StripeService
 
 
 class PriceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
@@ -1389,12 +1389,18 @@ class PaymentViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
         serializer = CreatePaymentIntentSerializer(data=request.data)
         if serializer.is_valid():
             service = StripeService()
-            result = service.create_payment_intent(
-                request.user,
-                serializer.validated_data.get('amount'),
-                serializer.validated_data.get('price_id'),
-                serializer.validated_data.get('currency', 'eur')
-            )
+            try:
+                result = service.create_payment_intent(
+                    request.user,
+                    serializer.validated_data.get('amount'),
+                    serializer.validated_data.get('price_id'),
+                    serializer.validated_data.get('currency', 'eur')
+                )
+            except PaymentIntentInitializationError as exc:
+                return Response(
+                    {'error': str(exc)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             
             if result:
                 AuditLogService.log(

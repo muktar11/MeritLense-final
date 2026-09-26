@@ -1,10 +1,12 @@
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import stripe
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 
@@ -18,7 +20,7 @@ from api.payments.models import AddonRequest, BalanceTransaction, Customer, Deal
 from api.payments.serializers import DealRecordSerializer
 from api.payments.refund_services import CONFIRMED_BILLING_ERROR, PLATFORM_ERROR, RefundEligibilityService, RefundService
 from api.payments.serializers import CreateSubscriptionSerializer
-from api.payments.services import StripeService
+from api.payments.services import PaymentIntentInitializationError, StripeService
 from api.sessions.models import InterviewSession
 from api.sessions.services import InterviewSessionService
 
@@ -71,6 +73,39 @@ def make_subscription(user, price, **overrides):
     )
     defaults.update(overrides)
     return Subscription.objects.create(**defaults)
+
+
+class CreatePaymentIntentInitializationTests(SimpleTestCase):
+    def setUp(self):
+        self.user = SimpleNamespace(id=123)
+        self.service = StripeService()
+
+    @patch.object(StripeService, "get_or_create_customer", return_value=None)
+    def test_customer_creation_failure_returns_actionable_error(self, _get_customer):
+        with self.assertRaisesRegex(PaymentIntentInitializationError, "Stripe customer"):
+            self.service.create_payment_intent(self.user, amount=Decimal("10.00"))
+
+    @patch.object(
+        StripeService,
+        "get_or_create_customer",
+        return_value=SimpleNamespace(id=1, stripe_customer_id="cus_test"),
+    )
+    def test_non_positive_amount_is_rejected(self, _get_customer):
+        with self.assertRaisesRegex(PaymentIntentInitializationError, "positive price"):
+            self.service.create_payment_intent(self.user, amount=Decimal("0.00"))
+
+    @patch.object(
+        StripeService,
+        "get_or_create_customer",
+        return_value=SimpleNamespace(id=1, stripe_customer_id="cus_test"),
+    )
+    @patch("api.payments.services.stripe.PaymentIntent.create")
+    def test_stripe_failure_is_logged_and_reported(self, create_intent, _get_customer):
+        create_intent.side_effect = stripe.error.APIConnectionError("Stripe unavailable")
+
+        with self.assertLogs("api.payments.services", level="ERROR"):
+            with self.assertRaisesRegex(PaymentIntentInitializationError, "Stripe unavailable"):
+                self.service.create_payment_intent(self.user, amount=Decimal("10.00"))
 
 
 class HandleInvoicePaidTests(TestCase):

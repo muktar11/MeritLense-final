@@ -51,6 +51,21 @@ def _generate_one_time_invoice_number():
     return f"{prefix}{count + 1:06d}"
 
 
+def _local_invoice_pdf_attachment(invoice):
+    if not invoice.local_pdf_file:
+        return []
+
+    try:
+        with invoice.local_pdf_file.open("rb") as pdf_file:
+            pdf_content = pdf_file.read()
+    except Exception:
+        logger.exception("Failed to read invoice PDF %s for email", invoice.stripe_invoice_id)
+        return []
+
+    filename = f"{invoice.number or invoice.stripe_invoice_id}.pdf"
+    return [(filename, pdf_content, "application/pdf")]
+
+
 def _notify_one_time_payment_confirmed(payment, price, invoice):
     """Sent right after a one-time B2C package purchase succeeds - a
     clear "payment received" confirmation, distinct from
@@ -64,6 +79,13 @@ def _notify_one_time_payment_confirmed(payment, price, invoice):
         from .invoice_services import _invoice_language
 
         pdf_link = f"{settings.FRONTEND_URL}/{_invoice_language(invoice)}/dashboard/indivisual/profile?tab=billing"
+    attachments = _local_invoice_pdf_attachment(invoice)
+    invoice_message = (
+        "A PDF copy of your invoice is attached.\n"
+        f"Invoice: {pdf_link or 'available in your Billing settings'}"
+        if attachments
+        else f"Invoice: {pdf_link or 'available in your Billing settings'}"
+    )
     try:
         from api.accounts.utils import safe_send_mail
         safe_send_mail(
@@ -74,7 +96,7 @@ We've received your payment - thank you!
 
 Package: {price.name}
 Amount paid: {payment.amount} {payment.currency.upper()}
-Invoice: {pdf_link or "available in your Billing settings"}
+{invoice_message}
 
 Your package is now active and ready to use.
 
@@ -82,6 +104,7 @@ Best regards,
 Meritlense Team
 """,
             [payment.user.email],
+            attachments=attachments,
         )
     except Exception:
         logger.exception("Failed to send payment-confirmed email for payment %s", payment.stripe_payment_intent_id)
@@ -100,6 +123,12 @@ def _notify_invoice_generated(invoice):
         pdf_link = f"{settings.FRONTEND_URL}/{_invoice_language(invoice)}/dashboard/indivisual/profile?tab=billing"
     if not pdf_link:
         return
+    attachments = _local_invoice_pdf_attachment(invoice)
+    invoice_message = (
+        f"A PDF copy of your invoice is attached.\n\nInvoice: {pdf_link}"
+        if attachments
+        else f"Invoice: {pdf_link}"
+    )
     try:
         from api.accounts.utils import safe_send_mail
         safe_send_mail(
@@ -109,12 +138,13 @@ def _notify_invoice_generated(invoice):
 A new invoice has been generated for your Meritlense subscription.
 
 Amount: {invoice.amount_paid} {invoice.currency.upper()}
-Invoice: {pdf_link}
+{invoice_message}
 
 Best regards,
 Meritlense Team
 """,
             [invoice.user.email],
+            attachments=attachments,
         )
     except Exception:
         logger.exception("Failed to send invoice-generated email for invoice %s", invoice.stripe_invoice_id)

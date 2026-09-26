@@ -1,14 +1,14 @@
 from django.utils import timezone
 import secrets
 import logging
-from django.core.mail import send_mail
+from django.core.mail import EmailMessage, send_mail
 from django.conf import settings
 from api.core.constants import Roles
 
 logger = logging.getLogger(__name__)
 
 
-def safe_send_mail(subject, message, recipients):
+def safe_send_mail(subject, message, recipients, attachments=None):
     from_email = settings.DEFAULT_FROM_EMAIL or "no-reply@localhost"
 
     if not settings.EMAIL_HOST:
@@ -20,6 +20,12 @@ def safe_send_mail(subject, message, recipients):
         return 0
 
     try:
+        if attachments:
+            email = EmailMessage(subject, message, from_email, recipients)
+            for attachment in attachments:
+                email.attach(*attachment)
+            return email.send(fail_silently=False)
+
         return send_mail(
             subject,
             message,

@@ -6,7 +6,7 @@ import stripe
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 
@@ -285,6 +285,7 @@ class HandleInvoicePaidTests(TestCase):
 
         self.assertEqual(Invoice.objects.filter(subscription=self.subscription).count(), 2)
 
+    @override_settings(EMAIL_HOST="localhost")
     def test_invoice_paid_emails_the_customer_and_activation_notice(self):
         """Business requirement: automatic email alerts for package
         activation and invoice generation - both fire from this one
@@ -313,6 +314,8 @@ class HandleInvoicePaidTests(TestCase):
         self.assertEqual(len(invoice_emails), 1)
         self.assertIn(self.user.email, invoice_emails[0].to)
         self.assertIn("https://stripe.example/inv.pdf", invoice_emails[0].body)
+        self.assertEqual(len(invoice_emails[0].attachments), 1)
+        self.assertTrue(invoice_emails[0].attachments[0][1].startswith(b"%PDF"))
 
     def test_renewal_invoice_does_not_resend_activation_email(self):
         """Only the INCOMPLETE->ACTIVE transition (first invoice) should
@@ -731,6 +734,7 @@ class GrantB2COneTimePackageTests(TestCase):
 
         self.assertEqual(Invoice.objects.filter(stripe_payment_intent=self.payment).count(), 1)
 
+    @override_settings(EMAIL_HOST="localhost")
     def test_sends_a_payment_confirmation_email_with_amount_and_invoice_link(self):
         # A one-time purchase previously got no clear "payment received"
         # email at all - _notify_invoice_generated's "a new invoice has
@@ -748,6 +752,11 @@ class GrantB2COneTimePackageTests(TestCase):
         self.assertIn("50.00", email.body)
         self.assertIn(self.price.name, email.body)
         self.assertIn("/dashboard/indivisual/profile", email.body)
+        self.assertEqual(len(email.attachments), 1)
+        filename, content, mimetype = email.attachments[0]
+        self.assertTrue(filename.startswith("INV-"))
+        self.assertTrue(content.startswith(b"%PDF"))
+        self.assertEqual(mimetype, "application/pdf")
 
 
 class EntitlementServiceTests(TestCase):

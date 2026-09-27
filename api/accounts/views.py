@@ -29,6 +29,7 @@ from .serializers import (
     CompanyProfileSerializer,
     CompanySerializer,
     CreateAdminSerializer,
+    CustomTokenObtainPairSerializer,
     DocumentVerificationSerializer,
     EmailVerificationSerializer,
     EmployerListSerializer,
@@ -332,7 +333,7 @@ class B2CRegistrationView(APIView):
                     notify_superadmins(
                         f"New registration: {user.get_full_name()}",
                         f"A new Individual Employer account was registered: {user.get_full_name()} "
-                        f"({user.email}). Pending email verification and document review.",
+                        f"({user.email}). Pending email verification.",
                     )
             except IntegrityError:
                 return Response(
@@ -687,6 +688,14 @@ class EmailVerificationView(APIView):
                 fields={
                     "message": serializers.CharField(),
                     "role": serializers.CharField(),
+                    "access": serializers.CharField(required=False),
+                    "refresh": serializers.CharField(required=False),
+                    "user_id": serializers.CharField(required=False),
+                    "is_superuser": serializers.BooleanField(required=False),
+                    "is_staff": serializers.BooleanField(required=False),
+                    "is_verified": serializers.BooleanField(required=False),
+                    "documents_verified": serializers.BooleanField(required=False),
+                    "full_name": serializers.CharField(required=False),
                 },
             ),
             400: error_response_serializer,
@@ -729,10 +738,28 @@ class EmailVerificationView(APIView):
 
                 send_welcome_email(user, request)
 
-                return Response({
-                    'message': 'Email verified successfully. You can now log in.',
+                response_data = {
+                    'message': (
+                        'Email verified successfully. Your account is active.'
+                        if user.role == Roles.B2C
+                        else 'Email verified successfully. You can now log in.'
+                    ),
                     'role': user.role
-                }, status=status.HTTP_200_OK)
+                }
+                if user.role == Roles.B2C:
+                    refresh = CustomTokenObtainPairSerializer.get_token(user)
+                    response_data.update({
+                        'refresh': str(refresh),
+                        'access': str(refresh.access_token),
+                        'user_id': str(user.public_id),
+                        'is_superuser': user.is_superuser,
+                        'is_staff': user.is_staff,
+                        'is_verified': user.is_verified,
+                        'documents_verified': user.documents_verified,
+                        'full_name': user.get_full_name(),
+                    })
+
+                return Response(response_data, status=status.HTTP_200_OK)
                 
             except User.DoesNotExist:
                 

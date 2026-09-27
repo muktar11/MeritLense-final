@@ -100,7 +100,8 @@ class AccountsWeek2Tests(APITestCase):
         )
         return login_response
 
-    def test_b2c_registration_requires_verification_before_login_and_supports_refresh(self):
+    @patch("api.accounts.views.send_welcome_email")
+    def test_b2c_registration_requires_verification_before_login_and_supports_refresh(self, send_welcome_email):
         registration_payload = {
             "email": "new-b2c@example.com",
             "first_name": "New",
@@ -147,6 +148,22 @@ class AccountsWeek2Tests(APITestCase):
             format="json",
         )
         self.assertEqual(verify_response.status_code, status.HTTP_200_OK, verify_response.data)
+        self.assertEqual(verify_response.data["role"], Roles.B2C)
+        self.assertIn("access", verify_response.data)
+        self.assertIn("refresh", verify_response.data)
+        send_welcome_email.assert_called_once()
+
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
+        self.assertTrue(user.is_verified)
+        self.assertIsNotNone(user.email_verified_at)
+
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {verify_response.data['access']}"
+        )
+        profile_response = self.client.get("/api/v1/auth/me")
+        self.assertEqual(profile_response.status_code, status.HTTP_200_OK, profile_response.data)
+        self.client.credentials()
 
         login_response = self.client.post(
             "/api/v1/auth/login",

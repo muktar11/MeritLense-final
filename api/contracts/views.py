@@ -286,6 +286,19 @@ class AgreementSignConfirmView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        stale_agreements = [
+            agreement for agreement in agreements
+            if agreement.version != CURRENT_VERSIONS.get(agreement.agreement_type)
+        ]
+        if stale_agreements:
+            for agreement in agreements:
+                agreement.status = AgreementStatus.SUPERSEDED
+                agreement.save(update_fields=['status', 'updated_at'])
+            return Response(
+                {'error': 'The agreement terms have changed. Please review and start signing again.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
         otp_service = OTPService()
         ok, error = otp_service.verify(agreements[0], data['code'])
         if not ok:

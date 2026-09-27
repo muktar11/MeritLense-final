@@ -1,281 +1,175 @@
 {% extends "contracts/_base.html" %}
 {% block content %}
+<div class="doc-meta"><span>Generated {{ generated_at }}</span></div>
+<style>
+  .doc-brand { margin: 0; font-size: 15pt; font-weight: 700; }
+  .doc-slogan { margin-top: 0; color: #555; font-size: 9pt; }
+  .doc-subtitle { margin-top: -0.4em; color: #555; font-size: 10pt; font-weight: 600; }
+  .agreement-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 0.8em 0; page-break-inside: auto; }
+  .agreement-table th, .agreement-table td { border: 1px solid #ddd; padding: 5px 7px; vertical-align: top; }
+  .agreement-table th { background: #f5f3ff; text-align: start; }
+  .agreement-table tr { page-break-inside: avoid; }
+</style>
 <h1>B2C Individual Services Agreement</h1>
-<div class="doc-meta">
-  <span>Version {{ version }}</span>
-  <span>Generated {{ generated_at }}</span>
-  <span>Jurisdiction: Republic of Estonia</span>
-</div>
-
-<p>
-  This Agreement is designated for individuals and household employers who wish to evaluate
-  candidates for domestic labor, caregiving, or home operational services. It is a confidential
-  document for contractual use only.
-</p>
-
-<h2>0. Parties to the Agreement</h2>
-<p>
-  <strong>MeritLense OÜ</strong> (trading as "MeritLense Platform"), a company registered in the
-  Republic of Estonia with its registered office at Ruunaoja tn 3, 11415 Tallinn, Estonia — an
-  independent digital evaluation platform. The Platform provides modular multilingual assessment
-  tools specializing in operational, technical, and non-academic competencies prior to employment,
-  including: domestic workers, caregivers, cooks, technicians, and household operational services.
-  Email: info@meritlense.com. (Hereinafter referred to as "the First Party").
-</p>
-<p>
-  <span class="field">{{ individual_name }}</span>{% if individual_nationality %} (<span class="field">{{ individual_nationality }}</span>){% endif %}
-  — an individual or household employer wishing to evaluate a candidate for domestic labor,
-  caregiving, or home operational services through the MeritLense platform. (Hereinafter referred
-  to as "the Second Party").
-</p>
-
-<h2>1. Preamble</h2>
-<p>
-  The First Party operates MeritLense, designed to provide secure, neutral, and scalable tools
-  for evaluating operational, technical, and non-academic competencies prior to employment. The
-  Platform specializes in serving individuals and household employers seeking an objective and
-  structured candidate assessment.
-</p>
-<p>
-  The Second Party (individual / household employer) wishes to access these services in a
-  personal capacity for the purpose of evaluating a candidate to work in or for their household.
-  This Agreement does not create any employment, brokerage, or legal representation relationship
-  on the part of the Platform. This preamble shall be considered an integral part of this
-  Agreement.
-</p>
-
-<h2>2. Scope of Services</h2>
-<p>The Platform provides the Second Party with two evaluation tiers, based on the selected package:</p>
-<p><strong>Screening Evaluation</strong></p>
-<ul>
-  <li>Quick assessment to support proceed / no-proceed decisions</li>
-  <li>Identity verification and foundational assessment across the approved dimensions</li>
-  <li>Preliminary Readiness Indicator using the same official labels (Ready / Partially Ready /
-    Readiness Gaps Identified) as a preliminary signal only — not equivalent to the Full
-    Evaluation's official Workforce Readiness Level, and not a certificate-eligible output</li>
-</ul>
-<p><strong>Full MeritLense Evaluation</strong></p>
-<ul>
-  <li>Comprehensive assessment across the five approved Workforce Readiness dimensions: Safety
-    Awareness, Hygiene &amp; Standards, Communication Ability, Practical Task Execution, and
-    Behavioral Indicators</li>
-  <li>Detailed structured report + official Workforce Readiness Level + candidate comparison (per
-    package)</li>
-  <li>AI-Led or Employer-Led assessment path, as applicable to the selected package</li>
-</ul>
-<p><strong>Services included across all packages</strong></p>
-<ul>
-  <li>Multilingual dashboards</li>
-  <li>Technical support and account configuration</li>
-  <li>Verifiable digital evaluation certificate, issued only where the linked report satisfies the
-    applicable eligibility requirements (Full Evaluation)</li>
-</ul>
-<p>
-  The Platform does not participate in recruitment, candidate selection, or legal representation.
-  The final hiring decision remains the sole responsibility of the Second Party. The Platform may
-  not be used to evaluate academic or specialized professional roles. Use is restricted to the
-  operational, domestic, and non-academic workforce.
-</p>
-
-<h2>3. Responsibilities of the Parties</h2>
-<p><strong>First Party — MeritLense</strong></p>
-<ul>
-  <li>Ensure secure and reliable platform operation</li>
-  <li>Provide technical support and onboarding assistance</li>
-  <li>Protect Second Party and candidate data in accordance with the GDPR and Estonian data
-    protection laws</li>
-  <li>Maintain platform neutrality and full legal compliance</li>
-  <li>Provide objective evaluation reports based on neutral data and algorithms</li>
-  <li>Notify the Second Party of any material changes to services or pricing at least 14 days in
-    advance</li>
-</ul>
-<p><strong>Second Party — Individual / Household Employer</strong></p>
-<ul>
-  <li>Provide accurate information about the candidate to be evaluated and the nature of the work
-    required</li>
-  <li>Obtain explicit consent from the candidate to participate in the evaluation process before
-    entering their data</li>
-  <li>Comply with applicable domestic labor, privacy, and data protection laws in their country</li>
-  <li>Not use evaluation results for discriminatory purposes, unlawful exclusion, or any purpose
-    contrary to the candidate's rights</li>
-  <li>Use the Platform for personal household purposes only, and not for resale or commercial
-    recruitment</li>
-  <li>Maintain the confidentiality of login credentials and not share the account with third
-    parties</li>
-</ul>
-
-<h2>4. Consumer Protection and Individual Rights</h2>
-<p>As an individual (consumer), the Second Party is entitled to the following non-waivable rights:</p>
-<ul>
-  <li>The right to full information about the service and pricing before completing any purchase</li>
-  <li>The right to receive a copy of this Agreement in digital format at any time</li>
-  <li>The right to deletion of personal data from the Platform upon termination of the Agreement,
-    pursuant to the GDPR</li>
-  <li>The right to file a complaint or request a review of any decision related to service
-    quality</li>
-  <li>The right to know how candidate data is processed and used within the Platform</li>
-</ul>
-
-<h2>5. Candidate Data and Informed Consent</h2>
-<p>
-  The Second Party acknowledges that it is legally responsible for obtaining explicit and
-  informed consent from the candidate before conducting any evaluation.
-</p>
-<ul>
-  <li>Candidate data is processed in accordance with MeritLense's Privacy Policy, aligned with the
-    GDPR</li>
-  <li>The Platform does not share candidate data with third parties without explicit consent</li>
-  <li>The candidate has the right at any time to access, correct, or request deletion of their
-    data</li>
-  <li>Upon expiry of the associated evaluation, personally identifying candidate data (name,
-    contact details, photo / ID image) is deleted or anonymized. The underlying assessment record
-    (readiness level, dates, certificate status) is retained in de-identified form for audit,
-    verification, and legal record-keeping purposes, consistent with the Data Retention Period in
-    MeritLense's Privacy Policy</li>
-  <li>Evaluation results are shared with the Second Party (individual) and the candidate only —
-    transfer to other parties is not permitted</li>
-</ul>
-
-<h2>6. Payment Terms and Packages</h2>
-<p>MeritLense offers individuals one-time packages, defined by a number of Assessment Slots and Points:</p>
-<table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
-  <thead>
-    <tr style="border-bottom:1px solid #ccc;text-align:left;">
-      <th style="padding:4px 6px;">Package</th><th style="padding:4px 6px;">Slots</th><th style="padding:4px 6px;">Points</th><th style="padding:4px 6px;">Tier</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Basic</td><td style="padding:4px 6px;">3</td><td style="padding:4px 6px;">Per pricing page</td><td style="padding:4px 6px;">Screening</td></tr>
-    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Essential</td><td style="padding:4px 6px;">5</td><td style="padding:4px 6px;">Per pricing page</td><td style="padding:4px 6px;">Screening</td></tr>
-    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Advanced</td><td style="padding:4px 6px;">10</td><td style="padding:4px 6px;">Per pricing page</td><td style="padding:4px 6px;">Full Evaluation</td></tr>
-    <tr><td style="padding:4px 6px;">Premium</td><td style="padding:4px 6px;">20</td><td style="padding:4px 6px;">Per pricing page</td><td style="padding:4px 6px;">Full Evaluation</td></tr>
-  </tbody>
+<p>Final Platform Version — {{ version }}</p>
+<table class="agreement-table">
+<tr>
+<td>Effective Date<br />27 September 2026</td>
+<td>Jurisdiction<br />Estonia</td>
+<td>Language<br />English (controlling version)</td>
+</tr>
 </table>
-<p>
-  Current pricing and the exact Points allocation for each package are displayed on the
-  Platform's pricing page and confirmed to the Second Party at checkout before any payment is
-  completed. This Agreement does not itself state a fixed price or Points figure, so that this
-  information always reflects what is currently in effect on the Platform.
-</p>
+<h2>0. Parties</h2>
+<p>First Party / Provider: MeritLense OÜ, an Estonian private limited company (Osaühing), Registry Code 17607462, registered address Ruunaoja tn 3, Lasnamäe linnaosa, Tallinn, Harju maakond, 11415, Estonia, email info@meritlense.com, operating the MeritLense Workforce Readiness Assessment Platform (the “Platform” or “MeritLense”).</p>
+<p>Second Party / Consumer: the individual or household employer who creates an account, purchases a package, or otherwise accepts this Agreement through the Platform (the “Second Party” or “Consumer”).</p>
+<p>This Agreement is intended for individuals and household employers using MeritLense to assess candidates for domestic, caregiving, driving, household-support, or other supported operational/non-academic roles.</p>
+{% if individual_name %}<p><strong>{{ individual_name }}</strong></p>{% endif %}
+<h2>1. Purpose and Platform Role</h2>
+<p>MeritLense provides structured workforce-readiness assessment and decision-support services. AI may assist with evidence extraction and processing; assessment outputs are determined through the Platform’s approved assessment logic, rule configuration, and applicable role configuration.</p>
+<p>MeritLense is not a recruitment agency, manpower supplier, employment broker, employer, immigration adviser, licensing authority, or legal representative. MeritLense does not select or hire candidates and does not guarantee employment, future performance, visa or immigration approval, professional licensing, or any hiring outcome. The final hiring and employment decision remains solely with the Second Party and, where applicable, the legally responsible or licensed parties.</p>
+<h2>2. Scope of Services</h2>
+<p>The services available depend on the package selected and the role configuration supported by the Platform.</p>
+<p>Screening Evaluation</p>
 <ul>
-  <li>All packages are one-time purchases; Assessment Slots and Points do not expire and remain
-    usable until fully consumed</li>
-  <li>Because balances never expire, no rollover mechanism is required</li>
-  <li>The full price and applicable taxes are clearly displayed before completing any purchase</li>
-  <li>Assessment Slots and Points are non-transferable to other persons or accounts</li>
+<li>A preliminary assessment intended to support an initial proceed / no-proceed review.</li>
+<li>Identity and foundational assessment controls may be included where applicable to the selected assessment.</li>
+<li>Any preliminary readiness signal is decision-support information only and is not equivalent to an official Full Evaluation Workforce Readiness Level and is not certificate-eligible unless the Platform expressly states otherwise.</li>
 </ul>
-
-<h2>7. Refund Policy (B2C)</h2>
-<p>
-  As the Second Party is an individual (consumer), the following refund policy applies, based on
-  actual usage of the purchased package:
-</p>
-<p><strong>Accepted refund cases</strong></p>
+<p>Full MeritLense Evaluation</p>
 <ul>
-  <li>Zero consumption on the purchase — no Assessment Slot has been started and no Points have
-    been consumed. A full refund applies regardless of how much time has passed since purchase,
-    since Assessment Slots and Points do not expire</li>
-  <li>A confirmed billing, payment, or platform error by MeritLense</li>
-  <li>A material breach by the First Party of its contractual obligations</li>
+<li>A structured assessment against the competencies applicable to the selected role configuration. MeritLense maintains a canonical competency framework, while individual competencies may be Required, Optional, or Not Applicable depending on the approved role profile.</li>
+<li>A structured assessment report and an official Workforce Readiness Level generated under the applicable assessment logic.</li>
+<li>A verifiable digital assessment certificate may be issued only where the linked assessment satisfies the Platform’s applicable certificate-eligibility rules.</li>
+<li>Candidate comparison or other features are provided only where included in the selected package.</li>
 </ul>
-<p><strong>Non-accepted refund cases</strong></p>
+<p>A competency marked Not Applicable for a role is not treated as failed merely because it is not assessed. Assessment coverage and readiness are determined under the applicable role configuration.</p>
+<h2>3. Responsibilities of the Parties</h2>
+<p>MeritLense will:</p>
 <ul>
-  <li>Any consumption has occurred — at least one Assessment Slot has been started or any Points
-    have been consumed on the purchase, regardless of how much of the package remains unused</li>
-  <li>Second Party dissatisfaction with candidate results (results reflect actual performance)</li>
+<li>Operate and maintain the Platform using reasonable technical and organizational safeguards.</li>
+<li>Provide the purchased assessment functionality and reasonable technical support.</li>
+<li>Process personal data in accordance with the Privacy Policy, the GDPR, Estonian data-protection law, and other mandatory applicable data-protection rules.</li>
+<li>Maintain assessment records, certificate status, and audit information as described in the Platform policies.</li>
+<li>Provide material service or pricing information before purchase and notify users of material changes where legally required.</li>
 </ul>
-<p>
-  Refund requests must be submitted in writing to info@meritlense.com with the order number and
-  reason. If approved, refunds will be processed within 14 business days.
-</p>
-
-<h2>8. Mutual Obligations</h2>
+<p>The Second Party will:</p>
 <ul>
-  <li>Both parties shall cooperate in good faith to ensure a smooth evaluation process and legal
-    compliance</li>
-  <li>The Second Party acknowledges that the candidate participates in the evaluation of their own
-    free will and with prior consent</li>
-  <li>The First Party is entitled to service fees upon activating access to the evaluation tools,
-    regardless of the evaluation outcome</li>
-  <li>The First Party is not a party to any employment or contractual relationship arising between
-    the Second Party and the candidate</li>
+<li>Provide accurate account and candidate information and use the Platform only for lawful personal or household hiring purposes.</li>
+<li>Ensure that there is a lawful basis to submit candidate information and that the candidate has received any required notice and consent request before assessment.</li>
+<li>Use assessment results as decision-support information and not as the sole basis for a decision where applicable law requires broader human consideration.</li>
+<li>Not use the Platform or its outputs for unlawful discrimination, prohibited profiling, commercial recruitment, resale, or redistribution.</li>
+<li>Protect account credentials and promptly notify MeritLense of suspected unauthorized access.</li>
 </ul>
-
-<h2>9. Intellectual Property and Confidentiality</h2>
+<h2>4. Consumer Information and Mandatory Rights</h2>
+<p>Before purchase, the Platform will make available the main characteristics of the service, the identity and contact details of MeritLense OÜ, the total price and applicable taxes, payment arrangements, relevant service conditions, and information about the statutory right of withdrawal where applicable.</p>
+<p>Nothing in this Agreement limits or excludes any consumer right that cannot lawfully be waived under applicable mandatory law.</p>
+<h2>5. Candidate Data, Privacy and Identity</h2>
+<p>Candidate and Second Party personal data are processed in accordance with the MeritLense Privacy Policy and applicable data-protection law. The Privacy Policy governs the purposes, legal bases, categories of data, recipients/processors, international transfers, retention periods, and data-subject rights.</p>
 <ul>
-  <li>The Platform retains all intellectual property rights unless explicitly transferred in
-    writing</li>
-  <li>Evaluation reports and results are owned by the Second Party for personal internal use only
-    — resale or redistribution is strictly prohibited</li>
-  <li>The Second Party commits to not sharing reports with third parties outside the scope of the
-    direct personal hiring decision</li>
-  <li>Disclosure of any Platform proprietary information to third parties is prohibited without
-    prior written consent</li>
+<li>The Second Party must not upload candidate data unless legally permitted to do so.</li>
+<li>Where the assessment includes identity verification, identity data or images are used only for the disclosed verification and platform purposes and are handled under the Privacy Policy.</li>
+<li>Public report or certificate verification must be limited to the minimum information necessary to verify authenticity and status and must not expose the candidate’s full confidential assessment results.</li>
+<li>Requests to access, correct, delete, restrict, or otherwise exercise applicable data-protection rights are handled in accordance with the Privacy Policy and applicable law.</li>
+<li>Retention and deletion are governed by the Privacy Policy and legal/audit requirements; data will not be promised to be deleted where retention remains legally required.</li>
 </ul>
-
-<h2>10. Acceptable Use Policy</h2>
-<p><strong>Permitted uses</strong></p>
+<p>MeritLense does not make a legally binding employment decision on behalf of the Second Party. The Platform provides assessment and decision-support outputs; the final decision remains with the responsible human decision-maker.</p>
+<h2>6. Packages, Payment and Account Balances</h2>
+<p>MeritLense offers one-time B2C packages based on Assessment Slots and/or Points. Current package contents, Points allocation, price, taxes, and any applicable limits are shown on the Platform and confirmed at checkout. The checkout information forms part of the transaction.</p>
+<table class="agreement-table">
+<tr>
+<th>Package</th>
+<th>Assessment Slots</th>
+<th>Points</th>
+<th>Tier</th>
+</tr>
+<tr>
+<td>Basic</td>
+<td>3</td>
+<td>As shown on Pricing Page</td>
+<td>Screening</td>
+</tr>
+<tr>
+<td>Essential</td>
+<td>5</td>
+<td>As shown on Pricing Page</td>
+<td>Screening</td>
+</tr>
+<tr>
+<td>Advanced</td>
+<td>10</td>
+<td>As shown on Pricing Page</td>
+<td>Full Evaluation</td>
+</tr>
+<tr>
+<td>Premium</td>
+<td>20</td>
+<td>As shown on Pricing Page</td>
+<td>Full Evaluation</td>
+</tr>
+</table>
 <ul>
-  <li>Evaluating candidates for domestic labor, caregiving, or personal operational services only</li>
-  <li>Using reports personally to make a household hiring decision</li>
+<li>Unless the Pricing Page or checkout expressly states otherwise, purchased Assessment Slots and Points do not expire and remain available until consumed.</li>
+<li>Assessment Slots and Points are personal to the account and are not transferable to another person or account.</li>
+<li>MeritLense may change future package pricing or contents. Changes do not retroactively reduce balances already purchased, except where required by law or agreed with the Consumer.</li>
 </ul>
-<p><strong>Prohibited uses</strong></p>
+<h2>7. Withdrawal and Refunds</h2>
+<p>Statutory 14-day withdrawal right. Where the Second Party concludes this Agreement as a consumer through the Platform, the Second Party has the statutory right, where applicable, to withdraw from the distance service contract within 14 days from conclusion without giving a reason. Mandatory consumer-law exceptions and consequences apply.</p>
+<p>Immediate performance. If the Second Party expressly requests that paid services begin during the 14-day withdrawal period, MeritLense may begin performance immediately. If the Second Party then validly withdraws before the service has been fully performed, the Second Party may be required to pay a proportionate amount for the services supplied up to the time of withdrawal, to the extent permitted by law. The statutory right of withdrawal is lost for a service only after the service has been fully performed where the legally required prior express consent/request and acknowledgement have been obtained.</p>
+<p>Additional MeritLense refund policy. Without limiting statutory rights:</p>
 <ul>
-  <li>Reselling evaluation reports or using them for commercial or paid recruitment purposes</li>
-  <li>Evaluating candidates for academic or specialized professional roles (doctors, engineers,
-    etc.)</li>
-  <li>Using results for discrimination based on gender, nationality, age, or religion</li>
-  <li>Sharing candidate data with agencies or other parties without their consent</li>
+<li>If a purchase remains entirely unused — no Assessment Slot has been started and no Points have been consumed — MeritLense will provide a full refund on request, even after the statutory withdrawal period, unless fraud, chargeback abuse, or another lawful exception applies.</li>
+<li>After the statutory withdrawal period, once any Assessment Slot has been started or any Points have been consumed, unused balances are generally non-refundable, except for a confirmed billing/platform error, a material breach by MeritLense, or where mandatory law requires otherwise.</li>
+<li>Dissatisfaction with a candidate’s assessment outcome is not by itself a basis for a refund because the service is the assessment process, not a guaranteed result.</li>
 </ul>
-
-<h2>11. Force Majeure</h2>
-<p>
-  Neither party shall be held liable for delays or failures resulting from events beyond its
-  control, including natural disasters, pandemics, governmental decisions, or major electronic
-  infrastructure failures. The affected party shall notify the other in writing as soon as
-  possible, and both parties shall endeavor to resume their obligations as soon as the cause is
-  removed.
-</p>
-
+<p>Withdrawal or refund requests may be submitted to info@meritlense.com with sufficient information to identify the order. Any refund due will be processed without undue delay and within the time required by applicable law.</p>
+<p>A model withdrawal notice is included at the end of this Agreement for convenience.</p>
+<h2>8. Acceptable Use</h2>
+<ul>
+<li>Use the Platform only for supported personal/household workforce-readiness assessment purposes.</li>
+<li>Do not resell reports, operate a commercial recruitment service through a B2C account, circumvent package limits, interfere with assessment integrity, or misuse verification features.</li>
+<li>Do not use results unlawfully on the basis of protected characteristics or in a manner that violates candidate rights.</li>
+<li>Do not submit unlawful, misleading, infringing, or malicious content.</li>
+</ul>
+<h2>9. Intellectual Property, Reports and Confidentiality</h2>
+<p>All Platform software, assessment logic, methodologies, templates, trademarks, content, and related intellectual property remain owned by MeritLense or its licensors unless expressly agreed otherwise in writing.</p>
+<p>The Second Party receives a limited, non-exclusive, non-transferable right to use purchased reports and outputs for the permitted personal household hiring purpose. Candidate reports and confidential assessment information must not be resold, publicly posted, or redistributed beyond persons who lawfully need the information for the relevant hiring decision.</p>
+<h2>10. Assessment Outputs, Certificates and Human Decision-Making</h2>
+<ul>
+<li>Assessment results reflect the evidence available at the time of assessment and the applicable role/configuration version.</li>
+<li>A Workforce Readiness Level is decision-support information and is not a professional license, employment authorization, or guarantee of future performance.</li>
+<li>Certificate eligibility is separate from readiness. A certificate may be withheld, revoked, or superseded where the linked assessment is ineligible, invalidated, corrected, or superseded under the Platform’s audit rules.</li>
+<li>Where a certificate is revoked or superseded, the public verification status may continue to show the certificate identifier and lifecycle status for authenticity and audit purposes.</li>
+<li>Any Human Review flag is a Platform review control and does not itself constitute an employment decision.</li>
+</ul>
+<h2>11. Service Availability, Suspension and Changes</h2>
+<p>MeritLense may suspend access where reasonably necessary for security, suspected unlawful use, material breach, payment fraud, protection of candidate data, maintenance, or platform integrity. Where practicable and lawful, MeritLense will provide notice and an opportunity to remedy.</p>
+<p>MeritLense may update the Platform, assessment methodology, role configurations, and future service features. Historical assessment records should remain associated with the version/configuration used for that assessment, subject to documented correction, revocation, or supersession processes.</p>
 <h2>12. Term and Termination</h2>
-<ul>
-  <li>The Agreement commences from the date the Second Party completes the purchase and registers
-    on the Platform</li>
-  <li>The Second Party may terminate the Agreement with 14 days' prior written notice</li>
-  <li>The First Party may terminate the Agreement immediately upon a proven violation by the
-    Second Party of the acceptable use terms or of candidate rights</li>
-  <li>Upon termination: personally identifying data is deleted or anonymized per the Privacy
-    Policy, and any remaining unused Assessment Slots / Points are handled per the Refund Policy
-    in Article 7, where applicable</li>
-</ul>
-
-<h2>13. Governing Law and Jurisdiction</h2>
-<p>
-  This Agreement shall be governed by the laws of the Republic of Estonia. Any disputes shall be
-  resolved by the competent courts in Estonia unless both parties agree in writing on an
-  alternative mechanism. This Agreement does not override any non-waivable consumer rights
-  guaranteed by the local law of the Second Party's country.
-</p>
-
-<h2>14. Platform Disclaimer</h2>
-<p>
-  MeritLense provides structured assessment and readiness indicators. The final hiring decision
-  remains the sole responsibility of the Second Party.
-</p>
-<ul>
-  <li>Reports reflect candidate performance at the time of evaluation and do not constitute a
-    guarantee of future performance. Evaluation results should be considered decision-support
-    information and not the sole basis for hiring decisions</li>
-  <li>All figures and statistics in marketing materials are based on market assumptions and
-    operational estimates</li>
-  <li>The Platform assumes no liability for hiring decisions or the operational outcomes resulting
-    from them</li>
-</ul>
-
-<div class="signature-block">
-  <p>Both parties acknowledge that they have read, understood, and agreed to all terms of this Agreement. In a digital environment, clicking "I Agree" or completing the purchase is equivalent to a legally binding electronic signature. Signed electronically by:</p>
-  <p><strong>{{ signatory_name }}</strong></p>
-</div>
-
+<p>This Agreement takes effect when the Second Party accepts it, creates an account, or completes a purchase, whichever occurs first.</p>
+<p>The Second Party may stop using the Platform and request account closure at any time. Account closure does not automatically erase records that MeritLense must lawfully retain for transaction, security, fraud-prevention, certificate verification, dispute, or audit purposes.</p>
+<p>Termination does not affect accrued payment obligations, statutory consumer rights, or provisions intended by their nature to survive termination.</p>
+<h2>13. Liability and Disclaimer</h2>
+<p>MeritLense will provide the Platform with reasonable care and skill and remains responsible to the extent required by mandatory applicable law. Nothing in this Agreement excludes liability that cannot lawfully be excluded or limited.</p>
+<p>To the maximum extent permitted by law, MeritLense is not responsible for the Second Party’s hiring decision, the candidate’s future conduct or performance, employment arrangements, immigration or licensing outcomes, or losses caused by inaccurate information supplied by the Second Party or candidate.</p>
+<p>Marketing estimates, examples, samples, or illustrative statistics are not contractual guarantees unless expressly incorporated into the checkout or a written order.</p>
+<h2>14. Governing Law and Dispute Resolution</h2>
+<p>This Agreement is governed by the laws of the Republic of Estonia, subject to any mandatory consumer-protection rules that apply to the Second Party and cannot lawfully be excluded by choice of law.</p>
+<p>Before commencing formal proceedings, the parties should first attempt in good faith to resolve a complaint in writing through info@meritlense.com. Where a dispute is not resolved, it may be brought before the competent Estonian court or any other court/consumer dispute body that has mandatory jurisdiction under applicable consumer law.</p>
+<h2>15. Contract Documents, Updates and Language</h2>
+<p>This Agreement should be read together with the Privacy Policy, Terms of Use, Refund/Withdrawal information displayed at checkout, and any package-specific terms presented before purchase. For personal-data processing, the Privacy Policy and any mandatory data-protection terms prevail to the extent necessary to comply with law. Transaction-specific checkout terms prevail for the specific package, price, taxes, and quantities purchased.</p>
+<p>MeritLense may update this Agreement for future use. Material changes affecting an existing Consumer will be communicated where required by law and will not retroactively remove accrued statutory rights.</p>
+<p>Language precedence. MeritLense may provide this Agreement in English and Arabic for convenience. In the event of any inconsistency, ambiguity, or difference in interpretation between the English and Arabic versions, the English version shall prevail, subject always to mandatory applicable law.</p>
+<h2>16. Electronic Acceptance</h2>
+<p>By ticking the acceptance box, clicking “I Agree”, creating an account where acceptance is presented, or completing a purchase after this Agreement is made available, the Second Party confirms that they have had the opportunity to read and understand this Agreement and agree to be bound by it.</p>
+<p>No handwritten signature, company stamp, passport copy, or identity-document upload by the Second Party is required merely to create and access a standard B2C account unless a specific verification requirement is separately disclosed and lawfully required for a particular feature or transaction.</p>
+<p>Electronic records of acceptance, checkout, and transaction details may be retained as evidence of the agreement.</p>
+<h2>Annex 1. Model Withdrawal Notice</h2>
+<p>To: MeritLense OÜ, Ruunaoja tn 3, Lasnamäe linnaosa, Tallinn, Harju maakond, 11415, Estonia — info@meritlense.com</p>
+<p>I hereby give notice that I withdraw from my contract for the following MeritLense service/package:</p>
+<p>Order number: ____________________    Order date: ____________________</p>
+<p>Consumer name: ____________________</p>
+<p>Consumer email: ____________________</p>
+<p>Date: ____________________</p>
+<p>This model notice is provided for convenience. A consumer may also communicate an unambiguous withdrawal request by other legally permitted means.</p>
 {% include "contracts/_seal.html" %}
 {% endblock %}

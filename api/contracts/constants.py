@@ -4,10 +4,10 @@ from api.core.constants import AgreementType
 # Agreement Management Guide v1.2). The frontend fetches these rather than
 # hardcoding them, so a version bump is a one-line change here.
 CURRENT_VERSIONS = {
-    AgreementType.PRIVACY_TERMS: "v1.1",
+    AgreementType.PRIVACY_TERMS: "v1.6",
     AgreementType.AI_DISCLOSURE: "v1.0",
-    AgreementType.B2B_AGREEMENT: "v1.5",
-    AgreementType.DPA: "v2.1",
-    AgreementType.B2C_AGREEMENT: "v1.5",
+    AgreementType.B2B_AGREEMENT: "v1.6",
+    AgreementType.DPA: "v1.7",
+    AgreementType.B2C_AGREEMENT: "v1.6",
     AgreementType.CANDIDATE_CONSENT: "v1.1",
 }

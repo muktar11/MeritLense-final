@@ -1,254 +1,116 @@
 {% extends "contracts/_base.html" %}
 {% block content %}
-<h1>B2B Services Agreement</h1>
-<div class="doc-meta">
-  <span>Version {{ version }}</span>
-  <span>Generated {{ generated_at }}</span>
-  <span>Jurisdiction: Republic of Estonia</span>
-</div>
-
-<p>
-  This Agreement is confidential and intended solely for contractual purposes between the named
-  parties.
-</p>
-
-<h2>0. Parties to the Agreement</h2>
-<p>
-  <strong>MeritLense OÜ</strong> (trading as "MeritLense Platform"), a company registered in the
-  Republic of Estonia with its registered office at Ruunaoja tn 3, 11415 Tallinn, Estonia — an
-  independent digital evaluation platform. The Platform provides modular multilingual tools for
-  assessing operational, technical, and non-academic workforce competencies prior to employment,
-  serving sectors including: domestic labor, hospitality, caregiving, technicians, and operational
-  roles. Email: info@meritlense.com. (Hereinafter referred to as "the First Party").
-</p>
-<p>
-  <span class="field">{{ company_name }}</span> — a licensed business entity or agency seeking to
-  use MeritLense services for operational or recruitment-related evaluation purposes.
-  (Hereinafter referred to as "the Second Party").
-</p>
-<p>
-  This Agreement is signed together with MeritLense's Data Processing Agreement (DPA), which
-  governs MeritLense's processing of candidate personal data on behalf of the Second Party as a
-  data processor. Both documents form part of the same onboarding step and must be read together.
-  For Custom Enterprise arrangements with individually negotiated pricing or volume, a separately
-  signed Pricing Addendum supplements this Agreement and governs the specific commercial terms
-  agreed for that account.
-</p>
-<p>
-  MeritLense's Privacy Policy is referenced in this Agreement and in the DPA for general
-  informational and descriptive purposes only. It is not a binding contractual document, does not
-  form part of the order of precedence between this Agreement and the DPA, and does not modify,
-  supplement, or override the obligations set out in either document.
-</p>
-
-<h2>1. Preamble</h2>
-<p>
-  The First Party operates MeritLense, designed to provide secure, neutral, and scalable tools
-  for evaluating non-academic workforce profiles prior to employment. The Platform specializes in
-  operational, technical, and non-academic competency assessment — and does not provide
-  recruitment, brokerage, or legal representation services.
-</p>
-<p>
-  The Second Party wishes to access these services to support its business activities under the
-  terms set out in this Agreement. This preamble shall be considered an integral part of this
-  Agreement.
-</p>
-
-<h2>2. Scope of Services</h2>
-<p>The Platform provides the Second Party with two evaluation tiers, based on the selected package:</p>
-<p><strong>Screening Evaluation</strong></p>
-<ul>
-  <li>Quick assessment to support proceed / no-proceed decisions</li>
-  <li>Identity verification and foundational assessment across the approved dimensions</li>
-  <li>Preliminary Readiness Indicator using the same official labels (Ready / Partially Ready /
-    Readiness Gaps Identified) as a preliminary signal only — not equivalent to the Full
-    Evaluation's official Workforce Readiness Level, and not a certificate-eligible output</li>
-</ul>
-<p><strong>Full MeritLense Evaluation</strong></p>
-<ul>
-  <li>Comprehensive assessment across the five approved Workforce Readiness dimensions: Safety
-    Awareness, Hygiene &amp; Standards, Communication Ability, Practical Task Execution, and
-    Behavioral Indicators</li>
-  <li>Detailed report + official Workforce Readiness Level + candidate comparison</li>
-  <li>AI-Led or Employer-Led assessment path, as applicable to the selected package</li>
-</ul>
-<p><strong>Included platform services</strong></p>
-<ul>
-  <li>Multilingual dashboards for candidate comparison</li>
-  <li>Technical support, account configuration, and onboarding</li>
-  <li>Optional integration with internal systems (subject to a separate agreement)</li>
-</ul>
-<p>
-  The Platform does not participate in recruitment, candidate selection, or legal representation.
-  Its role is strictly limited to providing technical assessment tools. The Platform may not be
-  used to evaluate academic or specialized professional roles (such as doctors, engineers, or
-  lawyers). Use is restricted to operational, technical, and non-academic workforce sectors.
-</p>
-
-<h2>3. Responsibilities of the Parties</h2>
-<p><strong>First Party — MeritLense</strong></p>
-<ul>
-  <li>Ensure secure and reliable platform operation</li>
-  <li>Provide technical support and onboarding assistance</li>
-  <li>Protect user data in accordance with the GDPR and Estonian data protection laws</li>
-  <li>Maintain platform neutrality and full legal compliance</li>
-  <li>Provide objective evaluation reports based on neutral data and algorithms</li>
-</ul>
-<p><strong>Second Party — Client</strong></p>
-<ul>
-  <li>Provide accurate, up-to-date job profiles and clear evaluation requests</li>
-  <li>Comply with applicable labor, immigration, and professional ethics standards in its
-    jurisdiction</li>
-  <li>Keep account information current and secure</li>
-  <li>Ensure fees collected from third parties align with local regulatory guidelines</li>
-  <li>Use the Platform solely for lawful and professional purposes within the targeted operational
-    sectors</li>
-  <li>Not resell evaluation reports or results to third parties, or use them outside the agreed
-    employment scope</li>
-</ul>
-
-<h2>4. Payment Terms</h2>
-<p>MeritLense offers business clients the following packages, each defined by a number of Assessment Slots and Points:</p>
-<table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin:0.8em 0;">
-  <thead>
-    <tr style="border-bottom:1px solid #ccc;text-align:left;">
-      <th style="padding:4px 6px;">Package</th><th style="padding:4px 6px;">Slots</th><th style="padding:4px 6px;">Points</th><th style="padding:4px 6px;">Billing</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Starter</td><td style="padding:4px 6px;">Per Agreement</td><td style="padding:4px 6px;">Per Agreement</td><td style="padding:4px 6px;">Per Agreement (pilot)</td></tr>
-    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Growth</td><td style="padding:4px 6px;">200 / month</td><td style="padding:4px 6px;">Per pricing page</td><td style="padding:4px 6px;">Monthly, recurring</td></tr>
-    <tr style="border-bottom:1px solid #eee;"><td style="padding:4px 6px;">Business</td><td style="padding:4px 6px;">500 / month</td><td style="padding:4px 6px;">Per pricing page</td><td style="padding:4px 6px;">Monthly, recurring</td></tr>
-    <tr><td style="padding:4px 6px;">Enterprise</td><td style="padding:4px 6px;">Custom</td><td style="padding:4px 6px;">Custom</td><td style="padding:4px 6px;">Per signed Pricing Addendum</td></tr>
-  </tbody>
+<div class="doc-meta"><span>Generated {{ generated_at }}</span></div>
+<style>
+  .doc-brand { margin: 0; font-size: 15pt; font-weight: 700; }
+  .doc-slogan { margin-top: 0; color: #555; font-size: 9pt; }
+  .doc-subtitle { margin-top: -0.4em; color: #555; font-size: 10pt; font-weight: 600; }
+  .agreement-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 0.8em 0; page-break-inside: auto; }
+  .agreement-table th, .agreement-table td { border: 1px solid #ddd; padding: 5px 7px; vertical-align: top; }
+  .agreement-table th { background: #f5f3ff; text-align: start; }
+  .agreement-table tr { page-break-inside: avoid; }
+</style>
+<h1>B2B SERVICES AGREEMENT</h1>
+<table class="agreement-table">
+<tr>
+<th>Effective Date</th>
+<th>Version</th>
+<th>Jurisdiction</th>
+</tr>
+<tr>
+<td>27 September 2026</td>
+<td>{{ version }}</td>
+<td>Estonia</td>
+</tr>
 </table>
-<p>
-  Current pricing and the exact Points allocation for Growth and Business are displayed on the
-  Platform's pricing page and confirmed to the Second Party before any payment is completed. This
-  Agreement does not itself state a fixed price or Points figure for these packages.
-</p>
+<h2>0. Parties to the Agreement</h2>
+<p>FIRST PARTY — MeritLense OÜ, a private limited company (Osaühing / OÜ) incorporated and registered in the Republic of Estonia, Registry Code 17607462, registered office at Ruunaoja tn 3, Lasnamäe linnaosa, Tallinn, Harju maakond, 11415, Estonia, operating the MeritLense Workforce Readiness Assessment Platform. Email: info@meritlense.com (Hereinafter referred to as the “First Party”, “MeritLense”, or the “Platform”.)</p>
+<p>SECOND PARTY — {{ company_name }}, a duly established and, where required, licensed business entity or agency seeking to use MeritLense services for lawful workforce assessment and employment decision-support purposes. Registered address: {{ company_address }} Registration / Licence No.: {{ company_registration_number }} Email: {{ company_email }} (Hereinafter referred to as the “Second Party” or the “Client”.)</p>
+<p>This Agreement is entered into together with MeritLense’s Data Processing Agreement (“DPA”) where MeritLense processes candidate personal data on behalf of the Second Party. The DPA governs such processing and forms part of the contractual onboarding documentation. For Custom Enterprise arrangements with individually negotiated pricing, volume, or service terms, a separately executed Pricing Addendum supplements this Agreement.</p>
+<p>MeritLense’s Privacy Policy is referenced for transparency and information purposes. Unless expressly incorporated in writing, it does not amend or override this Agreement or the DPA.</p>
+<h2>1. Preamble</h2>
+<p>MeritLense operates a digital workforce-readiness assessment platform designed to provide structured, auditable and scalable tools for evaluating operational, technical and non-academic workforce competencies before employment. MeritLense provides assessment and decision-support tools only and does not act as a recruitment agency, manpower supplier, employment broker, employer, immigration adviser, or legal representative.</p>
+<p>The Second Party wishes to access the Platform to support its lawful workforce assessment and hiring processes. Final employment, hiring, immigration, licensing and deployment decisions remain with the responsible employer and/or appropriately licensed parties.</p>
+<p>This Preamble forms an integral part of this Agreement.</p>
+<h2>2. Scope of Services</h2>
+<p>The Platform may provide Screening Evaluation and Full MeritLense Evaluation services according to the selected package and role configuration.</p>
+<p>Screening Evaluation may include a rapid preliminary assessment, identity-related controls where enabled, and a preliminary readiness signal. Any preliminary readiness signal is for screening support only, is not equivalent to the official Workforce Readiness Level produced by a Full Evaluation, and is not certificate-eligible unless expressly stated by the Platform.</p>
+<p>Full MeritLense Evaluation may assess the canonical Workforce Readiness competency framework: Safety Awareness; Hygiene &amp; Standards; Communication Ability; Practical Task Execution; and Behavioral Indicators. Role-specific configuration determines which competencies are Required, Optional, or Not Applicable, together with applicable thresholds, evidence requirements and readiness rules.</p>
+<p>Full Evaluation outputs may include a detailed assessment report, an official Workforce Readiness Level, candidate comparison functionality, and certificate eligibility where the applicable assessment and certificate rules are satisfied.</p>
+<p>Assessment paths may be AI-assisted and/or employer-led according to the selected package and configuration. MeritLense uses AI-assisted evidence processing where applicable; deterministic platform rules and approved role configuration govern scoring and readiness outputs, while the employer remains the final decision maker.</p>
+<p>Included services may also include multilingual dashboards, technical support, account configuration, onboarding and optional integrations subject to separate written agreement.</p>
+<p>The Platform does not itself recruit, select, employ, sponsor, deploy or legally represent candidates.</p>
+<h2>3. Responsibilities of the Parties</h2>
+<p>First Party — MeritLense:</p>
 <ul>
-  <li>For Growth and Business, Assessment Slots and Points are granted at the start of each
-    monthly billing cycle and reset at each renewal — unused Slots and Points do not roll over to
-    the next cycle</li>
-  <li>Starter is a per-agreement pilot plan — its Slots, Points, renewal, and any rollover terms
-    are defined individually in the applicable agreement, and standard Growth / Business
-    entitlements are not assumed</li>
-  <li>Enterprise volume, pricing, and any rollover terms are governed exclusively by the signed
-    Pricing Addendum / Custom Deal Record for that account — not by this Agreement's standard
-    terms</li>
-  <li>Pricing terms and payment requirements shall be disclosed in advance, before any purchase or
-    renewal</li>
-  <li>Assessment Slots and Points are non-transferable to third parties</li>
+<li>Operate the Platform with reasonable technical and security safeguards.</li>
+<li>Provide the contracted assessment functionality, onboarding and technical support.</li>
+<li>Process personal data in accordance with applicable data-protection law and the DPA.</li>
+<li>Maintain assessment traceability, role configuration and platform records appropriate to the contracted service.</li>
+<li>Provide assessment reports and readiness outputs as decision-support information, subject to the Platform’s applicable methodology and configuration.</li>
 </ul>
-
-<h2>5. Refund Policy (B2B)</h2>
-<p>
-  The current paid billing period is not refundable once payment is confirmed, regardless of
-  usage. A Second Party wishing to stop future billing must cancel the subscription; cancellation
-  does not refund the current period, and the account may continue using its existing allocation
-  until the end of that period.
-</p>
-<p>Exceptionally, a refund or billing correction may be considered only if:</p>
+<p>Second Party — Client:</p>
 <ul>
-  <li>A confirmed billing, payment, or platform error by MeritLense is identified (treated as a
-    billing correction, not a standard refund)</li>
-  <li>A material breach by the First Party of its contractual obligations is proven</li>
-  <li>For Custom Enterprise accounts, the signed Pricing Addendum contains an explicit clause
-    permitting refunds</li>
+<li>Provide accurate and current account, role and assessment information.</li>
+<li>Use the Platform only for lawful workforce assessment and employment-related purposes.</li>
+<li>Ensure it has an appropriate lawful basis, authority and required notices/consents for candidate data it submits or causes to be submitted.</li>
+<li>Comply with applicable employment, labour, immigration, anti-discrimination, privacy and sector-specific requirements in the jurisdictions where it operates.</li>
+<li>Keep account credentials secure and restrict access to authorised users.</li>
+<li>Not resell, unlawfully redistribute, or use assessment outputs outside the agreed scope.</li>
+<li>Remain responsible for its hiring and employment decisions and for any legally required human review.</li>
 </ul>
-<p>
-  Refund requests must be submitted in writing to info@meritlense.com. If approved, refunds will
-  be processed within 30 business days, subject to administrative deductions.
-</p>
-
-<h2>6. Mutual Obligations</h2>
-<ul>
-  <li>Both parties shall cooperate in good faith to ensure smooth operation and full legal
-    compliance</li>
-  <li>The Second Party acknowledges that all interactions with candidates or agencies are subject
-    to their independent approval</li>
-  <li>The First Party is entitled to service fees upon activating access to the evaluation tools,
-    regardless of decisions by the Second Party or candidates</li>
-  <li>Both parties shall refrain from any action that diminishes or damages the reputation of the
-    other party</li>
-</ul>
-
-<h2>7. Intellectual Property &amp; Confidentiality</h2>
-<ul>
-  <li>The Platform retains all intellectual property rights unless explicitly transferred in
-    writing</li>
-  <li>The Second Party shall maintain full confidentiality of this Agreement and of any
-    proprietary information or data</li>
-  <li>Disclosure of any information to third parties is prohibited without prior written consent
-    from the First Party</li>
-  <li>Evaluation reports and results are owned by the Second Party for its internal business use
-    within the agreed scope only — resale or redistribution to third parties is strictly
-    prohibited</li>
-</ul>
-
-<h2>8. Acceptable Use Policy</h2>
-<p><strong>Permitted use is limited to:</strong></p>
-<ul>
-  <li>Evaluating candidates for operational, technical, and non-academic roles exclusively</li>
-  <li>Using reports internally to support direct hiring decisions</li>
-  <li>Sharing evaluation results with the candidate themselves or the direct employer only</li>
-</ul>
-<p><strong>Prohibited uses include, but are not limited to:</strong></p>
-<ul>
-  <li>Evaluating academic or specialized professional roles (doctors, engineers, lawyers, etc.)</li>
-  <li>Reselling reports or evaluation results to any third party</li>
-  <li>Using data for discriminatory or unethical targeting purposes</li>
-  <li>Any use that conflicts with applicable labor and privacy laws</li>
-</ul>
-
-<h2>9. Force Majeure</h2>
-<p>
-  Neither party shall be held liable for delays or failures in performance resulting from events
-  beyond its reasonable control, including but not limited to: natural disasters, pandemics,
-  wars, governmental decisions, or major electronic infrastructure failures. The affected party
-  shall notify the other party in writing as soon as reasonably possible, and both parties shall
-  endeavor to resume their obligations as soon as the cause is removed.
-</p>
-
-<h2>10. Term and Termination</h2>
-<ul>
-  <li>This Agreement commences on the date of signature by both parties and remains valid until
-    terminated under the following conditions</li>
-  <li>Either party may terminate the Agreement with 90 days' prior written notice</li>
-  <li>Upon termination: personally identifying data is deleted or anonymized per the Privacy
-    Policy and the DPA, the underlying assessment records are retained in de-identified form for
-    audit purposes, and outstanding payments are settled amicably</li>
-  <li>Unused Assessment Slots / Points at the end of the current billing period expire per Article
-    4 and are non-refundable, except under the exceptional circumstances set out in Article 5 or
-    as explicitly stated in a signed Custom Enterprise Pricing Addendum</li>
-</ul>
-
-<h2>11. Governing Law and Jurisdiction</h2>
-<p>
-  This Agreement shall be governed by the laws of the Republic of Estonia. Any disputes shall be
-  resolved by the competent courts in Estonia, unless both parties agree in writing on an
-  alternative dispute resolution mechanism (such as international arbitration).
-</p>
-
-<h2>12. Platform Disclaimer</h2>
-<p>
-  MeritLense provides structured assessment and readiness indicators. The final hiring decision
-  remains the sole responsibility of the employer.
-</p>
-<ul>
-  <li>Reports and results reflect candidate performance at the time of evaluation and do not
-    constitute a guarantee of future performance</li>
-  <li>All figures and statistics in marketing materials are based on market assumptions and
-    operational estimates</li>
-  <li>The Platform assumes no liability for hiring decisions made by the Second Party based on
-    evaluation results</li>
-</ul>
-
-<div class="signature-block">
-  <p>Both parties acknowledge that they have read, understood, and agreed to all terms of this Agreement. Signed electronically by the Second Party's authorized representative:</p>
-  <p><strong>{{ signatory_name }}</strong></p>
-</div>
-
+<h2>4. Payment Terms</h2>
+<p>Commercial packages, Assessment Slots, Points, subscription periods and prices are those displayed or confirmed to the Second Party before purchase, or those stated in an applicable signed Pricing Addendum.</p>
+<p>Growth and Business allocations, where sold as recurring monthly subscriptions, are granted for the applicable billing cycle and reset at renewal unless the applicable order states otherwise. Unused allocations do not roll over unless expressly agreed.</p>
+<p>Starter or pilot arrangements are governed by the applicable order or written agreement. Custom Enterprise pricing, volume, rollover and commercial terms are governed by the signed Pricing Addendum or Custom Deal Record.</p>
+<p>All applicable charges, taxes and payment terms will be disclosed before purchase or renewal. Assessment Slots and Points are account entitlements and may not be transferred or resold to third parties unless expressly authorised in writing by MeritLense.</p>
+<h2>5. Refunds, Cancellation and Billing Corrections</h2>
+<p>Except where mandatory law requires otherwise or a signed commercial addendum expressly provides otherwise, fees for a current paid billing period are non-refundable once payment is confirmed. Cancellation stops future renewal but does not, by itself, refund the current paid period; access may continue until the end of that period subject to this Agreement.</p>
+<p>MeritLense may issue a refund or billing correction where it confirms a billing/payment/platform error, where a refund is required by applicable law, where a material contractual breach by MeritLense justifies a remedy, or where a signed Custom Enterprise Pricing Addendum expressly permits it.</p>
+<p>Requests must be submitted to info@meritlense.com. Approved refunds or corrections will be processed using the original or another lawful payment method within a commercially reasonable period, subject to payment-provider processing times. No unspecified “administrative deduction” will be applied unless disclosed and lawfully agreed in advance.</p>
+<h2>6. Data Protection and Candidate Data</h2>
+<p>Each party shall comply with applicable data-protection law. Where the Second Party determines the purposes and means of candidate-data processing and MeritLense processes such data on its documented instructions, the Second Party acts as controller and MeritLense acts as processor, as further set out in the DPA.</p>
+<p>The Second Party is responsible for ensuring that candidate personal data is collected and submitted lawfully and that required privacy information is provided. MeritLense shall process such data only as permitted by the DPA, applicable law and documented instructions.</p>
+<p>Nothing in this Agreement authorises either party to use candidate data for unlawful discrimination, unrelated marketing, or purposes incompatible with the agreed assessment service.</p>
+<h2>7. Intellectual Property, Reports and Confidentiality</h2>
+<p>All intellectual property in the Platform, assessment methodology, software, interfaces, templates, scoring/rule structures, trademarks and proprietary materials remains with MeritLense or its licensors unless expressly transferred in writing.</p>
+<p>Subject to payment and this Agreement, the Second Party receives a limited, non-exclusive, non-transferable right to use assessment reports and outputs for its legitimate internal workforce and hiring purposes. This does not transfer ownership of MeritLense methodology, software or underlying intellectual property.</p>
+<p>Each party shall protect the other party’s confidential information using reasonable safeguards and shall disclose it only to personnel, professional advisers or service providers who need it for the permitted purpose and are bound by appropriate confidentiality duties, or where disclosure is required by law.</p>
+<p>The Second Party may share a candidate’s assessment information with that candidate and with an authorised direct employer or other recipient where the sharing is lawful and within the agreed purpose. Resale or public redistribution of reports is prohibited unless MeritLense expressly agrees in writing.</p>
+<h2>8. Acceptable Use and Responsible Employment Decisions</h2>
+<p>The Platform may be used only for lawful assessment of roles and populations supported by the applicable MeritLense product configuration. The Second Party shall not use the Platform or its outputs to make decisions prohibited by applicable law, to discriminate unlawfully, to infer protected characteristics not intended by the service, or to bypass legally required human oversight.</p>
+<p>Unless MeritLense expressly offers a product configured for a regulated profession, the Platform is not a professional licensing, credential-recognition, medical, legal, engineering or other regulated-profession qualification authority.</p>
+<p>Assessment outputs are decision-support information. The Second Party shall apply appropriate human judgment and any safeguards required by applicable law before making consequential employment decisions.</p>
+<h2>9. Platform Availability, Changes and Force Majeure</h2>
+<p>MeritLense may make reasonable technical, security, methodology or product updates to maintain, improve or protect the Platform, provided that material changes do not remove contracted core functionality during a paid term without an appropriate remedy.</p>
+<p>Neither party is liable for delay or failure caused by events beyond its reasonable control, including major infrastructure failures, natural disasters, war, governmental action, widespread telecommunications outages or other force-majeure events. The affected party shall notify the other party when reasonably practicable and use reasonable efforts to resume performance.</p>
+<h2>10. Term, Suspension and Termination</h2>
+<p>This Agreement begins on the effective date accepted or signed by the parties and continues until terminated in accordance with its terms or the applicable order.</p>
+<p>Either party may terminate an open-ended contractual relationship by giving 30 days’ written notice, unless an applicable signed order or Pricing Addendum provides a different committed term. Termination does not cancel accrued payment obligations.</p>
+<p>MeritLense may suspend access where reasonably necessary for security, suspected unlawful use, material breach, non-payment, or protection of candidate data, and will provide notice where reasonably practicable.</p>
+<p>Upon termination, personal data shall be returned, deleted, anonymised or retained as required by the DPA and applicable law. Assessment and audit records may be retained in de-identified or otherwise lawful form where necessary for security, legal compliance, dispute handling and auditability. Unused entitlements expire according to the applicable billing terms unless mandatory law or a signed commercial addendum requires otherwise.</p>
+<h2>11. Warranties, Disclaimers and Limitation of Role</h2>
+<p>MeritLense provides structured workforce-readiness assessment and decision-support outputs. Reports reflect the evidence available and candidate performance at the time of assessment and do not guarantee future performance, employment, visa or immigration approval, professional licensing, or any particular hiring outcome.</p>
+<p>MeritLense does not make the employer’s final hiring decision. The Second Party remains responsible for verifying any information that must independently be verified and for complying with applicable employment and sector rules.</p>
+<p>Nothing in this Agreement excludes or limits liability that cannot lawfully be excluded or limited. Any contractual limitation of liability contained in an applicable signed commercial addendum shall apply only to the extent permitted by law.</p>
+<h2>12. Governing Law and Dispute Resolution</h2>
+<p>This Agreement is governed by the laws of the Republic of Estonia, without prejudice to mandatory rules that may apply irrespective of the chosen law. The competent courts of Estonia shall have jurisdiction unless the parties agree in writing to another lawful dispute-resolution mechanism.</p>
+<p>Before commencing formal proceedings, the parties shall use reasonable good-faith efforts to resolve the dispute through written escalation between authorised representatives.</p>
+<h2>13. General Provisions</h2>
+<p>This Agreement, the applicable DPA and any signed order or Pricing Addendum constitute the contractual framework for the relevant services. In case of conflict concerning personal-data processing, the DPA prevails for that subject matter. A signed Pricing Addendum or order prevails for expressly negotiated commercial terms.</p>
+<p>Neither party may assign this Agreement in a manner that materially prejudices the other party without prior written consent, except as part of a lawful corporate reorganisation, merger, or transfer of substantially all relevant business assets, subject to applicable law.</p>
+<p>If any provision is held unenforceable, the remaining provisions remain effective. Failure to enforce a provision is not a waiver. Amendments must be recorded in writing or through a legally valid electronic contracting process accepted by both parties.</p>
+<p>Electronic signatures and electronic acceptance may be used to the extent permitted by applicable law.</p>
+<p>Language. This Agreement may be made available in English and Arabic. In the event of any conflict, inconsistency, or discrepancy in interpretation between the Arabic and English versions, the English version shall prevail and be the controlling version.</p>
+<h2>14. Signatures and Acknowledgment</h2>
+<table class="agreement-table">
+<tr>
+<th>FIRST PARTY — MeritLense OÜ<br />Registry Code: 17607462<br />Name: ______________________________<br />Title: _______________________________<br />Signature: ___________________________<br />Date: _______________________________</th>
+</tr>
+<tr>
+<td>SECOND PARTY — {{ company_name }}<br />Registration / Licence No.: ____________<br />Name: ______________________________<br />Title: _______________________________<br />Signature: ___________________________<br />Date: _______________________________</td>
+</tr>
+</table>
+<p>MeritLense OÜ | Registry Code: 17607462 | Ruunaoja tn 3, Lasnamäe linnaosa, Tallinn, Harju maakond, 11415, Estonia | info@meritlense.com</p>
 {% include "contracts/_seal.html" %}
 {% endblock %}

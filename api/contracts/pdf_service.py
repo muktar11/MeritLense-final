@@ -79,6 +79,26 @@ def _individual_context(user):
     }
 
 
+def _company_context(company, user):
+    if company is None:
+        return {
+            "company_name": "",
+            "company_registration_number": "",
+            "company_country": "",
+            "company_address": "",
+            "company_email": getattr(user, "email", ""),
+        }
+
+    admin_user = getattr(company, "admin_user", None)
+    return {
+        "company_name": getattr(company, "name", ""),
+        "company_registration_number": getattr(company, "registration_number", ""),
+        "company_country": getattr(company, "country", ""),
+        "company_address": getattr(company, "address", ""),
+        "company_email": getattr(admin_user, "email", "") or getattr(user, "email", ""),
+    }
+
+
 def generate_contract_id():
     year = timezone.now().year
     suffix = secrets.token_hex(3).upper()
@@ -138,9 +158,7 @@ def render_preview_html(agreement_type, version, company=None, user=None, langua
     context = {
         "version": version,
         "generated_at": timezone.now().strftime("%Y-%m-%d %H:%M UTC"),
-        "company_name": getattr(company, "name", ""),
-        "company_registration_number": getattr(company, "registration_number", ""),
-        "company_country": getattr(company, "country", ""),
+        **_company_context(company, user),
         "signatory_name": "",
         "is_preview": True,
         **_language_context(language),
@@ -170,9 +188,7 @@ def render_agreement_pdf(agreement, company=None, user=None, request=None):
     context = {
         "version": agreement.version,
         "generated_at": timezone.now().strftime("%Y-%m-%d %H:%M UTC"),
-        "company_name": getattr(company, "name", ""),
-        "company_registration_number": getattr(company, "registration_number", ""),
-        "company_country": getattr(company, "country", ""),
+        **_company_context(company, user),
         "signatory_name": agreement.signatory_name,
         "contract_id": agreement.contract_id,
         "signed_at": agreement.accepted_at.strftime("%Y-%m-%d %H:%M UTC") if agreement.accepted_at else "",

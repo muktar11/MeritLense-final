@@ -17,6 +17,7 @@ class FakeCompany:
     name = "Acme Staffing LLC"
     registration_number = "REG-12345"
     country = "AE"
+    address = "123 Example Road, Tallinn"
 
 
 class FakeIndividualProfile:
@@ -32,9 +33,7 @@ class FakeUser:
 
 
 class AgreementTemplateContentTests(TestCase):
-    """B2B/B2C agreement bodies must be the real legal text, not the
-    placeholder that shipped before legal review - see CURRENT_VERSIONS
-    and api/contracts/templates/contracts/*.html."""
+    """Agreement previews must match the supplied current legal documents."""
 
     def test_b2b_agreement_has_no_placeholder_notice(self):
         html = render_preview_html(
@@ -43,6 +42,8 @@ class AgreementTemplateContentTests(TestCase):
         )
         self.assertNotIn("PLACEHOLDER", html)
         self.assertIn("Acme Staffing LLC", html)
+        self.assertIn("REG-12345", html)
+        self.assertIn("123 Example Road, Tallinn", html)
         self.assertIn("Republic of Estonia", html)
 
     def test_b2c_agreement_has_no_placeholder_notice(self):
@@ -52,21 +53,23 @@ class AgreementTemplateContentTests(TestCase):
         )
         self.assertNotIn("PLACEHOLDER", html)
         self.assertIn("Jane Doe", html)
-        self.assertIn("Refund Policy (B2C)", html)
+        self.assertIn("Statutory 14-day withdrawal right", html)
+        self.assertIn("Jane Doe", html)
 
     def test_b2b_and_b2c_versions_match_provided_documents(self):
-        self.assertEqual(CURRENT_VERSIONS[AgreementType.B2B_AGREEMENT], "v1.5")
-        self.assertEqual(CURRENT_VERSIONS[AgreementType.B2C_AGREEMENT], "v1.5")
+        self.assertEqual(CURRENT_VERSIONS[AgreementType.B2B_AGREEMENT], "v1.6")
+        self.assertEqual(CURRENT_VERSIONS[AgreementType.B2C_AGREEMENT], "v1.6")
 
-    def test_b2b_agreement_v1_5_privacy_policy_clause(self):
-        """v1.5 added the clause clarifying the Privacy Policy is
-        informational only and doesn't affect precedence between this
-        Agreement and the DPA - matches the DPA's equivalent language."""
+    def test_privacy_terms_version_matches_provided_policy(self):
+        self.assertEqual(CURRENT_VERSIONS[AgreementType.PRIVACY_TERMS], "v1.6")
+
+    def test_b2b_agreement_includes_the_final_privacy_policy_clause(self):
         html = render_preview_html(
             AgreementType.B2B_AGREEMENT, CURRENT_VERSIONS[AgreementType.B2B_AGREEMENT],
             company=FakeCompany(), user=None,
         )
-        self.assertIn("is referenced in this Agreement and in the DPA for general", html)
+        self.assertIn("referenced for transparency and information purposes", html)
+        self.assertIn("Acme Staffing LLC", html)
 
     def test_b2b_agreement_arabic_preview_renders_rtl_with_real_content(self):
         """b2b_agreement_ar.html didn't exist until now - Arabic-locale B2B
@@ -78,7 +81,7 @@ class AgreementTemplateContentTests(TestCase):
         )
         self.assertIn('dir="rtl"', html)
         self.assertNotIn("PLACEHOLDER", html)
-        self.assertIn("اتفاقية خدمات B2B", html)
+        self.assertIn("اتفاقية خدمات للشركات والوكالات", html)
         self.assertIn("Acme Staffing LLC", html)
         self.assertIn("Assessment Slots", html)
 
@@ -89,11 +92,12 @@ class AgreementTemplateContentTests(TestCase):
         )
         self.assertNotIn("PLACEHOLDER", html)
         self.assertIn("Acme Staffing LLC", html)
+        self.assertIn("REG-12345", html)
         self.assertIn("Republic of Estonia", html)
-        self.assertIn("Annex E", html)
+        self.assertIn("Annex D — Retention Principles", html)
 
     def test_dpa_version_matches_provided_document(self):
-        self.assertEqual(CURRENT_VERSIONS[AgreementType.DPA], "v2.1")
+        self.assertEqual(CURRENT_VERSIONS[AgreementType.DPA], "v1.7")
 
     def test_dpa_arabic_preview_renders_rtl_with_real_content(self):
         html = render_preview_html(
@@ -105,12 +109,7 @@ class AgreementTemplateContentTests(TestCase):
         self.assertIn("اتفاقية معالجة البيانات", html)
         self.assertIn("Acme Staffing LLC", html)
 
-    def test_dpa_annex_b_subprocessors_are_confirmed_not_placeholder(self):
-        """Annex B/C/D/E shipped as literal '[To be completed]'/'[To be
-        confirmed]' placeholders until the 90-day retention job, off-VM
-        backups, and the subprocessor list were actually verified against
-        production - v2.1 fills them in with the confirmed real values,
-        matching the client-issued reference copy (MeritLense_DPA_v2_1)."""
+    def test_dpa_annexes_match_the_final_provider_and_retention_disclosures(self):
         html = render_preview_html(
             AgreementType.DPA, CURRENT_VERSIONS[AgreementType.DPA],
             company=FakeCompany(), user=None,
@@ -121,9 +120,10 @@ class AgreementTemplateContentTests(TestCase):
         self.assertNotIn("[Retention / Deletion Policy to be confirmed]", html)
         self.assertIn("Microsoft Azure", html)
         self.assertIn("OpenAI", html)
-        self.assertIn("Stripe", html)
+        self.assertIn("Payment provider", html)
+        self.assertIn("not candidate assessment data unless technically necessary", html)
         self.assertIn("Standard Contractual Clauses", html)
-        self.assertIn("90 days after the associated evaluation", html)
+        self.assertIn("current 90-day deletion control is enabled", html)
 
     def test_dpa_arabic_annex_b_subprocessors_are_confirmed_not_placeholder(self):
         html = render_preview_html(
@@ -133,29 +133,16 @@ class AgreementTemplateContentTests(TestCase):
         self.assertNotIn("قيد الإكمال", html)
         self.assertNotIn("قيد التأكيد", html)
         self.assertIn("Microsoft Azure", html)
-        self.assertIn("Stripe", html)
+        self.assertIn("مقدم خدمات الدفع", html)
         self.assertIn("البنود التعاقدية القياسية", html)
 
-    def test_dpa_annex_b_excludes_stripe_as_a_row_and_uses_appropriate_safeguard_wording(self):
-        """Stripe only ever touches the Customer's own billing data, never
-        candidate Personal Data on the Customer's behalf - it's explicitly
-        carved out of Annex B/C as a subprocessor row (still mentioned in
-        the explanatory paragraph). Annex C also deliberately doesn't
-        assert a specific transfer mechanism per provider until verified
-        against each provider's actual terms - "Appropriate safeguard per
-        Section 11" pending that, not a blanket SCC claim."""
+    def test_dpa_annexes_describe_transfer_safeguards_without_blanket_claims(self):
         html = render_preview_html(
             AgreementType.DPA, CURRENT_VERSIONS[AgreementType.DPA],
             company=FakeCompany(), user=None,
         )
-        self.assertIn(
-            "Payment processing providers (such as Stripe) process the Customer's own billing",
-            html,
-        )
-        self.assertIn("Appropriate safeguard per Section 11", html)
-        self.assertIn(
-            "The specific transfer mechanism relied upon for each provider", html,
-        )
+        self.assertIn("lawful Chapter V GDPR transfer basis applicable to that transfer", html)
+        self.assertIn("not required to duplicate SCCs in this DPA", html)
 
 
 class AgreementPublicPreviewEndpointTests(APITestCase):
@@ -166,7 +153,7 @@ class AgreementPublicPreviewEndpointTests(APITestCase):
     def test_b2c_public_preview_accessible_without_auth(self):
         response = self.client.get("/api/v1/agreements/public-preview/B2C_AGREEMENT")
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertIn("Refund Policy (B2C)", response.data["html"])
+        self.assertIn("Statutory 14-day withdrawal right", response.data["html"])
         self.assertEqual(response.data["version"], CURRENT_VERSIONS[AgreementType.B2C_AGREEMENT])
 
     def test_b2b_public_preview_accessible_without_auth(self):
@@ -245,6 +232,29 @@ class AdminAgreementEndpointTests(APITestCase):
     def test_admin_listing_unknown_user_returns_404(self):
         response = self.client.get("/api/v1/agreements/admin/user/999999")
         self.assertEqual(response.status_code, 404)
+
+    def test_stale_pending_agreement_must_be_reviewed_again(self):
+        agreement = Agreement.objects.create(
+            user=self.superadmin,
+            agreement_type=AgreementType.B2C_AGREEMENT,
+            version="v1.5",
+            method=AgreementMethod.OTP_SIGNATURE,
+            status=AgreementStatus.PENDING,
+            signatory_name="Agreement Super",
+            otp_reference="stale-terms-reference",
+        )
+
+        response = self.client.post(
+            "/api/v1/agreements/sign/confirm",
+            {"otp_reference": agreement.otp_reference, "code": "12345"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 409, response.data)
+        self.assertIn("terms have changed", response.data["error"])
+        agreement.refresh_from_db()
+        self.assertEqual(agreement.status, AgreementStatus.SUPERSEDED)
+        self.assertFalse(agreement.signed_pdf)
 
     def test_non_admin_cannot_list_another_users_agreements(self):
         other_user = User.objects.create_user(

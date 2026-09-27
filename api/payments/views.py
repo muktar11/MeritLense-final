@@ -1113,6 +1113,7 @@ class AdminPaymentViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_409_CONFLICT,
             )
 
+        stripe.api_key = settings.STRIPE_SECRET_KEY
         try:
             intent = stripe.PaymentIntent.retrieve(payment.stripe_payment_intent_id)
         except stripe.error.StripeError:

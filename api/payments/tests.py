@@ -1304,6 +1304,7 @@ class AdminPaymentReconciliationTests(APITestCase):
             "metadata": {},
         }
 
+    @override_settings(STRIPE_SECRET_KEY="sk_test_reconcile")
     @patch("api.payments.views.StripeService.handle_payment_succeeded")
     @patch("api.payments.views.stripe.PaymentIntent.retrieve")
     def test_reconciles_only_after_stripe_confirms_matching_success(
@@ -1322,6 +1323,7 @@ class AdminPaymentReconciliationTests(APITestCase):
         response = self.client.post(self.url, {}, format="json")
 
         self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(stripe.api_key, "sk_test_reconcile")
         retrieve_intent.assert_called_once_with(self.payment.stripe_payment_intent_id)
         handle_success.assert_called_once_with(self.stripe_intent)
         self.assertEqual(response.data["payment"]["status"], "SUCCEEDED")

@@ -94,6 +94,18 @@ class EvaluationReadinessRecordService:
             return ReadinessStatus.NOT_READY
         if readiness_indicator == cls.INDICATOR_INCOMPLETE:
             return ReadinessStatus.INCOMPLETE
+        if readiness_indicator == cls.INDICATOR_MEDIUM:
+            # INDICATOR_MEDIUM is also the persisted fallback for a locked
+            # PENDING record (a rare case: readiness_indicator_enabled=True
+            # but summary.status was PARTIALLY_EVALUATED/
+            # REQUIRES_HUMAN_REVIEW when the record was written - see
+            # _map_indicator's own fallback below). EvaluationReportService.
+            # _resolve_readiness_indicator already displays that same record
+            # as "Partially Ready", not "Pending", so resolving it back to
+            # PARTIALLY_READY here keeps the internal status consistent with
+            # what's already shown, rather than introducing a second
+            # disagreement on top of an existing display ambiguity.
+            return ReadinessStatus.PARTIALLY_READY
         return ReadinessStatus.PENDING
 
     @classmethod
@@ -104,4 +116,6 @@ class EvaluationReadinessRecordService:
             return cls.INDICATOR_NOT_READY
         if readiness_status == ReadinessStatus.INCOMPLETE:
             return cls.INDICATOR_INCOMPLETE
+        if readiness_status == ReadinessStatus.PARTIALLY_READY:
+            return cls.INDICATOR_MEDIUM
         return cls.INDICATOR_MEDIUM

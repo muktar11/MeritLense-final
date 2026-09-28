@@ -1422,6 +1422,8 @@ class EvaluationReportService:
             raw_value = "غير جاهز"
         elif evaluation.readiness_status == "INCOMPLETE":
             raw_value = "أدلة غير كافية"
+        elif evaluation.readiness_status == "PARTIALLY_READY":
+            raw_value = "متوسط"
         else:
             raw_value = "متوسط"
 

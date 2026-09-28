@@ -1231,9 +1231,12 @@ class Week6ScoringServiceTests(TestCase):
 class DriverV12ReadinessTests(TestCase):
     """Driver-v1.2 Required/Critical competency configuration: Safety
     Awareness and Practical Task Execution are Required/Critical,
-    Behavioral Indicators is Required/Non-Critical, Communication Ability
-    is Not Applicable (no question-bank coverage for driver - see
-    certificate_services.ROLE_COMPETENCY_CONFIG's docstring)."""
+    Behavioral Indicators and Communication Ability are Required/
+    Non-Critical - Communication Ability by explicit direction even though
+    the driver question bank has no real coverage for it yet (see
+    certificate_services.ROLE_COMPETENCY_CONFIG's docstring), so these
+    tests answer it directly via a synthetic rule/question the same way
+    the other three competencies are exercised."""
 
     def setUp(self):
         self.user = User.objects.create_user(
@@ -1261,7 +1264,7 @@ class DriverV12ReadinessTests(TestCase):
             language="EN",
             evaluation_tier=InterviewEvaluationTier.FULL,
             duration_minutes=45,
-            total_questions=3,
+            total_questions=4,
             allow_retries=True,
             max_retries=1,
             rubric_version="v1.2",
@@ -1277,7 +1280,7 @@ class DriverV12ReadinessTests(TestCase):
             candidate_language="EN",
             tts_language_code="en-US",
             stt_language_code="en-US",
-            total_questions=3,
+            total_questions=4,
             evaluation_tier=InterviewEvaluationTier.FULL,
             rubric_version="v1.2",
             question_set_version="v1.2",
@@ -1306,6 +1309,7 @@ class DriverV12ReadinessTests(TestCase):
             "safety_awareness": ("SAF-001", 1),
             "task_execution": ("TSK-001", 2),
             "behavior_integrity": ("IR-001", 3),
+            "communication_ability": ("COM-001", 4),
         }
         for competency_code, (question_code, order) in self.competencies.items():
             template = QuestionTemplate.objects.create(
@@ -1394,6 +1398,7 @@ class DriverV12ReadinessTests(TestCase):
         self._answer("safety_awareness", observed=["a", "b"])
         self._answer("task_execution", observed=["a", "b"])
         self._answer("behavior_integrity", observed=["a", "b"])
+        self._answer("communication_ability", observed=["a", "b"])
         self._run()
         self.evaluation.refresh_from_db()
         self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.READY)
@@ -1403,6 +1408,7 @@ class DriverV12ReadinessTests(TestCase):
         self._answer("safety_awareness", observed=[])  # Critical, 0% - fails
         self._answer("task_execution", observed=["a", "b"])
         self._answer("behavior_integrity", observed=["a", "b"])
+        self._answer("communication_ability", observed=["a", "b"])
         self._run()
         self.evaluation.refresh_from_db()
         self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.NOT_READY)
@@ -1413,6 +1419,7 @@ class DriverV12ReadinessTests(TestCase):
         self._answer("safety_awareness", observed=["a", "b"])
         self._answer("task_execution", observed=["a", "b"])
         self._answer("behavior_integrity", observed=[])  # Non-critical, 0% - fails
+        self._answer("communication_ability", observed=["a", "b"])
         self._run()
         self.evaluation.refresh_from_db()
         self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.PARTIALLY_READY)
@@ -1421,10 +1428,26 @@ class DriverV12ReadinessTests(TestCase):
 
     def test_missing_required_dimension_is_incomplete_not_ready_or_partially_ready(self):
         # No response at all for behavior_integrity - Required Competency
-        # Coverage must be 100%, no slack, regardless of the other two
+        # Coverage must be 100%, no slack, regardless of the other three
         # scoring perfectly.
         self._answer("safety_awareness", observed=["a", "b"])
         self._answer("task_execution", observed=["a", "b"])
+        self._answer("communication_ability", observed=["a", "b"])
+        self._run()
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.INCOMPLETE)
+        self.assertFalse(self.evaluation.readiness_override_applied)
+
+    def test_missing_communication_ability_is_incomplete(self):
+        # Communication Ability is Required/Non-Critical by explicit
+        # direction even though the real driver question bank has zero
+        # questions for it today - an evaluation that never touches it must
+        # land on INCOMPLETE (Insufficient Evidence), not silently skip it
+        # and reach READY/PARTIALLY_READY, however well the other three
+        # competencies score.
+        self._answer("safety_awareness", observed=["a", "b"])
+        self._answer("task_execution", observed=["a", "b"])
+        self._answer("behavior_integrity", observed=["a", "b"])
         self._run()
         self.evaluation.refresh_from_db()
         self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.INCOMPLETE)
@@ -1438,6 +1461,7 @@ class DriverV12ReadinessTests(TestCase):
         # flag a completely empty observed_indicators list triggers (an
         # unrelated, pre-existing check this test isn't about).
         self._answer("behavior_integrity", observed=["a"])
+        self._answer("communication_ability", observed=["a", "b"])
         summary = self._run()
         self.evaluation.refresh_from_db()
         self.session.identity_verified = True

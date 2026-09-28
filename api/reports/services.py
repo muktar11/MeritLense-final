@@ -2640,13 +2640,19 @@ class EvaluationReportService:
 
     @classmethod
     def _build_qa_rows(cls, report):
-        """Question + the candidate's own actual answer text, paired in
-        question order - deliberately separate from evidence_summary (which
-        only carries `has_transcript: bool`, never the literal transcript,
-        since that payload is built for the employer-facing structured
-        report). Prefers the translated transcript (most readable to
-        whoever downloads the bundle), falling back to the original-language
-        transcript when no translation exists or it failed."""
+        """Question + the candidate's own actual answer text, keyed by the
+        question's own stable public_id (question_id) - the same id
+        _build_response_evidence's rows carry - so the merge in
+        _build_qa_and_score_rows below is a real ID-based join, never a
+        question_order/array-position association. question_order is still
+        attached for display numbering only ("Q1", "Q2", ...); it plays no
+        role in matching a row to its evidence/score. Deliberately separate
+        from evidence_summary (which only carries `has_transcript: bool`,
+        never the literal transcript, since that payload is built for the
+        employer-facing structured report). Prefers the translated
+        transcript (most readable to whoever downloads the bundle), falling
+        back to the original-language transcript when no translation exists
+        or it failed."""
         responses = (
             CandidateResponse.objects.filter(session_id=report.session_id)
             .select_related("question")
@@ -2662,6 +2668,8 @@ class EvaluationReportService:
             ).strip()
             rows.append(
                 {
+                    "question_id": str(response.question.public_id),
+                    "response_id": str(response.public_id),
                     "question_order": response.question.question_order,
                     "question_text": response.question.question_text,
                     "answer_text": answer,
@@ -2677,7 +2685,10 @@ class EvaluationReportService:
         see _build_response_evidence's docstring at its call site below for
         why - so it's rebuilt fresh from ResponseEvaluationResult, the same
         way generate_for_evaluation itself does, then joined to the answer
-        rows by question_order."""
+        rows by the question's own public_id (question_id) - a stable,
+        ID-based relationship. Never joined by question_order or array
+        position, so two rows can never swap content because of ordering,
+        renumbering, or a gap in the sequence."""
         payload = report.report_payload or {}
         language = payload.get("language", "en")
         summary = report.evaluation.session_summaries.select_related("rule_set").first()
@@ -2691,13 +2702,13 @@ class EvaluationReportService:
                 .select_related("question", "response", "rule_set")
                 .order_by("question__question_order", "created_at")
             )
-        evidence_by_order = {
-            row["question_order"]: row
+        evidence_by_question_id = {
+            row["question_id"]: row
             for row in cls._build_response_evidence(response_results, language=language)
         }
         rows = []
         for qa_row in cls._build_qa_rows(report):
-            evidence = evidence_by_order.get(qa_row["question_order"], {})
+            evidence = evidence_by_question_id.get(qa_row["question_id"], {})
             rows.append({**qa_row, **evidence, "answer_text": qa_row["answer_text"], "scored": bool(evidence)})
         return rows
 

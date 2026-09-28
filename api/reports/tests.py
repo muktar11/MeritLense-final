@@ -526,6 +526,106 @@ class EvaluationReportApiTests(TestCase):
         qa_and_score_pdf_bytes = archive.read(f"{report.report_number}-questions-answers-and-score.pdf")
         self.assertGreater(len(qa_and_score_pdf_bytes), 0)
 
+    def test_qa_and_score_rows_join_by_question_id_not_order(self):
+        """_build_qa_and_score_rows must pair each answer with its own
+        score by the question's stable public_id, never by question_order/
+        array position - added as a second, differently-scored question so
+        a positional mix-up (Q1's answer with Q2's score, or vice versa)
+        would be caught rather than passing by coincidence with only one
+        question in the fixture."""
+        second_template = QuestionTemplate.objects.create(
+            role_name="Housekeeper",
+            role_code="domestic_worker",
+            question_code="HK-SAF-004",
+            question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE,
+            domain="Safety & Hygiene",
+            skill_tag="safety_awareness",
+            skill="Safety Awareness",
+            sequence_number=2,
+            difficulty=QuestionDifficulty.MEDIUM,
+            question_text="What do you do before letting a child near the stove?",
+            question_type="safety",
+            question_format="SCENARIO",
+            language="EN",
+            scoring_type="0/3/5",
+            difficulty_score=2,
+            estimated_time_seconds=60,
+            expected_answer_type="multi_step",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            critical_question=False,
+            is_active=True,
+        )
+        second_question = SessionQuestion.objects.create(
+            session=self.session,
+            question_template=second_template,
+            question_text=second_template.question_text,
+            domain=second_template.domain,
+            skill=second_template.skill_tag,
+            difficulty=second_template.difficulty,
+            question_order=2,
+            status="ANSWERED",
+            is_mandatory=True,
+            asked_at=timezone.now(),
+            answered_at=timezone.now(),
+        )
+        second_response = CandidateResponse.objects.create(
+            session=self.session,
+            question=second_question,
+            response_type=CandidateResponseType.TEXT,
+            transcript="I turn off the stove and keep them at a safe distance.",
+            text_response="I turn off the stove and keep them at a safe distance.",
+            interpretation_status="COMPLETED",
+            processing_status="RULE_INPUT_PREPARED",
+        )
+        EvaluationInputArtifact.objects.create(
+            response=second_response,
+            session=self.session,
+            question=second_question,
+            competency_code="safety_awareness",
+            expected_indicators=["turn off stove", "keep distance"],
+            observed_indicators=["turn off stove", "keep distance"],
+            missing_indicators=[],
+            risk_flags=[],
+            source_interpretation_status="COMPLETED",
+            requires_human_review=False,
+            metadata={"source": "week5"},
+        )
+        ScoringRule.objects.create(
+            rule_set=self.rule_set,
+            competency_code="safety_awareness",
+            competency_name="Safety Awareness",
+            question_template=second_template,
+            question_code="HK-SAF-004",
+            expected_indicators=["turn off stove", "keep distance"],
+            required_indicators=["turn off stove"],
+            weighted_indicators={"turn off stove": "5", "keep distance": "5"},
+            max_score="10.00",
+            pass_threshold="6.00",
+            scoring_method=ScoringRule.SCORING_METHOD_WEIGHTED_MATCH,
+            is_active=True,
+        )
+        Week6ScoringService.run_for_evaluation(evaluation=self.evaluation, actor=self.user, rule_set=self.rule_set)
+
+        self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report", {}, format="json",
+        )
+        report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status=EvaluationReport.STATUS_ACTIVE)
+
+        rows = EvaluationReportService._build_qa_and_score_rows(report)
+        by_question_id = {row["question_id"]: row for row in rows}
+
+        first_row = by_question_id[str(self.session_question.public_id)]
+        second_row = by_question_id[str(second_question.public_id)]
+
+        self.assertIn("dry the floor", first_row["answer_text"])
+        self.assertEqual(float(first_row["score"]), 7.0)
+
+        self.assertIn("stove", second_row["answer_text"])
+        self.assertEqual(float(second_row["score"]), 10.0)
+
     def test_transcript_issue_text_is_normalized_for_employer_outputs(self):
         interpretation = CandidateResponseInterpretation.objects.get(response=self.response)
         interpretation.structured_output = {

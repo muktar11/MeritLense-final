@@ -243,17 +243,22 @@ def assessed_dimensions(summary):
 # both the coverage requirement and the below-threshold check entirely -
 # never silently treated as "required but always failing".
 ROLE_COMPETENCY_CONFIG = {
-    # Driver-v1.2. Communication Ability is deliberately left out (Not
-    # Applicable) rather than marked Required - the driver question bank has
-    # zero questions for it today (confirmed against production
-    # QuestionTemplate/ScoringRule data), so marking it Required would make
-    # every driver assessment permanently unable to reach Required
-    # Competency Coverage, the same failure mode the original role-specific
-    # coverage fix above (REQUIRED_DIMENSIONS_BY_ROLE) exists to avoid.
+    # Driver-v1.2, per the approved specification. Communication Ability is
+    # Required/Non-Critical here by explicit direction, even though the
+    # driver question bank has zero questions for it today (confirmed
+    # against production QuestionTemplate/ScoringRule data) - every driver
+    # assessment will correctly land on INCOMPLETE (Insufficient Evidence)
+    # rather than READY/PARTIALLY_READY until real Communication Ability
+    # questions exist for this role. That's the intended, accepted
+    # consequence of marking it Required rather than Not Applicable - see
+    # evaluate_role_competency_readiness's "missing" branch below, which is
+    # exactly the rule this configuration is relying on to surface the gap
+    # instead of silently hiding it.
     "driver": {
         "SAFETY": "CRITICAL",
         "PRACTICAL_TASKS": "CRITICAL",
         "BEHAVIORAL": "NON_CRITICAL",
+        "COMMUNICATION": "NON_CRITICAL",
     },
 }
 

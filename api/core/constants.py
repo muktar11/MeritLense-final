@@ -231,10 +231,18 @@ class ReadinessStatus:
     # "we have enough evidence and it says the candidate isn't ready";
     # INCOMPLETE means "we don't have enough evidence to say either way".
     INCOMPLETE = "INCOMPLETE"
+    # All Required competencies have sufficient evidence and every Critical
+    # one meets its threshold, but one or more Non-Critical Required
+    # competencies is below threshold - a role-specific distinction that
+    # only applies to roles configured with a Critical/Non-Critical split
+    # (see certificate_services.ROLE_COMPETENCY_CONFIG); roles without one
+    # never produce this status.
+    PARTIALLY_READY = "PARTIALLY_READY"
 
     CHOICES = [
         (PENDING, "Pending"),
         (READY, "Ready"),
+        (PARTIALLY_READY, "Partially Ready"),
         (NOT_READY, "Not Ready"),
         (INCOMPLETE, "Insufficient Evidence / Incomplete"),
     ]

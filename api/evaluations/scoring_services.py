@@ -12,6 +12,7 @@ from api.translation.models import EvaluationInputArtifact
 from .certificate_services import (
     assessed_dimensions,
     below_threshold_dimensions,
+    evaluate_role_competency_readiness,
     minimum_required_dimensions_for_role,
     required_dimensions_for_role,
 )
@@ -531,38 +532,61 @@ class Week6ScoringService:
             # already applies so a READY evaluation and an eligible-for-
             # certificate evaluation never disagree about whether coverage
             # was sufficient.
-            covered_dimensions = assessed_dimensions(summary)
             role_code = evaluation.session.role_code
-            role_required_dimensions = required_dimensions_for_role(role_code)
-            minimum_dimensions = minimum_required_dimensions_for_role(role_code)
-            # A dimension can be "covered" (assessed_dimensions above) yet
-            # still be a real fail: below_threshold_competencies is computed
-            # by _build_session_summary but was previously never consulted
-            # here, so a required competency that was fully assessed and
-            # scored below its own pass_threshold still rolled up to READY.
-            failed_required_dimensions = below_threshold_dimensions(summary) & set(role_required_dimensions)
-            if len(covered_dimensions) < minimum_dimensions:
-                evaluation.readiness_status = ReadinessStatus.INCOMPLETE
-                evaluation.readiness_override_applied = False
-                evaluation.readiness_override_reason = ""
-                readiness_reason = (
-                    f"Insufficient assessment coverage: {len(covered_dimensions)} of "
-                    f"{len(role_required_dimensions)} competencies assessed, minimum required is "
-                    f"{minimum_dimensions}."
-                )
-            elif failed_required_dimensions:
-                evaluation.readiness_status = ReadinessStatus.NOT_READY
-                evaluation.readiness_override_applied = True
-                override_triggered = True
-                failed_names = ", ".join(sorted(failed_required_dimensions))
-                readiness_reason = f"Required competency below threshold: {failed_names}."
-                record_metadata["below_threshold_dimensions"] = sorted(failed_required_dimensions)
-                evaluation.readiness_override_reason = readiness_reason
+            role_competency_result = evaluate_role_competency_readiness(summary, role_code)
+            if role_competency_result is not None:
+                # Migrated role (currently just Driver-v1.2): Required/
+                # Critical model decides INCOMPLETE / NOT_READY /
+                # PARTIALLY_READY / READY directly - see
+                # certificate_services.evaluate_role_competency_readiness
+                # for the exact rules.
+                status, readiness_reason = role_competency_result
+                evaluation.readiness_status = status
+                if status == ReadinessStatus.READY:
+                    evaluation.readiness_override_applied = False
+                    evaluation.readiness_override_reason = ""
+                elif status == ReadinessStatus.INCOMPLETE:
+                    evaluation.readiness_override_applied = False
+                    evaluation.readiness_override_reason = ""
+                else:
+                    # NOT_READY or PARTIALLY_READY - the indicator overrides
+                    # the raw score-based narrative either way.
+                    evaluation.readiness_override_applied = True
+                    override_triggered = True
+                    evaluation.readiness_override_reason = readiness_reason
+                    record_metadata["role_competency_status"] = status
             else:
-                evaluation.readiness_status = ReadinessStatus.READY
-                evaluation.readiness_override_applied = False
-                evaluation.readiness_override_reason = ""
-                readiness_reason = "Deterministic scoring completed without critical failures."
+                covered_dimensions = assessed_dimensions(summary)
+                role_required_dimensions = required_dimensions_for_role(role_code)
+                minimum_dimensions = minimum_required_dimensions_for_role(role_code)
+                # A dimension can be "covered" (assessed_dimensions above) yet
+                # still be a real fail: below_threshold_competencies is computed
+                # by _build_session_summary but was previously never consulted
+                # here, so a required competency that was fully assessed and
+                # scored below its own pass_threshold still rolled up to READY.
+                failed_required_dimensions = below_threshold_dimensions(summary) & set(role_required_dimensions)
+                if len(covered_dimensions) < minimum_dimensions:
+                    evaluation.readiness_status = ReadinessStatus.INCOMPLETE
+                    evaluation.readiness_override_applied = False
+                    evaluation.readiness_override_reason = ""
+                    readiness_reason = (
+                        f"Insufficient assessment coverage: {len(covered_dimensions)} of "
+                        f"{len(role_required_dimensions)} competencies assessed, minimum required is "
+                        f"{minimum_dimensions}."
+                    )
+                elif failed_required_dimensions:
+                    evaluation.readiness_status = ReadinessStatus.NOT_READY
+                    evaluation.readiness_override_applied = True
+                    override_triggered = True
+                    failed_names = ", ".join(sorted(failed_required_dimensions))
+                    readiness_reason = f"Required competency below threshold: {failed_names}."
+                    record_metadata["below_threshold_dimensions"] = sorted(failed_required_dimensions)
+                    evaluation.readiness_override_reason = readiness_reason
+                else:
+                    evaluation.readiness_status = ReadinessStatus.READY
+                    evaluation.readiness_override_applied = False
+                    evaluation.readiness_override_reason = ""
+                    readiness_reason = "Deterministic scoring completed without critical failures."
             update_fields.extend(["readiness_status", "readiness_override_applied", "readiness_override_reason"])
         else:
             evaluation.readiness_status = ReadinessStatus.PENDING

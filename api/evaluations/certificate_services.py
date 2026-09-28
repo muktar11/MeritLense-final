@@ -9,6 +9,7 @@ from django.core.files.base import ContentFile
 from django.template.loader import render_to_string
 from django.utils import timezone
 
+from api.core.constants import ReadinessStatus
 from api.core.pdf_fonts import arabic_font_context
 from .models import Certificate
 from .readiness_record_services import EvaluationReadinessRecordService
@@ -230,6 +231,89 @@ def assessed_dimensions(summary):
     return dimensions
 
 
+# Per-role competency configuration for roles migrated onto the full
+# Required/Critical readiness framework - a finer-grained model than the
+# plain REQUIRED_DIMENSIONS_BY_ROLE + "allow one miss" slack every other
+# (not-yet-migrated) role still uses via minimum_required_dimensions_for_role.
+# A dimension listed here is one of:
+#   "CRITICAL"     - required; below its own 60% threshold -> NOT_READY
+#   "NON_CRITICAL" - required; below its own 60% threshold -> PARTIALLY_READY
+#                    (only reached once every Critical dimension has passed)
+# A dimension the role doesn't list at all is Not Applicable: excluded from
+# both the coverage requirement and the below-threshold check entirely -
+# never silently treated as "required but always failing".
+ROLE_COMPETENCY_CONFIG = {
+    # Driver-v1.2. Communication Ability is deliberately left out (Not
+    # Applicable) rather than marked Required - the driver question bank has
+    # zero questions for it today (confirmed against production
+    # QuestionTemplate/ScoringRule data), so marking it Required would make
+    # every driver assessment permanently unable to reach Required
+    # Competency Coverage, the same failure mode the original role-specific
+    # coverage fix above (REQUIRED_DIMENSIONS_BY_ROLE) exists to avoid.
+    "driver": {
+        "SAFETY": "CRITICAL",
+        "PRACTICAL_TASKS": "CRITICAL",
+        "BEHAVIORAL": "NON_CRITICAL",
+    },
+}
+
+
+def role_competency_config(role_code):
+    return ROLE_COMPETENCY_CONFIG.get(role_code)
+
+
+def evaluate_role_competency_readiness(summary, role_code):
+    """Required/Critical readiness decision for a role in
+    ROLE_COMPETENCY_CONFIG. Returns (status, reason) using ReadinessStatus
+    values, or None if this role hasn't been migrated onto the new model -
+    callers fall back to the legacy REQUIRED_DIMENSIONS_BY_ROLE +
+    minimum_required_dimensions_for_role path in that case, unchanged.
+
+    Rules (matching the approved Driver-v1.2 specification):
+    - Required Competency Coverage must be 100% - every Required dimension
+      (Critical or Non-Critical) must have sufficient evidence, no slack.
+    - A Critical dimension below its threshold -> NOT_READY.
+    - A Non-Critical dimension below its threshold (with every Critical one
+      passing) -> PARTIALLY_READY.
+    - Everything passing -> READY.
+    """
+    config = role_competency_config(role_code)
+    if config is None:
+        return None
+
+    covered = assessed_dimensions(summary)
+    failed = below_threshold_dimensions(summary)
+    required_dims = set(config.keys())
+    critical_dims = {dim for dim, level in config.items() if level == "CRITICAL"}
+    non_critical_dims = required_dims - critical_dims
+
+    missing = required_dims - covered
+    if missing:
+        return (
+            ReadinessStatus.INCOMPLETE,
+            f"Required competency coverage incomplete: {', '.join(sorted(missing))} not yet sufficiently assessed.",
+        )
+
+    failed_critical = failed & critical_dims
+    if failed_critical:
+        return (
+            ReadinessStatus.NOT_READY,
+            f"Critical competency below threshold: {', '.join(sorted(failed_critical))}.",
+        )
+
+    failed_non_critical = failed & non_critical_dims
+    if failed_non_critical:
+        return (
+            ReadinessStatus.PARTIALLY_READY,
+            f"Non-critical competency below threshold: {', '.join(sorted(failed_non_critical))}.",
+        )
+
+    return (
+        ReadinessStatus.READY,
+        "All required competencies meet or exceed threshold; all critical requirements met.",
+    )
+
+
 def below_threshold_dimensions(summary):
     """Canonical dimensions with at least one BELOW_THRESHOLD competency -
     distinct from assessed_dimensions(), which only tells us a dimension
@@ -438,18 +522,34 @@ def certificate_eligibility(evaluation, summary):
     if not _minimum_quality_met(assessment_quality):
         return False, "QUALITY_BELOW_THRESHOLD"
     role_code = session.role_code if session else None
-    if len(covered_dimensions) < minimum_required_dimensions_for_role(role_code):
-        return False, "INSUFFICIENT_COMPETENCY_COVERAGE"
-    # Re-derived fresh from the actual CompetencyEvaluationResult data every
-    # call, independent of `indicator` (which can come from a stale, locked
-    # EvaluationReadinessDecisionRecord written before this check existed -
-    # see below_threshold_dimensions()/the readiness gate fix in
+    # Both branches below are re-derived fresh from the actual
+    # CompetencyEvaluationResult data every call, independent of `indicator`
+    # (which can come from a stale, locked EvaluationReadinessDecisionRecord
+    # written before this check existed - see the readiness gate fix in
     # Week6ScoringService._apply_evaluation_rollups). A required competency
-    # that is genuinely below its own pass_threshold must never be
+    # that is genuinely below its own pass_threshold, or a required
+    # dimension that was never sufficiently covered, must never be
     # certificate-eligible, whatever the cached indicator claims.
-    failed_required_dimensions = below_threshold_dimensions(summary) & set(required_dimensions_for_role(role_code))
-    if failed_required_dimensions:
-        return False, "REQUIRED_COMPETENCY_BELOW_THRESHOLD"
+    role_competency_result = evaluate_role_competency_readiness(summary, role_code)
+    if role_competency_result is not None:
+        # Migrated role (currently just Driver-v1.2): coverage and
+        # threshold are both decided by the same Required/Critical model
+        # that produced the readiness status in the first place, so this
+        # can never disagree with it the way the legacy pair of checks
+        # below could for a migrated role.
+        status, _reason = role_competency_result
+        if status == ReadinessStatus.INCOMPLETE:
+            return False, "INCOMPLETE"
+        if status == ReadinessStatus.NOT_READY:
+            return False, "REQUIRED_COMPETENCY_BELOW_THRESHOLD"
+        # READY or PARTIALLY_READY - both eligible, continue to the
+        # remaining checks below (human review, evaluator rating, etc).
+    else:
+        if len(covered_dimensions) < minimum_required_dimensions_for_role(role_code):
+            return False, "INSUFFICIENT_COMPETENCY_COVERAGE"
+        failed_required_dimensions = below_threshold_dimensions(summary) & set(required_dimensions_for_role(role_code))
+        if failed_required_dimensions:
+            return False, "REQUIRED_COMPETENCY_BELOW_THRESHOLD"
     if human_review_flags or _human_review_pending(summary):
         return False, "HUMAN_REVIEW_PENDING"
     if session and session.is_scheduled_interview and getattr(evaluation, "evaluator_rating", None) is None:

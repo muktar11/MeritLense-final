@@ -1228,6 +1228,250 @@ class Week6ScoringServiceTests(TestCase):
         self.assertFalse(self.evaluation.readiness_override_applied)
 
 
+class DriverV12ReadinessTests(TestCase):
+    """Driver-v1.2 Required/Critical competency configuration: Safety
+    Awareness and Practical Task Execution are Required/Critical,
+    Behavioral Indicators is Required/Non-Critical, Communication Ability
+    is Not Applicable (no question-bank coverage for driver - see
+    certificate_services.ROLE_COMPETENCY_CONFIG's docstring)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="driver-v12@example.com",
+            password="testpass123",
+            first_name="Driver",
+            last_name="V12",
+            role=Roles.B2C,
+            is_verified=True,
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Driver",
+            last_name="Candidate",
+            email="driver-v12-candidate@example.com",
+            passport_id="DRIVERV12-001",
+            job_role="NA",
+            core_skills="driving",
+            preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf",
+            created_by=self.user,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Driver",
+            role_code="driver",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=45,
+            total_questions=3,
+            allow_retries=True,
+            max_retries=1,
+            rubric_version="v1.2",
+            question_set_version="v1.2",
+        )
+        self.session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            role_code=self.config.role_code,
+            ui_language="EN",
+            candidate_language="EN",
+            tts_language_code="en-US",
+            stt_language_code="en-US",
+            total_questions=3,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v1.2",
+            question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+        )
+        self.evaluation = Evaluation.objects.create(
+            session=self.session,
+            candidate=self.candidate,
+            evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now() + timezone.timedelta(days=1),
+            duration_minutes=45,
+            created_by=self.user,
+        )
+        self.rule_set = ScoringRuleSet.objects.create(
+            name="Driver v1.2 Rules",
+            version="v1.2",
+            role_code="driver",
+            role_name="Driver",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            is_active=True,
+            created_by=self.user,
+            company=self.candidate.company,
+        )
+        self.competencies = {
+            "safety_awareness": ("SAF-001", 1),
+            "task_execution": ("TSK-001", 2),
+            "behavior_integrity": ("IR-001", 3),
+        }
+        for competency_code, (question_code, order) in self.competencies.items():
+            template = QuestionTemplate.objects.create(
+                role_name="Driver",
+                role_code="driver",
+                question_code=question_code,
+                question_version="1.0",
+                question_status=QuestionLifecycleStatus.ACTIVE,
+                domain="Driving",
+                skill_tag=competency_code,
+                skill=competency_code,
+                sequence_number=order,
+                difficulty=QuestionDifficulty.MEDIUM,
+                question_text=f"Question for {competency_code}",
+                question_type="scenario",
+                question_format="SCENARIO",
+                language="EN",
+                scoring_type="0/3/5",
+                difficulty_score=2,
+                estimated_time_seconds=60,
+                expected_answer_type="multi_step",
+                evaluation_tier=InterviewEvaluationTier.FULL,
+                rubric_version="v1.2",
+                question_set_version="v1.2",
+                critical_question=False,
+                is_active=True,
+            )
+            ScoringRule.objects.create(
+                rule_set=self.rule_set,
+                competency_code=competency_code,
+                competency_name=competency_code,
+                question_template=template,
+                question_code=question_code,
+                expected_indicators=["a", "b"],
+                required_indicators=["a"],
+                weighted_indicators={"a": "5", "b": "5"},
+                max_score="10.00",
+                pass_threshold="6.00",
+                scoring_method=ScoringRule.SCORING_METHOD_WEIGHTED_MATCH,
+                is_active=True,
+            )
+
+    def _answer(self, competency_code, *, observed):
+        question_code, order = self.competencies[competency_code]
+        template = QuestionTemplate.objects.get(role_code="driver", question_code=question_code)
+        session_question = SessionQuestion.objects.create(
+            session=self.session,
+            question_template=template,
+            question_text=template.question_text,
+            domain=template.domain,
+            skill=template.skill_tag,
+            difficulty=template.difficulty,
+            question_order=order,
+            status="ANSWERED",
+            is_mandatory=True,
+            asked_at=timezone.now(),
+            answered_at=timezone.now(),
+        )
+        response = CandidateResponse.objects.create(
+            session=self.session,
+            question=session_question,
+            response_type=CandidateResponseType.TEXT,
+            transcript=f"Answer for {competency_code}",
+            text_response=f"Answer for {competency_code}",
+            interpretation_status="COMPLETED",
+            processing_status="RULE_INPUT_PREPARED",
+        )
+        EvaluationInputArtifact.objects.create(
+            response=response,
+            session=self.session,
+            question=session_question,
+            competency_code=competency_code,
+            expected_indicators=["a", "b"],
+            observed_indicators=observed,
+            missing_indicators=[i for i in ["a", "b"] if i not in observed],
+            risk_flags=[],
+            source_interpretation_status="COMPLETED",
+            requires_human_review=False,
+            metadata={"source": "week5"},
+        )
+
+    def _run(self):
+        return Week6ScoringService.run_for_evaluation(evaluation=self.evaluation, actor=self.user, rule_set=self.rule_set)
+
+    def test_all_required_passing_is_ready(self):
+        self._answer("safety_awareness", observed=["a", "b"])
+        self._answer("task_execution", observed=["a", "b"])
+        self._answer("behavior_integrity", observed=["a", "b"])
+        self._run()
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.READY)
+        self.assertFalse(self.evaluation.readiness_override_applied)
+
+    def test_critical_below_threshold_is_not_ready(self):
+        self._answer("safety_awareness", observed=[])  # Critical, 0% - fails
+        self._answer("task_execution", observed=["a", "b"])
+        self._answer("behavior_integrity", observed=["a", "b"])
+        self._run()
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.NOT_READY)
+        self.assertTrue(self.evaluation.readiness_override_applied)
+        self.assertIn("SAFETY", self.evaluation.readiness_override_reason)
+
+    def test_non_critical_below_threshold_with_criticals_passing_is_partially_ready(self):
+        self._answer("safety_awareness", observed=["a", "b"])
+        self._answer("task_execution", observed=["a", "b"])
+        self._answer("behavior_integrity", observed=[])  # Non-critical, 0% - fails
+        self._run()
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.PARTIALLY_READY)
+        self.assertTrue(self.evaluation.readiness_override_applied)
+        self.assertIn("BEHAVIORAL", self.evaluation.readiness_override_reason)
+
+    def test_missing_required_dimension_is_incomplete_not_ready_or_partially_ready(self):
+        # No response at all for behavior_integrity - Required Competency
+        # Coverage must be 100%, no slack, regardless of the other two
+        # scoring perfectly.
+        self._answer("safety_awareness", observed=["a", "b"])
+        self._answer("task_execution", observed=["a", "b"])
+        self._run()
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.INCOMPLETE)
+        self.assertFalse(self.evaluation.readiness_override_applied)
+
+    def test_partially_ready_is_certificate_eligible(self):
+        self._answer("safety_awareness", observed=["a", "b"])
+        self._answer("task_execution", observed=["a", "b"])
+        # Partial (not zero) match - scores 50%, still below the 60%
+        # threshold, but avoids the separate "zero evidence" human-review
+        # flag a completely empty observed_indicators list triggers (an
+        # unrelated, pre-existing check this test isn't about).
+        self._answer("behavior_integrity", observed=["a"])
+        summary = self._run()
+        self.evaluation.refresh_from_db()
+        self.session.identity_verified = True
+        self.session.status = "COMPLETED"
+        self.session.ended_at = timezone.now()
+        consent = Agreement.objects.create(
+            user=self.user,
+            agreement_type=AgreementType.CANDIDATE_CONSENT,
+            version="v1",
+            method=AgreementMethod.CHECKBOX,
+            status=AgreementStatus.SIGNED,
+            accepted_at=timezone.now(),
+        )
+        self.session.candidate_consent_agreement = consent
+        self.session.save(update_fields=["identity_verified", "status", "ended_at", "candidate_consent_agreement"])
+        self.evaluation.status = EvaluationStatus.COMPLETED
+        self.evaluation.completed_at = timezone.now()
+        self.evaluation.save(update_fields=["status", "completed_at"])
+
+        eligible, reason = certificate_eligibility(self.evaluation, summary)
+        self.assertTrue(eligible)
+        self.assertEqual(reason, "PARTIALLY_READY")
+
+    def test_not_ready_is_not_certificate_eligible(self):
+        self._answer("safety_awareness", observed=[])
+        self._answer("task_execution", observed=["a", "b"])
+        self._answer("behavior_integrity", observed=["a", "b"])
+        summary = self._run()
+        self.evaluation.refresh_from_db()
+
+        certificate = generate_certificate(self.evaluation, summary)
+        self.assertIsNone(certificate)
+
+
 class ScoringRuleSetTenantScopingTests(TestCase):
     def setUp(self):
         self.client = APIClient()

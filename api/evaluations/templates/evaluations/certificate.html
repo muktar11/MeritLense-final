@@ -28,8 +28,8 @@
   .photo-frame img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
   .photo-verified { font-size: 7pt; font-weight: 700; color: #14532d; background: #dcfce7; border: 1px solid #86efac; border-radius: 999px; padding: 4px 8px; }
   .statement-col { flex: 1; text-align: center; }
-  .statement-intro { font-size: 9.5pt; color: #64748b; margin-bottom: 3px; }
-  .candidate-name { font-family: Georgia, "Times New Roman", serif; font-size: 23pt; font-weight: 700; color: #1e2a3a; line-height: 1.15; margin: 6px 0 8px; }
+  .statement-intro { font-size: 9.5pt; color: #64748b; margin-bottom: 7px; }
+  .candidate-name { font-family: Georgia, "Times New Roman", serif; font-size: 24pt; font-weight: 700; color: #1e2a3a; line-height: 1.15; margin: 8px 0 14px; }
   .statement-body { font-size: 9.5pt; color: #444; line-height: 1.5; max-width: 480px; margin: 0 auto; }
 
   /* ---------- Stats row ---------- */
@@ -71,7 +71,7 @@
   .issued-by b { color: #1e2a3a; }
   .digital-record { min-width: 78px; padding: 5px 7px; border: 1px solid #dbe4f7; border-radius: 4px; color: #64748b; font-size: 5.3pt; font-weight: 700; line-height: 1.35; letter-spacing: 0.02em; text-align: center; }
 
-  .disclaimer { font-size: 7pt; color: #64748b; text-align: center; margin: 12px auto 0; padding: 0 5mm; line-height: 1.5; }
+  .disclaimer { font-size: 7pt; color: #64748b; text-align: center; margin: 16px auto 0; padding: 0 8mm; line-height: 1.6; }
   .cert-id-footer { text-align: center; font-size: 7pt; color: #bbb; margin-top: 4px; }
 </style>
 </head>
@@ -97,7 +97,7 @@
       <div class="photo-block">
         <div class="photo-frame">
           {% if candidate_photo_data_uri %}
-          <img src="{{ candidate_photo_data_uri }}" alt="{{ candidate_name }}" />
+          <img src="{{ candidate_photo_data_uri }}" alt="" />
           {% endif %}
         </div>
         {% if candidate_photo_verified %}

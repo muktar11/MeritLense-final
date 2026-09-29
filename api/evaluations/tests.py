@@ -884,6 +884,55 @@ class Week6ScoringServiceTests(TestCase):
             ).exists()
         )
 
+    def test_scoring_only_uses_the_latest_attempt_per_question(self):
+        """Attempt isolation regression: if a question is ever answered
+        more than once (CandidateResponse.attempt_number), scoring must
+        use only the latest attempt, never sum both into the competency
+        total. No retry path exists in the app today, but the aggregation
+        code has no attempt-awareness of its own - this guards the
+        boundary directly rather than relying on "nothing calls it that
+        way yet"."""
+        second_response = CandidateResponse.objects.create(
+            session=self.session,
+            question=self.session_question,
+            response_type=CandidateResponseType.TEXT,
+            transcript="Second attempt: I would clean the spill and warn others.",
+            text_response="Second attempt: I would clean the spill and warn others.",
+            interpretation_status="COMPLETED",
+            processing_status="RULE_INPUT_PREPARED",
+            attempt_number=2,
+        )
+        EvaluationInputArtifact.objects.create(
+            response=second_response,
+            session=self.session,
+            question=self.session_question,
+            competency_code="safety_awareness",
+            expected_indicators=["identify hazard", "clean spill", "prevent recurrence"],
+            observed_indicators=["identify hazard", "clean spill", "prevent recurrence"],
+            missing_indicators=[],
+            risk_flags=[],
+            source_interpretation_status="COMPLETED",
+            requires_human_review=False,
+            metadata={"source": "week5"},
+        )
+
+        summary = Week6ScoringService.run_for_evaluation(
+            evaluation=self.evaluation, actor=self.user, rule_set=self.rule_set,
+        )
+
+        self.assertFalse(ResponseEvaluationResult.objects.filter(response=self.response).exists())
+        second_result = ResponseEvaluationResult.objects.get(response=second_response)
+        self.assertEqual(float(second_result.score), 10.0)  # attempt 2 matched all 3 indicators
+
+        safety_result = CompetencyEvaluationResult.objects.get(
+            evaluation=self.evaluation, competency_code="safety_awareness",
+        )
+        # 10.0/10.0, not 17.0/20.0 (which is what summing both attempts
+        # would produce) - only the latest attempt counted.
+        self.assertEqual(float(safety_result.total_score), 10.0)
+        self.assertEqual(float(safety_result.max_score), 10.0)
+        self.assertEqual(summary.total_response_count, 1)
+
     def test_required_competency_below_threshold_blocks_ready(self):
         """Item 6 QA-closure regression: below_threshold_competencies is
         computed by _build_session_summary but was previously never
@@ -1494,6 +1543,38 @@ class DriverV12ReadinessTests(TestCase):
 
         certificate = generate_certificate(self.evaluation, summary)
         self.assertIsNone(certificate)
+
+    def test_missing_required_indicator_triggers_required_gate_and_zero_score(self):
+        """A response can match a non-required indicator and still be
+        forced to a zero/fail result if it misses a REQUIRED one - the
+        Required Gate overrides ordinary weighted scoring rather than just
+        deducting partial credit. Each rule's required_indicators=["a"]
+        (set in setUp); observing only "b" matches a real, weighted
+        indicator (worth half the question's points) but still must score
+        zero, because "a" - the required one - was never observed."""
+        self._answer("safety_awareness", observed=["b"])  # "b" matched, "a" (required) missing
+        self._answer("task_execution", observed=["a", "b"])
+        self._answer("behavior_integrity", observed=["a", "b"])
+        self._answer("communication_ability", observed=["a", "b"])
+        self._run()
+
+        question_code, _order = self.competencies["safety_awareness"]
+        result = ResponseEvaluationResult.objects.get(
+            evaluation=self.evaluation, rule__question_code=question_code,
+        )
+        self.assertEqual(result.matched_indicators, ["b"])
+        self.assertEqual(result.missing_indicators, ["a"])
+        self.assertFalse(result.passed_required_indicators)
+        self.assertEqual(float(result.score), 0.0)
+        self.assertEqual(float(result.percentage), 0.0)
+
+        safety_result = CompetencyEvaluationResult.objects.get(
+            evaluation=self.evaluation, competency_code="safety_awareness",
+        )
+        self.assertEqual(safety_result.status, CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD)
+
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.NOT_READY)
 
 
 class ScoringRuleSetTenantScopingTests(TestCase):
@@ -2454,7 +2535,7 @@ class CertificateGenerationTests(TestCase):
         self.assertIsNone(certificate.expires_at)
 
         from api.evaluations.certificate_services import _candidate_photo_context, _readiness_gauge_context
-        photo_data_uri, photo_verified = _candidate_photo_context(self.candidate)
+        photo_data_uri, photo_verified = _candidate_photo_context(self.candidate, self.session)
         self.assertTrue(photo_data_uri.startswith("data:image/jpeg;base64,"))
         self.assertFalse(photo_verified)
         readiness = _readiness_gauge_context(self.evaluation, "en")
@@ -2475,7 +2556,9 @@ class CertificateGenerationTests(TestCase):
     def test_candidate_photo_prefers_verification_photo_and_marks_verified(self):
         # Regression guard: the "Verified ID Photo" badge must describe the
         # same image actually shown, not a different field's presence -
-        # see _candidate_photo_context's docstring.
+        # see _candidate_photo_context's docstring. Only earns the badge
+        # when BOTH the reference photo is shown AND the session's real
+        # identity verification actually passed.
         import base64
         from django.core.files.uploadedfile import SimpleUploadedFile
         from api.evaluations.certificate_services import _candidate_photo_context
@@ -2491,10 +2574,39 @@ class CertificateGenerationTests(TestCase):
             "verify.jpg", tiny_jpeg, content_type="image/jpeg"
         )
         self.candidate.save(update_fields=["verification_photo"])
+        self.session.identity_verified = True
+        self.session.save(update_fields=["identity_verified"])
 
-        photo_data_uri, photo_verified = _candidate_photo_context(self.candidate)
+        photo_data_uri, photo_verified = _candidate_photo_context(self.candidate, self.session)
         self.assertTrue(photo_data_uri.startswith("data:image/jpeg;base64,"))
         self.assertTrue(photo_verified)
+
+    def test_verification_photo_on_file_is_not_labeled_verified_without_real_verification(self):
+        # The actual bug this fixes: a verification_photo can be on file
+        # (e.g. captured at candidate creation, long before any interview)
+        # with no session ever having passed real identity verification -
+        # the certificate must not claim "Verified ID Photo" in that case.
+        import base64
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from api.evaluations.certificate_services import _candidate_photo_context
+
+        tiny_jpeg = base64.b64decode(
+            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a"
+            "HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIy"
+            "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEB"
+            "AxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAA"
+            "AAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k="
+        )
+        self.candidate.verification_photo = SimpleUploadedFile(
+            "verify.jpg", tiny_jpeg, content_type="image/jpeg"
+        )
+        self.candidate.save(update_fields=["verification_photo"])
+        self.session.identity_verified = False
+        self.session.save(update_fields=["identity_verified"])
+
+        photo_data_uri, photo_verified = _candidate_photo_context(self.candidate, self.session)
+        self.assertTrue(photo_data_uri.startswith("data:image/jpeg;base64,"))
+        self.assertFalse(photo_verified)
 
     def test_readiness_gauge_reflects_real_evaluation_status(self):
         from api.core.constants import ReadinessStatus
@@ -3045,6 +3157,82 @@ class CertificateEligibilityTests(TestCase):
         client = APIClient()
         response = client.get(f"/api/v1/evaluations/certificates/verify/{first_certificate.verification_id}")
         self.assertEqual(response.data["status"], "SUPERSEDED")
+
+    def test_readiness_correction_does_not_alter_original_record_or_status(self):
+        from api.evaluations.readiness_record_services import EvaluationReadinessRecordService
+        from api.evaluations.models import EvaluationReadinessCorrection
+        from api.core.constants import ReadinessStatus
+
+        self.evaluation.readiness_status = ReadinessStatus.READY
+        self.evaluation.save(update_fields=["readiness_status"])
+        record = EvaluationReadinessRecordService.persist_once(
+            evaluation=self.evaluation, readiness_status=ReadinessStatus.READY, readiness_reason="original",
+        )
+
+        correction = EvaluationReadinessRecordService.apply_correction(
+            evaluation=self.evaluation,
+            corrected_status=ReadinessStatus.NOT_READY,
+            reason="Readiness gate bug fixed after the fact - re-scored against the same evidence.",
+            actor=self.user,
+        )
+
+        self.assertEqual(correction.original_readiness_status, ReadinessStatus.READY)
+        self.assertEqual(correction.corrected_readiness_status, ReadinessStatus.NOT_READY)
+
+        # Nothing about the original record or the evaluation's own stored
+        # status field is touched - both remain exactly as they were.
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.READY)
+        record.refresh_from_db()
+        self.assertEqual(record.readiness_indicator, EvaluationReadinessRecordService.INDICATOR_READY)
+
+        self.assertTrue(
+            AuditLog.objects.filter(action=AuditLogAction.EVALUATION_READINESS_CORRECTED).exists()
+        )
+
+    def test_readiness_correction_is_reflected_in_resolved_indicator(self):
+        from api.evaluations.readiness_record_services import EvaluationReadinessRecordService
+        from api.reports.services import EvaluationReportService
+        from api.core.constants import ReadinessStatus
+
+        self.evaluation.readiness_status = ReadinessStatus.READY
+        self.evaluation.save(update_fields=["readiness_status"])
+        EvaluationReadinessRecordService.persist_once(
+            evaluation=self.evaluation, readiness_status=ReadinessStatus.READY, readiness_reason="original",
+        )
+
+        before = EvaluationReportService._resolve_readiness_indicator(
+            self.evaluation, EvaluationReadinessRecordService.get_existing(self.evaluation),
+        )
+        self.assertEqual(before["code"], "READY")
+
+        EvaluationReadinessRecordService.apply_correction(
+            evaluation=self.evaluation, corrected_status=ReadinessStatus.NOT_READY, reason="corrected", actor=self.user,
+        )
+
+        after = EvaluationReportService._resolve_readiness_indicator(
+            self.evaluation, EvaluationReadinessRecordService.get_existing(self.evaluation),
+        )
+        self.assertEqual(after["code"], "NOT_READY")
+        self.assertEqual(
+            EvaluationReadinessRecordService.current_readiness_status(self.evaluation),
+            ReadinessStatus.NOT_READY,
+        )
+
+    def test_readiness_correction_is_idempotent(self):
+        from api.evaluations.readiness_record_services import EvaluationReadinessRecordService
+        from api.evaluations.models import EvaluationReadinessCorrection
+        from api.core.constants import ReadinessStatus
+
+        first = EvaluationReadinessRecordService.apply_correction(
+            evaluation=self.evaluation, corrected_status=ReadinessStatus.NOT_READY, reason="first", actor=self.user,
+        )
+        second = EvaluationReadinessRecordService.apply_correction(
+            evaluation=self.evaluation, corrected_status=ReadinessStatus.INCOMPLETE, reason="second", actor=self.user,
+        )
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(second.reason, "first")  # unchanged - the second call is a no-op
+        self.assertEqual(EvaluationReadinessCorrection.objects.filter(evaluation=self.evaluation).count(), 1)
 
 
 class EvaluatorRatingTests(TestCase):

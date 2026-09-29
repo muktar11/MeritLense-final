@@ -3,7 +3,7 @@ from django.utils import timezone
 from api.audit.services import AuditLogService
 from api.core.constants import AuditLogAction, AuditLogCategory, ReadinessStatus
 
-from .models import EvaluationReadinessDecisionRecord
+from .models import EvaluationReadinessCorrection, EvaluationReadinessDecisionRecord
 
 
 class EvaluationReadinessRecordService:
@@ -85,6 +85,85 @@ class EvaluationReadinessRecordService:
             return evaluation.readiness_legal_record
         except EvaluationReadinessDecisionRecord.DoesNotExist:
             return None
+
+    @classmethod
+    def get_correction(cls, evaluation):
+        try:
+            return evaluation.readiness_correction
+        except (EvaluationReadinessCorrection.DoesNotExist, AttributeError):
+            # AttributeError covers lightweight non-model stand-ins used in
+            # some existing tests (e.g. SimpleNamespace) that don't carry
+            # Django's reverse-relation descriptors - never a real
+            # evaluation lacking this, since every Evaluation instance has
+            # the descriptor even with no row behind it.
+            return None
+
+    @classmethod
+    def current_readiness_status(cls, evaluation):
+        """The evaluation's readiness status as it actually stands today:
+        the corrected value from an EvaluationReadinessCorrection when one
+        exists, otherwise evaluation.readiness_status unchanged. The
+        original EvaluationReadinessDecisionRecord is never consulted or
+        altered here - it's left exactly as decided, for history; this is
+        the "what's true now" read, for anything (report, dashboard, a
+        future certificate flow) that needs the authoritative current
+        answer rather than the frozen original one."""
+        correction = cls.get_correction(evaluation)
+        if correction is not None:
+            return correction.corrected_readiness_status
+        return evaluation.readiness_status
+
+    @classmethod
+    def apply_correction(cls, *, evaluation, corrected_status, reason, actor=None, metadata=None):
+        """Records a formal, auditable correction to an evaluation's
+        readiness result without touching the original immutable record or
+        evaluation.readiness_status itself - both remain exactly as they
+        were for history. Idempotent: calling this again for an evaluation
+        that already has a correction returns the existing one unchanged
+        (immutable once created, same as EvaluationReadinessDecisionRecord -
+        a further change would need a new, distinct correction mechanism,
+        not an edit to this one)."""
+        existing = cls.get_correction(evaluation)
+        if existing is not None:
+            return existing
+
+        correction = EvaluationReadinessCorrection.objects.create(
+            evaluation=evaluation,
+            original_readiness_status=evaluation.readiness_status,
+            corrected_readiness_status=corrected_status,
+            reason=reason,
+            corrected_by=actor,
+            metadata=metadata or {},
+        )
+        description = (
+            f"Readiness correction recorded for evaluation {evaluation.public_id}: "
+            f"{correction.original_readiness_status} -> {correction.corrected_readiness_status}. "
+            f"Reason: {reason}"
+        )
+        log_data = {
+            "evaluation_id": str(evaluation.public_id),
+            "original_readiness_status": correction.original_readiness_status,
+            "corrected_readiness_status": correction.corrected_readiness_status,
+            "reason": reason,
+        }
+        if actor:
+            AuditLogService.log(
+                user=actor,
+                action=AuditLogAction.EVALUATION_READINESS_CORRECTED,
+                category=AuditLogCategory.EVALUATION,
+                description=description,
+                resource=evaluation,
+                data=log_data,
+            )
+        else:
+            AuditLogService.log_system(
+                action=AuditLogAction.EVALUATION_READINESS_CORRECTED,
+                category=AuditLogCategory.EVALUATION,
+                description=description,
+                resource=evaluation,
+                data=log_data,
+            )
+        return correction
 
     @classmethod
     def status_from_indicator(cls, readiness_indicator):

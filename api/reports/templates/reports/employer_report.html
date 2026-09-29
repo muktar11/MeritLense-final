@@ -1119,10 +1119,21 @@
               <div class="summary-label">Assessment Coverage</div>
               <div class="summary-value">
                 {% for item in assessment.assessment_coverage %}
-                  {{ item.label }}{% if not item.covered %} (Not Assessed){% endif %}{% if not forloop.last %} | {% endif %}
+                  {{ item.label }}{% if item.not_applicable %} (N/A){% elif not item.covered %} (Not Assessed){% endif %}{% if not forloop.last %} | {% endif %}
                 {% endfor %}
               </div>
             </div>
+
+            {% if assessment.required_competency_coverage %}
+            <div class="summary-row">
+              <div class="summary-label">Session Status</div>
+              <div class="summary-value">{{ assessment.assessment_status }}</div>
+            </div>
+            <div class="summary-row">
+              <div class="summary-label">Required Competency Coverage</div>
+              <div class="summary-value">{{ assessment.required_competency_coverage.label }} &mdash; {{ assessment.required_competency_coverage.status_label }}</div>
+            </div>
+            {% endif %}
 
             <div class="summary-row">
               <div class="summary-label">Assessment Reliability</div>
@@ -1140,11 +1151,16 @@
           <div class="readiness-card card">
             <div class="readiness-top">
               <div>
-                <div class="readiness-score-label">Overall Score</div>
-                {% if summary.overall_score_available %}
-                  <div class="readiness-score">{{ summary.overall_score_display }}<span>/100</span></div>
+                {% if assessment.required_competency_coverage %}
+                  <div class="readiness-score-label">Score on Assessed Competencies</div>
+                  <div class="readiness-score readiness-score-text">{{ assessment.required_competency_coverage.score_on_assessed_display }}</div>
                 {% else %}
-                  <div class="readiness-score readiness-score-text">{{ summary.overall_score_display }}</div>
+                  <div class="readiness-score-label">Overall Score</div>
+                  {% if summary.overall_score_available %}
+                    <div class="readiness-score">{{ summary.overall_score_display }}<span>/100</span></div>
+                  {% else %}
+                    <div class="readiness-score readiness-score-text">{{ summary.overall_score_display }}</div>
+                  {% endif %}
                 {% endif %}
               </div>
               <div>
@@ -1169,7 +1185,9 @@
                 <div class="metric-title">Assessment Quality</div>
                 <div class="metric-value">{{ assessment.assessment_quality }}</div>
                 <div class="metric-copy">
-                  {% if summary.overall_score_available %}
+                  {% if assessment.required_competency_coverage %}
+                    {{ assessment.assessment_completeness }}% session completeness. Required Competency Coverage: {{ assessment.required_competency_coverage.label }} &mdash; {{ assessment.required_competency_coverage.status_label }}.
+                  {% elif summary.overall_score_available %}
                     {{ assessment.assessment_completeness }}% session completeness, {{ assessment.competencies_assessed_count }} of {{ assessment.competencies_required_count }} competencies assessed.
                   {% elif summary.overall_score_unavailable_reason == "EVALUATOR_RATING_PENDING" %}
                     Awaiting the evaluator's rating for this scheduled interview. The overall score becomes available once the evaluator submits their assessment.
@@ -1233,6 +1251,8 @@
             {% for item in assessment.assessment_coverage %}
               {% if item.covered %}
                 <li class="coverage-item"><span class="check-mark">&#10003;</span>{{ item.label }}</li>
+              {% elif item.not_applicable %}
+                <li class="coverage-item coverage-item-pending"><span class="pending-mark">&#8212;</span>{{ item.label }} (N/A)</li>
               {% else %}
                 <li class="coverage-item coverage-item-pending"><span class="pending-mark">&#8212;</span>{{ item.label }} (Not Assessed)</li>
               {% endif %}
@@ -1308,8 +1328,8 @@
                 <div class="context-value">{{ assessment.assessment_completeness }}%</div>
               </div>
               <div class="context-block">
-                <div class="context-label">Competencies Assessed</div>
-                <div class="context-value">{{ assessment.competencies_assessed_count }} of {{ assessment.competencies_required_count }}</div>
+                <div class="context-label">{% if assessment.required_competency_coverage %}Required Competency Coverage{% else %}Competencies Assessed{% endif %}</div>
+                <div class="context-value">{% if assessment.required_competency_coverage %}{{ assessment.required_competency_coverage.label }}{% else %}{{ assessment.competencies_assessed_count }} of {{ assessment.competencies_required_count }}{% endif %}</div>
               </div>
               <div class="context-block">
                 <div class="context-label">Candidate Reference</div>

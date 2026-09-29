@@ -749,13 +749,60 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(
             coverage,
             [
-                {"label": "Safety", "covered": True},
-                {"label": "Hygiene", "covered": True},
-                {"label": "Communication", "covered": True},
-                {"label": "Practical Tasks", "covered": True},
-                {"label": "Behavioral Indicators", "covered": False},
+                {"label": "Safety", "covered": True, "not_applicable": False},
+                {"label": "Hygiene", "covered": True, "not_applicable": False},
+                {"label": "Communication", "covered": True, "not_applicable": False},
+                {"label": "Practical Tasks", "covered": True, "not_applicable": False},
+                {"label": "Behavioral Indicators", "covered": False, "not_applicable": False},
             ],
         )
+
+    def test_driver_hygiene_shows_not_applicable_not_not_assessed(self):
+        """Driver is migrated onto ROLE_COMPETENCY_CONFIG, which excludes
+        Hygiene & Standards entirely - it must read as Not Applicable, a
+        deliberate exclusion, not Not Assessed, which implies a gap that
+        should have been covered."""
+        status = EvaluationReportService._build_critical_competency_status(
+            competency_breakdown=[], risk_indicators={}, role_code="driver",
+        )
+        by_label = {item["label"]: item for item in status}
+        self.assertTrue(by_label["Hygiene & Standards"]["not_applicable"])
+        self.assertEqual(by_label["Hygiene & Standards"]["status_label"], "N/A")
+        self.assertFalse(by_label["Safety Awareness"]["not_applicable"])
+
+    def test_required_competency_coverage_excludes_na_from_denominator(self):
+        """3 of Driver-v1.2's 4 Required competencies assessed (Communication
+        Ability missing) must report as "3 of 4", never "3 of 5" - Hygiene &
+        Standards (Not Applicable) must not count toward either the
+        numerator or the denominator."""
+        status = [
+            {"label": "Safety Awareness", "tone": "good", "not_applicable": False, "score": 60, "max_score": 60},
+            {"label": "Hygiene & Standards", "tone": "neutral", "not_applicable": True, "score": 0, "max_score": 0},
+            {"label": "Communication Ability", "tone": "neutral", "not_applicable": False, "score": 0, "max_score": 0},
+            {"label": "Practical Task Execution", "tone": "good", "not_applicable": False, "score": 40, "max_score": 40},
+            {"label": "Behavioral Indicators", "tone": "good", "not_applicable": False, "score": 60, "max_score": 60},
+        ]
+        coverage = EvaluationReportService._build_required_competency_coverage(
+            role_code="driver", critical_competency_status=status,
+        )
+        self.assertEqual(coverage["assessed"], 3)
+        self.assertEqual(coverage["required"], 4)
+        self.assertEqual(coverage["percentage"], 75.0)
+        self.assertFalse(coverage["is_complete"])
+        self.assertEqual(coverage["label"], "3 of 4 (75.0%)")
+        self.assertEqual(coverage["not_applicable_labels"], ["Hygiene & Standards"])
+        # Score on Assessed Competencies excludes both the N/A dimension and
+        # the unassessed Communication Ability from its own denominator.
+        self.assertEqual(coverage["score_on_assessed_competencies"], 100.0)
+
+    def test_required_competency_coverage_is_none_for_unmigrated_roles(self):
+        status = EvaluationReportService._build_critical_competency_status(
+            competency_breakdown=[], risk_indicators={}, role_code="domestic_worker",
+        )
+        coverage = EvaluationReportService._build_required_competency_coverage(
+            role_code="domestic_worker", critical_competency_status=status,
+        )
+        self.assertIsNone(coverage)
 
     def test_competency_coverage_counts_only_dimensions_with_evidence(self):
         status = [

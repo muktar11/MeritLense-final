@@ -152,7 +152,7 @@
       </div>
       <div class="lower-right">
         <div class="totals-row"><span class="t-label">Subtotal (net)</span><span class="t-value">&euro;{{ invoice.subtotal }}</span></div>
-        <div class="totals-row"><span class="t-label">VAT (0%)</span><span class="t-value">&euro;{{ invoice.vat_total }}</span></div>
+        <div class="totals-row"><span class="t-label">VAT{% if invoice.vat_rate_label %} ({{ invoice.vat_rate_label }}%){% endif %}</span><span class="t-value">&euro;{{ invoice.vat_total }}</span></div>
         <div class="totals-row total"><span class="t-label">Total</span><span class="t-value">&euro;{{ invoice.total }}</span></div>
         <div class="totals-row"><span class="t-label">Amount paid</span><span class="t-value">&euro;{{ invoice.amount_paid }}</span></div>
         <div class="amount-due-bar">

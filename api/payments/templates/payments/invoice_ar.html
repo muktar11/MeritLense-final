@@ -109,7 +109,7 @@
         <div class="party-name">{{ supplier.name }}</div>
         <div class="party-line">{{ supplier.description_ar }}</div>
         <div class="party-line">العنوان المسجّل &mdash; {% if supplier.address %}<span class="ltr-isolate">{{ supplier.address }}</span>{% else %}يُستكمل{% endif %}</div>
-        <div class="party-line">الرقم الضريبي &mdash; {% if supplier.tax_id %}<span class="ltr-isolate">{{ supplier.tax_id }}</span>{% else %}يُستكمل{% endif %}</div>
+        {% if supplier.tax_id %}<div class="party-line">الرقم الضريبي &mdash; <span class="ltr-isolate">{{ supplier.tax_id }}</span></div>{% endif %}
         <div class="party-line"><span class="ltr-isolate">{{ supplier.email }}</span></div>
       </div>
       <div class="party-cell">
@@ -134,8 +134,10 @@
           <th class="num">الكمية</th>
           <th class="num">سعر الوحدة</th>
           <th class="num">الصافي</th>
+          {% if invoice.vat_registered %}
           <th class="num">نسبة الضريبة</th>
           <th class="num">قيمة الضريبة</th>
+          {% endif %}
         </tr>
       </thead>
       <tbody>
@@ -144,13 +146,15 @@
           <td>{{ forloop.counter }}</td>
           <td>
             <div class="item-desc-main">{{ item.description }}</div>
-            <div class="item-desc-sub">فترة الخدمة: <span class="ltr-isolate">{{ item.period_start }} &ndash; {{ item.period_end }}</span></div>
+            {% if item.show_service_period %}<div class="item-desc-sub">فترة الخدمة: <span class="ltr-isolate">{{ item.period_start }} &ndash; {{ item.period_end }}</span></div>{% endif %}
           </td>
           <td class="num"><span class="ltr-isolate">{{ item.qty }}</span></td>
           <td class="num"><span class="ltr-isolate">{{ item.unit_price }}</span></td>
           <td class="num"><span class="ltr-isolate">{{ item.net_amount }}</span></td>
+          {% if invoice.vat_registered %}
           <td class="num"><span class="ltr-isolate">{{ item.vat_percent }}%</span></td>
           <td class="num"><span class="ltr-isolate">{{ item.vat_amount }}</span></td>
+          {% endif %}
         </tr>
         {% endfor %}
       </tbody>
@@ -158,6 +162,16 @@
 
     <div class="lower-row">
       <div class="lower-left">
+        {% if invoice.is_paid %}
+        <div class="info-box">
+          <div class="info-box-title">تأكيد الدفع</div>
+          <div class="info-box-body">
+            حالة الدفع &mdash; مدفوعة بالكامل<br />
+            {% if invoice.payment_method_label %}طريقة الدفع &mdash; <span class="ltr-isolate">{{ invoice.payment_method_label }}</span><br />{% endif %}
+            {% if invoice.payment_date %}تاريخ الدفع &mdash; <span class="ltr-isolate">{{ invoice.payment_date }}</span>{% endif %}
+          </div>
+        </div>
+        {% else %}
         <div class="info-box">
           <div class="info-box-title">شروط الدفع</div>
           <div class="info-box-body">الدفع مستحق فوراً عند الاستلام. يُرجى ذكر رقم الفاتورة <span class="ltr-isolate">{{ invoice.invoice_number }}</span> كمرجع للتحويل.</div>
@@ -170,21 +184,20 @@
             رمز المصرف SWIFT / BIC &mdash; {% if bank.bic_swift %}<span class="ltr-isolate">{{ bank.bic_swift }}</span>{% else %}يُستكمل{% endif %}
           </div>
         </div>
-        <div class="info-box">
-          <div class="info-box-title">ملاحظة ضريبية</div>
-          <div class="info-box-body">لا تُحتسب ضريبة قيمة مضافة على هذه الفاتورة. يُرجى تأكيد المعالجة الضريبية المطبّقة قبل الإصدار.</div>
-        </div>
+        {% endif %}
       </div>
       <div class="lower-right">
         <div class="totals-row"><span class="t-label">المجموع قبل الضريبة</span><span class="t-value ltr-isolate">&euro;{{ invoice.subtotal }}</span></div>
+        {% if invoice.vat_registered %}
         <div class="totals-row"><span class="t-label">ضريبة القيمة المضافة{% if invoice.vat_rate_label %} {{ invoice.vat_rate_label }}%{% endif %}</span><span class="t-value ltr-isolate">&euro;{{ invoice.vat_total }}</span></div>
+        {% endif %}
         <div class="totals-row total"><span class="t-label">الإجمالي</span><span class="t-value ltr-isolate">&euro;{{ invoice.total }}</span></div>
         <div class="totals-row"><span class="t-label">المبلغ المدفوع</span><span class="t-value ltr-isolate">&euro;{{ invoice.amount_paid }}</span></div>
         <div class="amount-due-bar">
           <div class="t-label">المبلغ المستحق</div>
           <div class="t-value"><span class="ltr-isolate">&euro;{{ invoice.amount_due_display }}</span></div>
         </div>
-        <div class="payable-by">يُسدَّد بحلول <span class="ltr-isolate">{{ invoice.payable_by }}</span></div>
+        {% if not invoice.is_paid %}<div class="payable-by">يُسدَّد بحلول <span class="ltr-isolate">{{ invoice.payable_by }}</span></div>{% endif %}
       </div>
     </div>
 

@@ -2261,43 +2261,57 @@ class InvoiceVatLabelTests(TestCase):
 
         self.assertEqual(snapshot["vat_rate_label"], snapshot["line_items"][0]["vat_percent"])
 
-    def test_english_invoice_renders_the_data_driven_label_not_a_hardcoded_string(self):
+    def test_english_invoice_hides_the_vat_breakdown_while_not_vat_registered(self):
+        """MeritLense OÜ isn't VAT-registered today, so the invoice must
+        never claim a "0% VAT" treatment - the whole VAT column/row is
+        hidden rather than shown at a hardcoded zero rate."""
         from django.template.loader import render_to_string
 
         from api.payments.invoice_services import SUPPLIER, _build_snapshot, _logo_data_uri
 
         snapshot = _build_snapshot(self.invoice)
+        self.assertFalse(snapshot["vat_registered"])
+        html = render_to_string(
+            "payments/invoice.html",
+            {"invoice": snapshot, "supplier": SUPPLIER, "bank": {}, "logo_data_uri": _logo_data_uri()},
+        )
+
+        self.assertNotIn("VAT %", html)
+        self.assertNotIn("VAT (0", html)
+        self.assertNotIn("Confirm the applicable VAT treatment", html)
+
+    def test_english_invoice_shows_the_data_driven_label_once_vat_registered(self):
+        """The VAT-registered rendering path isn't dead code - once
+        SUPPLIER_VAT_REGISTERED flips (a future, real registration), the
+        label must read the actual computed rate, not a stale string."""
+        from django.template.loader import render_to_string
+        from unittest.mock import patch
+
+        from api.payments.invoice_services import SUPPLIER, _build_snapshot, _logo_data_uri
+
+        with patch("api.payments.invoice_services.SUPPLIER_VAT_REGISTERED", True):
+            snapshot = _build_snapshot(self.invoice)
         html = render_to_string(
             "payments/invoice.html",
             {"invoice": snapshot, "supplier": SUPPLIER, "bank": {}, "logo_data_uri": _logo_data_uri()},
         )
 
         self.assertIn(f"VAT ({snapshot['vat_rate_label']}%)", html)
-        self.assertNotIn("VAT (0%)<", html)
 
-    def test_arabic_invoice_renders_the_data_driven_label_not_a_hardcoded_string(self):
+    def test_arabic_invoice_hides_the_vat_breakdown_while_not_vat_registered(self):
         from django.template.loader import render_to_string
 
         from api.core.pdf_fonts import arabic_font_context
         from api.payments.invoice_services import SUPPLIER, _build_snapshot, _logo_data_uri
 
-        from api.accounts.models import IndividualEmployerProfile
-        from api.core.constants import JobRoles, Nationalities
-
-        IndividualEmployerProfile.objects.create(
-            user=self.user, passport_id="PASS-VAT-1", phone_number="+10000000000",
-            job_role=JobRoles.CHOICES[0][0], nationality=Nationalities.CHOICES[0][0],
-            preferred_language="AR",
-            id_document=SimpleUploadedFile("id.pdf", b"%PDF-1.1", content_type="application/pdf"),
-            resume_document=SimpleUploadedFile("resume.pdf", b"%PDF-1.1", content_type="application/pdf"),
-        )
         snapshot = _build_snapshot(self.invoice)
         context = {"invoice": snapshot, "supplier": SUPPLIER, "bank": {}, "logo_data_uri": _logo_data_uri()}
         context.update(arabic_font_context())
         html = render_to_string("payments/invoice_ar.html", context)
 
-        self.assertIn(f"{snapshot['vat_rate_label']}%", html)
+        self.assertNotIn("نسبة الضريبة", html)
         self.assertNotIn("ضريبة القيمة المضافة 0%", html)
+        self.assertNotIn("يُرجى تأكيد المعالجة الضريبية", html)
 
 
 class InvoiceArabicRtlIsolationTests(TestCase):
@@ -2323,10 +2337,14 @@ class InvoiceArabicRtlIsolationTests(TestCase):
             resume_document=SimpleUploadedFile("resume.pdf", b"%PDF-1.1", content_type="application/pdf"),
         )
         customer = Customer.objects.create(user=self.user, stripe_customer_id="cus_rtl_isolation")
+        # Unpaid - Bank Details / Payment Terms (the sections these tests
+        # exercise) only render while amount is still owed; a paid invoice
+        # shows the Payment Confirmation box instead (see
+        # InvoicePaidStatusTests).
         self.invoice = Invoice.objects.create(
             user=self.user, customer=customer, stripe_invoice_id="in_rtl_isolation",
-            number="INV-RTL-0042", status="PAID", amount_due=Decimal("250.00"),
-            amount_paid=Decimal("250.00"), amount_remaining=Decimal("0.00"), currency="eur",
+            number="INV-RTL-0042", status="OPEN", amount_due=Decimal("250.00"),
+            amount_paid=Decimal("0.00"), amount_remaining=Decimal("250.00"), currency="eur",
         )
 
     def _render(self, bank):
@@ -2361,6 +2379,273 @@ class InvoiceArabicRtlIsolationTests(TestCase):
         self.assertIn(f'<span class="meta-value ltr-isolate">{snapshot["issue_date"]}</span>', html)
         self.assertIn(f'<span class="meta-value ltr-isolate">{snapshot["due_date"]}</span>', html)
         self.assertIn(f'<span class="meta-value ltr-isolate">{snapshot["currency"]}</span>', html)
+
+
+class InvoiceSupplierTaxIdPlaceholderTests(TestCase):
+    """MeritLense OÜ has no VAT ID today (not VAT-registered) - the invoice
+    must omit the "Tax / VAT ID" line entirely rather than show a
+    "to be completed" placeholder that implies an incomplete production
+    document."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="supplier-taxid@example.com", password="Password123!",
+            first_name="Supplier", last_name="TaxId", role=Roles.B2C, is_verified=True,
+        )
+        customer = Customer.objects.create(user=self.user, stripe_customer_id="cus_supplier_taxid")
+        self.invoice = Invoice.objects.create(
+            user=self.user, customer=customer, stripe_invoice_id="in_supplier_taxid",
+            number="INV-SUP-TAX-1", status="PAID", amount_due=Decimal("50.00"),
+            amount_paid=Decimal("50.00"), amount_remaining=Decimal("0.00"), currency="eur",
+        )
+
+    def test_placeholder_omitted_when_supplier_has_no_tax_id(self):
+        """"to be completed" legitimately still appears for other
+        genuinely-incomplete fields (e.g. this fixture's customer has no
+        billing address on file) - this test only asserts the specific
+        supplier Tax/VAT ID placeholder is gone, not that the phrase never
+        appears anywhere on the page."""
+        from django.template.loader import render_to_string
+
+        from api.payments.invoice_services import SUPPLIER, _build_snapshot, _logo_data_uri
+
+        self.assertIsNone(SUPPLIER["tax_id"])
+        snapshot = _build_snapshot(self.invoice)
+        html = render_to_string(
+            "payments/invoice.html",
+            {"invoice": snapshot, "supplier": SUPPLIER, "bank": {}, "logo_data_uri": _logo_data_uri()},
+        )
+
+        self.assertNotIn("Tax / VAT ID &mdash; to be completed", html)
+
+
+class InvoicePackageDescriptionTests(TestCase):
+    """The line-item description reads "MeritLense <Package> — <N>
+    [Full ]Assessment(s)[ / Month]" from the actual purchased Price, not a
+    generic "MeritLense subscription"/raw internal price name."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="pkg-desc@example.com", password="Password123!",
+            first_name="Pkg", last_name="Desc", role=Roles.B2C, is_verified=True,
+        )
+
+    def _invoice_for(self, price, **overrides):
+        subscription = make_subscription(self.user, price, **overrides)
+        defaults = dict(
+            user=self.user, customer=subscription.customer, subscription=subscription,
+            stripe_invoice_id=f"in_pkg_{price.id}", number=f"INV-PKG-{price.id}",
+            status="PAID", amount_due=price.unit_amount, amount_paid=price.unit_amount,
+            amount_remaining=Decimal("0.00"), currency="eur",
+        )
+        return Invoice.objects.create(**defaults)
+
+    def test_one_time_screening_package_description(self):
+        from api.payments.invoice_services import _build_snapshot
+
+        price = make_price(
+            name="basic package", target_user_type="B2C", billing_type="ONE_TIME",
+            unit_amount=Decimal("50.00"), slot_grant=3, evaluation_tier="SCREENING",
+        )
+        invoice = self._invoice_for(price)
+
+        snapshot = _build_snapshot(invoice)
+
+        self.assertEqual(snapshot["line_items"][0]["description"], "MeritLense Basic — 3 Assessments")
+
+    def test_recurring_full_package_description_includes_full_and_month(self):
+        from api.payments.invoice_services import _build_snapshot
+
+        price = make_price(
+            name="growth package", target_user_type="B2B", billing_type="RECURRING",
+            unit_amount=Decimal("2000.00"), slot_grant=200, evaluation_tier="FULL",
+        )
+        invoice = self._invoice_for(price)
+
+        snapshot = _build_snapshot(invoice)
+
+        self.assertEqual(
+            snapshot["line_items"][0]["description"], "MeritLense Growth — 200 Full Assessments / Month",
+        )
+
+    def test_falls_back_to_generic_description_with_no_subscription(self):
+        from api.payments.invoice_services import _build_snapshot
+
+        customer = Customer.objects.create(user=self.user, stripe_customer_id="cus_no_sub")
+        invoice = Invoice.objects.create(
+            user=self.user, customer=customer, stripe_invoice_id="in_no_sub",
+            number="INV-NO-SUB", status="PAID", amount_due=Decimal("10.00"),
+            amount_paid=Decimal("10.00"), amount_remaining=Decimal("0.00"), currency="eur",
+        )
+
+        snapshot = _build_snapshot(invoice)
+
+        self.assertEqual(snapshot["line_items"][0]["description"], "MeritLense subscription")
+
+
+class InvoiceServicePeriodTests(TestCase):
+    """Service period only renders when the linked Subscription carries a
+    genuine, distinct validity/billing window - never a same-day
+    issue/due-date fallback, which previously showed one date as both the
+    start and end."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="svc-period@example.com", password="Password123!",
+            first_name="Svc", last_name="Period", role=Roles.B2C, is_verified=True,
+        )
+
+    def _invoice_for(self, price, **subscription_overrides):
+        subscription = make_subscription(self.user, price, **subscription_overrides)
+        return Invoice.objects.create(
+            user=self.user, customer=subscription.customer, subscription=subscription,
+            stripe_invoice_id=f"in_svc_{price.id}_{subscription.id}", number=f"INV-SVC-{subscription.id}",
+            status="PAID", amount_due=price.unit_amount, amount_paid=price.unit_amount,
+            amount_remaining=Decimal("0.00"), currency="eur",
+        )
+
+    def test_hidden_when_invoice_has_no_linked_subscription(self):
+        """Subscription.save() always auto-fills a period if one isn't
+        given (see api/payments/models.py), so a subscription itself can
+        never truly have "no period" - the real no-period case is an
+        invoice with no subscription linked at all (e.g. a bare
+        one-time-purchase invoice that predates that grant path)."""
+        from api.payments.invoice_services import _build_snapshot
+
+        customer = Customer.objects.create(user=self.user, stripe_customer_id="cus_no_period")
+        invoice = Invoice.objects.create(
+            user=self.user, customer=customer, stripe_invoice_id="in_no_period",
+            number="INV-NOPERIOD", status="PAID", amount_due=Decimal("50.00"),
+            amount_paid=Decimal("50.00"), amount_remaining=Decimal("0.00"), currency="eur",
+        )
+
+        snapshot = _build_snapshot(invoice)
+
+        self.assertFalse(snapshot["line_items"][0]["show_service_period"])
+
+    def test_hidden_when_start_and_end_are_identical(self):
+        from api.payments.invoice_services import _build_snapshot
+
+        same_instant = timezone.now()
+        price = make_price(
+            name="basic package", target_user_type="B2C", billing_type="ONE_TIME",
+            slot_grant=3, evaluation_tier="SCREENING",
+        )
+        invoice = self._invoice_for(price, current_period_start=same_instant, current_period_end=same_instant)
+
+        snapshot = _build_snapshot(invoice)
+
+        self.assertFalse(snapshot["line_items"][0]["show_service_period"])
+
+    def test_shown_for_a_genuine_billing_period(self):
+        from api.payments.invoice_services import _build_snapshot
+
+        price = make_price(
+            name="growth package", target_user_type="B2B", billing_type="RECURRING",
+            slot_grant=200, evaluation_tier="FULL",
+        )
+        invoice = self._invoice_for(price)  # make_subscription's own 30-day default period
+
+        snapshot = _build_snapshot(invoice)
+        item = snapshot["line_items"][0]
+
+        self.assertTrue(item["show_service_period"])
+        self.assertNotEqual(item["period_start"], item["period_end"])
+
+
+class InvoicePaidStatusTests(TestCase):
+    """A PAID invoice shows a Payment Confirmation box (status/method/date)
+    and never shows payment instructions, bank details, or a "Payable by"
+    date - those are only actionable while money is still owed."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="paid-status@example.com", password="Password123!",
+            first_name="Paid", last_name="Status", role=Roles.B2C, is_verified=True,
+        )
+        self.customer = Customer.objects.create(user=self.user, stripe_customer_id="cus_paid_status")
+
+    def _render(self, invoice):
+        from django.template.loader import render_to_string
+
+        from api.payments.invoice_services import BANK_DETAILS, SUPPLIER, _build_snapshot, _logo_data_uri
+
+        snapshot = _build_snapshot(invoice)
+        html = render_to_string(
+            "payments/invoice.html",
+            {"invoice": snapshot, "supplier": SUPPLIER, "bank": BANK_DETAILS, "logo_data_uri": _logo_data_uri()},
+        )
+        return html, snapshot
+
+    def test_paid_invoice_hides_payment_instructions_and_bank_details(self):
+        invoice = Invoice.objects.create(
+            user=self.user, customer=self.customer, stripe_invoice_id="in_paid_1",
+            number="INV-PAID-1", status="PAID", amount_due=Decimal("80.00"),
+            amount_paid=Decimal("80.00"), amount_remaining=Decimal("0.00"),
+            currency="eur", paid_at=timezone.now(),
+        )
+
+        html, snapshot = self._render(invoice)
+
+        self.assertTrue(snapshot["is_paid"])
+        self.assertIn("Payment Confirmation", html)
+        self.assertIn("PAID", html)
+        self.assertNotIn("Payment Terms", html)
+        self.assertNotIn("Bank Details", html)
+        self.assertNotIn("Payable by", html)
+
+    def test_paid_invoice_shows_payment_date_when_available(self):
+        paid_at = timezone.now()
+        invoice = Invoice.objects.create(
+            user=self.user, customer=self.customer, stripe_invoice_id="in_paid_2",
+            number="INV-PAID-2", status="PAID", amount_due=Decimal("80.00"),
+            amount_paid=Decimal("80.00"), amount_remaining=Decimal("0.00"),
+            currency="eur", paid_at=paid_at,
+        )
+
+        html, snapshot = self._render(invoice)
+
+        self.assertEqual(snapshot["payment_date"], paid_at.strftime("%Y-%m-%d"))
+        self.assertIn(paid_at.strftime("%Y-%m-%d"), html)
+
+    def test_unpaid_invoice_shows_payment_instructions_not_confirmation(self):
+        invoice = Invoice.objects.create(
+            user=self.user, customer=self.customer, stripe_invoice_id="in_unpaid_1",
+            number="INV-UNPAID-1", status="OPEN", amount_due=Decimal("80.00"),
+            amount_paid=Decimal("0.00"), amount_remaining=Decimal("80.00"), currency="eur",
+        )
+
+        html, snapshot = self._render(invoice)
+
+        self.assertFalse(snapshot["is_paid"])
+        self.assertIn("Payment Terms", html)
+        self.assertIn("Bank Details", html)
+        self.assertIn("Payable by", html)
+        self.assertNotIn("Payment Confirmation", html)
+
+    def test_payment_method_label_resolved_from_linked_payment(self):
+        from api.payments.invoice_services import _build_snapshot
+        from api.payments.models import PaymentMethod
+
+        payment_method = PaymentMethod.objects.create(
+            customer=self.customer, stripe_payment_method_id="pm_test_visa",
+            method_type="CARD", card_brand="visa", card_last4="4242",
+        )
+        payment = Payment.objects.create(
+            user=self.user, customer=self.customer, stripe_payment_intent_id="pi_test_visa",
+            stripe_payment_method=payment_method, amount=Decimal("80.00"), currency="eur",
+            status="SUCCEEDED", paid_at=timezone.now(),
+        )
+        invoice = Invoice.objects.create(
+            user=self.user, customer=self.customer, stripe_invoice_id="in_paid_method",
+            number="INV-PAID-METHOD", status="PAID", amount_due=Decimal("80.00"),
+            amount_paid=Decimal("80.00"), amount_remaining=Decimal("0.00"), currency="eur",
+            paid_at=timezone.now(), stripe_payment_intent=payment,
+        )
+
+        snapshot = _build_snapshot(invoice)
+
+        self.assertEqual(snapshot["payment_method_label"], "Visa •••• 4242")
 
 
 class GenerateInvoicePdfsCommandTests(TestCase):

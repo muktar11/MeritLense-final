@@ -89,7 +89,7 @@
         <div class="party-name">{{ supplier.name }}</div>
         <div class="party-line">{{ supplier.description }}</div>
         <div class="party-line">Registered address &mdash; {% if supplier.address %}{{ supplier.address }}{% else %}to be completed{% endif %}</div>
-        <div class="party-line">Tax / VAT ID &mdash; {% if supplier.tax_id %}{{ supplier.tax_id }}{% else %}to be completed{% endif %}</div>
+        {% if supplier.tax_id %}<div class="party-line">Tax / VAT ID &mdash; {{ supplier.tax_id }}</div>{% endif %}
         <div class="party-line">{{ supplier.email }}</div>
       </div>
       <div class="party-cell">
@@ -109,8 +109,10 @@
           <th class="num">Qty</th>
           <th class="num">Unit price</th>
           <th class="num">Net amount</th>
+          {% if invoice.vat_registered %}
           <th class="num">VAT %</th>
           <th class="num">VAT amount</th>
+          {% endif %}
         </tr>
       </thead>
       <tbody>
@@ -119,13 +121,15 @@
           <td>{{ forloop.counter|stringformat:"02d" }}</td>
           <td>
             <div class="item-desc-main">{{ item.description }}</div>
-            <div class="item-desc-sub">Service period: {{ item.period_start }} &ndash; {{ item.period_end }}</div>
+            {% if item.show_service_period %}<div class="item-desc-sub">Service period: {{ item.period_start }} &ndash; {{ item.period_end }}</div>{% endif %}
           </td>
           <td class="num">{{ item.qty }}</td>
           <td class="num">{{ item.unit_price }}</td>
           <td class="num">{{ item.net_amount }}</td>
+          {% if invoice.vat_registered %}
           <td class="num">{{ item.vat_percent }}%</td>
           <td class="num">{{ item.vat_amount }}</td>
+          {% endif %}
         </tr>
         {% endfor %}
       </tbody>
@@ -133,6 +137,16 @@
 
     <div class="lower-row">
       <div class="lower-left">
+        {% if invoice.is_paid %}
+        <div class="info-box">
+          <div class="info-box-title">Payment Confirmation</div>
+          <div class="info-box-body">
+            Payment Status &mdash; PAID<br />
+            {% if invoice.payment_method_label %}Payment Method &mdash; {{ invoice.payment_method_label }}<br />{% endif %}
+            {% if invoice.payment_date %}Payment Date &mdash; {{ invoice.payment_date }}{% endif %}
+          </div>
+        </div>
+        {% else %}
         <div class="info-box">
           <div class="info-box-title">Payment Terms</div>
           <div class="info-box-body">Due on receipt (net 0 days). Quote invoice no. {{ invoice.invoice_number }} as the transfer reference.</div>
@@ -145,21 +159,20 @@
             BIC / SWIFT &mdash; {% if bank.bic_swift %}{{ bank.bic_swift }}{% else %}to be completed{% endif %}
           </div>
         </div>
-        <div class="info-box">
-          <div class="info-box-title">VAT Note</div>
-          <div class="info-box-body">No VAT charged on this invoice. Confirm the applicable VAT treatment before issuing.</div>
-        </div>
+        {% endif %}
       </div>
       <div class="lower-right">
         <div class="totals-row"><span class="t-label">Subtotal (net)</span><span class="t-value">&euro;{{ invoice.subtotal }}</span></div>
+        {% if invoice.vat_registered %}
         <div class="totals-row"><span class="t-label">VAT{% if invoice.vat_rate_label %} ({{ invoice.vat_rate_label }}%){% endif %}</span><span class="t-value">&euro;{{ invoice.vat_total }}</span></div>
+        {% endif %}
         <div class="totals-row total"><span class="t-label">Total</span><span class="t-value">&euro;{{ invoice.total }}</span></div>
         <div class="totals-row"><span class="t-label">Amount paid</span><span class="t-value">&euro;{{ invoice.amount_paid }}</span></div>
         <div class="amount-due-bar">
           <div class="t-label">AMOUNT DUE</div>
           <div class="t-value">&euro;{{ invoice.amount_due_display }}</div>
         </div>
-        <div class="payable-by">Payable by {{ invoice.payable_by }}</div>
+        {% if not invoice.is_paid %}<div class="payable-by">Payable by {{ invoice.payable_by }}</div>{% endif %}
       </div>
     </div>
 

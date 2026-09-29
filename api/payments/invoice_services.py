@@ -8,6 +8,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.template.loader import render_to_string
 
+from api.core.constants import InterviewEvaluationTier, PaymentMethodConstants
 from api.core.pdf_fonts import arabic_font_context
 
 # Reuses the same real logo asset certificate_services.py already bundles -
@@ -41,6 +42,16 @@ BANK_DETAILS = {
     "iban": None,
     "bic_swift": None,
 }
+
+# MeritLense OÜ is not currently VAT-registered. While that's true, no
+# invoice should represent a transaction as "0% VAT" - that implies a real,
+# zero-rated VAT treatment, which is a different legal claim than "VAT does
+# not apply because the supplier isn't registered". Once registration
+# happens, the applicable rate/treatment must be computed per-transaction
+# (customer type/location) - never hard-coded back to a single flag/rate
+# here; this constant only governs today's genuinely-uniform not-registered
+# state.
+SUPPLIER_VAT_REGISTERED = False
 
 
 class InvoicePdfError(Exception):
@@ -108,23 +119,67 @@ def _billing_party_context(invoice):
     return {"name": name, "address": address, "tax_id": None, "email": user.email}
 
 
-def _line_items_context(invoice, *, fallback_period_start, fallback_period_end):
+def _package_description(price):
+    """"MeritLense <Package> — <N> [Full ]Assessment(s)[ / Month]" - built
+    from the actual purchased Price, not a generic "MeritLense
+    subscription"/raw internal price name. The Full/plain wording mirrors
+    the package's own evaluation_tier (Screening packages read as plain
+    "Assessments", matching how the pricing page itself only calls out
+    "Full" for FULL-tier packages); billing_type adds "/ Month" only for
+    recurring (B2B) plans, never for a one-time purchase."""
+    if price is None:
+        return None
+    base_name = re.sub(r"\s+package$", "", price.name or "", flags=re.IGNORECASE).strip().title()
+    if not base_name:
+        return None
+    count = price.slot_grant
+    if not count:
+        return f"MeritLense {base_name}"
+    tier_word = "Full " if price.evaluation_tier == InterviewEvaluationTier.FULL else ""
+    unit = "Assessment" if count == 1 else "Assessments"
+    period_suffix = " / Month" if price.billing_type == "RECURRING" else ""
+    return f"MeritLense {base_name} — {count} {tier_word}{unit}{period_suffix}"
+
+
+def _payment_method_label(invoice):
+    """"Visa •••• 4242" / "Bank Transfer" for the paid-invoice confirmation
+    box - None (line omitted) when no payment method is resolvable, per
+    the spec's own "Payment Method, where available" qualifier."""
+    payment = invoice.stripe_payment_intent
+    method = getattr(payment, "stripe_payment_method", None) if payment else None
+    if method is None:
+        return None
+    if method.method_type == PaymentMethodConstants.CARD and method.card_brand and method.card_last4:
+        return f"{method.card_brand.title()} •••• {method.card_last4}"
+    return method.get_method_type_display()
+
+
+def _line_items_context(invoice):
     """One synthetic line item per invoice - no LineItem model exists.
-    VAT is always 0%/0.00, matching MeritLense not charging VAT today;
-    revisit if that ever changes rather than deriving it from Stripe's own
-    tax data, which isn't persisted on Invoice. Service period prefers the
-    linked Subscription's current billing period (the real one this
-    invoice was for) over the issue/due-date fallback, which would
-    otherwise show the same single day twice."""
-    description = None
-    period_start, period_end = fallback_period_start, fallback_period_end
+    VAT is always 0%/0.00, matching MeritLense not charging VAT today -
+    the template decides whether to even display a VAT breakdown based on
+    SUPPLIER_VAT_REGISTERED, so this stays a neutral, always-correct value
+    rather than something the template has to reinterpret.
+    Service period is shown only when the linked Subscription actually
+    carries a genuine, distinct start/end (its real billing or purchase-
+    validity window) - never a same-day issue/due-date fallback, which
+    previously produced a misleading "period" of a single repeated date."""
+    price = invoice.subscription.stripe_price if (invoice.subscription_id and invoice.subscription) else None
+    description = _package_description(price) or "MeritLense subscription"
+
+    show_service_period = False
+    period_start = period_end = None
     if invoice.subscription_id and invoice.subscription:
-        if invoice.subscription.stripe_price:
-            description = invoice.subscription.stripe_price.name
-        if invoice.subscription.current_period_start and invoice.subscription.current_period_end:
-            period_start = invoice.subscription.current_period_start
-            period_end = invoice.subscription.current_period_end
-    description = description or "MeritLense subscription"
+        subscription = invoice.subscription
+        if (
+            subscription.current_period_start
+            and subscription.current_period_end
+            and subscription.current_period_start != subscription.current_period_end
+        ):
+            period_start = subscription.current_period_start
+            period_end = subscription.current_period_end
+            show_service_period = True
+
     net_amount = invoice.amount_due
     return [
         {
@@ -134,6 +189,7 @@ def _line_items_context(invoice, *, fallback_period_start, fallback_period_end):
             "net_amount": net_amount,
             "vat_percent": Decimal("0.00"),
             "vat_amount": Decimal("0.00"),
+            "show_service_period": show_service_period,
             "period_start": period_start.strftime("%Y-%m-%d") if period_start else "",
             "period_end": period_end.strftime("%Y-%m-%d") if period_end else "",
         }
@@ -147,7 +203,7 @@ def _money(value):
 def _build_snapshot(invoice):
     issue_date = invoice.paid_at or invoice.created_at
     due_date = invoice.due_date or issue_date
-    line_items = _line_items_context(invoice, fallback_period_start=issue_date, fallback_period_end=due_date)
+    line_items = _line_items_context(invoice)
     subtotal = sum((item["net_amount"] for item in line_items), Decimal("0.00"))
     vat_total = sum((item["vat_amount"] for item in line_items), Decimal("0.00"))
     # The totals-section "VAT (X%)" label must read the rate that was
@@ -173,6 +229,15 @@ def _build_snapshot(invoice):
     # still Latin script; real Arabic text must stay in the normal RTL
     # flow, not be forced into an LTR box.
     billing_party["address_is_latin"] = bool(billing_party["address"]) and not _is_arabic_text(billing_party["address"])
+
+    # A PAID invoice must never show payment instructions/bank details -
+    # those are actionable only while money is still owed. It shows a
+    # confirmation box instead; method/date are individually omitted if
+    # not resolvable rather than blocking the PAID status itself.
+    is_paid = invoice.amount_remaining <= Decimal("0.00")
+    payment_method_label = _payment_method_label(invoice) if is_paid else None
+    payment_date = invoice.paid_at.strftime("%Y-%m-%d") if (is_paid and invoice.paid_at) else None
+
     return {
         "language": language,
         "invoice_number": invoice.number or invoice.stripe_invoice_id,
@@ -182,6 +247,10 @@ def _build_snapshot(invoice):
         "payable_by": due_date.strftime("%Y-%m-%d") if due_date else "",
         "currency": invoice.currency.upper(),
         "billing_party": billing_party,
+        "is_paid": is_paid,
+        "payment_method_label": payment_method_label,
+        "payment_date": payment_date,
+        "vat_registered": SUPPLIER_VAT_REGISTERED,
         "line_items": [
             {
                 "description": item["description"],
@@ -190,6 +259,7 @@ def _build_snapshot(invoice):
                 "net_amount": _money(item["net_amount"]),
                 "vat_percent": str(item["vat_percent"]),
                 "vat_amount": _money(item["vat_amount"]),
+                "show_service_period": item["show_service_period"],
                 "period_start": item["period_start"],
                 "period_end": item["period_end"],
             }

@@ -1127,10 +1127,21 @@
               <div class="summary-label">تغطية التقييم</div>
               <div class="summary-value">
                 {% for item in assessment.assessment_coverage %}
-                  {{ item.label }}{% if not item.covered %} (غير مقيَّم){% endif %}{% if not forloop.last %} | {% endif %}
+                  {{ item.label }}{% if item.not_applicable %} (غير منطبق){% elif not item.covered %} (غير مقيَّم){% endif %}{% if not forloop.last %} | {% endif %}
                 {% endfor %}
               </div>
             </div>
+
+            {% if assessment.required_competency_coverage %}
+            <div class="summary-row">
+              <div class="summary-label">حالة الجلسة</div>
+              <div class="summary-value">{{ assessment.assessment_status }}</div>
+            </div>
+            <div class="summary-row">
+              <div class="summary-label">تغطية الكفاءات المطلوبة</div>
+              <div class="summary-value">{{ assessment.required_competency_coverage.label }} &mdash; {{ assessment.required_competency_coverage.status_label }}</div>
+            </div>
+            {% endif %}
 
             <div class="summary-row">
               <div class="summary-label">موثوقية التقييم</div>
@@ -1148,11 +1159,16 @@
           <div class="readiness-card card">
             <div class="readiness-top">
               <div>
-                <div class="readiness-score-label">الدرجة الإجمالية</div>
-                {% if summary.overall_score_available %}
-                  <div class="readiness-score">{{ summary.overall_score_display }}<span>/100</span></div>
+                {% if assessment.required_competency_coverage %}
+                  <div class="readiness-score-label">الدرجة على الكفاءات المقيَّمة</div>
+                  <div class="readiness-score readiness-score-text">{{ assessment.required_competency_coverage.score_on_assessed_display }}</div>
                 {% else %}
-                  <div class="readiness-score readiness-score-text">{{ summary.overall_score_display }}</div>
+                  <div class="readiness-score-label">الدرجة الإجمالية</div>
+                  {% if summary.overall_score_available %}
+                    <div class="readiness-score">{{ summary.overall_score_display }}<span>/100</span></div>
+                  {% else %}
+                    <div class="readiness-score readiness-score-text">{{ summary.overall_score_display }}</div>
+                  {% endif %}
                 {% endif %}
               </div>
               <div>
@@ -1177,7 +1193,9 @@
                 <div class="metric-title">جودة التقييم</div>
                 <div class="metric-value">{{ assessment.assessment_quality }}</div>
                 <div class="metric-copy">
-                  {% if summary.overall_score_available %}
+                  {% if assessment.required_competency_coverage %}
+                    اكتمال الجلسة {{ assessment.assessment_completeness }}%. تغطية الكفاءات المطلوبة: {{ assessment.required_competency_coverage.label }} &mdash; {{ assessment.required_competency_coverage.status_label }}.
+                  {% elif summary.overall_score_available %}
                     اكتمال الجلسة {{ assessment.assessment_completeness }}%، تم تقييم {{ assessment.competencies_assessed_count }} من {{ assessment.competencies_required_count }} كفاءة.
                   {% elif summary.overall_score_unavailable_reason == "EVALUATOR_RATING_PENDING" %}
                     بانتظار تقييم المقيّم لهذه المقابلة المجدولة. تصبح الدرجة الإجمالية متاحة بمجرد تقديم المقيّم لتقييمه.
@@ -1241,6 +1259,8 @@
             {% for item in assessment.assessment_coverage %}
               {% if item.covered %}
                 <li class="coverage-item"><span class="check-mark">&#10003;</span>{{ item.label }}</li>
+              {% elif item.not_applicable %}
+                <li class="coverage-item coverage-item-pending"><span class="pending-mark">&#8212;</span>{{ item.label }} (غير منطبق)</li>
               {% else %}
                 <li class="coverage-item coverage-item-pending"><span class="pending-mark">&#8212;</span>{{ item.label }} (غير مقيَّم)</li>
               {% endif %}
@@ -1316,8 +1336,8 @@
                 <div class="context-value">{{ assessment.assessment_completeness }}%</div>
               </div>
               <div class="context-block">
-                <div class="context-label">الكفاءات المقيَّمة</div>
-                <div class="context-value">{{ assessment.competencies_assessed_count }} من {{ assessment.competencies_required_count }}</div>
+                <div class="context-label">{% if assessment.required_competency_coverage %}تغطية الكفاءات المطلوبة{% else %}الكفاءات المقيَّمة{% endif %}</div>
+                <div class="context-value">{% if assessment.required_competency_coverage %}{{ assessment.required_competency_coverage.label }}{% else %}{{ assessment.competencies_assessed_count }} من {{ assessment.competencies_required_count }}{% endif %}</div>
               </div>
               <div class="context-block">
                 <div class="context-label">الرقم المرجعي للمرشح</div>

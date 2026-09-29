@@ -216,6 +216,14 @@ def _canonical_dimension(*values):
 
 
 def assessed_dimensions(summary):
+    """A competency counts toward coverage only once ITS OWN configured
+    minimum evidence requirement is satisfied - STATUS_INCOMPLETE means
+    some but not all of that competency's expected responses were
+    completed (see Week6ScoringService._aggregate_competencies), which is
+    partial evidence, not sufficient coverage. Previously this only
+    excluded INCOMPLETE competencies that also had zero completed
+    responses, so a competency with SOME (but not all) responses done
+    still silently counted as "covered"."""
     dimensions = set()
     for item in summary.competencies_summary or []:
         response_count = int(item.get("completed_response_count") or 0)
@@ -223,7 +231,7 @@ def assessed_dimensions(summary):
         status = str(item.get("status") or "").upper()
         if response_count <= 0 and percentage in (None, ""):
             continue
-        if status in {"NOT_STARTED", "INCOMPLETE"} and response_count <= 0:
+        if status in {"NOT_STARTED", "INCOMPLETE"}:
             continue
         dimension = _canonical_dimension(item.get("competency_code"), item.get("competency_name"))
         if dimension:
@@ -369,18 +377,25 @@ def _build_qr_data_uri(verification_url):
     return f"data:image/png;base64,{encoded}"
 
 
-def _candidate_photo_context(candidate):
+def _candidate_photo_context(candidate, session=None):
     """The certificate photo, preferring verification_photo (the AI-cropped,
     candidate/staff-confirmed face used as the identity verification
     reference - see its docstring in api/candidates/models.py) and falling
     back to profile_photo when absent, exactly as verification_photo's own
-    fallback semantics describe. Returns (data_uri, verified) as a single
-    pair so the "Verified ID Photo" badge can never be shown next to a
-    different, unverified image than the one it's describing - the
-    previous version derived the badge from verification_photo existing
-    while always rendering profile_photo, so a candidate with only a
-    verification_photo got the badge over a blank placeholder."""
-    for field, verified in (("verification_photo", True), ("profile_photo", False)):
+    fallback semantics describe. Returns (data_uri, verified).
+
+    "Verified" requires BOTH that the image shown is the verification_photo
+    (the field actually used as the matching reference - a profile_photo
+    never earns the badge, whatever session state) AND that
+    session.identity_verified is actually True. verification_photo alone
+    is not enough: it's documented as the REFERENCE image used for
+    matching, not proof that a match occurred - a candidate can have one
+    on file (e.g. captured at onboarding) with no session ever having
+    passed real identity verification against it. The "Verified ID Photo"
+    label must reflect that a verification event actually completed for
+    THIS photo, not just that a photo is on file."""
+    identity_actually_verified = bool(session and session.identity_verified)
+    for field, is_reference_photo in (("verification_photo", True), ("profile_photo", False)):
         image_field = getattr(candidate, field)
         if not image_field:
             continue
@@ -390,6 +405,7 @@ def _candidate_photo_context(candidate):
         finally:
             image_field.close()
         encoded = base64.b64encode(content).decode()
+        verified = is_reference_photo and identity_actually_verified
         return f"data:image/jpeg;base64,{encoded}", verified
     return None, False
 
@@ -606,7 +622,7 @@ def generate_certificate(evaluation, summary):
     language = _certificate_language(session)
     verification_url = f"{settings.FRONTEND_URL}/{language}/verify-certificate?id={certificate.verification_id}"
     readiness = _readiness_gauge_context(evaluation, language)
-    candidate_photo_data_uri, candidate_photo_verified = _candidate_photo_context(evaluation.candidate)
+    candidate_photo_data_uri, candidate_photo_verified = _candidate_photo_context(evaluation.candidate, session)
 
     context = {
         "logo_data_uri": _logo_data_uri(),

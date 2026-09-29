@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8" />
-  <title>الأسئلة والإجابات ودرجة الذكاء الاصطناعي</title>
+  <title>الأسئلة والإجابات وتقرير الدرجة القائمة على القواعد</title>
   <style>
     @page {
       size: A4;
@@ -119,7 +119,7 @@
   </style>
 </head>
 <body>
-  <h1>الأسئلة والإجابات ودرجة الذكاء الاصطناعي</h1>
+  <h1>الأسئلة والإجابات وتقرير الدرجة القائمة على القواعد</h1>
   <div class="meta">
     <span>رقم التقرير: {{ report_number }}</span>
     {% if assessment_context.candidate_name %}<span>المرشح: {{ assessment_context.candidate_name }}</span>{% endif %}
@@ -165,7 +165,7 @@
     {% else %}
       <div class="no-answer">لا يتوفر نص لهذه الإجابة.</div>
     {% endif %}
-    <div class="s-label">درجة الذكاء الاصطناعي والنتيجة</div>
+    <div class="s-label">درجة السؤال والنتيجة</div>
     {% if row.scored %}
       <div class="score-line">
         <span class="score-value">{{ row.score }}&nbsp;/&nbsp;{{ row.max_score }}</span>

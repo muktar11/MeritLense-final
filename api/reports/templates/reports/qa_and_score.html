@@ -2,7 +2,7 @@
 <html lang="en" dir="ltr">
 <head>
   <meta charset="utf-8" />
-  <title>Questions, Answers &amp; AI Score</title>
+  <title>Questions, Answers &amp; Rule-Based Score Report</title>
   <style>
     @page {
       size: A4;
@@ -107,7 +107,7 @@
   </style>
 </head>
 <body>
-  <h1>Questions, Answers &amp; AI Score</h1>
+  <h1>Questions, Answers &amp; Rule-Based Score Report</h1>
   <div class="meta">
     <span>Report: {{ report_number }}</span>
     {% if assessment_context.candidate_name %}<span>Candidate: {{ assessment_context.candidate_name }}</span>{% endif %}
@@ -153,7 +153,7 @@
     {% else %}
       <div class="no-answer">No transcript is available for this response.</div>
     {% endif %}
-    <div class="s-label">AI Score &amp; Result</div>
+    <div class="s-label">Question Score &amp; Result</div>
     {% if row.scored %}
       <div class="score-line">
         <span class="score-value">{{ row.score }}&nbsp;/&nbsp;{{ row.max_score }}</span>

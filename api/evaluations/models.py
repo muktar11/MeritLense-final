@@ -331,6 +331,52 @@ class EvaluationReadinessDecisionRecord(TimeStampedModel):
         raise ValidationError("Evaluation readiness decision records cannot be deleted.")
 
 
+class EvaluationReadinessCorrection(TimeStampedModel):
+    """An auditable, additive correction to an evaluation's readiness
+    result - created when the original EvaluationReadinessDecisionRecord is
+    later found to be wrong (e.g. a scoring-gate bug fixed after the fact),
+    without ever touching, overwriting, or deleting that original immutable
+    record. The original stays exactly as it was decided - this is a
+    formal note layered on top of it, not a replacement.
+
+    Anything that needs "what is this evaluation's readiness today" -
+    certificate_eligibility, the employer report, dashboards - should
+    prefer this correction's corrected_readiness_status over the original
+    when one exists (see certificate_services.current_readiness_status).
+    Immutable once created, same as the record it corrects; a further
+    change gets a new correction, never an edit to an existing one."""
+
+    evaluation = models.OneToOneField(
+        Evaluation,
+        on_delete=models.CASCADE,
+        related_name="readiness_correction",
+    )
+    original_readiness_status = models.CharField(max_length=20)
+    corrected_readiness_status = models.CharField(max_length=20, choices=ReadinessStatus.CHOICES)
+    reason = models.TextField()
+    corrected_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "Evaluation Readiness Correction"
+        verbose_name_plural = "Evaluation Readiness Corrections"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.evaluation_id}: {self.original_readiness_status} -> {self.corrected_readiness_status}"
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError(
+                "Evaluation readiness corrections are immutable once generated - "
+                "supersede with a new correction rather than editing one."
+            )
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Evaluation readiness corrections cannot be deleted.")
+
+
 class ScoringRuleSet(TimeStampedModel):
     name = models.CharField(max_length=150)
     version = models.CharField(max_length=40)

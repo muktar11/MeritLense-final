@@ -43,15 +43,32 @@ class Week6ScoringService:
             raise Week6ScoringError("Evaluation must be linked to an interview session before scoring")
 
         selected_rule_set = rule_set or cls._resolve_rule_set(evaluation)
-        responses = list(
+        all_responses = list(
             CandidateResponse.objects.select_related(
                 "question",
                 "question__question_template",
                 "evaluation_input_artifact",
             )
             .filter(session=session)
-            .order_by("question__question_order", "created_at")
+            .order_by("question__question_order", "-attempt_number", "-created_at")
         )
+        # Attempt isolation: if a question were ever answered more than
+        # once (CandidateResponse.attempt_number), only its latest attempt
+        # may feed scoring - every response for a session gets its own
+        # ResponseEvaluationResult row keyed by response id, so without
+        # this dedup, _aggregate_competencies would silently sum multiple
+        # attempts into one competency total. No retry path exists in the
+        # app today (every response is attempt_number=1), so this is
+        # currently a no-op - it exists so scoring can't silently combine
+        # attempts the moment one does.
+        responses = []
+        seen_question_ids = set()
+        for response in all_responses:
+            if response.question_id in seen_question_ids:
+                continue
+            seen_question_ids.add(response.question_id)
+            responses.append(response)
+        responses.sort(key=lambda r: (r.question.question_order, r.created_at))
         if not responses:
             raise Week6ScoringError("No candidate responses are available for scoring")
 

@@ -1211,6 +1211,12 @@ class EvaluationReportService:
             competency_breakdown=competency_breakdown,
             risk_indicators=risk_indicators,
             language=language,
+            role_code=session.role_code,
+        )
+        required_competency_coverage = cls._build_required_competency_coverage(
+            role_code=session.role_code,
+            critical_competency_status=critical_competency_status,
+            language=language,
         )
         competency_coverage = cls._derive_competency_coverage(critical_competency_status)
         overall_score_available = (
@@ -1274,6 +1280,7 @@ class EvaluationReportService:
                 "competencies_assessed_count": competency_coverage,
                 "competencies_required_count": len(critical_competency_status),
                 "competencies_minimum_required": cls._minimum_assessed_competencies(session.role_code),
+                "required_competency_coverage": required_competency_coverage,
                 "human_review_required": bool(human_review_flags),
             },
             "executive_summary": {
@@ -1413,8 +1420,23 @@ class EvaluationReportService:
 
     @classmethod
     def _resolve_readiness_indicator(cls, evaluation, readiness_record):
+        from api.evaluations.readiness_record_services import EvaluationReadinessRecordService
+
+        # A formal, auditable correction (see EvaluationReadinessCorrection)
+        # takes priority over even the locked readiness_record - it exists
+        # specifically to be the authoritative "what's true now" answer for
+        # an evaluation whose original decision was later found wrong,
+        # without altering that original record at all.
+        correction = EvaluationReadinessRecordService.get_correction(evaluation)
         raw_value = ""
-        if readiness_record is not None:
+        if correction is not None:
+            raw_value = {
+                "READY": "جاهز",
+                "NOT_READY": "غير جاهز",
+                "INCOMPLETE": "أدلة غير كافية",
+                "PARTIALLY_READY": "متوسط",
+            }.get(correction.corrected_readiness_status, "متوسط")
+        elif readiness_record is not None:
             raw_value = readiness_record.readiness_indicator or ""
         elif evaluation.readiness_status == "READY":
             raw_value = "جاهز"
@@ -1954,8 +1976,21 @@ class EvaluationReportService:
             for domain, (evaluated, method) in zip(dimensions, evaluated_and_method)
         ]
 
+    # Maps each _build_critical_competency_status risk_key to the same
+    # dimension code certificate_services.ROLE_COMPETENCY_CONFIG uses
+    # (SAFETY/HYGIENE/COMMUNICATION/PRACTICAL_TASKS/BEHAVIORAL), so a role
+    # migrated onto the Required/Critical model can be cross-referenced
+    # against this report-layer status list directly.
+    RISK_KEY_TO_DIMENSION = {
+        "safety_risk": "SAFETY",
+        "hygiene_risk": "HYGIENE",
+        "communication_risk": "COMMUNICATION",
+        "practical_tasks_risk": "PRACTICAL_TASKS",
+        "integrity_risk": "BEHAVIORAL",
+    }
+
     @classmethod
-    def _build_critical_competency_status(cls, *, competency_breakdown, risk_indicators, language="en"):
+    def _build_critical_competency_status(cls, *, competency_breakdown, risk_indicators, language="en", role_code=None):
         # Labels come from CANONICAL_COMPETENCY_DIMENSIONS - not hardcoded
         # short names - so this section can't drift out of sync with the
         # full names Assessment Methodology and Full Competency Breakdown
@@ -1972,8 +2007,38 @@ class EvaluationReportService:
             (label, tokens, risk_key)
             for label, (tokens, risk_key) in zip(dimensions, matchers)
         ]
+        from api.evaluations.certificate_services import role_competency_config
+
+        role_config = role_competency_config(role_code)
         items = []
         for label, tokens, risk_key in categories:
+            # A dimension this role's Required/Critical config doesn't list
+            # at all is Not Applicable - a deliberate exclusion, not a gap
+            # in coverage - so it must never read the same as "we should
+            # have assessed this and didn't" (NOT_ASSESSED/Insufficient
+            # Evidence). Only applies to roles actually migrated onto that
+            # config; every other role's dimensions are unaffected.
+            if role_config is not None and cls.RISK_KEY_TO_DIMENSION.get(risk_key) not in role_config:
+                na_label = "غير منطبق" if language == "ar" else "N/A"
+                items.append(
+                    {
+                        "label": label,
+                        "status_label": na_label,
+                        "tone": "neutral",
+                        "not_applicable": True,
+                        "risk_level": "Low",
+                        "risk_score": 0,
+                        "score_display": na_label,
+                        "percentage": 0,
+                        "score": 0,
+                        "max_score": 0,
+                        "pass_threshold": 0,
+                        "summary": (
+                            "غير مطلوب لهذا الدور." if language == "ar" else "Not required for this role."
+                        ),
+                    }
+                )
+                continue
             competency = None
             for item in competency_breakdown:
                 haystack = " ".join(
@@ -2015,6 +2080,7 @@ class EvaluationReportService:
                     "label": label,
                     "status_label": status_label,
                     "tone": tone,
+                    "not_applicable": False,
                     "risk_level": risk_level,
                     "risk_score": risk.get("risk_score", 0),
                     "score_display": score_display,
@@ -2027,6 +2093,50 @@ class EvaluationReportService:
                 }
             )
         return items
+
+    @classmethod
+    def _build_required_competency_coverage(cls, *, role_code, critical_competency_status, language="en"):
+        """Required Competency Coverage for a role migrated onto the
+        Required/Critical model (certificate_services.ROLE_COMPETENCY_CONFIG)
+        - e.g. "3 of 4 (75%)" for driver with Communication Ability
+        unassessed - computed with Not Applicable dimensions (Hygiene &
+        Standards for driver) excluded from both the numerator and the
+        denominator entirely, never counted as a missing required
+        competency. Returns None for a role not on this model; callers
+        fall back to the generic 5-dimension assessment_coverage/
+        competencies_assessed_count fields in that case, unchanged."""
+        from api.evaluations.certificate_services import role_competency_config
+
+        if role_competency_config(role_code) is None:
+            return None
+        applicable = [item for item in critical_competency_status if not item.get("not_applicable")]
+        required = len(applicable)
+        assessed = sum(1 for item in applicable if item.get("tone") != "neutral")
+        percentage = round(assessed / required * 100, 2) if required else 0
+        assessed_items = [item for item in applicable if item.get("tone") != "neutral"]
+        total_score = sum(item.get("score") or 0 for item in assessed_items)
+        total_max = sum(item.get("max_score") or 0 for item in assessed_items)
+        score_on_assessed = round(float(total_score) / float(total_max) * 100, 2) if total_max else None
+        return {
+            "assessed": assessed,
+            "required": required,
+            "percentage": percentage,
+            "is_complete": assessed == required,
+            "label": (
+                f"{assessed} من {required} ({percentage}%)" if language == "ar"
+                else f"{assessed} of {required} ({percentage}%)"
+            ),
+            "status_label": (
+                ("مكتملة" if assessed == required else "غير مكتملة")
+                if language == "ar" else ("Complete" if assessed == required else "Incomplete")
+            ),
+            "not_applicable_labels": [item["label"] for item in critical_competency_status if item.get("not_applicable")],
+            "score_on_assessed_competencies": score_on_assessed,
+            "score_on_assessed_display": (
+                "N/A" if score_on_assessed is None
+                else (f"{score_on_assessed}%" if language != "ar" else f"{score_on_assessed}٪")
+            ),
+        }
 
     @classmethod
     def _build_consent_summary(cls, session, language="en"):
@@ -2547,9 +2657,18 @@ class EvaluationReportService:
         "tone != neutral" signal _derive_competency_coverage counts with),
         not a fixed all-5-covered list. A dimension with no evidence has to
         render as not covered here, or it visually contradicts its own
-        "Not Assessed" status shown elsewhere in the same report."""
+        "Not Assessed" status shown elsewhere in the same report.
+        not_applicable is carried through so the template can show "N/A"
+        instead of "(Not Assessed)" for a dimension the role's config
+        deliberately excludes (e.g. Hygiene & Standards for driver) -
+        those two states are not the same claim and must not read the
+        same way."""
         return [
-            {"label": item["label"], "covered": item.get("tone") != "neutral"}
+            {
+                "label": item["label"],
+                "covered": item.get("tone") != "neutral",
+                "not_applicable": bool(item.get("not_applicable")),
+            }
             for item in critical_competency_status
         ]
 

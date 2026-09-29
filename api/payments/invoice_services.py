@@ -11,9 +11,11 @@ from django.template.loader import render_to_string
 from api.core.constants import InterviewEvaluationTier, PaymentMethodConstants
 from api.core.pdf_fonts import arabic_font_context
 
-# Reuses the same real logo asset certificate_services.py already bundles -
-# one file, not a second copy per app.
-_LOGO_PATH = Path(__file__).resolve().parents[1] / "evaluations" / "assets" / "meritlense-logo.png"
+# The full icon+wordmark lockup (not the icon-only mark
+# certificate_services.py/reports use) - the invoice header shows the
+# brand name as part of the logo image itself, with the tagline as
+# separate text below it, matching the approved letterhead design.
+_LOGO_PATH = Path(__file__).resolve().parents[1] / "evaluations" / "assets" / "meritlense-logo-full.png"
 _logo_data_uri_cache = None
 
 

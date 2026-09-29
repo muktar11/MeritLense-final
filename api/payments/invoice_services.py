@@ -150,6 +150,16 @@ def _build_snapshot(invoice):
     line_items = _line_items_context(invoice, fallback_period_start=issue_date, fallback_period_end=due_date)
     subtotal = sum((item["net_amount"] for item in line_items), Decimal("0.00"))
     vat_total = sum((item["vat_amount"] for item in line_items), Decimal("0.00"))
+    # The totals-section "VAT (X%)" label must read the rate that was
+    # actually applied to these line items, not a literal string baked
+    # into the template - otherwise a future non-zero/mixed transaction
+    # tax treatment would render next to a stale "0%" label. Only
+    # collapses to a single rate when every line item agrees; a future
+    # multi-rate invoice (mixed VAT treatments in one invoice) falls back
+    # to no percentage in the summary label, since the per-line VAT %
+    # column already shows the real breakdown for that case.
+    distinct_vat_percents = {item["vat_percent"] for item in line_items}
+    vat_rate_label = str(next(iter(distinct_vat_percents))) if len(distinct_vat_percents) == 1 else None
     language = _invoice_language(invoice)
     billing_party = _billing_party_context(invoice)
     if language == "ar":
@@ -187,6 +197,7 @@ def _build_snapshot(invoice):
         ],
         "subtotal": _money(subtotal),
         "vat_total": _money(vat_total),
+        "vat_rate_label": vat_rate_label,
         "total": _money(subtotal + vat_total),
         "amount_paid": _money(invoice.amount_paid),
         "amount_due_display": _money(invoice.amount_remaining),

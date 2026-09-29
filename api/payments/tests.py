@@ -2235,6 +2235,134 @@ class InvoiceAddressTranslationTests(TestCase):
         self.assertEqual(snapshot["billing_party"]["address"], "Concord Tower, Dubai, United Arab Emirates")
 
 
+class InvoiceVatLabelTests(TestCase):
+    """The totals-section 'VAT (X%)' label must be read off the invoice's
+    actual computed vat_percent, not a literal string baked into the
+    template - otherwise a non-zero/mixed transaction tax treatment would
+    render next to a stale hardcoded label that disagrees with the real
+    per-line VAT % column right above it."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="vat-label@example.com", password="Password123!",
+            first_name="Vat", last_name="Label", role=Roles.B2C, is_verified=True,
+        )
+        customer = Customer.objects.create(user=self.user, stripe_customer_id="cus_vat_label")
+        self.invoice = Invoice.objects.create(
+            user=self.user, customer=customer, stripe_invoice_id="in_vat_label",
+            number="INV-VAT-1", status="PAID", amount_due=Decimal("100.00"),
+            amount_paid=Decimal("100.00"), amount_remaining=Decimal("0.00"), currency="eur",
+        )
+
+    def test_vat_rate_label_matches_the_real_line_item_rate(self):
+        from api.payments.invoice_services import _build_snapshot
+
+        snapshot = _build_snapshot(self.invoice)
+
+        self.assertEqual(snapshot["vat_rate_label"], snapshot["line_items"][0]["vat_percent"])
+
+    def test_english_invoice_renders_the_data_driven_label_not_a_hardcoded_string(self):
+        from django.template.loader import render_to_string
+
+        from api.payments.invoice_services import SUPPLIER, _build_snapshot, _logo_data_uri
+
+        snapshot = _build_snapshot(self.invoice)
+        html = render_to_string(
+            "payments/invoice.html",
+            {"invoice": snapshot, "supplier": SUPPLIER, "bank": {}, "logo_data_uri": _logo_data_uri()},
+        )
+
+        self.assertIn(f"VAT ({snapshot['vat_rate_label']}%)", html)
+        self.assertNotIn("VAT (0%)<", html)
+
+    def test_arabic_invoice_renders_the_data_driven_label_not_a_hardcoded_string(self):
+        from django.template.loader import render_to_string
+
+        from api.core.pdf_fonts import arabic_font_context
+        from api.payments.invoice_services import SUPPLIER, _build_snapshot, _logo_data_uri
+
+        from api.accounts.models import IndividualEmployerProfile
+        from api.core.constants import JobRoles, Nationalities
+
+        IndividualEmployerProfile.objects.create(
+            user=self.user, passport_id="PASS-VAT-1", phone_number="+10000000000",
+            job_role=JobRoles.CHOICES[0][0], nationality=Nationalities.CHOICES[0][0],
+            preferred_language="AR",
+            id_document=SimpleUploadedFile("id.pdf", b"%PDF-1.1", content_type="application/pdf"),
+            resume_document=SimpleUploadedFile("resume.pdf", b"%PDF-1.1", content_type="application/pdf"),
+        )
+        snapshot = _build_snapshot(self.invoice)
+        context = {"invoice": snapshot, "supplier": SUPPLIER, "bank": {}, "logo_data_uri": _logo_data_uri()}
+        context.update(arabic_font_context())
+        html = render_to_string("payments/invoice_ar.html", context)
+
+        self.assertIn(f"{snapshot['vat_rate_label']}%", html)
+        self.assertNotIn("ضريبة القيمة المضافة 0%", html)
+
+
+class InvoiceArabicRtlIsolationTests(TestCase):
+    """Latin/numeric fields (invoice number, dates, currency, IBAN,
+    BIC/SWIFT) embedded in the Arabic invoice must be wrapped in the
+    ltr-isolate run used throughout this template, or the bidi algorithm
+    can reorder/garble them inside the surrounding RTL paragraph - the
+    same class of bug already fixed once for addresses/emails."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="rtl-isolation@example.com", password="Password123!",
+            first_name="Rtl", last_name="Isolation", role=Roles.B2C, is_verified=True,
+        )
+        from api.accounts.models import IndividualEmployerProfile
+        from api.core.constants import JobRoles, Nationalities
+
+        IndividualEmployerProfile.objects.create(
+            user=self.user, passport_id="PASS-RTL-1", phone_number="+10000000000",
+            job_role=JobRoles.CHOICES[0][0], nationality=Nationalities.CHOICES[0][0],
+            preferred_language="AR",
+            id_document=SimpleUploadedFile("id.pdf", b"%PDF-1.1", content_type="application/pdf"),
+            resume_document=SimpleUploadedFile("resume.pdf", b"%PDF-1.1", content_type="application/pdf"),
+        )
+        customer = Customer.objects.create(user=self.user, stripe_customer_id="cus_rtl_isolation")
+        self.invoice = Invoice.objects.create(
+            user=self.user, customer=customer, stripe_invoice_id="in_rtl_isolation",
+            number="INV-RTL-0042", status="PAID", amount_due=Decimal("250.00"),
+            amount_paid=Decimal("250.00"), amount_remaining=Decimal("0.00"), currency="eur",
+        )
+
+    def _render(self, bank):
+        from django.template.loader import render_to_string
+
+        from api.core.pdf_fonts import arabic_font_context
+        from api.payments.invoice_services import SUPPLIER, _build_snapshot, _logo_data_uri
+
+        snapshot = _build_snapshot(self.invoice)
+        context = {"invoice": snapshot, "supplier": SUPPLIER, "bank": bank, "logo_data_uri": _logo_data_uri()}
+        context.update(arabic_font_context())
+        return render_to_string("payments/invoice_ar.html", context), snapshot
+
+    def test_iban_and_bic_are_ltr_isolated(self):
+        html, _ = self._render(
+            {"account_holder": "MeritLense OU", "iban": "EE382200221020145685", "bic_swift": "EEUHEE2X"}
+        )
+
+        self.assertIn('<span class="ltr-isolate">EE382200221020145685</span>', html)
+        self.assertIn('<span class="ltr-isolate">EEUHEE2X</span>', html)
+        self.assertIn('<span class="ltr-isolate">MeritLense OU</span>', html)
+
+    def test_invoice_number_is_ltr_isolated_in_meta_box_and_payment_terms(self):
+        html, snapshot = self._render({})
+
+        self.assertIn(f'<span class="meta-value ltr-isolate">{snapshot["invoice_number"]}</span>', html)
+        self.assertIn(f'<span class="ltr-isolate">{snapshot["invoice_number"]}</span>', html)
+
+    def test_dates_and_currency_are_ltr_isolated(self):
+        html, snapshot = self._render({})
+
+        self.assertIn(f'<span class="meta-value ltr-isolate">{snapshot["issue_date"]}</span>', html)
+        self.assertIn(f'<span class="meta-value ltr-isolate">{snapshot["due_date"]}</span>', html)
+        self.assertIn(f'<span class="meta-value ltr-isolate">{snapshot["currency"]}</span>', html)
+
+
 class GenerateInvoicePdfsCommandTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(

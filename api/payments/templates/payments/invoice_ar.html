@@ -7,7 +7,7 @@
     size: A4;
     margin: 0 0 16mm 0;
     @bottom-center {
-      content: "MeritLense — الذكاء الاصطناعي يساعد. القواعد تحكم. أصحاب العمل يقررون.    صفحة " counter(page) " من " counter(pages) " \00B7 فاتورة {{ invoice.invoice_number }}";
+      content: "MeritLense — الذكاء الاصطناعي يساعد. القواعد تحكم. أصحاب العمل يقررون.    صفحة " counter(page) " من " counter(pages) " \00B7 فاتورة \2066{{ invoice.invoice_number }}\2069";
       font-size: 7pt; color: #8a97ad;
     }
   }
@@ -96,11 +96,11 @@
     </div>
 
     <div class="meta-box">
-      <div class="meta-row"><span class="meta-label">رقم الفاتورة</span><span class="meta-value">{{ invoice.invoice_number }}</span></div>
-      <div class="meta-row"><span class="meta-label">تاريخ الإصدار</span><span class="meta-value">{{ invoice.issue_date }}</span></div>
-      <div class="meta-row"><span class="meta-label">تاريخ التوريد</span><span class="meta-value">{{ invoice.supply_date }}</span></div>
-      <div class="meta-row due"><span class="meta-label">تاريخ الاستحقاق</span><span class="meta-value">{{ invoice.due_date }}</span></div>
-      <div class="meta-row"><span class="meta-label">العملة</span><span class="meta-value">{{ invoice.currency }}</span></div>
+      <div class="meta-row"><span class="meta-label">رقم الفاتورة</span><span class="meta-value ltr-isolate">{{ invoice.invoice_number }}</span></div>
+      <div class="meta-row"><span class="meta-label">تاريخ الإصدار</span><span class="meta-value ltr-isolate">{{ invoice.issue_date }}</span></div>
+      <div class="meta-row"><span class="meta-label">تاريخ التوريد</span><span class="meta-value ltr-isolate">{{ invoice.supply_date }}</span></div>
+      <div class="meta-row due"><span class="meta-label">تاريخ الاستحقاق</span><span class="meta-value ltr-isolate">{{ invoice.due_date }}</span></div>
+      <div class="meta-row"><span class="meta-label">العملة</span><span class="meta-value ltr-isolate">{{ invoice.currency }}</span></div>
     </div>
 
     <div class="parties-row">
@@ -144,13 +144,13 @@
           <td>{{ forloop.counter }}</td>
           <td>
             <div class="item-desc-main">{{ item.description }}</div>
-            <div class="item-desc-sub">فترة الخدمة: {{ item.period_start }} &ndash; {{ item.period_end }}</div>
+            <div class="item-desc-sub">فترة الخدمة: <span class="ltr-isolate">{{ item.period_start }} &ndash; {{ item.period_end }}</span></div>
           </td>
-          <td class="num">{{ item.qty }}</td>
-          <td class="num">{{ item.unit_price }}</td>
-          <td class="num">{{ item.net_amount }}</td>
-          <td class="num">{{ item.vat_percent }}%</td>
-          <td class="num">{{ item.vat_amount }}</td>
+          <td class="num"><span class="ltr-isolate">{{ item.qty }}</span></td>
+          <td class="num"><span class="ltr-isolate">{{ item.unit_price }}</span></td>
+          <td class="num"><span class="ltr-isolate">{{ item.net_amount }}</span></td>
+          <td class="num"><span class="ltr-isolate">{{ item.vat_percent }}%</span></td>
+          <td class="num"><span class="ltr-isolate">{{ item.vat_amount }}</span></td>
         </tr>
         {% endfor %}
       </tbody>
@@ -160,14 +160,14 @@
       <div class="lower-left">
         <div class="info-box">
           <div class="info-box-title">شروط الدفع</div>
-          <div class="info-box-body">الدفع مستحق فوراً عند الاستلام. يُرجى ذكر رقم الفاتورة {{ invoice.invoice_number }} كمرجع للتحويل.</div>
+          <div class="info-box-body">الدفع مستحق فوراً عند الاستلام. يُرجى ذكر رقم الفاتورة <span class="ltr-isolate">{{ invoice.invoice_number }}</span> كمرجع للتحويل.</div>
         </div>
         <div class="info-box">
           <div class="info-box-title">البيانات البنكية</div>
           <div class="info-box-body">
-            اسم صاحب الحساب &mdash; {% if bank.account_holder %}{{ bank.account_holder }}{% else %}يُستكمل{% endif %}<br />
-            رقم الحساب الدولي IBAN &mdash; {% if bank.iban %}{{ bank.iban }}{% else %}يُستكمل{% endif %}<br />
-            رمز المصرف SWIFT / BIC &mdash; {% if bank.bic_swift %}{{ bank.bic_swift }}{% else %}يُستكمل{% endif %}
+            اسم صاحب الحساب &mdash; {% if bank.account_holder %}<span class="ltr-isolate">{{ bank.account_holder }}</span>{% else %}يُستكمل{% endif %}<br />
+            رقم الحساب الدولي IBAN &mdash; {% if bank.iban %}<span class="ltr-isolate">{{ bank.iban }}</span>{% else %}يُستكمل{% endif %}<br />
+            رمز المصرف SWIFT / BIC &mdash; {% if bank.bic_swift %}<span class="ltr-isolate">{{ bank.bic_swift }}</span>{% else %}يُستكمل{% endif %}
           </div>
         </div>
         <div class="info-box">
@@ -176,15 +176,15 @@
         </div>
       </div>
       <div class="lower-right">
-        <div class="totals-row"><span class="t-label">المجموع قبل الضريبة</span><span class="t-value">&euro;{{ invoice.subtotal }}</span></div>
-        <div class="totals-row"><span class="t-label">ضريبة القيمة المضافة 0%</span><span class="t-value">&euro;{{ invoice.vat_total }}</span></div>
-        <div class="totals-row total"><span class="t-label">الإجمالي</span><span class="t-value">&euro;{{ invoice.total }}</span></div>
-        <div class="totals-row"><span class="t-label">المبلغ المدفوع</span><span class="t-value">&euro;{{ invoice.amount_paid }}</span></div>
+        <div class="totals-row"><span class="t-label">المجموع قبل الضريبة</span><span class="t-value ltr-isolate">&euro;{{ invoice.subtotal }}</span></div>
+        <div class="totals-row"><span class="t-label">ضريبة القيمة المضافة{% if invoice.vat_rate_label %} {{ invoice.vat_rate_label }}%{% endif %}</span><span class="t-value ltr-isolate">&euro;{{ invoice.vat_total }}</span></div>
+        <div class="totals-row total"><span class="t-label">الإجمالي</span><span class="t-value ltr-isolate">&euro;{{ invoice.total }}</span></div>
+        <div class="totals-row"><span class="t-label">المبلغ المدفوع</span><span class="t-value ltr-isolate">&euro;{{ invoice.amount_paid }}</span></div>
         <div class="amount-due-bar">
           <div class="t-label">المبلغ المستحق</div>
-          <div class="t-value">&euro;{{ invoice.amount_due_display }}</div>
+          <div class="t-value"><span class="ltr-isolate">&euro;{{ invoice.amount_due_display }}</span></div>
         </div>
-        <div class="payable-by">يُسدَّد بحلول {{ invoice.payable_by }}</div>
+        <div class="payable-by">يُسدَّد بحلول <span class="ltr-isolate">{{ invoice.payable_by }}</span></div>
       </div>
     </div>
 

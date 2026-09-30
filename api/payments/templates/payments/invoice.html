@@ -50,6 +50,7 @@
   .info-box { border: 1px solid #e2e8f5; border-radius: 8px; padding: 3.5mm 4mm; margin-bottom: 4mm; }
   .info-box-title { font-size: 7pt; letter-spacing: 0.05em; color: #8a97ad; text-transform: uppercase; margin-bottom: 1.5mm; }
   .info-box-body { font-size: 8.3pt; color: #4b5563; line-height: 1.55; }
+  .pay-online-button { display: inline-block; background: linear-gradient(90deg, #7b56f5, #2f6fe8); color: #ffffff; font-weight: 700; font-size: 8.5pt; padding: 2.8mm 7mm; border-radius: 999px; text-decoration: none; }
 
   .totals-row { display: table; width: 100%; font-size: 8.7pt; padding: 1.2mm 0; }
   .totals-row .t-label { display: table-cell; color: #6b7280; }
@@ -153,12 +154,23 @@
           <div class="info-box-title">Payment Terms</div>
           <div class="info-box-body">Due on receipt (net 0 days). Quote invoice no. {{ invoice.invoice_number }} as the transfer reference.</div>
         </div>
+        {% if invoice.pay_online_url %}
         <div class="info-box">
-          <div class="info-box-title">Bank Details</div>
+          <div class="info-box-title">Pay Online</div>
           <div class="info-box-body">
-            Account holder &mdash; {% if bank.account_holder %}{{ bank.account_holder }}{% else %}to be completed{% endif %}<br />
+            <a class="pay-online-button" href="{{ invoice.pay_online_url }}">Pay Online</a>
+          </div>
+        </div>
+        {% endif %}
+        <div class="info-box">
+          <div class="info-box-title">Bank Transfer</div>
+          <div class="info-box-body">
+            Beneficiary &mdash; {% if bank.account_holder %}{{ bank.account_holder }}{% else %}to be completed{% endif %}<br />
             IBAN &mdash; {% if bank.iban %}{{ bank.iban }}{% else %}to be completed{% endif %}<br />
-            BIC / SWIFT &mdash; {% if bank.bic_swift %}{{ bank.bic_swift }}{% else %}to be completed{% endif %}
+            SWIFT / BIC &mdash; {% if bank.bic_swift %}{{ bank.bic_swift }}{% else %}to be completed{% endif %}<br />
+            Bank &mdash; {% if bank.bank_name %}{{ bank.bank_name }}{% else %}to be completed{% endif %}<br />
+            Bank Address &mdash; {% if bank.bank_address %}{{ bank.bank_address }}{% else %}to be completed{% endif %}<br />
+            Payment Reference &mdash; Invoice No. {{ invoice.invoice_number }}
           </div>
         </div>
         {% endif %}

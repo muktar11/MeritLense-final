@@ -906,6 +906,15 @@ class PackageRequest(TimeStampedModel):
     stripe_payment_link_url = models.URLField(blank=True, max_length=500)
     paid_at = models.DateTimeField(null=True, blank=True)
 
+    invoice = models.OneToOneField(
+        'Invoice',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='source_package_request',
+        help_text="Created OPEN/unpaid at approval (with the Pay Online link as its hosted_invoice_url), updated to PAID once activate_after_payment runs"
+    )
+
     class Meta:
         verbose_name = "Package Request"
         verbose_name_plural = "Package Requests"

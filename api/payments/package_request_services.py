@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 
 import stripe
 from django.conf import settings
@@ -7,7 +8,7 @@ from django.utils import timezone
 
 from api.core.constants import AuditLogAction, AuditLogCategory, PackageRequestBilling, PackageRequestStatus
 from api.core.public_ids import get_by_identifier
-from .models import DealRecord, PackageRequest, Price, Subscription
+from .models import DealRecord, Invoice, PackageRequest, Price, Subscription
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,8 @@ class PackageRequestService:
     def approve(cls, *, package_request, actor, slot_grant, points_grant, unit_amount, billing_type, currency="eur", rollover_allowed=False, addendum_reference="", decision_reason=""):
         from api.accounts.utils import send_package_request_approved_email
         from api.audit.services import AuditLogService
+        from .invoice_services import generate_invoice_pdf
+        from .services import StripeService, _generate_one_time_invoice_number
 
         if billing_type not in (PackageRequestBilling.ONE_TIME, PackageRequestBilling.RECURRING):
             raise PackageRequestError("billing_type must be ONE_TIME or RECURRING.")
@@ -134,11 +137,37 @@ class PackageRequestService:
         package_request.stripe_price_id = stripe_price.id
         package_request.stripe_payment_link_id = payment_link.id
         package_request.stripe_payment_link_url = payment_link.url
+
+        # An unpaid Invoice from the moment of approval - the "Pay Online"
+        # link on it (_build_snapshot.pay_online_url) is this same Payment
+        # Link, and Bank Transfer is always shown alongside it (see
+        # invoice.html's unpaid branch). Never a real Stripe Invoice object
+        # (no subscription/billing cycle exists yet for a brand-new custom
+        # deal), same synthetic-id approach as one-time B2C purchases.
+        customer = StripeService().get_or_create_customer(package_request.requested_by)
+        invoice = Invoice.objects.create(
+            user=package_request.requested_by,
+            customer=customer,
+            stripe_invoice_id=f"pkgreq_{package_request.public_id}",
+            number=_generate_one_time_invoice_number(),
+            status="OPEN",
+            amount_due=unit_amount,
+            amount_paid=Decimal("0.00"),
+            amount_remaining=unit_amount,
+            currency=currency,
+            hosted_invoice_url=payment_link.url,
+        )
+        try:
+            generate_invoice_pdf(invoice)
+        except Exception:
+            logger.exception("Failed to generate invoice PDF for package request %s", package_request.public_id)
+        package_request.invoice = invoice
+
         package_request.save(update_fields=[
             "status", "decision_reason", "reviewed_by", "reviewed_at", "billing_type",
             "approved_slot_grant", "approved_points_grant", "unit_amount", "currency",
             "rollover_allowed", "addendum_reference", "stripe_product_id", "stripe_price_id",
-            "stripe_payment_link_id", "stripe_payment_link_url", "updated_at",
+            "stripe_payment_link_id", "stripe_payment_link_url", "invoice", "updated_at",
         ])
 
         AuditLogService.log(
@@ -147,7 +176,7 @@ class PackageRequestService:
             category=AuditLogCategory.SUBSCRIPTION,
             description=f"Package request approved: {package_request.company.name} ({package_request.deal_type}) - payment link sent",
             resource=package_request,
-            data={"slot_grant": slot_grant, "points_grant": points_grant, "unit_amount": str(unit_amount), "billing_type": billing_type},
+            data={"slot_grant": slot_grant, "points_grant": points_grant, "unit_amount": str(unit_amount), "billing_type": billing_type, "invoice_number": invoice.number},
         )
 
         send_package_request_approved_email(package_request.requested_by, package_request)
@@ -161,6 +190,7 @@ class PackageRequestService:
         honor it. Idempotent - webhooks can be delivered more than once."""
         from api.accounts.utils import send_package_request_payment_confirmed_email
         from api.audit.services import AuditLogService
+        from .invoice_services import generate_invoice_pdf
         from .services import StripeService
 
         try:
@@ -254,6 +284,22 @@ class PackageRequestService:
             package_request.paid_at = now
             package_request.deal_record = deal_record
             package_request.save(update_fields=["status", "paid_at", "deal_record", "updated_at"])
+
+            # Same Invoice created at approval, flipped to PAID/€0.00 due -
+            # _build_snapshot's is_paid gate then renders the existing
+            # paid-invoice design (Payment Confirmation box, no Payment
+            # Options) the next time this PDF is generated, unchanged.
+            if package_request.invoice_id:
+                invoice = package_request.invoice
+                invoice.status = "PAID"
+                invoice.amount_paid = invoice.amount_due
+                invoice.amount_remaining = Decimal("0.00")
+                invoice.paid_at = now
+                invoice.save(update_fields=["status", "amount_paid", "amount_remaining", "paid_at", "updated_at"])
+                try:
+                    generate_invoice_pdf(invoice)
+                except Exception:
+                    logger.exception("Failed to regenerate paid invoice PDF for package request %s", package_request.public_id)
 
         AuditLogService.log_system(
             action=AuditLogAction.PACKAGE_REQUEST_PAID,

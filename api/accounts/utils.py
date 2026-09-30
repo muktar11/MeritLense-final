@@ -287,23 +287,30 @@ def send_package_request_approved_email(user, package_request):
     """Sent at approval time - the package isn't active yet, this is the
     payment request. Activation (DealRecord creation) happens separately,
     once Stripe confirms the payment made through this link - see
-    send_package_request_payment_confirmed_email."""
+    send_package_request_payment_confirmed_email. The attached invoice
+    (if its PDF generated successfully) carries the same payment link as
+    its "Pay Online" option, plus bank transfer details - the email text
+    only needs to point the requester at it, not repeat everything."""
     subject = f"Your {package_request.get_deal_type_display()} Request Has Been Approved - Payment Required"
     slot_line = f"Assessment Slots: {package_request.approved_slot_grant}\n" if package_request.approved_slot_grant is not None else ""
     points_line = f"Points: {package_request.approved_points_grant}\n" if package_request.approved_points_grant is not None else ""
     amount = _format_currency_amount(package_request.unit_amount, package_request.currency)
     billing_line = "billed once" if package_request.billing_type == "ONE_TIME" else "billed monthly"
+    invoice_line = f"Invoice: {package_request.invoice.number}\n" if package_request.invoice_id else ""
     message = f"""
 Hello {user.first_name},
 
 Good news - your {package_request.get_deal_type_display()} request for {package_request.company.name}
 has been approved.
 
-{slot_line}{points_line}
+{slot_line}{points_line}{invoice_line}
 Amount due: {amount} ({billing_line})
 
 To activate your package, complete payment here:
 {package_request.stripe_payment_link_url}
+
+The attached invoice also includes this payment link and bank transfer
+details as an alternative.
 
 Your package will be activated automatically as soon as payment is confirmed.
 If you have any questions, please contact support.
@@ -311,12 +318,14 @@ If you have any questions, please contact support.
 Best regards,
 Meritlense Team
 """
-    safe_send_mail(subject, message, [user.email])
+    attachments = _invoice_email_attachments(package_request.invoice) if package_request.invoice_id else []
+    safe_send_mail(subject, message, [user.email], attachments=attachments)
 
 
 def send_package_request_payment_confirmed_email(user, package_request, deal_record):
     """Sent once activate_after_payment has created the real DealRecord -
-    this is when the package actually becomes usable."""
+    this is when the package actually becomes usable. The attached invoice
+    is the same one sent at approval, now regenerated as PAID/€0.00 due."""
     subject = f"Your {package_request.get_deal_type_display()} Package Is Now Active"
     slot_line = f"Assessment Slots: {deal_record.slot_grant}\n" if deal_record.slot_grant is not None else ""
     points_line = f"Points: {deal_record.points_grant}\n" if deal_record.points_grant is not None else ""
@@ -333,7 +342,13 @@ contact support.
 Best regards,
 Meritlense Team
 """
-    safe_send_mail(subject, message, [user.email])
+    attachments = _invoice_email_attachments(package_request.invoice) if package_request.invoice_id else []
+    safe_send_mail(subject, message, [user.email], attachments=attachments)
+
+
+def _invoice_email_attachments(invoice):
+    from api.payments.services import invoice_pdf_email_attachments
+    return invoice_pdf_email_attachments(invoice)
 
 
 def send_package_request_denied_email(user, package_request, reason):

@@ -70,6 +70,7 @@
   .info-box { border: 1px solid #e2e8f5; border-radius: 8px; padding: 3.5mm 4mm; margin-bottom: 4mm; }
   .info-box-title { font-size: 7pt; letter-spacing: 0.02em; color: #8a97ad; margin-bottom: 1.5mm; }
   .info-box-body { font-size: 8.3pt; color: #4b5563; line-height: 1.65; }
+  .pay-online-button { display: inline-block; background: linear-gradient(90deg, #2f6fe8, #7b56f5); color: #ffffff; font-weight: 700; font-size: 8.5pt; padding: 2.8mm 7mm; border-radius: 999px; text-decoration: none; }
 
   .totals-row { display: table; width: 100%; font-size: 8.7pt; padding: 1.2mm 0; direction: rtl; }
   .totals-row .t-label { display: table-cell; color: #6b7280; }
@@ -178,12 +179,23 @@
           <div class="info-box-title">شروط الدفع</div>
           <div class="info-box-body">الدفع مستحق فوراً عند الاستلام. يُرجى ذكر رقم الفاتورة <span class="ltr-isolate">{{ invoice.invoice_number }}</span> كمرجع للتحويل.</div>
         </div>
+        {% if invoice.pay_online_url %}
         <div class="info-box">
-          <div class="info-box-title">البيانات البنكية</div>
+          <div class="info-box-title">الدفع عبر الإنترنت</div>
           <div class="info-box-body">
-            اسم صاحب الحساب &mdash; {% if bank.account_holder %}<span class="ltr-isolate">{{ bank.account_holder }}</span>{% else %}يُستكمل{% endif %}<br />
+            <a class="pay-online-button" href="{{ invoice.pay_online_url }}">ادفع الآن</a>
+          </div>
+        </div>
+        {% endif %}
+        <div class="info-box">
+          <div class="info-box-title">التحويل البنكي</div>
+          <div class="info-box-body">
+            المستفيد &mdash; {% if bank.account_holder %}<span class="ltr-isolate">{{ bank.account_holder }}</span>{% else %}يُستكمل{% endif %}<br />
             رقم الحساب الدولي IBAN &mdash; {% if bank.iban %}<span class="ltr-isolate">{{ bank.iban }}</span>{% else %}يُستكمل{% endif %}<br />
-            رمز المصرف SWIFT / BIC &mdash; {% if bank.bic_swift %}<span class="ltr-isolate">{{ bank.bic_swift }}</span>{% else %}يُستكمل{% endif %}
+            رمز المصرف SWIFT / BIC &mdash; {% if bank.bic_swift %}<span class="ltr-isolate">{{ bank.bic_swift }}</span>{% else %}يُستكمل{% endif %}<br />
+            البنك &mdash; {% if bank.bank_name %}<span class="ltr-isolate">{{ bank.bank_name }}</span>{% else %}يُستكمل{% endif %}<br />
+            عنوان البنك &mdash; {% if bank.bank_address %}<span class="ltr-isolate">{{ bank.bank_address }}</span>{% else %}يُستكمل{% endif %}<br />
+            مرجع الدفع &mdash; رقم الفاتورة <span class="ltr-isolate">{{ invoice.invoice_number }}</span>
           </div>
         </div>
         {% endif %}

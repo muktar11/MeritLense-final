@@ -2453,7 +2453,10 @@ class InvoicePackageDescriptionTests(TestCase):
 
         self.assertEqual(snapshot["line_items"][0]["description"], "MeritLense Basic — 3 Assessments")
 
-    def test_recurring_full_package_description_includes_full_and_month(self):
+    def test_recurring_full_package_description_has_no_tier_qualifier_and_includes_month(self):
+        """No "Full"/"Screening" qualifier on the invoice line item -
+        evaluation tier is chosen per candidate assessment, not a property
+        of the package, regardless of the Price's own evaluation_tier."""
         from api.payments.invoice_services import _build_snapshot
 
         price = make_price(
@@ -2465,7 +2468,7 @@ class InvoicePackageDescriptionTests(TestCase):
         snapshot = _build_snapshot(invoice)
 
         self.assertEqual(
-            snapshot["line_items"][0]["description"], "MeritLense Growth — 200 Full Assessments / Month",
+            snapshot["line_items"][0]["description"], "MeritLense Growth — 200 Assessments / Month",
         )
 
     def test_falls_back_to_generic_description_with_no_subscription(self):

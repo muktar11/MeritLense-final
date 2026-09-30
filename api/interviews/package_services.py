@@ -1,4 +1,4 @@
-from api.core.constants import CoverageLevel, InterviewEvaluationTier, Roles, SubscriptionStatus
+from api.core.constants import CoverageLevel, InterviewEvaluationTier, PackageAudience, Roles, SubscriptionStatus
 from api.interviews.models import PackageSessionConfig, RolePackageCoverage
 
 
@@ -36,13 +36,23 @@ class PackageArchitectureService:
         if coverage is None:
             return None
 
+        # B2C packages (Basic/Essential/Advanced/Premium) grant certificate +
+        # readiness-level eligibility on every package, for both Screening
+        # and Full evaluations - unlike B2B, where only a package explicitly
+        # configured for it, on a role covered above Screening, qualifies.
+        # This only affects the certificate/readiness gate, not the
+        # assessment itself: coverage_level (and so evaluation_tier,
+        # question depth, scoring) is untouched.
+        is_b2c_package = package.audience == PackageAudience.B2C
+        screening_gate = coverage.coverage_level != CoverageLevel.SCREENING
+
         return {
             "package": package,
             "coverage": coverage,
             "evaluation_tier": cls.coverage_to_evaluation_tier(coverage.coverage_level),
-            "readiness_indicator_enabled": package.readiness_indicator_enabled and coverage.coverage_level != CoverageLevel.SCREENING,
-            "certificate_enabled": package.certificate_enabled and coverage.coverage_level != CoverageLevel.SCREENING,
-            "task_observation_enabled": package.task_observation_enabled and coverage.coverage_level != CoverageLevel.SCREENING,
+            "readiness_indicator_enabled": is_b2c_package or (package.readiness_indicator_enabled and screening_gate),
+            "certificate_enabled": is_b2c_package or (package.certificate_enabled and screening_gate),
+            "task_observation_enabled": package.task_observation_enabled and screening_gate,
         }
 
     @classmethod

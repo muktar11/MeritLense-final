@@ -255,16 +255,17 @@ PACKAGE_ORDER = {
 }
 
 
-# Candidate Assessment Slots per package (MeritLense Package Architecture v1.2,
-# Section 6). None = no automated enforcement (per-agreement/custom tiers).
+# Candidate Assessment Slots per package (Backend Package & Entitlement
+# Specification, Section 2 "Authoritative Package Matrix"). None = no
+# automated enforcement (per-agreement/custom tiers).
 SLOT_GRANTS = {
-    "basic": 3,
-    "essential": 5,
-    "advanced": 10,
-    "premium": 20,
+    "basic": 2,
+    "essential": 4,
+    "advanced": 6,
+    "premium": 8,
     "starter": None,
-    "growth": 200,
-    "business": 500,
+    "growth": 100,
+    "business": 200,
     "enterprise": None,
 }
 

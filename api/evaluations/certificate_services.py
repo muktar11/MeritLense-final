@@ -82,20 +82,23 @@ QUALITY_RANK = {
     "Excellent": 3,
 }
 
-_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "meritlense-logo-full.png"
-_logo_data_uri_cache = None
+_ICON_PATH = Path(__file__).resolve().parent / "assets" / "meritlense-logo.png"
+_icon_data_uri_cache = None
 
 
-def _logo_data_uri():
-    """The real MeritLense logo - the full icon+wordmark lockup, the same
-    asset the invoice uses, not the icon-only mark plus a hand-typed
-    "MeritLense" wordmark reconstructed in CSS. Read once per process and
-    cached - it's a fixed asset, not per-certificate data."""
-    global _logo_data_uri_cache
-    if _logo_data_uri_cache is None:
-        encoded = base64.b64encode(_LOGO_PATH.read_bytes()).decode()
-        _logo_data_uri_cache = f"data:image/png;base64,{encoded}"
-    return _logo_data_uri_cache
+def _icon_data_uri():
+    """The MeritLense icon mark only (no wordmark baked in) - the
+    certificate renders "MeritLense" as live text next to it (see
+    .brand-row / .wordmark in certificate.html) rather than a wordmark
+    flattened into the image, so the icon and text line up cleanly side by
+    side. Same icon-only asset api/reports/services.py already uses. Read
+    once per process and cached - it's a fixed asset, not per-certificate
+    data."""
+    global _icon_data_uri_cache
+    if _icon_data_uri_cache is None:
+        encoded = base64.b64encode(_ICON_PATH.read_bytes()).decode()
+        _icon_data_uri_cache = f"data:image/png;base64,{encoded}"
+    return _icon_data_uri_cache
 
 # certificate_id (ML-YYYY-NNNNNN) and assessment_id (ASM-YYYY-NNNNNN) are
 # deliberately two separate counters on two separate fields - the
@@ -627,7 +630,7 @@ def generate_certificate(evaluation, summary):
     candidate_photo_data_uri, candidate_photo_verified = _candidate_photo_context(evaluation.candidate, session)
 
     context = {
-        "logo_data_uri": _logo_data_uri(),
+        "logo_icon_data_uri": _icon_data_uri(),
         "certificate_id": certificate.certificate_id,
         "candidate_name": evaluation.candidate.get_full_name().title(),
         "role_name": _localized_role_name(session, evaluation.candidate, language),

@@ -11,7 +11,10 @@
 
   /* ---------- Header ---------- */
   .header { display: flex; justify-content: space-between; align-items: flex-start; }
-  .brand img { height: 52px; width: auto; }
+  .brand-row { display: flex; align-items: center; gap: 8px; }
+  .brand-row img { height: 32px; width: auto; }
+  .wordmark { font-size: 15pt; font-weight: 800; color: #3b4ee0; line-height: 1; }
+  .wordmark-accent { color: #9333ea; }
   .brand-tagline { font-size: 7.5pt; color: #888; margin-top: 4px; }
 
   /* ---------- Title ---------- */
@@ -44,7 +47,7 @@
   .readiness-badge.level-1 { background: #fee2e2; color: #991b1b; }
   .readiness-badge.level-2 { background: #fef3c7; color: #92400e; }
   .readiness-badge.level-3 { background: #dcfce7; color: #166534; }
-  .readiness-caption { max-width: 130px; font-size: 6.4pt; font-weight: 600; color: #888; margin-top: 8px; line-height: 1.3; }
+  .readiness-caption { max-width: 160px; font-size: 6.4pt; font-weight: 600; color: #888; margin-top: 8px; line-height: 1.3; }
 
   /* ---------- Evaluator rating row ---------- */
   .evaluator-row { margin-top: 12px; padding: 8px 12px; background: #f6f8fd; border: 1px solid #e3e9f7; border-radius: 10px; display: flex; align-items: center; gap: 12px; }
@@ -78,7 +81,10 @@
 
     <div class="header">
       <div class="brand">
-        <img src="{{ logo_data_uri }}" alt="MeritLense" />
+        <div class="brand-row">
+          <img src="{{ logo_icon_data_uri }}" alt="MeritLense" />
+          <div class="wordmark">Merit<span class="wordmark-accent">Lense</span></div>
+        </div>
         <div class="brand-tagline">MeritLense Workforce Readiness Assessment Platform</div>
       </div>
     </div>

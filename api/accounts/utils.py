@@ -276,6 +276,44 @@ Meritlense Team
     safe_send_mail(subject, message, [user.email])
 
 
+def send_package_request_approved_email(user, package_request, deal_record):
+    subject = f"Your {package_request.get_deal_type_display()} Request Has Been Approved"
+    slot_line = f"Assessment Slots: {deal_record.slot_grant}\n" if deal_record.slot_grant is not None else ""
+    points_line = f"Points: {deal_record.points_grant}\n" if deal_record.points_grant is not None else ""
+    message = f"""
+Hello {user.first_name},
+
+Good news - your {package_request.get_deal_type_display()} request for {package_request.company.name}
+has been approved.
+
+{slot_line}{points_line}
+Our team will be in touch with next steps. If you have any questions, please
+contact support.
+
+Best regards,
+Meritlense Team
+"""
+    safe_send_mail(subject, message, [user.email])
+
+
+def send_package_request_denied_email(user, package_request, reason):
+    subject = f"Update on Your {package_request.get_deal_type_display()} Request"
+    message = f"""
+Hello {user.first_name},
+
+Your {package_request.get_deal_type_display()} request for {package_request.company.name} was not approved.
+
+Reason: {reason or 'Not specified'}
+
+Please contact support if you have any questions or would like to discuss
+this further.
+
+Best regards,
+Meritlense Team
+"""
+    safe_send_mail(subject, message, [user.email])
+
+
 def send_admin_contact_email(user, message, sender):
     """A lighter-weight alternative to rejecting: an admin flags an issue
     with submitted documents without changing the account's verification

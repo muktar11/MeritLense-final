@@ -4,7 +4,7 @@ from api.core.serializers import PublicIdModelSerializer
 from api.core.public_ids import get_by_identifier
 from .models import (
     Price, Customer, PaymentMethod,
-    Subscription, Payment, Invoice, DealRecord, PackageBalance
+    Subscription, Payment, Invoice, DealRecord, PackageBalance, PackageRequest
 )
 from .refund_services import OVERRIDE_REASON_CODES
 
@@ -104,6 +104,58 @@ class DealRecordSerializer(PublicIdModelSerializer):
             ).exists():
                 raise serializers.ValidationError("This company (or its admin email) has already used a Free Trial.")
         return data
+
+
+class PackageRequestSerializer(PublicIdModelSerializer):
+    """Read serializer for both the requesting company (their own requests
+    only) and SuperAdmin (all requests)."""
+    company_name = serializers.CharField(source='company.name', read_only=True)
+    deal_type_display = serializers.CharField(source='get_deal_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    requested_by_name = serializers.CharField(source='requested_by.get_full_name', read_only=True)
+    requested_by_email = serializers.EmailField(source='requested_by.email', read_only=True)
+    reviewed_by_name = serializers.SerializerMethodField()
+    deal_record_id = serializers.PrimaryKeyRelatedField(source='deal_record', read_only=True)
+
+    class Meta:
+        model = PackageRequest
+        fields = [
+            'id', 'company', 'company_name', 'requested_by', 'requested_by_name', 'requested_by_email',
+            'deal_type', 'deal_type_display', 'requested_slot_grant', 'requested_points_grant', 'message',
+            'status', 'status_display', 'decision_reason', 'reviewed_by', 'reviewed_by_name', 'reviewed_at',
+            'deal_record_id', 'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+    def get_reviewed_by_name(self, obj):
+        return obj.reviewed_by.get_full_name() if obj.reviewed_by else None
+
+
+class PackageRequestCreateSerializer(serializers.ModelSerializer):
+    """What a B2B company admin actually submits - just their ask. The
+    company/requester are set by the view from the authenticated user,
+    never taken from the request body."""
+
+    class Meta:
+        model = PackageRequest
+        fields = ['deal_type', 'requested_slot_grant', 'requested_points_grant', 'message']
+
+
+class PackageRequestApproveSerializer(serializers.Serializer):
+    """The SuperAdmin's own negotiated terms at approval time - never a
+    passthrough of the requester's ask, since the request is a starting
+    point, not a binding offer (see PackageRequest's docstring)."""
+    slot_grant = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+    points_grant = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+    unit_amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
+    currency = serializers.CharField(max_length=3, required=False, default='eur')
+    rollover_allowed = serializers.BooleanField(required=False, default=False)
+    addendum_reference = serializers.CharField(required=False, allow_blank=True, default='')
+    decision_reason = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class PackageRequestDenySerializer(serializers.Serializer):
+    decision_reason = serializers.CharField(allow_blank=False)
 
 
 class PackageBalanceSerializer(PublicIdModelSerializer):

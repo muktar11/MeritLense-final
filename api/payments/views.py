@@ -13,21 +13,23 @@ from django.utils import timezone
 import stripe
 from api.accounts.models import User
 from api.core.constants import Roles, SubscriptionStatus
-from api.core.permisssions import IsAdminOrSuperAdmin, IsSuperAdmin
+from api.core.permisssions import IsAdminOrSuperAdmin, IsSuperAdmin, IsB2BUser, get_user_company
 from api.payments.subscription_serializers import CancelSubscriptionSerializer, ChangePlanSerializer, SubscriptionListSerializer, UpdateQuantitySerializer
 from meritlense import settings
 from api.audit.services import AuditLogService
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.public_ids import PublicIdLookupMixin, get_by_identifier
 
-from .models import Price, Customer, PaymentMethod, Subscription, Payment, Invoice, ProcessedStripeEvent, DealRecord, PackageBalance
+from .models import Price, Customer, PaymentMethod, Subscription, Payment, Invoice, ProcessedStripeEvent, DealRecord, PackageBalance, PackageRequest
 from .serializers import (
     PriceSerializer, PriceAdminSerializer, CustomerSerializer, PaymentMethodSerializer,
     SubscriptionSerializer, PaymentSerializer, InvoiceSerializer,
     CreatePaymentIntentSerializer, AttachPaymentMethodSerializer, CreateSubscriptionSerializer,
-    RefundPaymentSerializer, DealRecordSerializer, PackageBalanceSerializer, AdjustBalanceSerializer
+    RefundPaymentSerializer, DealRecordSerializer, PackageBalanceSerializer, AdjustBalanceSerializer,
+    PackageRequestSerializer, PackageRequestCreateSerializer, PackageRequestApproveSerializer, PackageRequestDenySerializer,
 )
 from .services import PaymentIntentInitializationError, StripeService, invoice_pdf_email_attachments
+from .package_request_services import PackageRequestService, PackageRequestError
 
 
 class PriceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
@@ -1229,6 +1231,89 @@ class AdminDealRecordViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
             data={'changes': list(serializer.validated_data.keys())},
             request=self.request,
         )
+
+
+class PackageRequestViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
+    """B2B-facing: a company admin submits a Starter/Enterprise ask and can
+    see their own company's requests and their decisions. No update/delete
+    - a submitted request is reviewed by a SuperAdmin (AdminPackageRequestViewSet),
+    never edited by the requester after the fact."""
+    permission_classes = [IsAuthenticated, IsB2BUser]
+    serializer_class = PackageRequestSerializer
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return PackageRequest.objects.none()
+        company = get_user_company(self.request.user)
+        if not company:
+            return PackageRequest.objects.none()
+        return PackageRequest.objects.filter(company=company).select_related(
+            'company', 'requested_by', 'reviewed_by', 'deal_record'
+        ).order_by('-created_at')
+
+    def create(self, request):
+        company = get_user_company(request.user)
+        if not company:
+            return Response({'error': 'No company found for this account.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = PackageRequestCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        package_request = PackageRequestService.submit(
+            company=company,
+            requested_by=request.user,
+            **serializer.validated_data,
+        )
+        return Response(PackageRequestSerializer(package_request).data, status=status.HTTP_201_CREATED)
+
+
+class AdminPackageRequestViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
+    """SuperAdmin-only review queue for Starter/Enterprise requests - same
+    sensitivity precedent as AdminDealRecordViewSet, since approving one
+    of these creates the real DealRecord."""
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
+    serializer_class = PackageRequestSerializer
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return PackageRequest.objects.none()
+        queryset = PackageRequest.objects.select_related(
+            'company', 'requested_by', 'reviewed_by', 'deal_record'
+        ).order_by('-created_at')
+        status_filter = self.request.query_params.get('status')
+        if status_filter:
+            queryset = queryset.filter(status__iexact=status_filter)
+        return queryset
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, id=None):
+        package_request = self.get_object()
+        serializer = PackageRequestApproveSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            package_request = PackageRequestService.approve(
+                package_request=package_request, actor=request.user, **serializer.validated_data,
+            )
+        except PackageRequestError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(PackageRequestSerializer(package_request).data)
+
+    @action(detail=True, methods=['post'])
+    def deny(self, request, id=None):
+        package_request = self.get_object()
+        serializer = PackageRequestDenySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            package_request = PackageRequestService.deny(
+                package_request=package_request, actor=request.user, **serializer.validated_data,
+            )
+        except PackageRequestError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(PackageRequestSerializer(package_request).data)
 
 
 class AdminPackageBalanceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):

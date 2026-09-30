@@ -82,13 +82,15 @@ QUALITY_RANK = {
     "Excellent": 3,
 }
 
-_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "meritlense-logo.png"
+_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "meritlense-logo-full.png"
 _logo_data_uri_cache = None
 
 
 def _logo_data_uri():
-    """The real MeritLense logo (not a hand-drawn approximation), read once
-    per process and cached - it's a fixed asset, not per-certificate data."""
+    """The real MeritLense logo - the full icon+wordmark lockup, the same
+    asset the invoice uses, not the icon-only mark plus a hand-typed
+    "MeritLense" wordmark reconstructed in CSS. Read once per process and
+    cached - it's a fixed asset, not per-certificate data."""
     global _logo_data_uri_cache
     if _logo_data_uri_cache is None:
         encoded = base64.b64encode(_LOGO_PATH.read_bytes()).decode()

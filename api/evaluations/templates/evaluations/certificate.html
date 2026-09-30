@@ -11,11 +11,8 @@
 
   /* ---------- Header ---------- */
   .header { display: flex; justify-content: space-between; align-items: flex-start; }
-  .brand { display: flex; align-items: center; gap: 10px; }
-  .brand img { width: 40px; height: auto; }
-  .wordmark { font-size: 15pt; font-weight: 800; color: #1e2a3a; }
-  .wordmark-accent { color: #2563eb; }
-  .brand-tagline { font-size: 7.5pt; color: #888; margin-top: 1px; }
+  .brand img { height: 52px; width: auto; }
+  .brand-tagline { font-size: 7.5pt; color: #888; margin-top: 4px; }
 
   /* ---------- Title ---------- */
   .title-block { text-align: center; margin-top: 10px; }
@@ -82,10 +79,7 @@
     <div class="header">
       <div class="brand">
         <img src="{{ logo_data_uri }}" alt="MeritLense" />
-        <div>
-          <div class="wordmark">Merit<span class="wordmark-accent">Lense</span></div>
-          <div class="brand-tagline">MeritLense Workforce Readiness Assessment Platform</div>
-        </div>
+        <div class="brand-tagline">MeritLense Workforce Readiness Assessment Platform</div>
       </div>
     </div>
 

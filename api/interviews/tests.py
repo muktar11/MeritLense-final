@@ -1971,6 +1971,173 @@ class InterviewSessionApiTests(APITestCase):
         self.assertIn("Basic", response.data["detail"])
         self.assertFalse(InterviewSession.objects.filter(candidate=self.candidate).exists())
 
+    def test_b2c_screening_package_still_grants_certificate_and_readiness(self):
+        # A B2C package (Basic/Essential) is configured with
+        # certificate_enabled=False and readiness_indicator_enabled=False at
+        # both the package and role-coverage level - the pre-change data
+        # that used to block certificates for Screening-tier B2C packages.
+        # Per the approved policy, every B2C package now grants both
+        # regardless of coverage tier, so the session must still come out
+        # True on both - this is what distinguishes the B2C override from
+        # simply inheriting the (here, all-False) source flags.
+        screening_config = InterviewConfiguration.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            duration_minutes=15,
+            total_questions=2,
+        )
+        PackageSessionConfig.objects.create(
+            package_code="basic",
+            package_name="Basic",
+            audience="B2C",
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            min_questions=1,
+            max_questions=2,
+            default_question_count=2,
+            duration_minutes=15,
+            readiness_indicator_enabled=False,
+            certificate_enabled=False,
+            basic_report_enabled=True,
+        )
+        RolePackageCoverage.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            package_code="basic",
+            package_name="Basic",
+            audience="B2C",
+            coverage_level=CoverageLevel.SCREENING,
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            readiness_indicator_enabled=False,
+            certificate_enabled=False,
+        )
+
+        response = self.client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(self.candidate.public_id),
+                "config_id": str(screening_config.public_id),
+                "package_code": "basic",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        session = InterviewSession.objects.get(public_id=response.data["id"])
+        self.assertEqual(session.evaluation_tier, InterviewEvaluationTier.SCREENING)
+        self.assertTrue(session.readiness_indicator_enabled)
+        self.assertTrue(session.certificate_enabled)
+
+    def test_b2b_screening_package_still_withholds_certificate_and_readiness(self):
+        # Control for the B2C override above: a B2B package on Screening
+        # coverage must keep its existing behavior (no certificate, no
+        # readiness indicator) - the B2C policy change must not leak into B2B.
+        from api.accounts.models import Company, CompanyEmployerProfile
+        from api.core.constants import CompanySize
+
+        b2b_user = User.objects.create_user(
+            email="b2b-owner@example.com",
+            password="testpass123",
+            first_name="B2B",
+            last_name="Owner",
+            role=Roles.B2B,
+            is_verified=True,
+        )
+        # IsCompanyApproved blocks write actions until Company.is_verified,
+        # resolved via user.company_profile.company (not Company.admin_user
+        # alone) - both need to exist and be linked for this B2B write to go
+        # through at all.
+        company = Company.objects.create(
+            name="Control Co",
+            registration_number=f"REG-{b2b_user.id}",
+            company_size="1-10",
+            phone_number="+15550000000",
+            country="United States",
+            city="San Francisco",
+            admin_user=b2b_user,
+            registration_certificate=make_file(),
+            is_verified=True,
+        )
+        CompanyEmployerProfile.objects.create(
+            user=b2b_user,
+            company=company,
+            company_name=company.name,
+            company_registration_number=f"REG-PROFILE-{b2b_user.id}",
+            company_size=CompanySize.CHOICES[0][0],
+            phone_number="+15550000000",
+            country="United States",
+            city="San Francisco",
+            registration_certificate=make_file(),
+            resachetified_license=make_file(),
+        )
+        b2b_client = APIClient()
+        b2b_client.force_authenticate(b2b_user)
+        b2b_candidate = Candidate.objects.create(
+            first_name="B2B",
+            last_name="Candidate",
+            email="b2b-candidate@example.com",
+            passport_id="PASS-W3-002",
+            job_role="NA",
+            core_skills="cleaning,care",
+            preferred_language="EN",
+            passport_document=make_file(),
+            created_by=b2b_user,
+        )
+        PackageBalance.objects.create(
+            owner_user=b2b_user,
+            balance_type=PackageBalance.SLOTS,
+            fixed_amount=1000,
+            current_balance=1000,
+        )
+        screening_config = InterviewConfiguration.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            duration_minutes=15,
+            total_questions=2,
+        )
+        PackageSessionConfig.objects.create(
+            package_code="starter",
+            package_name="Starter",
+            audience="B2B",
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            min_questions=1,
+            max_questions=2,
+            default_question_count=2,
+            duration_minutes=15,
+            readiness_indicator_enabled=False,
+            certificate_enabled=False,
+            basic_report_enabled=True,
+        )
+        RolePackageCoverage.objects.create(
+            role_name="Nanny",
+            role_code="nanny",
+            package_code="starter",
+            package_name="Starter",
+            audience="B2B",
+            coverage_level=CoverageLevel.SCREENING,
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+            readiness_indicator_enabled=False,
+            certificate_enabled=False,
+        )
+
+        response = b2b_client.post(
+            "/api/v1/interviews/",
+            {
+                "candidate_id": str(b2b_candidate.public_id),
+                "config_id": str(screening_config.public_id),
+                "package_code": "starter",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        session = InterviewSession.objects.get(public_id=response.data["id"])
+        self.assertFalse(session.readiness_indicator_enabled)
+        self.assertFalse(session.certificate_enabled)
+
     def test_session_completion_creates_linked_evaluation_with_package_flags(self):
         package = PackageSessionConfig.objects.create(
             package_code="advanced",
@@ -2163,8 +2330,16 @@ class InterviewSessionApiTests(APITestCase):
         evaluation = Evaluation.objects.get(session=session)
         self.assertEqual(evaluation.evaluation_tier, InterviewEvaluationTier.SCREENING)
         self.assertEqual(evaluation.coverage_level, CoverageLevel.SCREENING)
-        self.assertFalse(evaluation.readiness_indicator_enabled)
-        self.assertFalse(evaluation.certificate_enabled)
+        # Per the approved B2C policy, every B2C package (including this
+        # Screening-only "basic" one) is certificate/readiness-eligible -
+        # despite readiness_indicator_enabled=False/certificate_enabled=False
+        # on both the package and its role coverage above. certificate_status
+        # still legitimately comes out NOT_ISSUED: eligibility just clears
+        # the gate, actual issuance still runs the real quality-bar checks
+        # in certificate_eligibility(), which this minimal scored session
+        # doesn't clear.
+        self.assertTrue(evaluation.readiness_indicator_enabled)
+        self.assertTrue(evaluation.certificate_enabled)
         self.assertEqual(evaluation.certificate_status, "NOT_ISSUED")
 
     def test_current_question_endpoint_returns_active_question(self):

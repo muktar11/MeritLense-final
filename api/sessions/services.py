@@ -17,6 +17,7 @@ from api.core.constants import (
     InterviewEvaluationTier,
     InterviewSessionStatus,
     QuestionLifecycleStatus,
+    Roles,
     SessionObservedTaskStatus,
     SessionQuestionStatus,
     TaskObservationResultStatus,
@@ -426,8 +427,13 @@ class InterviewSessionService:
         resolved_package_name = ""
         coverage_level = "FULL"
         task_observation_enabled = config.enable_task_module
-        readiness_indicator_enabled = config.evaluation_tier == InterviewEvaluationTier.FULL
-        certificate_enabled = config.evaluation_tier == InterviewEvaluationTier.FULL
+        # B2C packages grant certificate + readiness-level eligibility for
+        # both Screening and Full evaluations, regardless of package tier -
+        # unlike B2B, where only Full (or a package explicitly configured
+        # for it below) qualifies.
+        is_b2c = getattr(created_by, "role", None) == Roles.B2C
+        readiness_indicator_enabled = is_b2c or config.evaluation_tier == InterviewEvaluationTier.FULL
+        certificate_enabled = is_b2c or config.evaluation_tier == InterviewEvaluationTier.FULL
         expiry_duration = config.duration_minutes
 
         if package_context is not None:

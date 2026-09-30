@@ -8,7 +8,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.template.loader import render_to_string
 
-from api.core.constants import InterviewEvaluationTier, PaymentMethodConstants
+from api.core.constants import PaymentMethodConstants
 from api.core.pdf_fonts import arabic_font_context
 
 # The full icon+wordmark lockup (not the icon-only mark
@@ -122,13 +122,12 @@ def _billing_party_context(invoice):
 
 
 def _package_description(price):
-    """"MeritLense <Package> — <N> [Full ]Assessment(s)[ / Month]" - built
-    from the actual purchased Price, not a generic "MeritLense
-    subscription"/raw internal price name. The Full/plain wording mirrors
-    the package's own evaluation_tier (Screening packages read as plain
-    "Assessments", matching how the pricing page itself only calls out
-    "Full" for FULL-tier packages); billing_type adds "/ Month" only for
-    recurring (B2B) plans, never for a one-time purchase."""
+    """"MeritLense <Package> — <N> Assessment(s)[ / Month]" - built from the
+    actual purchased Price, not a generic "MeritLense subscription"/raw
+    internal price name. No Full/Screening qualifier - evaluation tier is
+    chosen per candidate assessment, not a property of the package itself,
+    so the invoice line item doesn't call it out either. billing_type adds
+    "/ Month" only for recurring (B2B) plans, never for a one-time purchase."""
     if price is None:
         return None
     base_name = re.sub(r"\s+package$", "", price.name or "", flags=re.IGNORECASE).strip().title()
@@ -137,10 +136,9 @@ def _package_description(price):
     count = price.slot_grant
     if not count:
         return f"MeritLense {base_name}"
-    tier_word = "Full " if price.evaluation_tier == InterviewEvaluationTier.FULL else ""
     unit = "Assessment" if count == 1 else "Assessments"
     period_suffix = " / Month" if price.billing_type == "RECURRING" else ""
-    return f"MeritLense {base_name} — {count} {tier_word}{unit}{period_suffix}"
+    return f"MeritLense {base_name} — {count} {unit}{period_suffix}"
 
 
 def _payment_method_label(invoice):

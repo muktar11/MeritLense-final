@@ -276,15 +276,55 @@ Meritlense Team
     safe_send_mail(subject, message, [user.email])
 
 
-def send_package_request_approved_email(user, package_request, deal_record):
-    subject = f"Your {package_request.get_deal_type_display()} Request Has Been Approved"
-    slot_line = f"Assessment Slots: {deal_record.slot_grant}\n" if deal_record.slot_grant is not None else ""
-    points_line = f"Points: {deal_record.points_grant}\n" if deal_record.points_grant is not None else ""
+def _format_currency_amount(unit_amount, currency):
+    if unit_amount is None:
+        return "N/A"
+    symbol = {"eur": "€", "usd": "$", "gbp": "£"}.get((currency or "eur").lower(), (currency or "").upper() + " ")
+    return f"{symbol}{unit_amount:,.2f}"
+
+
+def send_package_request_approved_email(user, package_request):
+    """Sent at approval time - the package isn't active yet, this is the
+    payment request. Activation (DealRecord creation) happens separately,
+    once Stripe confirms the payment made through this link - see
+    send_package_request_payment_confirmed_email."""
+    subject = f"Your {package_request.get_deal_type_display()} Request Has Been Approved - Payment Required"
+    slot_line = f"Assessment Slots: {package_request.approved_slot_grant}\n" if package_request.approved_slot_grant is not None else ""
+    points_line = f"Points: {package_request.approved_points_grant}\n" if package_request.approved_points_grant is not None else ""
+    amount = _format_currency_amount(package_request.unit_amount, package_request.currency)
+    billing_line = "billed once" if package_request.billing_type == "ONE_TIME" else "billed monthly"
     message = f"""
 Hello {user.first_name},
 
 Good news - your {package_request.get_deal_type_display()} request for {package_request.company.name}
 has been approved.
+
+{slot_line}{points_line}
+Amount due: {amount} ({billing_line})
+
+To activate your package, complete payment here:
+{package_request.stripe_payment_link_url}
+
+Your package will be activated automatically as soon as payment is confirmed.
+If you have any questions, please contact support.
+
+Best regards,
+Meritlense Team
+"""
+    safe_send_mail(subject, message, [user.email])
+
+
+def send_package_request_payment_confirmed_email(user, package_request, deal_record):
+    """Sent once activate_after_payment has created the real DealRecord -
+    this is when the package actually becomes usable."""
+    subject = f"Your {package_request.get_deal_type_display()} Package Is Now Active"
+    slot_line = f"Assessment Slots: {deal_record.slot_grant}\n" if deal_record.slot_grant is not None else ""
+    points_line = f"Points: {deal_record.points_grant}\n" if deal_record.points_grant is not None else ""
+    message = f"""
+Hello {user.first_name},
+
+Payment received - your {package_request.get_deal_type_display()} package for
+{package_request.company.name} is now active.
 
 {slot_line}{points_line}
 Our team will be in touch with next steps. If you have any questions, please

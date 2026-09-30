@@ -6,7 +6,7 @@ from api.core.models import TimeStampedModel
 from api.core.constants import (
     CompanySize, PaymentStatus, PaymentMethodConstants,
     SubscriptionStatus, BillingInterval, InvoiceStatus, InterviewEvaluationTier,
-    PackageRequestStatus
+    PackageRequestStatus, PackageRequestBilling
 )
 from api.accounts.models import User, Company
 
@@ -838,7 +838,16 @@ class PackageRequest(TimeStampedModel):
     gets granted automatically. The reviewing SuperAdmin sets the actual
     negotiated terms (which may differ from the ask) at approval time,
     same as any other custom deal ("How Custom / Per Agreement Works"
-    memo) - approving one of these is what creates the real DealRecord.
+    memo).
+
+    Approving a request does NOT grant anything by itself - it generates a
+    Stripe Payment Link for the SuperAdmin's agreed amount and emails it to
+    the requester. The real DealRecord (and the Price/Subscription pair
+    that makes it consumable - see EntitlementService._resolve_grant) is
+    only created once Stripe confirms payment, via
+    PackageRequestService.activate_after_payment, called from the
+    payment_intent.succeeded / customer.subscription.created webhook
+    handlers.
     """
     company = models.ForeignKey(
         Company,
@@ -877,8 +886,25 @@ class PackageRequest(TimeStampedModel):
         null=True,
         blank=True,
         related_name='source_request',
-        help_text="The DealRecord created when this request was approved"
+        help_text="The DealRecord created once payment is confirmed - null while PENDING or APPROVED-awaiting-payment"
     )
+
+    # Set at approval time (the SuperAdmin's agreed terms - not necessarily
+    # equal to requested_slot_grant/requested_points_grant above), carried
+    # forward to the DealRecord created in activate_after_payment once paid.
+    billing_type = models.CharField(max_length=10, choices=PackageRequestBilling.CHOICES, blank=True)
+    approved_slot_grant = models.PositiveIntegerField(null=True, blank=True)
+    approved_points_grant = models.PositiveIntegerField(null=True, blank=True)
+    unit_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=3, default='eur', blank=True)
+    rollover_allowed = models.BooleanField(default=False)
+    addendum_reference = models.CharField(max_length=255, blank=True)
+
+    stripe_product_id = models.CharField(max_length=255, blank=True, help_text="Ad-hoc Stripe Product created for this deal's Payment Link")
+    stripe_price_id = models.CharField(max_length=255, blank=True, help_text="Ad-hoc Stripe Price created for this deal's Payment Link")
+    stripe_payment_link_id = models.CharField(max_length=255, blank=True)
+    stripe_payment_link_url = models.URLField(blank=True, max_length=500)
+    paid_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Package Request"

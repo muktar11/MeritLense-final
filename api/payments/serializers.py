@@ -2,6 +2,7 @@ from django.db.models import Q
 from rest_framework import serializers
 from api.core.serializers import PublicIdModelSerializer
 from api.core.public_ids import get_by_identifier
+from api.core.constants import PackageRequestBilling
 from .models import (
     Price, Customer, PaymentMethod,
     Subscription, Payment, Invoice, DealRecord, PackageBalance, PackageRequest
@@ -123,6 +124,8 @@ class PackageRequestSerializer(PublicIdModelSerializer):
             'id', 'company', 'company_name', 'requested_by', 'requested_by_name', 'requested_by_email',
             'deal_type', 'deal_type_display', 'requested_slot_grant', 'requested_points_grant', 'message',
             'status', 'status_display', 'decision_reason', 'reviewed_by', 'reviewed_by_name', 'reviewed_at',
+            'billing_type', 'approved_slot_grant', 'approved_points_grant', 'unit_amount', 'currency',
+            'stripe_payment_link_url', 'paid_at',
             'deal_record_id', 'created_at', 'updated_at',
         ]
         read_only_fields = fields
@@ -148,6 +151,7 @@ class PackageRequestApproveSerializer(serializers.Serializer):
     slot_grant = serializers.IntegerField(required=False, allow_null=True, min_value=0)
     points_grant = serializers.IntegerField(required=False, allow_null=True, min_value=0)
     unit_amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
+    billing_type = serializers.ChoiceField(choices=PackageRequestBilling.CHOICES)
     currency = serializers.CharField(max_length=3, required=False, default='eur')
     rollover_allowed = serializers.BooleanField(required=False, default=False)
     addendum_reference = serializers.CharField(required=False, allow_blank=True, default='')

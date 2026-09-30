@@ -739,6 +739,18 @@ class StripeService:
             return None
     
     def handle_payment_succeeded(self, payment_intent):
+        # A one-time-billed Starter/Enterprise Payment Link never goes
+        # through our own createPaymentIntent flow (no local Payment row is
+        # pre-created for it, and it has no user/company_profile context the
+        # way a normal B2C purchase's PaymentIntent does), so it's handled
+        # entirely separately here - never falls through to the
+        # Payment.objects.get_or_create below, which requires a resolvable
+        # user/customer this PaymentIntent doesn't carry.
+        package_request_id = (payment_intent.get('metadata') or {}).get('package_request_id')
+        if package_request_id:
+            from .package_request_services import PackageRequestService
+            return PackageRequestService.activate_after_payment(package_request_id)
+
         try:
             payment, created = Payment.objects.get_or_create(
                 stripe_payment_intent_id=payment_intent['id'],
@@ -917,6 +929,23 @@ class StripeService:
             return None
     
     def handle_subscription_created(self, subscription_data):
+        # A recurring-billed Starter/Enterprise Payment Link's subscription
+        # has no pre-existing local Subscription row the way our own
+        # create_subscription flow does (that's created below) - it's
+        # entirely new to us, so it's activated directly here instead of
+        # falling through to the "update an existing row" logic below.
+        package_request_id = (subscription_data.get('metadata') or {}).get('package_request_id')
+        if package_request_id:
+            from .package_request_services import PackageRequestService
+            current_period_end = timezone.datetime.fromtimestamp(
+                subscription_data['current_period_end'], tz=datetime.timezone.utc
+            )
+            return PackageRequestService.activate_after_payment(
+                package_request_id,
+                stripe_subscription_id=subscription_data['id'],
+                current_period_end=current_period_end,
+            )
+
         try:
             subscription = Subscription.objects.filter(
                 stripe_subscription_id=subscription_data['id']

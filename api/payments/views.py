@@ -1269,8 +1269,10 @@ class PackageRequestViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
 
 class AdminPackageRequestViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
     """SuperAdmin-only review queue for Starter/Enterprise requests - same
-    sensitivity precedent as AdminDealRecordViewSet, since approving one
-    of these creates the real DealRecord."""
+    sensitivity precedent as AdminDealRecordViewSet. Approving one sends a
+    Stripe Payment Link for the SuperAdmin's agreed terms; the real
+    DealRecord is only created once Stripe confirms payment (see
+    PackageRequestService.activate_after_payment)."""
     permission_classes = [IsAuthenticated, IsSuperAdmin]
     serializer_class = PackageRequestSerializer
 

@@ -251,12 +251,24 @@ class ReadinessStatus:
 class PackageRequestStatus:
     PENDING = "PENDING"
     APPROVED = "APPROVED"
+    PAID = "PAID"
     DENIED = "DENIED"
 
     CHOICES = [
         (PENDING, "Pending"),
-        (APPROVED, "Approved"),
+        (APPROVED, "Approved - Awaiting Payment"),
+        (PAID, "Paid"),
         (DENIED, "Denied"),
+    ]
+
+
+class PackageRequestBilling:
+    ONE_TIME = "ONE_TIME"
+    RECURRING = "RECURRING"
+
+    CHOICES = [
+        (ONE_TIME, "One-Time"),
+        (RECURRING, "Recurring (Monthly)"),
     ]
 
 
@@ -1011,6 +1023,7 @@ class AuditLogAction:
 
     PACKAGE_REQUEST_SUBMITTED = "PACKAGE_REQUEST_SUBMITTED"
     PACKAGE_REQUEST_APPROVED = "PACKAGE_REQUEST_APPROVED"
+    PACKAGE_REQUEST_PAID = "PACKAGE_REQUEST_PAID"
     PACKAGE_REQUEST_DENIED = "PACKAGE_REQUEST_DENIED"
 
     PAYMENT_SUCCEEDED = "PAYMENT_SUCCEEDED"
@@ -1209,6 +1222,7 @@ class AuditLogAction:
 
         (PACKAGE_REQUEST_SUBMITTED, "Package Request Submitted"),
         (PACKAGE_REQUEST_APPROVED, "Package Request Approved"),
+        (PACKAGE_REQUEST_PAID, "Package Request Paid"),
         (PACKAGE_REQUEST_DENIED, "Package Request Denied"),
 
         (PAYMENT_SUCCEEDED, "Payment Succeeded"),

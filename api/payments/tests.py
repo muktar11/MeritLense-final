@@ -2702,11 +2702,20 @@ class PackageRequestServiceTests(TestCase):
         self.assertEqual(mail.outbox[-1].to, [self.superadmin.email])
         self.assertIn(self.company.name, mail.outbox[-1].subject)
 
-    def test_approve_creates_deal_record_with_admins_own_numbers_not_the_ask(self):
+    def _mock_stripe_for_approval(self, mock_stripe, price_id="price_pkgreq_1", link_id="plink_pkgreq_1", link_url="https://buy.stripe.com/test_pkgreq_1"):
+        mock_stripe.Product.create.return_value = MagicMock(id="prod_pkgreq_1")
+        mock_stripe.Price.create.return_value = MagicMock(id=price_id)
+        mock_stripe.PaymentLink.create.return_value = MagicMock(id=link_id, url=link_url)
+
+    @patch("api.payments.package_request_services.stripe")
+    def test_approve_generates_payment_link_and_persists_admins_terms_without_a_deal_record_yet(self, mock_stripe):
         """The whole point of review: the SuperAdmin's numbers at approval
-        time are what get granted, not a rubber-stamp of the request."""
+        time are what will get granted, not a rubber-stamp of the request -
+        but approval alone only sends a payment link, it doesn't grant
+        anything yet (see activate_after_payment below)."""
         from api.payments.package_request_services import PackageRequestService
 
+        self._mock_stripe_for_approval(mock_stripe)
         package_request = PackageRequestService.submit(
             company=self.company, requested_by=self.owner, deal_type=self.DealRecord.ENTERPRISE,
             requested_slot_grant=1000, requested_points_grant=10000,
@@ -2715,19 +2724,198 @@ class PackageRequestServiceTests(TestCase):
 
         approved = PackageRequestService.approve(
             package_request=package_request, actor=self.superadmin,
-            slot_grant=200, points_grant=2000, unit_amount=Decimal("5000.00"),
+            slot_grant=200, points_grant=2000, unit_amount=Decimal("5000.00"), billing_type="RECURRING",
         )
 
         self.assertEqual(approved.status, "APPROVED")
         self.assertEqual(approved.reviewed_by, self.superadmin)
-        self.assertIsNotNone(approved.deal_record)
-        deal = approved.deal_record
+        self.assertIsNone(approved.deal_record)
+        self.assertEqual(approved.approved_slot_grant, 200)
+        self.assertEqual(approved.approved_points_grant, 2000)
+        self.assertEqual(approved.unit_amount, Decimal("5000.00"))
+        self.assertEqual(approved.stripe_payment_link_url, "https://buy.stripe.com/test_pkgreq_1")
+        self.assertEqual(mail.outbox[-1].to, [self.owner.email])
+        self.assertIn("https://buy.stripe.com/test_pkgreq_1", mail.outbox[-1].body)
+
+    @patch("api.payments.services.StripeService.get_or_create_customer")
+    @patch("api.payments.package_request_services.stripe")
+    def test_activate_after_payment_creates_deal_record_with_admins_own_numbers(self, mock_stripe, mock_get_or_create_customer):
+        """The payment webhook - not approval - is what actually creates the
+        DealRecord and makes it consumable (Price + Subscription), using the
+        SuperAdmin's numbers persisted at approval time."""
+        from api.payments.package_request_services import PackageRequestService
+
+        self._mock_stripe_for_approval(mock_stripe)
+        mock_get_or_create_customer.return_value = Customer.objects.create(
+            user=self.owner, stripe_customer_id="cus_pkgreq_activate", email=self.owner.email,
+        )
+
+        package_request = PackageRequestService.submit(
+            company=self.company, requested_by=self.owner, deal_type=self.DealRecord.ENTERPRISE,
+            requested_slot_grant=1000, requested_points_grant=10000,
+        )
+        approved = PackageRequestService.approve(
+            package_request=package_request, actor=self.superadmin,
+            slot_grant=200, points_grant=2000, unit_amount=Decimal("5000.00"), billing_type="ONE_TIME",
+        )
+        mail.outbox.clear()
+
+        activated = PackageRequestService.activate_after_payment(approved.public_id)
+
+        self.assertEqual(activated.status, "PAID")
+        self.assertIsNotNone(activated.paid_at)
+        self.assertIsNotNone(activated.deal_record)
+        deal = activated.deal_record
         self.assertEqual(deal.slot_grant, 200)
         self.assertEqual(deal.points_grant, 2000)
         self.assertEqual(deal.unit_amount, Decimal("5000.00"))
         self.assertEqual(deal.company, self.company)
         self.assertEqual(deal.deal_type, self.DealRecord.ENTERPRISE)
+        self.assertIsNotNone(deal.price)
+        self.assertEqual(deal.price.billing_type, "RECURRING")
+
+        subscription = deal.price.subscriptions.first()
+        self.assertIsNotNone(subscription)
+        self.assertEqual(subscription.company, self.company)
+        self.assertEqual(subscription.status, "ACTIVE")
+
         self.assertEqual(mail.outbox[-1].to, [self.owner.email])
+
+    @patch("api.payments.services.StripeService.get_or_create_customer")
+    @patch("api.payments.package_request_services.stripe")
+    def test_activate_after_payment_is_idempotent(self, mock_stripe, mock_get_or_create_customer):
+        from api.payments.package_request_services import PackageRequestService
+
+        self._mock_stripe_for_approval(mock_stripe)
+        mock_get_or_create_customer.return_value = Customer.objects.create(
+            user=self.owner, stripe_customer_id="cus_pkgreq_idem", email=self.owner.email,
+        )
+
+        package_request = PackageRequestService.submit(
+            company=self.company, requested_by=self.owner, deal_type=self.DealRecord.STARTER,
+        )
+        approved = PackageRequestService.approve(
+            package_request=package_request, actor=self.superadmin,
+            slot_grant=10, points_grant=100, unit_amount=Decimal("100.00"), billing_type="ONE_TIME",
+        )
+
+        first = PackageRequestService.activate_after_payment(approved.public_id)
+        second = PackageRequestService.activate_after_payment(approved.public_id)
+
+        self.assertEqual(first.deal_record_id, second.deal_record_id)
+        self.assertEqual(self.DealRecord.objects.filter(company=self.company).count(), 1)
+
+    @patch("api.payments.services.StripeService.get_or_create_customer")
+    @patch("api.payments.package_request_services.stripe")
+    def test_activating_two_different_requests_does_not_collide_on_stripe_price_id(self, mock_stripe, mock_get_or_create_customer):
+        """Regression guard: the local Price row created on activation must
+        carry the real, distinct Stripe price/product ids from approval -
+        Price.stripe_price_id is unique, so leaving it blank would make a
+        second activation crash with an IntegrityError."""
+        from api.payments.package_request_services import PackageRequestService
+
+        mock_get_or_create_customer.return_value = Customer.objects.create(
+            user=self.owner, stripe_customer_id="cus_pkgreq_collide", email=self.owner.email,
+        )
+
+        self._mock_stripe_for_approval(mock_stripe, price_id="price_pkgreq_A", link_id="plink_A", link_url="https://buy.stripe.com/A")
+        request_a = PackageRequestService.submit(company=self.company, requested_by=self.owner, deal_type=self.DealRecord.STARTER)
+        approved_a = PackageRequestService.approve(
+            package_request=request_a, actor=self.superadmin,
+            slot_grant=10, points_grant=100, unit_amount=Decimal("100.00"), billing_type="ONE_TIME",
+        )
+
+        self._mock_stripe_for_approval(mock_stripe, price_id="price_pkgreq_B", link_id="plink_B", link_url="https://buy.stripe.com/B")
+        request_b = PackageRequestService.submit(company=self.company, requested_by=self.owner, deal_type=self.DealRecord.ENTERPRISE)
+        approved_b = PackageRequestService.approve(
+            package_request=request_b, actor=self.superadmin,
+            slot_grant=20, points_grant=200, unit_amount=Decimal("200.00"), billing_type="ONE_TIME",
+        )
+
+        activated_a = PackageRequestService.activate_after_payment(approved_a.public_id)
+        activated_b = PackageRequestService.activate_after_payment(approved_b.public_id)
+
+        self.assertEqual(activated_a.deal_record.price.stripe_price_id, "price_pkgreq_A")
+        self.assertEqual(activated_b.deal_record.price.stripe_price_id, "price_pkgreq_B")
+
+    def test_activate_after_payment_on_a_still_pending_request_is_a_safe_no_op(self):
+        from api.payments.package_request_services import PackageRequestService
+
+        package_request = PackageRequestService.submit(
+            company=self.company, requested_by=self.owner, deal_type=self.DealRecord.STARTER,
+        )
+
+        result = PackageRequestService.activate_after_payment(package_request.public_id)
+
+        self.assertIsNone(result)
+        package_request.refresh_from_db()
+        self.assertEqual(package_request.status, "PENDING")
+        self.assertIsNone(package_request.deal_record)
+
+    @patch("api.payments.package_request_services.PackageRequestService.activate_after_payment")
+    def test_one_time_payment_intent_webhook_dispatches_to_activation(self, mock_activate):
+        """The webhook handler for a one-time Payment Link's underlying
+        PaymentIntent must route to PackageRequestService, not fall through
+        to the generic Payment/one-time-catalog-package logic (which would
+        crash - see handle_payment_succeeded's own comment on why)."""
+        service = StripeService()
+
+        result = service.handle_payment_succeeded({
+            "id": "pi_pkgreq_1",
+            "amount": 500000,
+            "currency": "eur",
+            "metadata": {"package_request_id": "pkgreq_abc123"},
+        })
+
+        mock_activate.assert_called_once_with("pkgreq_abc123")
+        self.assertEqual(result, mock_activate.return_value)
+
+    @patch("api.payments.package_request_services.PackageRequestService.activate_after_payment")
+    def test_recurring_subscription_created_webhook_dispatches_to_activation(self, mock_activate):
+        """A recurring Payment Link's underlying Subscription has no
+        pre-existing local row (that's what activation creates), so it must
+        route to PackageRequestService instead of the generic
+        'update an existing local Subscription' logic below it."""
+        service = StripeService()
+
+        result = service.handle_subscription_created({
+            "id": "sub_pkgreq_1",
+            "status": "active",
+            "current_period_end": int(timezone.now().timestamp()) + 2592000,
+            "metadata": {"package_request_id": "pkgreq_abc123"},
+        })
+
+        mock_activate.assert_called_once()
+        call_args = mock_activate.call_args
+        self.assertEqual(call_args[0][0], "pkgreq_abc123")
+        self.assertEqual(call_args[1]["stripe_subscription_id"], "sub_pkgreq_1")
+        self.assertEqual(result, mock_activate.return_value)
+
+    def test_payment_intent_webhook_without_package_request_metadata_is_unaffected(self):
+        """Regression guard: a normal B2C one-time-package PaymentIntent
+        (no package_request_id metadata) must still flow through the
+        existing Payment/_grant_one_time_package path untouched. Mirrors
+        production: a Payment row already exists (created synchronously
+        when the frontend called createPaymentIntent) by the time this
+        webhook arrives."""
+        service = StripeService()
+        price = make_price(name="Basic B2C", target_user_type="B2C", billing_type="ONE_TIME", slot_grant=2)
+        customer = Customer.objects.create(user=self.owner, stripe_customer_id="cus_normal_b2c_1", email=self.owner.email)
+        Payment.objects.create(
+            user=self.owner, customer=customer, stripe_payment_intent_id="pi_normal_b2c_1",
+            amount=Decimal("60.00"), currency="eur", status="PENDING",
+        )
+
+        result = service.handle_payment_succeeded({
+            "id": "pi_normal_b2c_1",
+            "amount": 6000,
+            "currency": "eur",
+            "metadata": {"price_id": str(price.id)},
+        })
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.stripe_payment_intent_id, "pi_normal_b2c_1")
+        self.assertEqual(result.status, "SUCCEEDED")
 
     def test_deny_requires_a_reason(self):
         from api.payments.package_request_services import PackageRequestService, PackageRequestError
@@ -2767,7 +2955,8 @@ class PackageRequestServiceTests(TestCase):
 
         with self.assertRaises(PackageRequestError):
             PackageRequestService.approve(
-                package_request=package_request, actor=self.superadmin, slot_grant=10, points_grant=100, unit_amount=Decimal("100.00"),
+                package_request=package_request, actor=self.superadmin, slot_grant=10, points_grant=100,
+                unit_amount=Decimal("100.00"), billing_type="ONE_TIME",
             )
 
 
@@ -2846,9 +3035,14 @@ class PackageRequestEndpointTests(APITestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_superadmin_can_approve_with_their_own_terms(self):
+    @patch("api.payments.package_request_services.stripe")
+    def test_superadmin_can_approve_with_their_own_terms(self, mock_stripe):
         from api.payments.package_request_services import PackageRequestService
         from api.payments.models import DealRecord, PackageRequest
+
+        mock_stripe.Product.create.return_value = MagicMock(id="prod_ep_1")
+        mock_stripe.Price.create.return_value = MagicMock(id="price_ep_1")
+        mock_stripe.PaymentLink.create.return_value = MagicMock(id="plink_ep_1", url="https://buy.stripe.com/test_ep_1")
 
         package_request = PackageRequestService.submit(
             company=self.company, requested_by=self.owner, deal_type=DealRecord.ENTERPRISE, requested_slot_grant=1000,
@@ -2857,14 +3051,20 @@ class PackageRequestEndpointTests(APITestCase):
 
         response = self.client.post(
             f"/api/v1/payments/admin/package-requests/{package_request.id}/approve",
-            {"slot_grant": 300, "points_grant": 3000, "unit_amount": "6000.00", "decision_reason": "Approved per signed addendum."},
+            {
+                "slot_grant": 300, "points_grant": 3000, "unit_amount": "6000.00", "billing_type": "RECURRING",
+                "decision_reason": "Approved per signed addendum.",
+            },
             format="json",
         )
 
         self.assertEqual(response.status_code, 200, response.data)
         package_request.refresh_from_db()
         self.assertEqual(package_request.status, "APPROVED")
-        self.assertEqual(package_request.deal_record.slot_grant, 300)
+        self.assertIsNone(package_request.deal_record)
+        self.assertEqual(package_request.approved_slot_grant, 300)
+        self.assertEqual(package_request.stripe_payment_link_url, "https://buy.stripe.com/test_ep_1")
+        self.assertEqual(response.data["stripe_payment_link_url"], "https://buy.stripe.com/test_ep_1")
 
     def test_superadmin_deny_requires_a_reason(self):
         from api.payments.package_request_services import PackageRequestService

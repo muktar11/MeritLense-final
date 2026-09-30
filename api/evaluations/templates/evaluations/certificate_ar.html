@@ -21,7 +21,13 @@
 
   /* ---------- Header ---------- */
   .header { display: flex; justify-content: space-between; align-items: flex-start; }
-  .brand img { height: 52px; width: auto; }
+  /* direction: ltr on the brand mark itself - "MeritLense" is a Latin
+     wordmark kept unmirrored regardless of document direction, same as
+     .sign-col and .evaluator-chip b elsewhere in this template. */
+  .brand-row { display: flex; align-items: center; gap: 8px; direction: ltr; }
+  .brand-row img { height: 32px; width: auto; }
+  .wordmark { font-size: 15pt; font-weight: 800; color: #3b4ee0; line-height: 1; }
+  .wordmark-accent { color: #9333ea; }
   .brand-tagline { font-size: 7.5pt; color: #888; margin-top: 4px; }
 
   /* ---------- Title ---------- */
@@ -94,7 +100,10 @@
 
     <div class="header">
       <div class="brand">
-        <img src="{{ logo_data_uri }}" alt="MeritLense" />
+        <div class="brand-row">
+          <img src="{{ logo_icon_data_uri }}" alt="MeritLense" />
+          <div class="wordmark">Merit<span class="wordmark-accent">Lense</span></div>
+        </div>
         <div class="brand-tagline">منصة MeritLense لتقييم جاهزية القوى العاملة</div>
       </div>
     </div>

@@ -2648,6 +2648,268 @@ class InvoicePaidStatusTests(TestCase):
         self.assertEqual(snapshot["payment_method_label"], "Visa •••• 4242")
 
 
+def _link_company_profile(user, company, **overrides):
+    """A B2B user's CompanyEmployerProfile.company link is what
+    get_user_company() actually resolves - make_company() alone only sets
+    Company.admin_user, a separate field, so tests that need the real
+    permission/ownership path (not just a Company row existing) need both."""
+    from api.accounts.models import CompanyEmployerProfile
+    from api.core.constants import CompanySize
+
+    defaults = dict(
+        user=user, company_name=company.name, company_registration_number=f"REG-{company.id}-{user.id}",
+        company_size=CompanySize.CHOICES[0][0], phone_number="+10000000000",
+        country="United States", city="San Francisco", company=company,
+        registration_certificate=SimpleUploadedFile("cert.pdf", b"cert", content_type="application/pdf"),
+        resachetified_license=SimpleUploadedFile("license.pdf", b"license", content_type="application/pdf"),
+    )
+    defaults.update(overrides)
+    return CompanyEmployerProfile.objects.create(**defaults)
+
+
+class PackageRequestServiceTests(TestCase):
+    """Service-layer coverage - the API tests below exercise the same
+    logic through the endpoints, this locks down the underlying behavior
+    directly."""
+
+    def setUp(self):
+        from api.payments.models import DealRecord
+
+        self.owner = User.objects.create_user(
+            email="pkgreq-owner@example.com", password="Password123!",
+            first_name="Pkg", last_name="Owner", role=Roles.B2B, is_verified=True,
+        )
+        self.company = make_company(self.owner)
+        _link_company_profile(self.owner, self.company)
+        self.superadmin = User.objects.create_user(
+            email="pkgreq-superadmin@example.com", password="Password123!",
+            first_name="Pkg", last_name="Super", role=Roles.SUPERADMIN, is_verified=True,
+        )
+        self.DealRecord = DealRecord
+
+    def test_submit_creates_pending_request_and_notifies_superadmins(self):
+        from api.payments.package_request_services import PackageRequestService
+        from api.payments.models import PackageRequest
+
+        package_request = PackageRequestService.submit(
+            company=self.company, requested_by=self.owner, deal_type=self.DealRecord.STARTER,
+            requested_slot_grant=50, requested_points_grant=500, message="We need this for a pilot rollout.",
+        )
+
+        self.assertEqual(package_request.status, "PENDING")
+        self.assertEqual(package_request.company, self.company)
+        self.assertIsNone(package_request.deal_record)
+        self.assertEqual(mail.outbox[-1].to, [self.superadmin.email])
+        self.assertIn(self.company.name, mail.outbox[-1].subject)
+
+    def test_approve_creates_deal_record_with_admins_own_numbers_not_the_ask(self):
+        """The whole point of review: the SuperAdmin's numbers at approval
+        time are what get granted, not a rubber-stamp of the request."""
+        from api.payments.package_request_services import PackageRequestService
+
+        package_request = PackageRequestService.submit(
+            company=self.company, requested_by=self.owner, deal_type=self.DealRecord.ENTERPRISE,
+            requested_slot_grant=1000, requested_points_grant=10000,
+        )
+        mail.outbox.clear()
+
+        approved = PackageRequestService.approve(
+            package_request=package_request, actor=self.superadmin,
+            slot_grant=200, points_grant=2000, unit_amount=Decimal("5000.00"),
+        )
+
+        self.assertEqual(approved.status, "APPROVED")
+        self.assertEqual(approved.reviewed_by, self.superadmin)
+        self.assertIsNotNone(approved.deal_record)
+        deal = approved.deal_record
+        self.assertEqual(deal.slot_grant, 200)
+        self.assertEqual(deal.points_grant, 2000)
+        self.assertEqual(deal.unit_amount, Decimal("5000.00"))
+        self.assertEqual(deal.company, self.company)
+        self.assertEqual(deal.deal_type, self.DealRecord.ENTERPRISE)
+        self.assertEqual(mail.outbox[-1].to, [self.owner.email])
+
+    def test_deny_requires_a_reason(self):
+        from api.payments.package_request_services import PackageRequestService, PackageRequestError
+
+        package_request = PackageRequestService.submit(
+            company=self.company, requested_by=self.owner, deal_type=self.DealRecord.STARTER,
+        )
+
+        with self.assertRaises(PackageRequestError):
+            PackageRequestService.deny(package_request=package_request, actor=self.superadmin, decision_reason="")
+
+    def test_deny_sets_status_and_sends_email(self):
+        from api.payments.package_request_services import PackageRequestService
+
+        package_request = PackageRequestService.submit(
+            company=self.company, requested_by=self.owner, deal_type=self.DealRecord.STARTER,
+        )
+        mail.outbox.clear()
+
+        denied = PackageRequestService.deny(
+            package_request=package_request, actor=self.superadmin, decision_reason="Company not yet verified.",
+        )
+
+        self.assertEqual(denied.status, "DENIED")
+        self.assertEqual(denied.decision_reason, "Company not yet verified.")
+        self.assertIsNone(denied.deal_record)
+        self.assertEqual(mail.outbox[-1].to, [self.owner.email])
+        self.assertIn("Company not yet verified.", mail.outbox[-1].body)
+
+    def test_cannot_decide_an_already_decided_request(self):
+        from api.payments.package_request_services import PackageRequestService, PackageRequestError
+
+        package_request = PackageRequestService.submit(
+            company=self.company, requested_by=self.owner, deal_type=self.DealRecord.STARTER,
+        )
+        PackageRequestService.deny(package_request=package_request, actor=self.superadmin, decision_reason="No.")
+
+        with self.assertRaises(PackageRequestError):
+            PackageRequestService.approve(
+                package_request=package_request, actor=self.superadmin, slot_grant=10, points_grant=100, unit_amount=Decimal("100.00"),
+            )
+
+
+class PackageRequestEndpointTests(APITestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            email="pkgreq-ep-owner@example.com", password="Password123!",
+            first_name="Pkg", last_name="Owner", role=Roles.B2B, is_verified=True,
+        )
+        self.company = make_company(self.owner)
+        _link_company_profile(self.owner, self.company)
+
+        self.other_owner = User.objects.create_user(
+            email="pkgreq-ep-other@example.com", password="Password123!",
+            first_name="Other", last_name="Owner", role=Roles.B2B, is_verified=True,
+        )
+        self.other_company = make_company(self.other_owner, registration_number="REG-OTHER-1")
+        _link_company_profile(self.other_owner, self.other_company)
+
+        self.team_member = User.objects.create_user(
+            email="pkgreq-ep-team@example.com", password="Password123!",
+            first_name="Team", last_name="Member", role=Roles.B2B_TEAM_MEMBER, is_verified=True,
+        )
+
+        self.superadmin = User.objects.create_user(
+            email="pkgreq-ep-superadmin@example.com", password="Password123!",
+            first_name="Pkg", last_name="Super", role=Roles.SUPERADMIN, is_verified=True,
+        )
+
+    def _login(self, user):
+        self.client.credentials()
+        login = self.client.post("/api/v1/auth/login", {"email": user.email, "password": "Password123!"}, format="json")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+    def test_b2b_owner_can_submit_a_request(self):
+        self._login(self.owner)
+
+        response = self.client.post(
+            "/api/v1/payments/package-requests",
+            {"deal_type": "STARTER", "requested_slot_grant": 50, "requested_points_grant": 500, "message": "Piloting with 3 clients."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["status"], "PENDING")
+        self.assertEqual(response.data["company"], self.company.id)
+
+    def test_team_member_cannot_submit_a_request(self):
+        self._login(self.team_member)
+
+        response = self.client.post(
+            "/api/v1/payments/package-requests",
+            {"deal_type": "STARTER"}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_b2b_owner_only_sees_their_own_companys_requests(self):
+        from api.payments.package_request_services import PackageRequestService
+        from api.payments.models import DealRecord
+
+        PackageRequestService.submit(company=self.company, requested_by=self.owner, deal_type=DealRecord.STARTER)
+        PackageRequestService.submit(company=self.other_company, requested_by=self.other_owner, deal_type=DealRecord.ENTERPRISE)
+
+        self._login(self.owner)
+        response = self.client.get("/api/v1/payments/package-requests")
+
+        self.assertEqual(response.status_code, 200)
+        companies_seen = {row["company"] for row in response.data["results"]} if isinstance(response.data, dict) and "results" in response.data else {row["company"] for row in response.data}
+        self.assertEqual(companies_seen, {self.company.id})
+
+    def test_non_superadmin_cannot_access_admin_queue(self):
+        self._login(self.owner)
+
+        response = self.client.get("/api/v1/payments/admin/package-requests")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_superadmin_can_approve_with_their_own_terms(self):
+        from api.payments.package_request_services import PackageRequestService
+        from api.payments.models import DealRecord, PackageRequest
+
+        package_request = PackageRequestService.submit(
+            company=self.company, requested_by=self.owner, deal_type=DealRecord.ENTERPRISE, requested_slot_grant=1000,
+        )
+        self._login(self.superadmin)
+
+        response = self.client.post(
+            f"/api/v1/payments/admin/package-requests/{package_request.id}/approve",
+            {"slot_grant": 300, "points_grant": 3000, "unit_amount": "6000.00", "decision_reason": "Approved per signed addendum."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        package_request.refresh_from_db()
+        self.assertEqual(package_request.status, "APPROVED")
+        self.assertEqual(package_request.deal_record.slot_grant, 300)
+
+    def test_superadmin_deny_requires_a_reason(self):
+        from api.payments.package_request_services import PackageRequestService
+        from api.payments.models import DealRecord
+
+        package_request = PackageRequestService.submit(company=self.company, requested_by=self.owner, deal_type=DealRecord.STARTER)
+        self._login(self.superadmin)
+
+        response = self.client.post(
+            f"/api/v1/payments/admin/package-requests/{package_request.id}/deny", {}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_superadmin_can_deny_with_a_reason(self):
+        from api.payments.package_request_services import PackageRequestService
+        from api.payments.models import DealRecord
+
+        package_request = PackageRequestService.submit(company=self.company, requested_by=self.owner, deal_type=DealRecord.STARTER)
+        self._login(self.superadmin)
+
+        response = self.client.post(
+            f"/api/v1/payments/admin/package-requests/{package_request.id}/deny",
+            {"decision_reason": "Company documents not yet verified."}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        package_request.refresh_from_db()
+        self.assertEqual(package_request.status, "DENIED")
+
+    def test_b2b_owner_cannot_approve_their_own_request(self):
+        from api.payments.package_request_services import PackageRequestService
+        from api.payments.models import DealRecord
+
+        package_request = PackageRequestService.submit(company=self.company, requested_by=self.owner, deal_type=DealRecord.STARTER)
+        self._login(self.owner)
+
+        response = self.client.post(
+            f"/api/v1/payments/admin/package-requests/{package_request.id}/approve",
+            {"slot_grant": 999, "points_grant": 999, "unit_amount": "0.01"}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+
 class GenerateInvoicePdfsCommandTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(

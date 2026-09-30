@@ -248,6 +248,18 @@ class ReadinessStatus:
     ]
 
 
+class PackageRequestStatus:
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    DENIED = "DENIED"
+
+    CHOICES = [
+        (PENDING, "Pending"),
+        (APPROVED, "Approved"),
+        (DENIED, "Denied"),
+    ]
+
+
 class EvaluationLayer:
     """Which of the three evaluation layers a scored competency counts
     toward. Final score = 50% Cognitive + 30% Behavioral + 20% Task
@@ -996,7 +1008,11 @@ class AuditLogAction:
     SUBSCRIPTION_UPDATED = "SUBSCRIPTION_UPDATED"
     SUBSCRIPTION_CANCELLED = "SUBSCRIPTION_CANCELLED"
     SUBSCRIPTION_REACTIVATED = "SUBSCRIPTION_REACTIVATED"
-    
+
+    PACKAGE_REQUEST_SUBMITTED = "PACKAGE_REQUEST_SUBMITTED"
+    PACKAGE_REQUEST_APPROVED = "PACKAGE_REQUEST_APPROVED"
+    PACKAGE_REQUEST_DENIED = "PACKAGE_REQUEST_DENIED"
+
     PAYMENT_SUCCEEDED = "PAYMENT_SUCCEEDED"
     PAYMENT_FAILED = "PAYMENT_FAILED"
     PAYMENT_REFUNDED = "PAYMENT_REFUNDED"
@@ -1190,7 +1206,11 @@ class AuditLogAction:
         (SUBSCRIPTION_UPDATED, "Subscription Updated"),
         (SUBSCRIPTION_CANCELLED, "Subscription Cancelled"),
         (SUBSCRIPTION_REACTIVATED, "Subscription Reactivated"),
-        
+
+        (PACKAGE_REQUEST_SUBMITTED, "Package Request Submitted"),
+        (PACKAGE_REQUEST_APPROVED, "Package Request Approved"),
+        (PACKAGE_REQUEST_DENIED, "Package Request Denied"),
+
         (PAYMENT_SUCCEEDED, "Payment Succeeded"),
         (PAYMENT_FAILED, "Payment Failed"),
         (PAYMENT_REFUNDED, "Payment Refunded"),

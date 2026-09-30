@@ -5,7 +5,8 @@ import stripe
 from api.core.models import TimeStampedModel
 from api.core.constants import (
     CompanySize, PaymentStatus, PaymentMethodConstants,
-    SubscriptionStatus, BillingInterval, InvoiceStatus, InterviewEvaluationTier
+    SubscriptionStatus, BillingInterval, InvoiceStatus, InterviewEvaluationTier,
+    PackageRequestStatus
 )
 from api.accounts.models import User, Company
 
@@ -828,6 +829,68 @@ class DealRecord(TimeStampedModel):
 
     def __str__(self):
         return f"{self.company.name} - {self.deal_type} - {self.slot_grant} slots"
+
+
+class PackageRequest(TimeStampedModel):
+    """A B2B company's self-submitted ask for a Starter or Enterprise deal.
+    This is a starting request, not a binding offer - the requested
+    slot/points figures are what the company is asking for, never what
+    gets granted automatically. The reviewing SuperAdmin sets the actual
+    negotiated terms (which may differ from the ask) at approval time,
+    same as any other custom deal ("How Custom / Per Agreement Works"
+    memo) - approving one of these is what creates the real DealRecord.
+    """
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name='package_requests'
+    )
+    requested_by = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='+'
+    )
+    deal_type = models.CharField(
+        max_length=20,
+        choices=[
+            (DealRecord.STARTER, 'Starter (Per Agreement)'),
+            (DealRecord.ENTERPRISE, 'Enterprise'),
+        ],
+    )
+    requested_slot_grant = models.PositiveIntegerField(null=True, blank=True)
+    requested_points_grant = models.PositiveIntegerField(null=True, blank=True)
+    message = models.TextField(blank=True, help_text="Requester's context/justification for this ask")
+
+    status = models.CharField(max_length=10, choices=PackageRequestStatus.CHOICES, default=PackageRequestStatus.PENDING)
+    decision_reason = models.TextField(blank=True, help_text="Required when denying; optional note when approving")
+    reviewed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+'
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    deal_record = models.OneToOneField(
+        DealRecord,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='source_request',
+        help_text="The DealRecord created when this request was approved"
+    )
+
+    class Meta:
+        verbose_name = "Package Request"
+        verbose_name_plural = "Package Requests"
+        indexes = [
+            models.Index(fields=['company', 'status']),
+            models.Index(fields=['status']),
+        ]
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.company.name} - {self.deal_type} - {self.status}"
 
 
 def invoice_pdf_upload_to(instance, filename):

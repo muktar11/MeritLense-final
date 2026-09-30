@@ -2594,7 +2594,8 @@ class InvoicePaidStatusTests(TestCase):
         self.assertIn("Payment Confirmation", html)
         self.assertIn("PAID", html)
         self.assertNotIn("Payment Terms", html)
-        self.assertNotIn("Bank Details", html)
+        self.assertNotIn("Bank Transfer", html)
+        self.assertNotIn("Pay Online", html)
         self.assertNotIn("Payable by", html)
 
     def test_paid_invoice_shows_payment_date_when_available(self):
@@ -2622,9 +2623,42 @@ class InvoicePaidStatusTests(TestCase):
 
         self.assertFalse(snapshot["is_paid"])
         self.assertIn("Payment Terms", html)
-        self.assertIn("Bank Details", html)
+        self.assertIn("Bank Transfer", html)
+        self.assertIn("BE46 9059 9855 0036", html)
+        self.assertIn("Wise Europe SA", html)
+        self.assertIn(invoice.number, html)
         self.assertIn("Payable by", html)
         self.assertNotIn("Payment Confirmation", html)
+
+    def test_unpaid_invoice_without_a_payment_link_hides_pay_online_but_keeps_bank_transfer(self):
+        """No hosted_invoice_url yet (e.g. a legacy/manually-issued unpaid
+        invoice) - Pay Online never renders on nothing, Bank Transfer is
+        always available regardless."""
+        invoice = Invoice.objects.create(
+            user=self.user, customer=self.customer, stripe_invoice_id="in_unpaid_no_link",
+            number="INV-UNPAID-NOLINK", status="OPEN", amount_due=Decimal("80.00"),
+            amount_paid=Decimal("0.00"), amount_remaining=Decimal("80.00"), currency="eur",
+        )
+
+        html, snapshot = self._render(invoice)
+
+        self.assertIsNone(snapshot["pay_online_url"])
+        self.assertNotIn("Pay Online", html)
+        self.assertIn("Bank Transfer", html)
+
+    def test_unpaid_invoice_with_a_payment_link_shows_pay_online_button(self):
+        invoice = Invoice.objects.create(
+            user=self.user, customer=self.customer, stripe_invoice_id="in_unpaid_with_link",
+            number="INV-UNPAID-LINK", status="OPEN", amount_due=Decimal("3500.00"),
+            amount_paid=Decimal("0.00"), amount_remaining=Decimal("3500.00"), currency="eur",
+            hosted_invoice_url="https://buy.stripe.com/test_abc123",
+        )
+
+        html, snapshot = self._render(invoice)
+
+        self.assertEqual(snapshot["pay_online_url"], "https://buy.stripe.com/test_abc123")
+        self.assertIn("Pay Online", html)
+        self.assertIn("https://buy.stripe.com/test_abc123", html)
 
     def test_payment_method_label_resolved_from_linked_payment(self):
         from api.payments.invoice_services import _build_snapshot
@@ -2710,15 +2744,21 @@ class PackageRequestServiceTests(TestCase):
         mock_stripe.Price.create.return_value = MagicMock(id=price_id)
         mock_stripe.PaymentLink.create.return_value = MagicMock(id=link_id, url=link_url)
 
+    @patch("api.payments.services.StripeService.get_or_create_customer")
     @patch("api.payments.package_request_services.stripe")
-    def test_approve_generates_payment_link_and_persists_admins_terms_without_a_deal_record_yet(self, mock_stripe):
+    def test_approve_generates_payment_link_and_persists_admins_terms_without_a_deal_record_yet(self, mock_stripe, mock_get_or_create_customer):
         """The whole point of review: the SuperAdmin's numbers at approval
         time are what will get granted, not a rubber-stamp of the request -
         but approval alone only sends a payment link, it doesn't grant
-        anything yet (see activate_after_payment below)."""
+        anything yet (see activate_after_payment below). It does, however,
+        create a real unpaid Invoice with that same link as its Pay
+        Online option."""
         from api.payments.package_request_services import PackageRequestService
 
         self._mock_stripe_for_approval(mock_stripe)
+        mock_get_or_create_customer.return_value = Customer.objects.create(
+            user=self.owner, stripe_customer_id="cus_pkgreq_approve", email=self.owner.email,
+        )
         package_request = PackageRequestService.submit(
             company=self.company, requested_by=self.owner, deal_type=self.DealRecord.ENTERPRISE,
             requested_slot_grant=1000, requested_points_grant=10000,
@@ -2739,6 +2779,17 @@ class PackageRequestServiceTests(TestCase):
         self.assertEqual(approved.stripe_payment_link_url, "https://buy.stripe.com/test_pkgreq_1")
         self.assertEqual(mail.outbox[-1].to, [self.owner.email])
         self.assertIn("https://buy.stripe.com/test_pkgreq_1", mail.outbox[-1].body)
+
+        self.assertIsNotNone(approved.invoice)
+        invoice = approved.invoice
+        self.assertEqual(invoice.status, "OPEN")
+        self.assertEqual(invoice.amount_due, Decimal("5000.00"))
+        self.assertEqual(invoice.amount_remaining, Decimal("5000.00"))
+        self.assertEqual(invoice.hosted_invoice_url, "https://buy.stripe.com/test_pkgreq_1")
+        self.assertTrue(invoice.number.startswith("INV-"))
+        self.assertTrue(invoice.local_pdf_file)
+        # The invoice PDF attaches to the approval email, not just a link in the body.
+        self.assertTrue(mail.outbox[-1].attachments)
 
     @patch("api.payments.services.StripeService.get_or_create_customer")
     @patch("api.payments.package_request_services.stripe")
@@ -2783,6 +2834,17 @@ class PackageRequestServiceTests(TestCase):
         self.assertEqual(subscription.status, "ACTIVE")
 
         self.assertEqual(mail.outbox[-1].to, [self.owner.email])
+
+        # Same Invoice created at approval, now flipped to PAID/€0.00 due -
+        # not a second/different invoice.
+        invoice = activated.invoice
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.id, approved.invoice_id)
+        self.assertEqual(invoice.status, "PAID")
+        self.assertEqual(invoice.amount_paid, Decimal("5000.00"))
+        self.assertEqual(invoice.amount_remaining, Decimal("0.00"))
+        self.assertIsNotNone(invoice.paid_at)
+        self.assertTrue(mail.outbox[-1].attachments)
 
     @patch("api.payments.services.StripeService.get_or_create_customer")
     @patch("api.payments.package_request_services.stripe")
@@ -3038,14 +3100,18 @@ class PackageRequestEndpointTests(APITestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    @patch("api.payments.services.StripeService.get_or_create_customer")
     @patch("api.payments.package_request_services.stripe")
-    def test_superadmin_can_approve_with_their_own_terms(self, mock_stripe):
+    def test_superadmin_can_approve_with_their_own_terms(self, mock_stripe, mock_get_or_create_customer):
         from api.payments.package_request_services import PackageRequestService
         from api.payments.models import DealRecord, PackageRequest
 
         mock_stripe.Product.create.return_value = MagicMock(id="prod_ep_1")
         mock_stripe.Price.create.return_value = MagicMock(id="price_ep_1")
         mock_stripe.PaymentLink.create.return_value = MagicMock(id="plink_ep_1", url="https://buy.stripe.com/test_ep_1")
+        mock_get_or_create_customer.return_value = Customer.objects.create(
+            user=self.owner, stripe_customer_id="cus_pkgreq_endpoint_approve", email=self.owner.email,
+        )
 
         package_request = PackageRequestService.submit(
             company=self.company, requested_by=self.owner, deal_type=DealRecord.ENTERPRISE, requested_slot_grant=1000,

@@ -40,9 +40,11 @@ SUPPLIER = {
 }
 
 BANK_DETAILS = {
-    "account_holder": None,
-    "iban": None,
-    "bic_swift": None,
+    "account_holder": "MeritLense OÜ",
+    "iban": "BE46 9059 9855 0036",
+    "bic_swift": "TRWIBEB1XXX",
+    "bank_name": "Wise Europe SA",
+    "bank_address": "Rue du Trône 100, 3rd floor, Brussels, 1050, Belgium",
 }
 
 # MeritLense OÜ is not currently VAT-registered. While that's true, no
@@ -237,6 +239,9 @@ def _build_snapshot(invoice):
     is_paid = invoice.amount_remaining <= Decimal("0.00")
     payment_method_label = _payment_method_label(invoice) if is_paid else None
     payment_date = invoice.paid_at.strftime("%Y-%m-%d") if (is_paid and invoice.paid_at) else None
+    # A real online-payment link for this specific outstanding balance -
+    # only ever meaningful while unpaid; never surfaced once is_paid.
+    pay_online_url = invoice.hosted_invoice_url if (not is_paid and invoice.hosted_invoice_url) else None
 
     return {
         "language": language,
@@ -250,6 +255,7 @@ def _build_snapshot(invoice):
         "is_paid": is_paid,
         "payment_method_label": payment_method_label,
         "payment_date": payment_date,
+        "pay_online_url": pay_online_url,
         "vat_registered": SUPPLIER_VAT_REGISTERED,
         "line_items": [
             {

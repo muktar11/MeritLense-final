@@ -8,7 +8,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.template.loader import render_to_string
 
-from api.core.constants import PaymentMethodConstants
+from api.core.constants import PackageRequestBilling, PaymentMethodConstants
 from api.core.pdf_fonts import arabic_font_context
 
 # The full icon+wordmark lockup (not the icon-only mark
@@ -124,23 +124,49 @@ def _billing_party_context(invoice):
 
 
 def _package_description(price):
-    """"MeritLense <Package> — <N> Assessment(s)[ / Month]" - built from the
-    actual purchased Price, not a generic "MeritLense subscription"/raw
-    internal price name. No Full/Screening qualifier - evaluation tier is
-    chosen per candidate assessment, not a property of the package itself,
-    so the invoice line item doesn't call it out either. billing_type adds
-    "/ Month" only for recurring (B2B) plans, never for a one-time purchase."""
+    """"MeritLense <Package>[ Monthly Subscription] — <N> Assessment(s)" -
+    built from the actual purchased Price, not a generic "MeritLense
+    subscription"/raw internal price name. No Full/Screening qualifier -
+    evaluation tier is chosen per candidate assessment, not a property of
+    the package itself, so the invoice line item doesn't call it out
+    either. "Monthly Subscription" only for recurring (B2B) plans, never
+    for a one-time purchase - the actual billing period itself is shown
+    separately as its own Service Period line (see _line_items_context),
+    so it isn't repeated here as a trailing "/ Month"."""
     if price is None:
         return None
     base_name = re.sub(r"\s+package$", "", price.name or "", flags=re.IGNORECASE).strip().title()
     if not base_name:
         return None
+    if price.billing_type == "RECURRING":
+        base_name = f"{base_name} Monthly Subscription"
     count = price.slot_grant
     if not count:
         return f"MeritLense {base_name}"
     unit = "Assessment" if count == 1 else "Assessments"
-    period_suffix = " / Month" if price.billing_type == "RECURRING" else ""
-    return f"MeritLense {base_name} — {count} {unit}{period_suffix}"
+    return f"MeritLense {base_name} — {count} {unit}"
+
+
+def _package_description_for_package_request(package_request):
+    """Same "MeritLense <Package>[ Monthly Subscription] — <N>
+    Assessment(s)" shape as _package_description, but for the unpaid
+    invoice PackageRequestService.approve() creates at approval time -
+    before Stripe confirms payment, there is no Subscription/Price row yet
+    for the normal path to read from, only the PackageRequest's own
+    approved terms."""
+    base_name = package_request.get_deal_type_display()
+    # "Starter (Per Agreement)" is admin-screen chrome explaining how that
+    # tier is priced - not invoice copy.
+    base_name = re.sub(r"\s*\([^)]*\)\s*$", "", base_name).strip()
+    if not base_name:
+        return None
+    if package_request.billing_type == PackageRequestBilling.RECURRING:
+        base_name = f"{base_name} Monthly Subscription"
+    count = package_request.approved_slot_grant
+    if not count:
+        return f"MeritLense {base_name}"
+    unit = "Assessment" if count == 1 else "Assessments"
+    return f"MeritLense {base_name} — {count} {unit}"
 
 
 def _payment_method_label(invoice):
@@ -167,7 +193,17 @@ def _line_items_context(invoice):
     validity window) - never a same-day issue/due-date fallback, which
     previously produced a misleading "period" of a single repeated date."""
     price = invoice.subscription.stripe_price if (invoice.subscription_id and invoice.subscription) else None
-    description = _package_description(price) or "MeritLense subscription"
+    description = _package_description(price)
+    if description is None:
+        # The unpaid invoice PackageRequestService.approve() creates at
+        # approval time has no Subscription/Price yet (that pair is only
+        # created once Stripe confirms payment) - read the actual approved
+        # package terms directly from the PackageRequest instead of
+        # falling back to a generic label.
+        package_request = getattr(invoice, "source_package_request", None)
+        if package_request is not None:
+            description = _package_description_for_package_request(package_request)
+    description = description or "MeritLense subscription"
 
     show_service_period = False
     period_start = period_end = None

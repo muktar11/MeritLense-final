@@ -2420,9 +2420,13 @@ class InvoiceSupplierTaxIdPlaceholderTests(TestCase):
 
 
 class InvoicePackageDescriptionTests(TestCase):
-    """The line-item description reads "MeritLense <Package> — <N>
-    [Full ]Assessment(s)[ / Month]" from the actual purchased Price, not a
-    generic "MeritLense subscription"/raw internal price name."""
+    """The line-item description reads "MeritLense <Package>[ Monthly
+    Subscription] — <N> Assessment(s)" from the actual purchased Price, not
+    a generic "MeritLense subscription"/raw internal price name. The
+    billing cadence lives in the description itself ("Monthly
+    Subscription") for recurring plans, not as a trailing "/ Month" -
+    the real Service Period is shown separately (see
+    InvoiceServicePeriodTests below)."""
 
     def setUp(self):
         self.user = User.objects.create_user(
@@ -2453,7 +2457,7 @@ class InvoicePackageDescriptionTests(TestCase):
 
         self.assertEqual(snapshot["line_items"][0]["description"], "MeritLense Basic — 3 Assessments")
 
-    def test_recurring_full_package_description_has_no_tier_qualifier_and_includes_month(self):
+    def test_recurring_full_package_description_has_no_tier_qualifier_and_names_the_subscription(self):
         """No "Full"/"Screening" qualifier on the invoice line item -
         evaluation tier is chosen per candidate assessment, not a property
         of the package, regardless of the Price's own evaluation_tier."""
@@ -2468,7 +2472,8 @@ class InvoicePackageDescriptionTests(TestCase):
         snapshot = _build_snapshot(invoice)
 
         self.assertEqual(
-            snapshot["line_items"][0]["description"], "MeritLense Growth — 200 Assessments / Month",
+            snapshot["line_items"][0]["description"],
+            "MeritLense Growth Monthly Subscription — 200 Assessments",
         )
 
     def test_falls_back_to_generic_description_with_no_subscription(self):
@@ -2790,6 +2795,37 @@ class PackageRequestServiceTests(TestCase):
         self.assertTrue(invoice.local_pdf_file)
         # The invoice PDF attaches to the approval email, not just a link in the body.
         self.assertTrue(mail.outbox[-1].attachments)
+
+    @patch("api.payments.services.StripeService.get_or_create_customer")
+    @patch("api.payments.package_request_services.stripe")
+    def test_approval_invoice_description_reflects_the_approved_package_before_any_payment(self, mock_stripe, mock_get_or_create_customer):
+        """The unpaid invoice created at approval time has no
+        Subscription/Price yet (only activate_after_payment creates that
+        pair) - its line-item description must still read the real
+        approved package terms, not the generic "MeritLense subscription"
+        fallback."""
+        from api.payments.invoice_services import _build_snapshot
+        from api.payments.package_request_services import PackageRequestService
+
+        self._mock_stripe_for_approval(mock_stripe)
+        mock_get_or_create_customer.return_value = Customer.objects.create(
+            user=self.owner, stripe_customer_id="cus_pkgreq_desc", email=self.owner.email,
+        )
+        package_request = PackageRequestService.submit(
+            company=self.company, requested_by=self.owner, deal_type=self.DealRecord.ENTERPRISE,
+            requested_slot_grant=1000, requested_points_grant=10000,
+        )
+
+        approved = PackageRequestService.approve(
+            package_request=package_request, actor=self.superadmin,
+            slot_grant=200, points_grant=2000, unit_amount=Decimal("5000.00"), billing_type="RECURRING",
+        )
+
+        snapshot = _build_snapshot(approved.invoice)
+        self.assertEqual(
+            snapshot["line_items"][0]["description"],
+            "MeritLense Enterprise Monthly Subscription — 200 Assessments",
+        )
 
     @patch("api.payments.services.StripeService.get_or_create_customer")
     @patch("api.payments.package_request_services.stripe")

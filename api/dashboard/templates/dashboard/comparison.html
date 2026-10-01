@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8" />
+<style>
+  @page {
+    size: A4;
+    margin: 0 0 16mm 0;
+    @bottom-center {
+      content: "MeritLense \2014 Candidate Comparison \00B7 Page " counter(page) " of " counter(pages);
+      font-size: 7pt; color: #8a97ad;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Helvetica", "Arial", sans-serif; color: #1f2937; font-size: 9.5pt; }
+  .content { padding: 0 14mm; }
+
+  .header-bar { height: 6mm; background: linear-gradient(90deg, #7b56f5, #2f6fe8); }
+  .header-row { display: table; width: 100%; margin-top: 8mm; }
+  .header-cell { display: table-cell; vertical-align: top; }
+  .brand-row { display: flex; align-items: center; gap: 8px; }
+  .brand-row img { height: 28px; width: auto; }
+  .wordmark { font-size: 14pt; font-weight: 800; color: #3b4ee0; }
+  .wordmark-accent { color: #9333ea; }
+  .title-cell { width: 50%; text-align: right; }
+  .title { font-size: 18pt; font-weight: 800; color: #111827; }
+  .subtitle { font-size: 9pt; color: #6b7280; margin-top: 2mm; }
+
+  .section-title { font-size: 8pt; letter-spacing: 0.05em; color: #8a97ad; text-transform: uppercase; margin: 8mm 0 3mm; }
+
+  .summary-row { display: table; width: 100%; border-collapse: separate; border-spacing: 3mm 0; margin-top: 2mm; }
+  .summary-card { display: table-cell; width: 25%; vertical-align: top; border: 1px solid #e2e8f5; border-radius: 8px; padding: 3mm; }
+  .summary-name { font-size: 10pt; font-weight: 700; color: #111827; margin-bottom: 1.5mm; }
+  .summary-line { font-size: 7.6pt; color: #4b5563; line-height: 1.5; }
+  .summary-line b { color: #1f2937; }
+  .badge { display: inline-block; font-size: 7pt; font-weight: 700; padding: 1mm 2.2mm; border-radius: 999px; margin-top: 1mm; }
+  .badge.ready { background: #dcfce7; color: #166534; }
+  .badge.partial { background: #fef3c7; color: #92400e; }
+  .badge.notready { background: #fee2e2; color: #991b1b; }
+  .badge.pending { background: #f1f5f9; color: #475569; }
+  .badge.review { background: #fef3c7; color: #92400e; }
+
+  table.comp { width: 100%; margin-top: 2mm; border-collapse: collapse; font-size: 8pt; }
+  table.comp th { text-align: left; font-size: 7pt; letter-spacing: 0.03em; color: #8a97ad; text-transform: uppercase; padding: 2mm; border-bottom: 1px solid #d7deec; }
+  table.comp td { padding: 2.3mm 2mm; border-bottom: 1px solid #eef1f8; }
+  table.comp td.num, table.comp th.num { text-align: center; }
+  .classification { font-size: 7pt; font-weight: 700; padding: 0.6mm 1.8mm; border-radius: 999px; }
+  .classification.critical { background: #fee2e2; color: #991b1b; }
+  .classification.non_critical { background: #eef1f8; color: #475569; }
+  .classification.required { background: #e0e7ff; color: #3730a3; }
+
+  .diff-list { margin-top: 2mm; padding-left: 4mm; }
+  .diff-list li { font-size: 8.3pt; color: #374151; line-height: 1.6; margin-bottom: 1mm; }
+
+  .radar-wrap { text-align: center; margin-top: 3mm; break-inside: avoid-page; page-break-inside: avoid; }
+  .radar-wrap svg { max-width: 100%; height: auto; }
+  .legend-row { display: table; width: 100%; margin-top: 3mm; }
+  .legend-item { display: inline-block; font-size: 7.6pt; color: #4b5563; margin: 0 4mm 0 0; }
+  .legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 1.5mm; vertical-align: middle; }
+
+  .disclaimer { margin-top: 8mm; border: 1px solid #eef1f8; background: #f8faff; border-radius: 8px; padding: 3mm 4mm; font-size: 7pt; color: #6b7280; line-height: 1.6; }
+</style>
+</head>
+<body>
+  <div class="header-bar"></div>
+  <div class="content">
+    <div class="header-row">
+      <div class="header-cell" style="width:50%;">
+        <div class="brand-row">
+          <img src="{{ logo_icon_data_uri }}" alt="MeritLense" />
+          <div class="wordmark">Merit<span class="wordmark-accent">Lense</span></div>
+        </div>
+      </div>
+      <div class="header-cell title-cell">
+        <div class="title">Candidate Comparison</div>
+        <div class="subtitle">Role Profile: {{ role_name }}</div>
+      </div>
+    </div>
+
+    <div class="section-title">Candidate Summary</div>
+    <div class="summary-row">
+      {% for entry in entries %}
+      <div class="summary-card">
+        <div class="summary-name">{{ entry.candidate_name }}</div>
+        <div class="summary-line">Readiness Level</div>
+        <span class="badge {% if entry.readiness_status == 'READY' %}ready{% elif entry.readiness_status == 'PARTIALLY_READY' %}partial{% elif entry.readiness_status == 'NOT_READY' %}notready{% else %}pending{% endif %}">{{ entry.readiness_display }}</span>
+        <div class="summary-line" style="margin-top:2mm;">Assessment Coverage &mdash; <b>{{ entry.assessment_coverage }}%</b></div>
+        {% if entry.requires_human_review %}
+        <div style="margin-top:1.5mm;"><span class="badge review">Human Review Pending</span></div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="section-title">Competency Comparison</div>
+    <table class="comp">
+      <thead>
+        <tr>
+          <th>Competency</th>
+          <th>Classification</th>
+          {% for entry in entries %}
+          <th class="num">{{ entry.candidate_name }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in competency_rows %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td>
+            <span class="classification {{ row.classification|lower }}">
+              {% if row.classification == "CRITICAL" %}Critical{% elif row.classification == "NON_CRITICAL" %}Non-Critical{% else %}Required{% endif %}
+            </span>
+          </td>
+          {% for value in row.values %}
+          <td class="num">{% if value is not None %}{{ value }}%{% else %}&mdash;{% endif %}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if key_differences %}
+    <div class="section-title">Key Differences</div>
+    <ul class="diff-list">
+      {% for diff in key_differences %}
+      <li>{{ diff.text }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if radar_svg %}
+    <div class="section-title">Performance Comparison (Radar Chart)</div>
+    <div class="radar-wrap">
+      {{ radar_svg|safe }}
+      <div class="legend-row">
+        {% for item in legend %}
+        <span class="legend-item"><span class="legend-dot" style="background:{{ item.color }};"></span>{{ item.name }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="disclaimer">
+      This comparison is a presentation of existing assessment results only - scoring, competency thresholds, readiness
+      decisions, and certificate eligibility are not recalculated here. The employer remains the final decision maker.
+      Generated {{ generated_at }}.
+    </div>
+  </div>
+</body>
+</html>

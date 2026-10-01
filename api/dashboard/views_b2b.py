@@ -13,7 +13,14 @@ from api.evaluations.models import Evaluation
 from api.accounts.models import User
 from api.payments.entitlement_services import EntitlementService
 from api.payments.models import PackageBalance
-from .comparison_services import build_candidate_comparison_entry
+from .comparison_services import (
+    build_candidate_comparison_entry,
+    build_full_comparison,
+    compute_key_differences,
+    get_comparable_roles,
+    get_eligible_candidates,
+)
+from .comparison_pdf_services import render_comparison_pdf
 from .serializers import (
     DashboardStatsSerializer, RecentCandidateSerializer, RecentEvaluationSerializer,
     ScoreDistributionSerializer, EvaluationTrendSerializer, LanguageDistributionSerializer,
@@ -544,3 +551,100 @@ class B2BCandidateComparisonView(APIView):
         result_with_scores.sort(key=lambda x: x['average_score'], reverse=True)
 
         return Response(result_with_scores)
+
+
+def _resolve_b2b_company(user):
+    if user.role == Roles.B2B and hasattr(user, 'company_profile'):
+        return user.company_profile.company
+    if user.role == Roles.B2B_TEAM_MEMBER and hasattr(user, 'team_member_profile'):
+        return user.team_member_profile.company
+    return None
+
+
+class B2BComparisonRolesView(APIView):
+    """Step 1 of role-based Candidate Comparison: which Job Roles actually
+    have comparable (scored) candidates to choose from."""
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+
+    def get(self, request):
+        company = _resolve_b2b_company(request.user)
+        if not company:
+            return Response({'error': 'Company not found'}, status=400)
+        return Response(get_comparable_roles(owner_type="COMPANY", owner=company))
+
+
+class B2BComparisonEligibleCandidatesView(APIView):
+    """Step 2: candidates eligible for comparison under a chosen role."""
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+
+    def get(self, request):
+        company = _resolve_b2b_company(request.user)
+        if not company:
+            return Response({'error': 'Company not found'}, status=400)
+        role_code = request.query_params.get('role_code', '').strip()
+        if not role_code:
+            return Response({'error': 'role_code is required'}, status=400)
+        return Response(get_eligible_candidates(owner_type="COMPANY", owner=company, role_code=role_code))
+
+
+class B2BComparisonFullView(APIView):
+    """Steps 3+4: the real Candidate Summary + Competency Comparison data
+    for 2-4 selected, role-eligible candidates."""
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+
+    def get(self, request):
+        company = _resolve_b2b_company(request.user)
+        if not company:
+            return Response({'error': 'Company not found'}, status=400)
+
+        role_code = request.query_params.get('role_code', '').strip()
+        raw_ids = request.query_params.get('candidate_ids', '')
+        candidate_ids = [v.strip() for v in raw_ids.split(',') if v.strip()]
+        if not role_code or not (2 <= len(candidate_ids) <= 4):
+            return Response({'error': 'role_code and 2-4 candidate_ids are required'}, status=400)
+
+        language = "ar" if request.query_params.get('lang') == "ar" else "en"
+        entries = build_full_comparison(
+            owner_type="COMPANY", owner=company, role_code=role_code,
+            candidate_ids=candidate_ids, language=language, actor=request.user,
+        )
+        return Response({
+            'role_code': role_code,
+            'role_name': dict((r['role_code'], r['role_name']) for r in get_comparable_roles(owner_type="COMPANY", owner=company)).get(role_code, role_code),
+            'candidates': entries,
+            'key_differences': compute_key_differences(entries, language=language),
+        })
+
+
+class B2BComparisonPdfView(APIView):
+    """Spec item 8: backend-rendered bilingual Comparison PDF, same
+    structure as the on-screen page - Candidate Summary, Competency
+    Comparison, Key Differences, Radar Chart."""
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+
+    def get(self, request):
+        company = _resolve_b2b_company(request.user)
+        if not company:
+            return Response({'error': 'Company not found'}, status=400)
+
+        role_code = request.query_params.get('role_code', '').strip()
+        raw_ids = request.query_params.get('candidate_ids', '')
+        candidate_ids = [v.strip() for v in raw_ids.split(',') if v.strip()]
+        if not role_code or not (2 <= len(candidate_ids) <= 4):
+            return Response({'error': 'role_code and 2-4 candidate_ids are required'}, status=400)
+
+        language = "ar" if request.query_params.get('lang') == "ar" else "en"
+        role_name = dict((r['role_code'], r['role_name']) for r in get_comparable_roles(owner_type="COMPANY", owner=company)).get(role_code, role_code)
+        entries = build_full_comparison(
+            owner_type="COMPANY", owner=company, role_code=role_code,
+            candidate_ids=candidate_ids, language=language, actor=request.user,
+        )
+        if len(entries) < 2:
+            return Response({'error': 'At least 2 comparable candidates are required.'}, status=400)
+
+        key_differences = compute_key_differences(entries, language=language)
+        pdf_bytes = render_comparison_pdf(role_name=role_name, entries=entries, key_differences=key_differences, language=language)
+        from django.http import HttpResponse
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="candidate-comparison.pdf"'
+        return response

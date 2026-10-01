@@ -7,9 +7,16 @@ from rest_framework.test import APIClient
 from api.accounts.models import Company, CompanyEmployerProfile, User
 from api.candidates.models import Candidate
 from api.core.constants import EvaluationType, InterviewEvaluationTier, Roles
+from api.dashboard.comparison_services import (
+    build_full_comparison,
+    compute_key_differences,
+    get_comparable_roles,
+    get_eligible_candidates,
+)
 from api.evaluations.models import Evaluation, ScoringRuleSet, SessionEvaluationSummary
 from api.interviews.models import InterviewConfiguration
 from api.payments.models import Customer, Invoice, Payment, Price, Subscription
+from api.reports.models import EvaluationReport
 from api.sessions.models import InterviewSession
 
 
@@ -279,6 +286,476 @@ class CandidateComparisonApiTests(TestCase):
         by_id = {item["candidate_id"]: item for item in response.data}
         self.assertEqual(set(by_id.keys()), {scored_id, unscored_id})
         self.assertEqual(by_id[scored_id]["scores_by_area"]["Teamwork"], 77.0)
+
+
+DIMENSION_ORDER = ("SAFETY", "HYGIENE", "COMMUNICATION", "PRACTICAL_TASKS", "BEHAVIORAL")
+DIMENSION_LABELS = {
+    "SAFETY": "Safety Awareness",
+    "HYGIENE": "Hygiene & Cleanliness",
+    "COMMUNICATION": "Communication Ability",
+    "PRACTICAL_TASKS": "Practical Task Execution",
+    "BEHAVIORAL": "Behavioral Indicators",
+}
+
+
+class CandidateComparisonFullFlowApiTests(TestCase):
+    """The new role-based Candidate Comparison flow (Select Job Role ->
+    Select 2-4 Eligible Candidates -> Compare), distinct from the older
+    leaderboard-widget comparison covered by CandidateComparisonApiTests
+    above, which this module leaves untouched."""
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def _make_candidate(self, *, created_by, company, suffix):
+        return Candidate.objects.create(
+            first_name=f"Cand{suffix}",
+            last_name="Test",
+            email=f"cand{suffix}@example.com",
+            passport_id=f"CMPF-{suffix}",
+            job_role="NA",
+            core_skills="care",
+            preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf",
+            created_by=created_by,
+            company=company,
+        )
+
+    def _make_scored_candidate(
+        self, *, created_by, company, suffix, role_code, dimension_percentages,
+        readiness_status="READY", requires_human_review=False, assessed=5, required=5,
+        not_applicable=None,
+    ):
+        """Builds a full SessionEvaluationSummary plus an ACTIVE
+        EvaluationReport with a hand-crafted report_payload in the exact
+        shape EvaluationReportService._build_critical_competency_status
+        produces, so build_full_comparison can be exercised end-to-end
+        without re-running the full scoring/report-generation pipeline."""
+        candidate = self._make_candidate(created_by=created_by, company=company, suffix=suffix)
+        not_applicable = not_applicable or set()
+        config = InterviewConfiguration.objects.create(
+            role_name=role_code.replace("_", " ").title(),
+            role_code=role_code,
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=45,
+            total_questions=1,
+            allow_retries=True,
+            max_retries=1,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+        )
+        session = InterviewSession.objects.create(
+            candidate=candidate,
+            organization=company,
+            config=config,
+            role_name=config.role_name,
+            role_code=config.role_code,
+            ui_language="EN",
+            candidate_language="EN",
+            tts_language_code="en-US",
+            stt_language_code="en-US",
+            total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=created_by,
+        )
+        evaluation = Evaluation.objects.create(
+            session=session,
+            candidate=candidate,
+            evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now() + timezone.timedelta(days=1),
+            duration_minutes=45,
+            created_by=created_by,
+        )
+        rule_set = ScoringRuleSet.objects.create(
+            name=f"Compare Rules {candidate.pk}",
+            version="v1",
+            role_code=role_code,
+            role_name=config.role_name,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            is_active=True,
+            created_by=created_by,
+            company=company,
+        )
+        competencies_summary = [
+            {
+                "competency_code": dim,
+                "competency_name": DIMENSION_LABELS[dim],
+                "percentage": pct,
+                "status": "EVALUATED",
+                "response_count": 1,
+                "completed_response_count": 1,
+            }
+            for dim, pct in dimension_percentages.items()
+        ]
+        summary = SessionEvaluationSummary.objects.create(
+            evaluation=evaluation,
+            session=session,
+            candidate=candidate,
+            rule_set=rule_set,
+            total_score=Decimal("0"),
+            max_score=Decimal("100"),
+            overall_percentage=Decimal("0"),
+            competencies_summary=competencies_summary,
+            status=SessionEvaluationSummary.STATUS_EVALUATED,
+        )
+        critical_competency_status = []
+        for dim in DIMENSION_ORDER:
+            if dim in not_applicable:
+                critical_competency_status.append({
+                    "label": DIMENSION_LABELS[dim],
+                    "status_label": "N/A",
+                    "tone": "neutral",
+                    "not_applicable": True,
+                    "percentage": 0,
+                })
+            else:
+                critical_competency_status.append({
+                    "label": DIMENSION_LABELS[dim],
+                    "status_label": "Evaluated",
+                    "tone": "positive",
+                    "not_applicable": False,
+                    "percentage": dimension_percentages.get(dim, 0),
+                })
+        EvaluationReport.objects.create(
+            evaluation=evaluation,
+            session=session,
+            candidate=candidate,
+            report_number=f"RPT-TEST-{candidate.pk}",
+            report_status=EvaluationReport.STATUS_ACTIVE,
+            readiness_status=readiness_status,
+            requires_human_review=requires_human_review,
+            report_payload={
+                "assessment_context": {
+                    "competencies_assessed_count": assessed,
+                    "competencies_required_count": required,
+                },
+                "critical_competency_status": critical_competency_status,
+            },
+        )
+        return candidate, summary
+
+    # -- get_comparable_roles / get_eligible_candidates --------------------
+
+    def test_get_comparable_roles_groups_by_role_and_counts_distinct_candidates(self):
+        user = User.objects.create_user(
+            email="roles-b2c@example.com", password="testpass123",
+            first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        self._make_scored_candidate(
+            created_by=user, company=None, suffix="r1", role_code="driver",
+            dimension_percentages={"SAFETY": 80}, not_applicable={"HYGIENE"},
+        )
+        self._make_scored_candidate(
+            created_by=user, company=None, suffix="r2", role_code="driver",
+            dimension_percentages={"SAFETY": 70}, not_applicable={"HYGIENE"},
+        )
+        self._make_scored_candidate(
+            created_by=user, company=None, suffix="r3", role_code="domestic_worker",
+            dimension_percentages={"SAFETY": 60},
+        )
+
+        roles = get_comparable_roles(owner_type="USER", owner=user)
+
+        by_code = {r["role_code"]: r for r in roles}
+        self.assertEqual(by_code["driver"]["candidate_count"], 2)
+        self.assertEqual(by_code["domestic_worker"]["candidate_count"], 1)
+        self.assertEqual(by_code["driver"]["role_name"], "Driver")
+
+    def test_get_eligible_candidates_excludes_other_roles_and_unscored(self):
+        user = User.objects.create_user(
+            email="eligible-b2c@example.com", password="testpass123",
+            first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        driver, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="e1", role_code="driver",
+            dimension_percentages={"SAFETY": 80}, not_applicable={"HYGIENE"},
+        )
+        self._make_scored_candidate(
+            created_by=user, company=None, suffix="e2", role_code="domestic_worker",
+            dimension_percentages={"SAFETY": 80},
+        )
+        self._make_candidate(created_by=user, company=None, suffix="e3")  # never evaluated
+
+        eligible = get_eligible_candidates(owner_type="USER", owner=user, role_code="driver")
+
+        self.assertEqual([c["candidate_id"] for c in eligible], [str(driver.public_id)])
+
+    # -- build_full_comparison / _competency_rows --------------------------
+
+    def test_build_full_comparison_driver_role_splits_critical_and_excludes_na_dimension(self):
+        user = User.objects.create_user(
+            email="driver-b2c@example.com", password="testpass123",
+            first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        alice, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="d1", role_code="driver",
+            dimension_percentages={"SAFETY": 90, "PRACTICAL_TASKS": 80, "BEHAVIORAL": 70, "COMMUNICATION": 60},
+            not_applicable={"HYGIENE"},
+            readiness_status="READY", assessed=4, required=4,
+        )
+        bob, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="d2", role_code="driver",
+            dimension_percentages={"SAFETY": 50, "PRACTICAL_TASKS": 60, "BEHAVIORAL": 85, "COMMUNICATION": 90},
+            not_applicable={"HYGIENE"},
+            readiness_status="PARTIALLY_READY", requires_human_review=True, assessed=3, required=4,
+        )
+
+        entries = build_full_comparison(
+            owner_type="USER", owner=user, role_code="driver",
+            candidate_ids=[str(alice.public_id), str(bob.public_id)],
+            language="en", actor=user,
+        )
+
+        self.assertEqual(len(entries), 2)
+        alice_entry = next(e for e in entries if e["candidate_id"] == str(alice.public_id))
+        bob_entry = next(e for e in entries if e["candidate_id"] == str(bob.public_id))
+
+        self.assertEqual(alice_entry["readiness_display"], "Ready")
+        self.assertEqual(alice_entry["assessment_coverage"], 100)
+        self.assertFalse(alice_entry["requires_human_review"])
+
+        self.assertEqual(bob_entry["readiness_display"], "Partially Ready")
+        self.assertEqual(bob_entry["assessment_coverage"], 75)
+        self.assertTrue(bob_entry["requires_human_review"])
+
+        labels = {row["label"] for row in alice_entry["competencies"]}
+        self.assertNotIn(DIMENSION_LABELS["HYGIENE"], labels)
+        self.assertEqual(len(alice_entry["competencies"]), 4)
+
+        classification_by_dim = {row["dimension_key"]: row["classification"] for row in alice_entry["competencies"]}
+        self.assertEqual(classification_by_dim["SAFETY"], "CRITICAL")
+        self.assertEqual(classification_by_dim["PRACTICAL_TASKS"], "CRITICAL")
+        self.assertEqual(classification_by_dim["BEHAVIORAL"], "NON_CRITICAL")
+        self.assertEqual(classification_by_dim["COMMUNICATION"], "NON_CRITICAL")
+
+    def test_build_full_comparison_non_driver_role_shows_required_only_no_fabricated_split(self):
+        user = User.objects.create_user(
+            email="domestic-b2c@example.com", password="testpass123",
+            first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        alice, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="n1", role_code="domestic_worker",
+            dimension_percentages={"SAFETY": 90, "PRACTICAL_TASKS": 80, "BEHAVIORAL": 70},
+        )
+        bob, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="n2", role_code="domestic_worker",
+            dimension_percentages={"SAFETY": 60, "PRACTICAL_TASKS": 95, "BEHAVIORAL": 65},
+        )
+
+        entries = build_full_comparison(
+            owner_type="USER", owner=user, role_code="domestic_worker",
+            candidate_ids=[str(alice.public_id), str(bob.public_id)],
+            language="en", actor=user,
+        )
+
+        alice_entry = next(e for e in entries if e["candidate_id"] == str(alice.public_id))
+        # domestic_worker has no ROLE_COMPETENCY_CONFIG entry, so no
+        # dimension may show a fabricated Critical/Non-Critical split -
+        # only HYGIENE/COMMUNICATION are excluded (not required for this
+        # role), and the 3 remaining dimensions all read "REQUIRED".
+        labels = {row["label"] for row in alice_entry["competencies"]}
+        self.assertNotIn(DIMENSION_LABELS["HYGIENE"], labels)
+        self.assertNotIn(DIMENSION_LABELS["COMMUNICATION"], labels)
+        self.assertEqual(len(alice_entry["competencies"]), 3)
+        self.assertTrue(all(row["classification"] == "REQUIRED" for row in alice_entry["competencies"]))
+
+    def test_build_full_comparison_skips_candidate_without_scored_evaluation_under_role(self):
+        user = User.objects.create_user(
+            email="skip-b2c@example.com", password="testpass123",
+            first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        alice, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="s1", role_code="driver",
+            dimension_percentages={"SAFETY": 90, "PRACTICAL_TASKS": 80, "BEHAVIORAL": 70, "COMMUNICATION": 60},
+            not_applicable={"HYGIENE"},
+        )
+        unrelated = self._make_candidate(created_by=user, company=None, suffix="s2")
+
+        entries = build_full_comparison(
+            owner_type="USER", owner=user, role_code="driver",
+            candidate_ids=[str(alice.public_id), str(unrelated.public_id)],
+            language="en", actor=user,
+        )
+
+        self.assertEqual([e["candidate_id"] for e in entries], [str(alice.public_id)])
+
+    # -- compute_key_differences --------------------------------------------
+
+    def test_compute_key_differences_prioritizes_critical_and_reports_correct_best_worst(self):
+        user = User.objects.create_user(
+            email="diff-b2c@example.com", password="testpass123",
+            first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        alice, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="k1", role_code="driver",
+            dimension_percentages={"SAFETY": 95, "PRACTICAL_TASKS": 60, "BEHAVIORAL": 55, "COMMUNICATION": 90},
+            not_applicable={"HYGIENE"},
+        )
+        bob, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="k2", role_code="driver",
+            dimension_percentages={"SAFETY": 40, "PRACTICAL_TASKS": 58, "BEHAVIORAL": 90, "COMMUNICATION": 50},
+            not_applicable={"HYGIENE"},
+        )
+        entries = build_full_comparison(
+            owner_type="USER", owner=user, role_code="driver",
+            candidate_ids=[str(alice.public_id), str(bob.public_id)],
+            language="en", actor=user,
+        )
+
+        differences = compute_key_differences(entries, language="en")
+
+        # SAFETY (CRITICAL, spread 55) must outrank COMMUNICATION
+        # (NON_CRITICAL, spread 40) even though both are large spreads.
+        self.assertEqual(differences[0]["label"], DIMENSION_LABELS["SAFETY"])
+        self.assertIn("95%", differences[0]["text"])
+        self.assertIn("40%", differences[0]["text"])
+
+    def test_compute_key_differences_returns_empty_for_single_candidate(self):
+        self.assertEqual(compute_key_differences([{"candidate_name": "Solo", "competencies": []}]), [])
+
+    # -- B2B/B2C endpoint integration ---------------------------------------
+
+    def test_b2b_comparison_roles_endpoint_scopes_to_requesting_company_only(self):
+        user_a = User.objects.create_user(
+            email="b2b-roles-a@example.com", password="testpass123",
+            first_name="A", last_name="Co", role=Roles.B2B, is_verified=True,
+        )
+        company_a = Company.objects.create(
+            name="Company A", registration_number="ROLES-A", company_size="11-50",
+            industry="Care", phone_number="+251900000001", country="Ethiopia",
+            city="Addis Ababa", admin_user=user_a,
+        )
+        CompanyEmployerProfile.objects.create(
+            user=user_a, company_name=company_a.name,
+            company_registration_number=company_a.registration_number,
+            company_size=company_a.company_size, company=company_a,
+        )
+        user_b = User.objects.create_user(
+            email="b2b-roles-b@example.com", password="testpass123",
+            first_name="B", last_name="Co", role=Roles.B2B, is_verified=True,
+        )
+        company_b = Company.objects.create(
+            name="Company B", registration_number="ROLES-B", company_size="11-50",
+            industry="Care", phone_number="+251900000002", country="Ethiopia",
+            city="Addis Ababa", admin_user=user_b,
+        )
+        CompanyEmployerProfile.objects.create(
+            user=user_b, company_name=company_b.name,
+            company_registration_number=company_b.registration_number,
+            company_size=company_b.company_size, company=company_b,
+        )
+        self._make_scored_candidate(
+            created_by=user_a, company=company_a, suffix="ca1", role_code="driver",
+            dimension_percentages={"SAFETY": 80}, not_applicable={"HYGIENE"},
+        )
+
+        self.client.force_authenticate(user_b)
+        response = self.client.get("/api/v1/dashboard/b2b/candidate-comparison/roles")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+
+    def test_b2b_comparison_full_endpoint_rejects_out_of_range_candidate_count(self):
+        user = User.objects.create_user(
+            email="b2b-range@example.com", password="testpass123",
+            first_name="B2B", last_name="User", role=Roles.B2B, is_verified=True,
+        )
+        company = Company.objects.create(
+            name="Range Co", registration_number="RANGE-001", company_size="11-50",
+            industry="Care", phone_number="+251900000003", country="Ethiopia",
+            city="Addis Ababa", admin_user=user,
+        )
+        CompanyEmployerProfile.objects.create(
+            user=user, company_name=company.name,
+            company_registration_number=company.registration_number,
+            company_size=company.company_size, company=company,
+        )
+        alice, _ = self._make_scored_candidate(
+            created_by=user, company=company, suffix="rg1", role_code="driver",
+            dimension_percentages={"SAFETY": 80}, not_applicable={"HYGIENE"},
+        )
+        self.client.force_authenticate(user)
+
+        too_few = self.client.get(
+            "/api/v1/dashboard/b2b/candidate-comparison/full",
+            {"role_code": "driver", "candidate_ids": str(alice.public_id)},
+        )
+        self.assertEqual(too_few.status_code, 400)
+
+        missing_role = self.client.get(
+            "/api/v1/dashboard/b2b/candidate-comparison/full",
+            {"candidate_ids": f"{alice.public_id},{alice.public_id}"},
+        )
+        self.assertEqual(missing_role.status_code, 400)
+
+    def test_b2c_comparison_full_endpoint_returns_expected_shape(self):
+        user = User.objects.create_user(
+            email="b2c-full@example.com", password="testpass123",
+            first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        alice, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="f1", role_code="driver",
+            dimension_percentages={"SAFETY": 90, "PRACTICAL_TASKS": 80, "BEHAVIORAL": 70, "COMMUNICATION": 60},
+            not_applicable={"HYGIENE"},
+        )
+        bob, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="f2", role_code="driver",
+            dimension_percentages={"SAFETY": 50, "PRACTICAL_TASKS": 60, "BEHAVIORAL": 85, "COMMUNICATION": 90},
+            not_applicable={"HYGIENE"},
+        )
+        self.client.force_authenticate(user)
+
+        response = self.client.get(
+            "/api/v1/dashboard/b2c/candidate-comparison/full",
+            {"role_code": "driver", "candidate_ids": f"{alice.public_id},{bob.public_id}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["role_code"], "driver")
+        self.assertEqual(response.data["role_name"], "Driver")
+        self.assertEqual(len(response.data["candidates"]), 2)
+        self.assertTrue(len(response.data["key_differences"]) >= 1)
+
+    def test_b2c_comparison_pdf_endpoint_returns_pdf(self):
+        user = User.objects.create_user(
+            email="b2c-pdf@example.com", password="testpass123",
+            first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        alice, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="p1", role_code="driver",
+            dimension_percentages={"SAFETY": 90, "PRACTICAL_TASKS": 80, "BEHAVIORAL": 70, "COMMUNICATION": 60},
+            not_applicable={"HYGIENE"},
+        )
+        bob, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="p2", role_code="driver",
+            dimension_percentages={"SAFETY": 50, "PRACTICAL_TASKS": 60, "BEHAVIORAL": 85, "COMMUNICATION": 90},
+            not_applicable={"HYGIENE"},
+        )
+        self.client.force_authenticate(user)
+
+        response = self.client.get(
+            "/api/v1/dashboard/b2c/candidate-comparison/pdf",
+            {"role_code": "driver", "candidate_ids": f"{alice.public_id},{bob.public_id}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertTrue(response.content.startswith(b"%PDF"))
+
+    def test_b2c_comparison_eligible_candidates_requires_role_code(self):
+        user = User.objects.create_user(
+            email="b2c-eligreq@example.com", password="testpass123",
+            first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        self.client.force_authenticate(user)
+
+        response = self.client.get("/api/v1/dashboard/b2c/candidate-comparison/eligible-candidates")
+
+        self.assertEqual(response.status_code, 400)
 
 
 class DashboardParityChartsApiTests(TestCase):

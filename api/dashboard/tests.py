@@ -324,13 +324,22 @@ class CandidateComparisonFullFlowApiTests(TestCase):
     def _make_scored_candidate(
         self, *, created_by, company, suffix, role_code, dimension_percentages,
         readiness_status="READY", requires_human_review=False, assessed=5, required=5,
-        not_applicable=None,
+        not_applicable=None, rule_set=None,
     ):
         """Builds a full SessionEvaluationSummary plus an ACTIVE
         EvaluationReport with a hand-crafted report_payload in the exact
         shape EvaluationReportService._build_critical_competency_status
         produces, so build_full_comparison can be exercised end-to-end
-        without re-running the full scoring/report-generation pipeline."""
+        without re-running the full scoring/report-generation pipeline.
+
+        `rule_set`: pass the SAME ScoringRuleSet instance across multiple
+        candidates meant to be comparable (the real-world default - one
+        active rule set per role) - comparison now only treats candidates
+        scored under the current rule set for that role as eligible (see
+        _current_rule_set_id), so two independently-created rule sets for
+        the same role_code, as this helper used to always do, are
+        deliberately treated as two incompatible versions and would make
+        the earlier-created candidate silently ineligible."""
         candidate = self._make_candidate(created_by=created_by, company=company, suffix=suffix)
         not_applicable = not_applicable or set()
         config = InterviewConfiguration.objects.create(
@@ -370,16 +379,17 @@ class CandidateComparisonFullFlowApiTests(TestCase):
             duration_minutes=45,
             created_by=created_by,
         )
-        rule_set = ScoringRuleSet.objects.create(
-            name=f"Compare Rules {candidate.pk}",
-            version="v1",
-            role_code=role_code,
-            role_name=config.role_name,
-            evaluation_tier=InterviewEvaluationTier.FULL,
-            is_active=True,
-            created_by=created_by,
-            company=company,
-        )
+        if rule_set is None:
+            rule_set = ScoringRuleSet.objects.create(
+                name=f"Compare Rules {candidate.pk}",
+                version="v1",
+                role_code=role_code,
+                role_name=config.role_name,
+                evaluation_tier=InterviewEvaluationTier.FULL,
+                is_active=True,
+                created_by=created_by,
+                company=company,
+            )
         competencies_summary = [
             {
                 "competency_code": dim,
@@ -438,6 +448,21 @@ class CandidateComparisonFullFlowApiTests(TestCase):
         )
         return candidate, summary
 
+    def _make_rule_set(self, *, created_by, company, role_code):
+        """One shared, current ScoringRuleSet for candidates in a test that
+        are meant to be comparable - pass its result as `rule_set=` to each
+        _make_scored_candidate call for that role."""
+        return ScoringRuleSet.objects.create(
+            name=f"Compare Rules {role_code} {created_by.pk}",
+            version="v1",
+            role_code=role_code,
+            role_name=role_code.replace("_", " ").title(),
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            is_active=True,
+            created_by=created_by,
+            company=company,
+        )
+
     # -- get_comparable_roles / get_eligible_candidates --------------------
 
     def test_get_comparable_roles_groups_by_role_and_counts_distinct_candidates(self):
@@ -445,13 +470,14 @@ class CandidateComparisonFullFlowApiTests(TestCase):
             email="roles-b2c@example.com", password="testpass123",
             first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
         )
+        driver_rule_set = self._make_rule_set(created_by=user, company=None, role_code="driver")
         self._make_scored_candidate(
             created_by=user, company=None, suffix="r1", role_code="driver",
-            dimension_percentages={"SAFETY": 80}, not_applicable={"HYGIENE"},
+            dimension_percentages={"SAFETY": 80}, not_applicable={"HYGIENE"}, rule_set=driver_rule_set,
         )
         self._make_scored_candidate(
             created_by=user, company=None, suffix="r2", role_code="driver",
-            dimension_percentages={"SAFETY": 70}, not_applicable={"HYGIENE"},
+            dimension_percentages={"SAFETY": 70}, not_applicable={"HYGIENE"}, rule_set=driver_rule_set,
         )
         self._make_scored_candidate(
             created_by=user, company=None, suffix="r3", role_code="domestic_worker",
@@ -491,16 +517,17 @@ class CandidateComparisonFullFlowApiTests(TestCase):
             email="driver-b2c@example.com", password="testpass123",
             first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
         )
+        driver_rule_set = self._make_rule_set(created_by=user, company=None, role_code="driver")
         alice, _ = self._make_scored_candidate(
             created_by=user, company=None, suffix="d1", role_code="driver",
             dimension_percentages={"SAFETY": 90, "PRACTICAL_TASKS": 80, "BEHAVIORAL": 70, "COMMUNICATION": 60},
-            not_applicable={"HYGIENE"},
+            not_applicable={"HYGIENE"}, rule_set=driver_rule_set,
             readiness_status="READY", assessed=4, required=4,
         )
         bob, _ = self._make_scored_candidate(
             created_by=user, company=None, suffix="d2", role_code="driver",
             dimension_percentages={"SAFETY": 50, "PRACTICAL_TASKS": 60, "BEHAVIORAL": 85, "COMMUNICATION": 90},
-            not_applicable={"HYGIENE"},
+            not_applicable={"HYGIENE"}, rule_set=driver_rule_set,
             readiness_status="PARTIALLY_READY", requires_human_review=True, assessed=3, required=4,
         )
 
@@ -537,13 +564,14 @@ class CandidateComparisonFullFlowApiTests(TestCase):
             email="domestic-b2c@example.com", password="testpass123",
             first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
         )
+        dw_rule_set = self._make_rule_set(created_by=user, company=None, role_code="domestic_worker")
         alice, _ = self._make_scored_candidate(
             created_by=user, company=None, suffix="n1", role_code="domestic_worker",
-            dimension_percentages={"SAFETY": 90, "PRACTICAL_TASKS": 80, "BEHAVIORAL": 70},
+            dimension_percentages={"SAFETY": 90, "PRACTICAL_TASKS": 80, "BEHAVIORAL": 70}, rule_set=dw_rule_set,
         )
         bob, _ = self._make_scored_candidate(
             created_by=user, company=None, suffix="n2", role_code="domestic_worker",
-            dimension_percentages={"SAFETY": 60, "PRACTICAL_TASKS": 95, "BEHAVIORAL": 65},
+            dimension_percentages={"SAFETY": 60, "PRACTICAL_TASKS": 95, "BEHAVIORAL": 65}, rule_set=dw_rule_set,
         )
 
         entries = build_full_comparison(
@@ -590,15 +618,16 @@ class CandidateComparisonFullFlowApiTests(TestCase):
             email="diff-b2c@example.com", password="testpass123",
             first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
         )
+        diff_rule_set = self._make_rule_set(created_by=user, company=None, role_code="driver")
         alice, _ = self._make_scored_candidate(
             created_by=user, company=None, suffix="k1", role_code="driver",
             dimension_percentages={"SAFETY": 95, "PRACTICAL_TASKS": 60, "BEHAVIORAL": 55, "COMMUNICATION": 90},
-            not_applicable={"HYGIENE"},
+            not_applicable={"HYGIENE"}, rule_set=diff_rule_set,
         )
         bob, _ = self._make_scored_candidate(
             created_by=user, company=None, suffix="k2", role_code="driver",
             dimension_percentages={"SAFETY": 40, "PRACTICAL_TASKS": 58, "BEHAVIORAL": 90, "COMMUNICATION": 50},
-            not_applicable={"HYGIENE"},
+            not_applicable={"HYGIENE"}, rule_set=diff_rule_set,
         )
         entries = build_full_comparison(
             owner_type="USER", owner=user, role_code="driver",
@@ -697,15 +726,16 @@ class CandidateComparisonFullFlowApiTests(TestCase):
             email="b2c-full@example.com", password="testpass123",
             first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
         )
+        full_rule_set = self._make_rule_set(created_by=user, company=None, role_code="driver")
         alice, _ = self._make_scored_candidate(
             created_by=user, company=None, suffix="f1", role_code="driver",
             dimension_percentages={"SAFETY": 90, "PRACTICAL_TASKS": 80, "BEHAVIORAL": 70, "COMMUNICATION": 60},
-            not_applicable={"HYGIENE"},
+            not_applicable={"HYGIENE"}, rule_set=full_rule_set,
         )
         bob, _ = self._make_scored_candidate(
             created_by=user, company=None, suffix="f2", role_code="driver",
             dimension_percentages={"SAFETY": 50, "PRACTICAL_TASKS": 60, "BEHAVIORAL": 85, "COMMUNICATION": 90},
-            not_applicable={"HYGIENE"},
+            not_applicable={"HYGIENE"}, rule_set=full_rule_set,
         )
         self.client.force_authenticate(user)
 
@@ -725,15 +755,16 @@ class CandidateComparisonFullFlowApiTests(TestCase):
             email="b2c-pdf@example.com", password="testpass123",
             first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
         )
+        pdf_rule_set = self._make_rule_set(created_by=user, company=None, role_code="driver")
         alice, _ = self._make_scored_candidate(
             created_by=user, company=None, suffix="p1", role_code="driver",
             dimension_percentages={"SAFETY": 90, "PRACTICAL_TASKS": 80, "BEHAVIORAL": 70, "COMMUNICATION": 60},
-            not_applicable={"HYGIENE"},
+            not_applicable={"HYGIENE"}, rule_set=pdf_rule_set,
         )
         bob, _ = self._make_scored_candidate(
             created_by=user, company=None, suffix="p2", role_code="driver",
             dimension_percentages={"SAFETY": 50, "PRACTICAL_TASKS": 60, "BEHAVIORAL": 85, "COMMUNICATION": 90},
-            not_applicable={"HYGIENE"},
+            not_applicable={"HYGIENE"}, rule_set=pdf_rule_set,
         )
         self.client.force_authenticate(user)
 
@@ -756,6 +787,86 @@ class CandidateComparisonFullFlowApiTests(TestCase):
         response = self.client.get("/api/v1/dashboard/b2c/candidate-comparison/eligible-candidates")
 
         self.assertEqual(response.status_code, 400)
+
+    # -- assessment-version compatibility (spec item 2) ----------------------
+    # Nothing in the data model retires an older ScoringRuleSet once a newer
+    # one is added for the same role (is_active is never auto-flipped), so
+    # these lock down that Candidate Comparison itself refuses to mix a
+    # candidate scored under a superseded rule set in with one scored under
+    # the role's current rule set - matching exactly what a brand-new
+    # evaluation would be scored against today (ScoringService._resolve_rule_set).
+
+    def test_get_eligible_candidates_excludes_a_candidate_scored_under_a_superseded_rule_set(self):
+        user = User.objects.create_user(
+            email="version-eligible-b2c@example.com", password="testpass123",
+            first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        old_rule_set = self._make_rule_set(created_by=user, company=None, role_code="driver")
+        stale, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="v1", role_code="driver",
+            dimension_percentages={"SAFETY": 80}, not_applicable={"HYGIENE"}, rule_set=old_rule_set,
+        )
+        # A later rule-set change for the same role, created after `stale`
+        # was already scored - exactly the real-world "rules updated since
+        # this candidate's assessment" scenario.
+        new_rule_set = self._make_rule_set(created_by=user, company=None, role_code="driver")
+        current, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="v2", role_code="driver",
+            dimension_percentages={"SAFETY": 75}, not_applicable={"HYGIENE"}, rule_set=new_rule_set,
+        )
+
+        eligible = get_eligible_candidates(owner_type="USER", owner=user, role_code="driver")
+
+        self.assertEqual([c["candidate_id"] for c in eligible], [str(current.public_id)])
+
+    def test_get_comparable_roles_does_not_count_a_candidate_on_a_superseded_rule_set(self):
+        user = User.objects.create_user(
+            email="version-roles-b2c@example.com", password="testpass123",
+            first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        old_rule_set = self._make_rule_set(created_by=user, company=None, role_code="driver")
+        self._make_scored_candidate(
+            created_by=user, company=None, suffix="vr1", role_code="driver",
+            dimension_percentages={"SAFETY": 80}, not_applicable={"HYGIENE"}, rule_set=old_rule_set,
+        )
+        new_rule_set = self._make_rule_set(created_by=user, company=None, role_code="driver")
+        self._make_scored_candidate(
+            created_by=user, company=None, suffix="vr2", role_code="driver",
+            dimension_percentages={"SAFETY": 75}, not_applicable={"HYGIENE"}, rule_set=new_rule_set,
+        )
+
+        roles = get_comparable_roles(owner_type="USER", owner=user)
+
+        by_code = {r["role_code"]: r for r in roles}
+        self.assertEqual(by_code["driver"]["candidate_count"], 1)
+
+    def test_build_full_comparison_excludes_a_stale_rule_set_candidate_even_if_explicitly_requested(self):
+        """Defense in depth: even if a caller passes the stale candidate's
+        id directly (bypassing step 2's eligible-candidates list), the
+        comparison itself must still never place them alongside a
+        current-rule-set candidate."""
+        user = User.objects.create_user(
+            email="version-build-b2c@example.com", password="testpass123",
+            first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        old_rule_set = self._make_rule_set(created_by=user, company=None, role_code="driver")
+        stale, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="vb1", role_code="driver",
+            dimension_percentages={"SAFETY": 80}, not_applicable={"HYGIENE"}, rule_set=old_rule_set,
+        )
+        new_rule_set = self._make_rule_set(created_by=user, company=None, role_code="driver")
+        current, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="vb2", role_code="driver",
+            dimension_percentages={"SAFETY": 75}, not_applicable={"HYGIENE"}, rule_set=new_rule_set,
+        )
+
+        entries = build_full_comparison(
+            owner_type="USER", owner=user, role_code="driver",
+            candidate_ids=[str(stale.public_id), str(current.public_id)],
+            language="en", actor=user,
+        )
+
+        self.assertEqual([e["candidate_id"] for e in entries], [str(current.public_id)])
 
 
 class DashboardParityChartsApiTests(TestCase):

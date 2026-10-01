@@ -1,6 +1,9 @@
+import json
 import shutil
 import tempfile
+from unittest.mock import patch
 
+import requests
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.utils import timezone
@@ -869,3 +872,144 @@ class CertificateReuseTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_402_PAYMENT_REQUIRED, response.data)
         self.assertEqual(response.data["code"], "no_slots_available")
         self.assertFalse(CertificateAccessGrant.objects.filter(certificate=self.certificate).exists())
+
+
+class PassportFieldExtractionServiceTests(APITestCase):
+    """Unit coverage for the pure extraction function - no HTTP layer, no
+    fixtures, just the OpenAI-call-and-parse contract."""
+
+    def _fake_openai_response(self, content_dict):
+        class FakeResponse:
+            status_code = 200
+            headers = {}
+
+            def json(self):
+                return {"choices": [{"message": {"content": json.dumps(content_dict)}}]}
+
+            def raise_for_status(self):
+                pass
+
+        return FakeResponse()
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_INTERPRETATION_MODEL="gpt-4o-mini")
+    def test_extracts_fields_from_a_successful_response(self):
+        from api.candidates.document_extraction_services import extract_passport_fields
+
+        fake_response = self._fake_openai_response(
+            {"first_name": "Selam", "last_name": "Tesfaye", "passport_id": "EP1234567"}
+        )
+        with patch("api.candidates.document_extraction_services.requests.post", return_value=fake_response):
+            result = extract_passport_fields(make_image("passport.jpg"))
+
+        self.assertEqual(result, {"first_name": "Selam", "last_name": "Tesfaye", "passport_id": "EP1234567"})
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_INTERPRETATION_MODEL="gpt-4o-mini")
+    def test_missing_fields_come_back_as_none_not_omitted(self):
+        from api.candidates.document_extraction_services import extract_passport_fields
+
+        fake_response = self._fake_openai_response({"first_name": "Selam", "last_name": None, "passport_id": None})
+        with patch("api.candidates.document_extraction_services.requests.post", return_value=fake_response):
+            result = extract_passport_fields(make_image("passport.jpg"))
+
+        self.assertEqual(result, {"first_name": "Selam", "last_name": None, "passport_id": None})
+
+    @override_settings(OPENAI_API_KEY="", OPENAI_INTERPRETATION_MODEL="gpt-4o-mini")
+    def test_no_api_key_configured_returns_empty_without_calling_out(self):
+        from api.candidates.document_extraction_services import extract_passport_fields
+
+        with patch("api.candidates.document_extraction_services.requests.post") as mock_post:
+            result = extract_passport_fields(make_image("passport.jpg"))
+
+        mock_post.assert_not_called()
+        self.assertEqual(result, {"first_name": None, "last_name": None, "passport_id": None})
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_INTERPRETATION_MODEL="gpt-4o-mini")
+    def test_provider_error_is_swallowed_not_raised(self):
+        """A failed/unreachable vision call must never surface as an error
+        to the candidate-creation flow - it's a convenience pre-fill, not a
+        required step."""
+        from api.candidates.document_extraction_services import extract_passport_fields
+
+        with patch("api.candidates.document_extraction_services.requests.post", side_effect=requests.ConnectionError("boom")):
+            result = extract_passport_fields(make_image("passport.jpg"))
+
+        self.assertEqual(result, {"first_name": None, "last_name": None, "passport_id": None})
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_INTERPRETATION_MODEL="gpt-4o-mini")
+    def test_malformed_json_content_is_swallowed_not_raised(self):
+        from api.candidates.document_extraction_services import extract_passport_fields
+
+        class FakeResponse:
+            status_code = 200
+            headers = {}
+
+            def json(self):
+                return {"choices": [{"message": {"content": "not valid json"}}]}
+
+            def raise_for_status(self):
+                pass
+
+        with patch("api.candidates.document_extraction_services.requests.post", return_value=FakeResponse()):
+            result = extract_passport_fields(make_image("passport.jpg"))
+
+        self.assertEqual(result, {"first_name": None, "last_name": None, "passport_id": None})
+
+
+class CandidateDocumentExtractionEndpointTests(APITestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._media_dir = tempfile.mkdtemp(prefix="candidate-extract-tests-")
+        cls._override = override_settings(MEDIA_ROOT=cls._media_dir)
+        cls._override.enable()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._override.disable()
+        shutil.rmtree(cls._media_dir, ignore_errors=True)
+        super().tearDownClass()
+
+    def authenticate(self, user, password="Password123!"):
+        response = self.client.post(
+            "/api/v1/auth/login", {"email": user.email, "password": password}, format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access']}")
+
+    def test_requires_a_document_file(self):
+        user = User.objects.create_user(
+            email="extract-nodoc@example.com", password="Password123!",
+            first_name="No", last_name="Doc", role=Roles.B2C, is_verified=True,
+        )
+        self.authenticate(user)
+
+        response = self.client.post("/api/v1/candidates/candidates/extract-document", {}, format="multipart")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch("api.candidates.views.extract_passport_fields")
+    def test_b2c_user_can_extract_fields_from_an_uploaded_document(self, mock_extract):
+        mock_extract.return_value = {"first_name": "Selam", "last_name": "Tesfaye", "passport_id": "EP1234567"}
+        user = User.objects.create_user(
+            email="extract-b2c@example.com", password="Password123!",
+            first_name="Extract", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        self.authenticate(user)
+
+        response = self.client.post(
+            "/api/v1/candidates/candidates/extract-document",
+            {"document": make_image("passport.jpg")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data, {"first_name": "Selam", "last_name": "Tesfaye", "passport_id": "EP1234567"})
+        mock_extract.assert_called_once()
+
+    def test_unauthenticated_request_is_rejected(self):
+        response = self.client.post(
+            "/api/v1/candidates/candidates/extract-document",
+            {"document": make_image("passport.jpg")},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

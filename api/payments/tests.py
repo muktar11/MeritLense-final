@@ -3060,6 +3060,129 @@ class PackageRequestServiceTests(TestCase):
                 unit_amount=Decimal("100.00"), billing_type="ONE_TIME",
             )
 
+    # -- confirm_bank_transfer: the manual alternative to Pay Online -------
+
+    def _approve_for_bank_transfer_tests(self, mock_stripe, mock_get_or_create_customer, *, billing_type="RECURRING"):
+        from api.payments.package_request_services import PackageRequestService
+
+        self._mock_stripe_for_approval(mock_stripe)
+        mock_get_or_create_customer.return_value = Customer.objects.create(
+            user=self.owner, stripe_customer_id=f"cus_pkgreq_bt_{billing_type}", email=self.owner.email,
+        )
+        package_request = PackageRequestService.submit(
+            company=self.company, requested_by=self.owner, deal_type=self.DealRecord.ENTERPRISE,
+            requested_slot_grant=1000, requested_points_grant=10000,
+        )
+        return PackageRequestService.approve(
+            package_request=package_request, actor=self.superadmin,
+            slot_grant=200, points_grant=2000, unit_amount=Decimal("3500.00"), billing_type=billing_type,
+        )
+
+    @patch("api.payments.services.StripeService.get_or_create_customer")
+    @patch("api.payments.package_request_services.stripe")
+    def test_confirm_bank_transfer_activates_same_as_pay_online(self, mock_stripe, mock_get_or_create_customer):
+        from api.payments.invoice_services import _build_snapshot
+        from api.payments.package_request_services import PackageRequestService
+
+        approved = self._approve_for_bank_transfer_tests(mock_stripe, mock_get_or_create_customer)
+        invoice_before = approved.invoice
+        invoice_number = invoice_before.number
+        mail.outbox.clear()
+
+        ops_user = User.objects.create_user(
+            email="pkgreq-ops@example.com", password="Password123!",
+            first_name="Ops", last_name="User", role=Roles.SUPERADMIN, is_verified=True,
+        )
+
+        confirmed = PackageRequestService.confirm_bank_transfer(
+            package_request=approved, actor=ops_user, note="Wire received, reconciled against bank statement.",
+        )
+
+        self.assertEqual(confirmed.status, "PAID")
+        self.assertEqual(confirmed.payment_method, "BANK_TRANSFER")
+        self.assertEqual(confirmed.confirmed_by, ops_user)
+        self.assertIsNotNone(confirmed.confirmed_at)
+        self.assertIsNotNone(confirmed.deal_record)
+        self.assertEqual(confirmed.deal_record.slot_grant, 200)
+
+        # Same invoice, same number - never a new one.
+        confirmed.invoice.refresh_from_db()
+        self.assertEqual(confirmed.invoice.id, invoice_before.id)
+        self.assertEqual(confirmed.invoice.number, invoice_number)
+        self.assertEqual(confirmed.invoice.status, "PAID")
+        self.assertEqual(confirmed.invoice.amount_remaining, Decimal("0.00"))
+        self.assertEqual(confirmed.invoice.amount_paid, confirmed.invoice.amount_due)
+        self.assertIsNotNone(confirmed.invoice.paid_at)
+
+        # The paid invoice follows the same approved paid-invoice logic:
+        # Amount Due = 0, Pay Online/Bank Transfer gone, Bank Transfer shown
+        # as the payment method actually used.
+        snapshot = _build_snapshot(confirmed.invoice)
+        self.assertTrue(snapshot["is_paid"])
+        self.assertEqual(snapshot["amount_due_display"], "0.00")
+        self.assertIsNone(snapshot["pay_online_url"])
+        self.assertEqual(snapshot["payment_method_label"], "Bank Transfer")
+
+        self.assertEqual(mail.outbox[-1].to, [self.owner.email])
+        self.assertTrue(mail.outbox[-1].attachments)
+
+    @patch("api.payments.services.StripeService.get_or_create_customer")
+    @patch("api.payments.package_request_services.stripe")
+    def test_confirm_bank_transfer_honors_an_explicit_payment_date(self, mock_stripe, mock_get_or_create_customer):
+        from api.payments.package_request_services import PackageRequestService
+
+        approved = self._approve_for_bank_transfer_tests(mock_stripe, mock_get_or_create_customer)
+        backdated = (timezone.now() - timezone.timedelta(days=3)).date()
+
+        confirmed = PackageRequestService.confirm_bank_transfer(
+            package_request=approved, actor=self.superadmin, payment_date=timezone.datetime.combine(
+                backdated, timezone.datetime.min.time(), tzinfo=timezone.get_current_timezone(),
+            ),
+        )
+
+        self.assertEqual(confirmed.invoice.paid_at.date(), backdated)
+
+    @patch("api.payments.services.StripeService.get_or_create_customer")
+    @patch("api.payments.package_request_services.stripe")
+    def test_confirm_bank_transfer_rejects_a_request_not_yet_approved(self, mock_stripe, mock_get_or_create_customer):
+        from api.payments.package_request_services import PackageRequestService, PackageRequestError
+
+        package_request = PackageRequestService.submit(
+            company=self.company, requested_by=self.owner, deal_type=self.DealRecord.STARTER,
+        )
+
+        with self.assertRaises(PackageRequestError):
+            PackageRequestService.confirm_bank_transfer(package_request=package_request, actor=self.superadmin)
+
+    @patch("api.payments.services.StripeService.get_or_create_customer")
+    @patch("api.payments.package_request_services.stripe")
+    def test_confirm_bank_transfer_rejects_an_already_paid_request(self, mock_stripe, mock_get_or_create_customer):
+        from api.payments.package_request_services import PackageRequestService, PackageRequestError
+
+        approved = self._approve_for_bank_transfer_tests(mock_stripe, mock_get_or_create_customer)
+        PackageRequestService.activate_after_payment(approved.public_id)
+
+        with self.assertRaises(PackageRequestError):
+            PackageRequestService.confirm_bank_transfer(package_request=approved, actor=self.superadmin)
+
+    @patch("api.payments.services.StripeService.get_or_create_customer")
+    @patch("api.payments.package_request_services.stripe")
+    def test_pay_online_webhook_path_still_works_unaffected_by_bank_transfer_support(self, mock_stripe, mock_get_or_create_customer):
+        """Regression guard for the _activate refactor: Stripe-confirmed
+        payments still activate exactly as before, with payment_method
+        recorded as STRIPE and no confirmed_by/confirmed_at (no human
+        actor in a webhook)."""
+        from api.payments.package_request_services import PackageRequestService
+
+        approved = self._approve_for_bank_transfer_tests(mock_stripe, mock_get_or_create_customer)
+
+        activated = PackageRequestService.activate_after_payment(approved.public_id)
+
+        self.assertEqual(activated.status, "PAID")
+        self.assertEqual(activated.payment_method, "STRIPE")
+        self.assertIsNone(activated.confirmed_by)
+        self.assertIsNone(activated.confirmed_at)
+
 
 class PackageRequestEndpointTests(APITestCase):
     def setUp(self):
@@ -3213,6 +3336,72 @@ class PackageRequestEndpointTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    @patch("api.payments.services.StripeService.get_or_create_customer")
+    @patch("api.payments.package_request_services.stripe")
+    def _approve_via_endpoint(self, mock_stripe, mock_get_or_create_customer):
+        """Not a test itself - shared setup for the confirm-bank-transfer
+        endpoint tests below, approving a fresh request as the SuperAdmin
+        the same way test_superadmin_can_approve_with_their_own_terms does."""
+        from api.payments.package_request_services import PackageRequestService
+        from api.payments.models import DealRecord
+
+        mock_stripe.Product.create.return_value = MagicMock(id="prod_ep_bt")
+        mock_stripe.Price.create.return_value = MagicMock(id="price_ep_bt")
+        mock_stripe.PaymentLink.create.return_value = MagicMock(id="plink_ep_bt", url="https://buy.stripe.com/test_ep_bt")
+        mock_get_or_create_customer.return_value = Customer.objects.create(
+            user=self.owner, stripe_customer_id="cus_pkgreq_endpoint_bt", email=self.owner.email,
+        )
+
+        package_request = PackageRequestService.submit(
+            company=self.company, requested_by=self.owner, deal_type=DealRecord.ENTERPRISE, requested_slot_grant=1000,
+        )
+        return PackageRequestService.approve(
+            package_request=package_request, actor=self.superadmin,
+            slot_grant=200, points_grant=2000, unit_amount=Decimal("3500.00"), billing_type="RECURRING",
+        )
+
+    def test_superadmin_can_confirm_a_bank_transfer(self):
+        approved = self._approve_via_endpoint()
+        self._login(self.superadmin)
+
+        response = self.client.post(
+            f"/api/v1/payments/admin/package-requests/{approved.id}/confirm-bank-transfer",
+            {"note": "Confirmed against October bank statement."}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], "PAID")
+        self.assertEqual(response.data["payment_method"], "BANK_TRANSFER")
+        self.assertEqual(response.data["confirmed_by_name"], self.superadmin.get_full_name())
+        self.assertIsNotNone(response.data["confirmed_at"])
+        approved.refresh_from_db()
+        self.assertIsNotNone(approved.deal_record)
+
+    def test_b2b_owner_cannot_confirm_a_bank_transfer(self):
+        """Ops-only action - the requesting company itself must not be able
+        to self-confirm payment, same sensitivity precedent as approve."""
+        approved = self._approve_via_endpoint()
+        self._login(self.owner)
+
+        response = self.client.post(
+            f"/api/v1/payments/admin/package-requests/{approved.id}/confirm-bank-transfer", {}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_confirm_bank_transfer_endpoint_rejects_a_pending_request(self):
+        from api.payments.package_request_services import PackageRequestService
+        from api.payments.models import DealRecord
+
+        package_request = PackageRequestService.submit(company=self.company, requested_by=self.owner, deal_type=DealRecord.STARTER)
+        self._login(self.superadmin)
+
+        response = self.client.post(
+            f"/api/v1/payments/admin/package-requests/{package_request.id}/confirm-bank-transfer", {}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
 
 
 class GenerateInvoicePdfsCommandTests(TestCase):

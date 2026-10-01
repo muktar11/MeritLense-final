@@ -12,7 +12,14 @@ from api.core.permisssions import IsB2CUser
 from api.evaluations.models import Evaluation
 from api.payments.entitlement_services import EntitlementService
 from api.payments.models import PackageBalance
-from .comparison_services import build_candidate_comparison_entry
+from .comparison_services import (
+    build_candidate_comparison_entry,
+    build_full_comparison,
+    compute_key_differences,
+    get_comparable_roles,
+    get_eligible_candidates,
+)
+from .comparison_pdf_services import render_comparison_pdf
 from .serializers import (
     DashboardStatsSerializer, RecentCandidateSerializer, RecentEvaluationSerializer,
     CandidateComparisonSerializer, EvaluationStatusDistributionSerializer,
@@ -408,3 +415,77 @@ class B2CMonthlyActivityView(APIView):
 
         serializer = MonthlyActivitySerializer(result, many=True)
         return Response(serializer.data)
+
+
+class B2CComparisonRolesView(APIView):
+    """Step 1 of role-based Candidate Comparison: which Job Roles actually
+    have comparable (scored) candidates to choose from."""
+    permission_classes = [IsAuthenticated, IsB2CUser]
+
+    def get(self, request):
+        return Response(get_comparable_roles(owner_type="USER", owner=request.user))
+
+
+class B2CComparisonEligibleCandidatesView(APIView):
+    """Step 2: candidates eligible for comparison under a chosen role."""
+    permission_classes = [IsAuthenticated, IsB2CUser]
+
+    def get(self, request):
+        role_code = request.query_params.get('role_code', '').strip()
+        if not role_code:
+            return Response({'error': 'role_code is required'}, status=400)
+        return Response(get_eligible_candidates(owner_type="USER", owner=request.user, role_code=role_code))
+
+
+class B2CComparisonFullView(APIView):
+    """Steps 3+4: the real Candidate Summary + Competency Comparison data
+    for 2-4 selected, role-eligible candidates."""
+    permission_classes = [IsAuthenticated, IsB2CUser]
+
+    def get(self, request):
+        role_code = request.query_params.get('role_code', '').strip()
+        raw_ids = request.query_params.get('candidate_ids', '')
+        candidate_ids = [v.strip() for v in raw_ids.split(',') if v.strip()]
+        if not role_code or not (2 <= len(candidate_ids) <= 4):
+            return Response({'error': 'role_code and 2-4 candidate_ids are required'}, status=400)
+
+        language = "ar" if request.query_params.get('lang') == "ar" else "en"
+        entries = build_full_comparison(
+            owner_type="USER", owner=request.user, role_code=role_code,
+            candidate_ids=candidate_ids, language=language, actor=request.user,
+        )
+        return Response({
+            'role_code': role_code,
+            'role_name': dict((r['role_code'], r['role_name']) for r in get_comparable_roles(owner_type="USER", owner=request.user)).get(role_code, role_code),
+            'candidates': entries,
+            'key_differences': compute_key_differences(entries, language=language),
+        })
+
+
+class B2CComparisonPdfView(APIView):
+    """Spec item 8: backend-rendered bilingual Comparison PDF, same
+    structure as the on-screen page."""
+    permission_classes = [IsAuthenticated, IsB2CUser]
+
+    def get(self, request):
+        role_code = request.query_params.get('role_code', '').strip()
+        raw_ids = request.query_params.get('candidate_ids', '')
+        candidate_ids = [v.strip() for v in raw_ids.split(',') if v.strip()]
+        if not role_code or not (2 <= len(candidate_ids) <= 4):
+            return Response({'error': 'role_code and 2-4 candidate_ids are required'}, status=400)
+
+        language = "ar" if request.query_params.get('lang') == "ar" else "en"
+        role_name = dict((r['role_code'], r['role_name']) for r in get_comparable_roles(owner_type="USER", owner=request.user)).get(role_code, role_code)
+        entries = build_full_comparison(
+            owner_type="USER", owner=request.user, role_code=role_code,
+            candidate_ids=candidate_ids, language=language, actor=request.user,
+        )
+        if len(entries) < 2:
+            return Response({'error': 'At least 2 comparable candidates are required.'}, status=400)
+
+        key_differences = compute_key_differences(entries, language=language)
+        pdf_bytes = render_comparison_pdf(role_name=role_name, entries=entries, key_differences=key_differences, language=language)
+        from django.http import HttpResponse
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="candidate-comparison.pdf"'
+        return response

@@ -272,6 +272,22 @@ class PackageRequestBilling:
     ]
 
 
+class PackageRequestPaymentMethod:
+    """How an approved PackageRequest was actually paid - STRIPE is set
+    automatically once the Payment Link's payment is confirmed by webhook
+    (PackageRequestService.activate_after_payment); BANK_TRANSFER is set
+    only by a SuperAdmin/Ops manual confirmation
+    (PackageRequestService.confirm_bank_transfer) - there is no automatic
+    bank-transfer reconciliation."""
+    STRIPE = "STRIPE"
+    BANK_TRANSFER = "BANK_TRANSFER"
+
+    CHOICES = [
+        (STRIPE, "Stripe (Pay Online)"),
+        (BANK_TRANSFER, "Bank Transfer"),
+    ]
+
+
 class EvaluationLayer:
     """Which of the three evaluation layers a scored competency counts
     toward. Final score = 50% Cognitive + 30% Behavioral + 20% Task
@@ -1025,6 +1041,7 @@ class AuditLogAction:
     PACKAGE_REQUEST_APPROVED = "PACKAGE_REQUEST_APPROVED"
     PACKAGE_REQUEST_PAID = "PACKAGE_REQUEST_PAID"
     PACKAGE_REQUEST_DENIED = "PACKAGE_REQUEST_DENIED"
+    PACKAGE_REQUEST_BANK_TRANSFER_CONFIRMED = "PACKAGE_REQUEST_BANK_TRANSFER_CONFIRMED"
 
     PAYMENT_SUCCEEDED = "PAYMENT_SUCCEEDED"
     PAYMENT_FAILED = "PAYMENT_FAILED"
@@ -1224,6 +1241,7 @@ class AuditLogAction:
         (PACKAGE_REQUEST_APPROVED, "Package Request Approved"),
         (PACKAGE_REQUEST_PAID, "Package Request Paid"),
         (PACKAGE_REQUEST_DENIED, "Package Request Denied"),
+        (PACKAGE_REQUEST_BANK_TRANSFER_CONFIRMED, "Package Request Bank Transfer Confirmed"),
 
         (PAYMENT_SUCCEEDED, "Payment Succeeded"),
         (PAYMENT_FAILED, "Payment Failed"),

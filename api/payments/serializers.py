@@ -117,6 +117,8 @@ class PackageRequestSerializer(PublicIdModelSerializer):
     requested_by_email = serializers.EmailField(source='requested_by.email', read_only=True)
     reviewed_by_name = serializers.SerializerMethodField()
     deal_record_id = serializers.PrimaryKeyRelatedField(source='deal_record', read_only=True)
+    payment_method_display = serializers.CharField(source='get_payment_method_display', read_only=True)
+    confirmed_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = PackageRequest
@@ -126,12 +128,16 @@ class PackageRequestSerializer(PublicIdModelSerializer):
             'status', 'status_display', 'decision_reason', 'reviewed_by', 'reviewed_by_name', 'reviewed_at',
             'billing_type', 'approved_slot_grant', 'approved_points_grant', 'unit_amount', 'currency',
             'stripe_payment_link_url', 'paid_at',
+            'payment_method', 'payment_method_display', 'confirmed_by_name', 'confirmed_at',
             'deal_record_id', 'created_at', 'updated_at',
         ]
         read_only_fields = fields
 
     def get_reviewed_by_name(self, obj):
         return obj.reviewed_by.get_full_name() if obj.reviewed_by else None
+
+    def get_confirmed_by_name(self, obj):
+        return obj.confirmed_by.get_full_name() if obj.confirmed_by else None
 
 
 class PackageRequestCreateSerializer(serializers.ModelSerializer):
@@ -160,6 +166,15 @@ class PackageRequestApproveSerializer(serializers.Serializer):
 
 class PackageRequestDenySerializer(serializers.Serializer):
     decision_reason = serializers.CharField(allow_blank=False)
+
+
+class PackageRequestConfirmBankTransferSerializer(serializers.Serializer):
+    """SuperAdmin/Ops manually confirming a bank-transfer payment for an
+    approved-but-unpaid request. payment_date lets Ops record the actual
+    date funds were received (e.g. confirming a few days after the wire
+    landed) rather than always defaulting to "now"."""
+    payment_date = serializers.DateField(required=False, allow_null=True)
+    note = serializers.CharField(required=False, allow_blank=True, default='')
 
 
 class PackageBalanceSerializer(PublicIdModelSerializer):

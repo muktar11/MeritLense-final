@@ -6,7 +6,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from api.core.constants import AuditLogAction, AuditLogCategory, PackageRequestBilling, PackageRequestStatus
+from api.core.constants import AuditLogAction, AuditLogCategory, PackageRequestBilling, PackageRequestPaymentMethod, PackageRequestStatus
 from api.core.public_ids import get_by_identifier
 from .models import DealRecord, Invoice, PackageRequest, Price, Subscription
 
@@ -183,35 +183,36 @@ class PackageRequestService:
         return package_request
 
     @classmethod
-    def activate_after_payment(cls, package_request_ref, *, stripe_subscription_id=None, current_period_end=None):
-        """Called from the payments webhook once Stripe confirms payment for
-        an approved request's Payment Link. Creates the real DealRecord plus
-        the Price/Subscription pair EntitlementService needs to actually
-        honor it. Idempotent - webhooks can be delivered more than once."""
-        from api.accounts.utils import send_package_request_payment_confirmed_email
-        from api.audit.services import AuditLogService
+    def _activate(
+        cls, package_request, *, payment_method, confirmed_by=None,
+        stripe_subscription_id=None, current_period_end=None, payment_date=None,
+    ):
+        """Shared activation core for both payment paths: creates the real
+        Price/Subscription/DealRecord, flips the request's Invoice to PAID
+        (€0.00 due, same invoice number), and regenerates its PDF - the
+        _build_snapshot.is_paid gate then renders the paid-invoice design
+        (Payment Confirmation box, no Pay Online/Bank Transfer) the next
+        time it's generated, unchanged.
+
+        Called by activate_after_payment (Stripe webhook, no human actor,
+        may carry a real stripe_subscription_id/current_period_end) and
+        confirm_bank_transfer (a real SuperAdmin/Ops actor, never a Stripe
+        subscription). Returns (package_request, deal_record, error) -
+        error is None on success, else "already_paid" or "not_approved"
+        (deal_record is None whenever error is set) - callers decide
+        whether that's a silent no-op (webhook, idempotent-by-design) or a
+        real error to surface (manual action)."""
         from .invoice_services import generate_invoice_pdf
         from .services import StripeService
-
-        try:
-            package_request = get_by_identifier(PackageRequest.objects.all(), package_request_ref)
-        except PackageRequest.DoesNotExist:
-            logger.warning("activate_after_payment: no PackageRequest found for %r", package_request_ref)
-            return None
 
         with transaction.atomic():
             package_request = PackageRequest.objects.select_for_update().get(pk=package_request.pk)
 
             if package_request.deal_record_id or package_request.status == PackageRequestStatus.PAID:
-                logger.info("activate_after_payment: package request %s already activated, skipping", package_request.public_id)
-                return package_request
+                return package_request, None, "already_paid"
 
             if package_request.status != PackageRequestStatus.APPROVED:
-                logger.warning(
-                    "activate_after_payment: package request %s is %s, not APPROVED - ignoring payment webhook",
-                    package_request.public_id, package_request.status,
-                )
-                return None
+                return package_request, None, "not_approved"
 
             local_price = Price.objects.create(
                 name=f"{package_request.company.name} - {package_request.get_deal_type_display()}",
@@ -262,7 +263,7 @@ class PackageRequestService:
             customer = StripeService().get_or_create_customer(package_request.requested_by)
             if customer is None:
                 logger.error(
-                    "activate_after_payment: could not resolve a Stripe customer for user %s - "
+                    "_activate: could not resolve a Stripe customer for user %s - "
                     "DealRecord %s created but no Subscription attached, entitlements will not resolve",
                     package_request.requested_by.id, deal_record.id,
                 )
@@ -283,23 +284,55 @@ class PackageRequestService:
             package_request.status = PackageRequestStatus.PAID
             package_request.paid_at = now
             package_request.deal_record = deal_record
-            package_request.save(update_fields=["status", "paid_at", "deal_record", "updated_at"])
+            package_request.payment_method = payment_method
+            update_fields = ["status", "paid_at", "deal_record", "payment_method", "updated_at"]
+            if confirmed_by is not None:
+                package_request.confirmed_by = confirmed_by
+                package_request.confirmed_at = now
+                update_fields += ["confirmed_by", "confirmed_at"]
+            package_request.save(update_fields=update_fields)
 
-            # Same Invoice created at approval, flipped to PAID/€0.00 due -
-            # _build_snapshot's is_paid gate then renders the existing
-            # paid-invoice design (Payment Confirmation box, no Payment
-            # Options) the next time this PDF is generated, unchanged.
             if package_request.invoice_id:
                 invoice = package_request.invoice
                 invoice.status = "PAID"
                 invoice.amount_paid = invoice.amount_due
                 invoice.amount_remaining = Decimal("0.00")
-                invoice.paid_at = now
+                invoice.paid_at = payment_date or now
                 invoice.save(update_fields=["status", "amount_paid", "amount_remaining", "paid_at", "updated_at"])
                 try:
                     generate_invoice_pdf(invoice)
                 except Exception:
                     logger.exception("Failed to regenerate paid invoice PDF for package request %s", package_request.public_id)
+
+        return package_request, deal_record, None
+
+    @classmethod
+    def activate_after_payment(cls, package_request_ref, *, stripe_subscription_id=None, current_period_end=None):
+        """Called from the payments webhook once Stripe confirms payment for
+        an approved request's Payment Link (Pay Online). Idempotent -
+        webhooks can be delivered more than once."""
+        from api.accounts.utils import send_package_request_payment_confirmed_email
+        from api.audit.services import AuditLogService
+
+        try:
+            package_request = get_by_identifier(PackageRequest.objects.all(), package_request_ref)
+        except PackageRequest.DoesNotExist:
+            logger.warning("activate_after_payment: no PackageRequest found for %r", package_request_ref)
+            return None
+
+        package_request, deal_record, error = cls._activate(
+            package_request, payment_method=PackageRequestPaymentMethod.STRIPE,
+            stripe_subscription_id=stripe_subscription_id, current_period_end=current_period_end,
+        )
+        if error == "already_paid":
+            logger.info("activate_after_payment: package request %s already activated, skipping", package_request.public_id)
+            return package_request
+        if error == "not_approved":
+            logger.warning(
+                "activate_after_payment: package request %s is %s, not APPROVED - ignoring payment webhook",
+                package_request.public_id, package_request.status,
+            )
+            return None
 
         AuditLogService.log_system(
             action=AuditLogAction.PACKAGE_REQUEST_PAID,
@@ -307,6 +340,41 @@ class PackageRequestService:
             description=f"Package request paid and activated: {package_request.company.name} ({package_request.deal_type})",
             resource=package_request,
             data={"deal_record_id": deal_record.id, "unit_amount": str(package_request.unit_amount)},
+        )
+
+        send_package_request_payment_confirmed_email(package_request.requested_by, package_request, deal_record)
+        return package_request
+
+    @classmethod
+    def confirm_bank_transfer(cls, *, package_request, actor, payment_date=None, note=""):
+        """A SuperAdmin/Ops manual alternative to Pay Online's automatic
+        Stripe-webhook confirmation (activate_after_payment), for a company
+        that paid an approved request by bank transfer instead. Manual only
+        by design - there is no automatic bank-transfer reconciliation.
+        Activates the same way (real DealRecord/Subscription, same invoice
+        flipped to PAID/€0.00 due, regenerated and re-emailed) but records
+        who confirmed it, when, and that the method was BANK_TRANSFER."""
+        from api.accounts.utils import send_package_request_payment_confirmed_email
+        from api.audit.services import AuditLogService
+
+        package_request, deal_record, error = cls._activate(
+            package_request, payment_method=PackageRequestPaymentMethod.BANK_TRANSFER,
+            confirmed_by=actor, payment_date=payment_date,
+        )
+        if error == "already_paid":
+            raise PackageRequestError("This request has already been paid and activated.")
+        if error == "not_approved":
+            raise PackageRequestError(
+                f"This request is {package_request.status.lower()}, not approved - nothing to confirm payment for."
+            )
+
+        AuditLogService.log(
+            user=actor,
+            action=AuditLogAction.PACKAGE_REQUEST_BANK_TRANSFER_CONFIRMED,
+            category=AuditLogCategory.SUBSCRIPTION,
+            description=f"Bank transfer payment confirmed: {package_request.company.name} ({package_request.deal_type})",
+            resource=package_request,
+            data={"deal_record_id": deal_record.id, "unit_amount": str(package_request.unit_amount), "note": note},
         )
 
         send_package_request_payment_confirmed_email(package_request.requested_by, package_request, deal_record)

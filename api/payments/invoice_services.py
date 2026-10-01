@@ -175,11 +175,18 @@ def _payment_method_label(invoice):
     the spec's own "Payment Method, where available" qualifier."""
     payment = invoice.stripe_payment_intent
     method = getattr(payment, "stripe_payment_method", None) if payment else None
-    if method is None:
-        return None
-    if method.method_type == PaymentMethodConstants.CARD and method.card_brand and method.card_last4:
-        return f"{method.card_brand.title()} •••• {method.card_last4}"
-    return method.get_method_type_display()
+    if method is not None:
+        if method.method_type == PaymentMethodConstants.CARD and method.card_brand and method.card_last4:
+            return f"{method.card_brand.title()} •••• {method.card_last4}"
+        return method.get_method_type_display()
+    # A PackageRequest-flow invoice (custom B2B deal) never gets a
+    # stripe_payment_intent linked, whether paid via the Pay Online link or
+    # manually confirmed - its payment method instead lives on the
+    # PackageRequest itself (see PackageRequestService._activate).
+    package_request = getattr(invoice, "source_package_request", None)
+    if package_request is not None and package_request.payment_method:
+        return package_request.get_payment_method_display()
+    return None
 
 
 def _line_items_context(invoice):

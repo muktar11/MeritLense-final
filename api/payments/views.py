@@ -27,6 +27,7 @@ from .serializers import (
     CreatePaymentIntentSerializer, AttachPaymentMethodSerializer, CreateSubscriptionSerializer,
     RefundPaymentSerializer, DealRecordSerializer, PackageBalanceSerializer, AdjustBalanceSerializer,
     PackageRequestSerializer, PackageRequestCreateSerializer, PackageRequestApproveSerializer, PackageRequestDenySerializer,
+    PackageRequestConfirmBankTransferSerializer,
 )
 from .services import PaymentIntentInitializationError, StripeService, invoice_pdf_email_attachments
 from .package_request_services import PackageRequestService, PackageRequestError
@@ -1311,6 +1312,30 @@ class AdminPackageRequestViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelView
         try:
             package_request = PackageRequestService.deny(
                 package_request=package_request, actor=request.user, **serializer.validated_data,
+            )
+        except PackageRequestError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(PackageRequestSerializer(package_request).data)
+
+    @action(detail=True, methods=['post'], url_path='confirm-bank-transfer')
+    def confirm_bank_transfer(self, request, id=None):
+        """The manual counterpart to Pay Online's automatic Stripe-webhook
+        confirmation - for a company that paid an approved request by bank
+        transfer instead. No automatic bank reconciliation exists; a
+        SuperAdmin/Ops user confirms it here once the transfer is verified."""
+        package_request = self.get_object()
+        serializer = PackageRequestConfirmBankTransferSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        payment_date = serializer.validated_data.get('payment_date')
+        if payment_date is not None:
+            payment_date = timezone.make_aware(timezone.datetime.combine(payment_date, timezone.datetime.min.time()))
+
+        try:
+            package_request = PackageRequestService.confirm_bank_transfer(
+                package_request=package_request, actor=request.user,
+                payment_date=payment_date, note=serializer.validated_data.get('note', ''),
             )
         except PackageRequestError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)

@@ -6,7 +6,7 @@ from api.core.models import TimeStampedModel
 from api.core.constants import (
     CompanySize, PaymentStatus, PaymentMethodConstants,
     SubscriptionStatus, BillingInterval, InvoiceStatus, InterviewEvaluationTier,
-    PackageRequestStatus, PackageRequestBilling
+    PackageRequestStatus, PackageRequestBilling, PackageRequestPaymentMethod
 )
 from api.accounts.models import User, Company
 
@@ -905,6 +905,24 @@ class PackageRequest(TimeStampedModel):
     stripe_payment_link_id = models.CharField(max_length=255, blank=True)
     stripe_payment_link_url = models.URLField(blank=True, max_length=500)
     paid_at = models.DateTimeField(null=True, blank=True)
+
+    # How this request was actually paid - set automatically to STRIPE once
+    # the Payment Link's payment is confirmed by webhook, or to
+    # BANK_TRANSFER only by a SuperAdmin/Ops manual confirmation (see
+    # PackageRequestService.confirm_bank_transfer). confirmed_by/
+    # confirmed_at are only ever set for the manual path - Stripe
+    # confirmation has no human actor, same reasoning as reviewed_by above
+    # being null until a human actually reviews the request.
+    payment_method = models.CharField(max_length=20, choices=PackageRequestPaymentMethod.CHOICES, blank=True)
+    confirmed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+',
+        help_text="Who manually confirmed a bank-transfer payment - null for Stripe-confirmed payments."
+    )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
 
     invoice = models.OneToOneField(
         'Invoice',

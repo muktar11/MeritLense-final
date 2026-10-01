@@ -32,15 +32,52 @@ def _scored_summaries_for_owner(owner_type, owner):
     )
 
 
+def _current_rule_set_id(owner_type, owner, role_code):
+    """The id of the ScoringRuleSet a brand-new evaluation under this role
+    would be scored against today - mirrors ScoringService._resolve_rule_set's
+    own "most recently created, is_active" selection (company-specific rule
+    set first, falling back to a non-company one). This is what Candidate
+    Comparison treats as "this role's current, compatible assessment
+    version" (spec item 2): nothing in the data model automatically retires
+    an older ScoringRuleSet once a newer one is added for the same role, so
+    without this check two candidates scored months apart under genuinely
+    different rules (different competency weighting, maybe a different
+    dimension set) would silently end up side by side in one table."""
+    from api.evaluations.models import ScoringRuleSet
+
+    company = owner if owner_type == "COMPANY" else None
+    queryset = ScoringRuleSet.objects.filter(role_code=role_code, is_active=True).order_by("-created_at")
+    rule_set = None
+    if company is not None:
+        rule_set = queryset.filter(company=company).first()
+    if rule_set is None:
+        rule_set = queryset.first()
+    return rule_set.id if rule_set else None
+
+
+def _current_rule_set_ids_by_role(owner_type, owner, role_codes):
+    return {role_code: _current_rule_set_id(owner_type, owner, role_code) for role_code in role_codes}
+
+
 def get_comparable_roles(*, owner_type, owner):
     """Step 1 of Candidate Comparison: every role_code with at least one
-    candidate whose LATEST evaluation under that role is actually scored.
-    Counts distinct candidates, not evaluations - a candidate re-assessed
-    twice under the same role still counts once."""
+    candidate whose LATEST evaluation under that role is both actually
+    scored AND scored under that role's current ScoringRuleSet version -
+    a candidate whose only scored attempt used a now-superseded rule set
+    doesn't count here, since they would not actually be selectable in
+    step 2 either (see get_eligible_candidates). Counts distinct
+    candidates, not evaluations - a candidate re-assessed twice under the
+    same role still counts once."""
     summaries = _scored_summaries_for_owner(owner_type, owner)
+    rows = list(summaries.values("session__role_code", "candidate_id", "rule_set_id"))
+    role_codes = {row["session__role_code"] for row in rows}
+    current_rule_set_by_role = _current_rule_set_ids_by_role(owner_type, owner, role_codes)
+
     by_role = {}
-    for row in summaries.values("session__role_code", "candidate_id"):
+    for row in rows:
         role_code = row["session__role_code"]
+        if row["rule_set_id"] != current_rule_set_by_role.get(role_code):
+            continue
         by_role.setdefault(role_code, set()).add(row["candidate_id"])
     return [
         {"role_code": role_code, "role_name": _role_display_name(role_code), "candidate_count": len(ids)}
@@ -50,11 +87,17 @@ def get_comparable_roles(*, owner_type, owner):
 
 def get_eligible_candidates(*, owner_type, owner, role_code):
     """Step 2 of Candidate Comparison: candidates with a scored evaluation
-    under this exact role_code - the only ones eligible to be selected for
-    comparison once a role is chosen."""
+    under this exact role_code, scored under that role's CURRENT
+    ScoringRuleSet - the only ones eligible to be selected for comparison
+    once a role is chosen (see _current_rule_set_id for why this matters:
+    a candidate's only matching evaluation might have used a since-
+    superseded, incompatible version of the rules). A candidate
+    re-assessed since the rules changed is still eligible, via their newer,
+    current-version attempt - only the stale attempt itself is excluded."""
+    current_rule_set_id = _current_rule_set_id(owner_type, owner, role_code)
     summaries = (
         _scored_summaries_for_owner(owner_type, owner)
-        .filter(session__role_code=role_code)
+        .filter(session__role_code=role_code, rule_set_id=current_rule_set_id)
         .order_by("-created_at")
     )
     seen = {}
@@ -160,7 +203,15 @@ def build_full_comparison(*, owner_type, owner, role_code, candidate_ids, langua
     Competency Comparison, for 2-4 already-eligible candidates - built
     entirely from each candidate's existing (or on-demand-formatted, never
     recalculated) authoritative EvaluationReport. See this module's other
-    docstrings for the "never recalculate" guardrail this serves."""
+    docstrings for the "never recalculate" guardrail this serves.
+
+    Re-checks the same current-ScoringRuleSet requirement
+    get_eligible_candidates already applies (rather than trusting the
+    candidate_ids the caller selected) - this is the actual comparison
+    output, so it's the last line of defense against ever placing two
+    candidates scored under incompatible rule versions in one table,
+    even if eligibility shifted between selection and this call."""
+    current_rule_set_id = _current_rule_set_id(owner_type, owner, role_code)
     candidates = _candidate_queryset_for_owner(owner_type, owner).filter(public_id__in=candidate_ids)
     by_id = {str(c.public_id): c for c in candidates}
 
@@ -171,7 +222,7 @@ def build_full_comparison(*, owner_type, owner, role_code, candidate_ids, langua
             continue
         summary = (
             _scored_summaries_for_owner(owner_type, owner)
-            .filter(candidate=candidate, session__role_code=role_code)
+            .filter(candidate=candidate, session__role_code=role_code, rule_set_id=current_rule_set_id)
             .order_by("-created_at")
             .first()
         )

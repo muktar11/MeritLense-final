@@ -13,6 +13,7 @@ from api.payments.entitlement_services import EntitlementService
 from api.payments.mixins import SubscriptionUsageMixin
 from api.payments.notifications import send_certificate_reused_email
 from .certificate_reuse_services import certificate_preview, find_reusable_certificate, grant_certificate_access
+from .document_extraction_services import extract_passport_fields
 from .models import Candidate
 from .serializers import (
     CandidateSerializer,
@@ -105,7 +106,7 @@ class CandidateViewSet(SubscriptionUsageMixin, viewsets.ModelViewSet):
         return Candidate.objects.none()
         
     def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy', 'reuse_certificate']:
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'reuse_certificate', 'extract_document']:
             self.permission_classes = [IsAuthenticated, CanManageCandidate, IsCompanyApproved]
         elif self.action in ['list', 'retrieve']:
             self.permission_classes = [IsAuthenticated, CanViewCandidate]
@@ -265,6 +266,22 @@ class CandidateViewSet(SubscriptionUsageMixin, viewsets.ModelViewSet):
             'job_role': certificate.evaluation.get_candidate_job_role_display(),
             'slots_remaining': balance.current_balance if balance else None,
         })
+
+    @action(detail=False, methods=['post'], url_path='extract-document')
+    def extract_document(self, request):
+        """Best-effort pre-fill for the Add Candidate form: extracts
+        first_name/last_name/passport_id from an uploaded passport/ID
+        document so the user reviews/corrects rather than retypes from
+        scratch. Always 200s with whatever was (or wasn't) extracted -
+        this is a convenience, never a precondition for candidate
+        creation, so a failed/low-confidence extraction must not block or
+        error out the upload flow."""
+        document = request.FILES.get('document')
+        if not document:
+            return Response({'detail': "A document file is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        fields = extract_passport_fields(document)
+        return Response(fields)
 
     def perform_create(self, serializer):
         candidate = serializer.save()

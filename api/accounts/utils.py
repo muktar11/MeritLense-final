@@ -197,7 +197,7 @@ def send_admin_credentials_email(user, permissions, request=None):
     login_url = f"{settings.FRONTEND_URL}/{locale}/auth/login"
 
     permission_descriptions = {
-        'can_manage_users': 'Manage Users',
+        'can_manage_users': 'Manage Staff',
         'can_verify_companies': 'Company Verification',
         'can_verify_documents': 'Document Verification',
         'can_access_financial': 'Financial Access',

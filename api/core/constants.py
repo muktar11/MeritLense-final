@@ -322,7 +322,7 @@ class AdminPermissions:
     REPORTS_ACCESS = "can_access_reports"
     
     CHOICES = [
-        (USER_MANAGEMENT, "User Management"),
+        (USER_MANAGEMENT, "Staff Management"),
         (COMPANY_VERIFICATION, "Company Verification"),
         (DOCUMENT_VERIFICATION, "Document Verification"),
         (FINANCIAL_ACCESS, "Financial Access"),

@@ -1926,6 +1926,55 @@ class WebhookIdempotencyTests(APITestCase):
         self.assertFalse(ProcessedStripeEvent.objects.filter(stripe_event_id="evt_fail").exists())
 
 
+class PublicPricesEndpointTests(APITestCase):
+    """Commercial Package Alignment: the public marketing pricing page
+    reads live price/capacity data instead of a separately hand-maintained
+    copy - this is the unauthenticated endpoint it reads from."""
+
+    def test_no_auth_required(self):
+        make_price(target_user_type="B2C", billing_type="ONE_TIME", name="Basic package")
+
+        response = self.client.get("/api/v1/payments/prices/public")
+
+        self.assertEqual(response.status_code, 200, response.content)
+
+    def test_only_active_prices_are_listed(self):
+        make_price(target_user_type="B2C", name="Active package", is_active=True)
+        make_price(target_user_type="B2C", name="Inactive package", is_active=False)
+
+        response = self.client.get("/api/v1/payments/prices/public")
+
+        names = [p["name"] for p in response.data]
+        self.assertIn("Active package", names)
+        self.assertNotIn("Inactive package", names)
+
+    def test_response_excludes_internal_fields(self):
+        make_price(target_user_type="B2C", name="Basic package", points_grant=50, metadata={"package_code": "basic", "internal_note": "secret"})
+
+        response = self.client.get("/api/v1/payments/prices/public")
+
+        price = response.data[0]
+        self.assertNotIn("points_grant", price)
+        self.assertNotIn("stripe_price_id", price)
+        self.assertNotIn("stripe_product_id", price)
+        self.assertNotIn("metadata", price)
+        self.assertEqual(price["package_code"], "basic")
+
+    def test_includes_price_and_capacity_fields(self):
+        make_price(
+            target_user_type="B2C", name="Essential package", billing_type="ONE_TIME",
+            unit_amount=Decimal("100.00"), currency="eur", slot_grant=4, evaluation_tier="BOTH",
+        )
+
+        response = self.client.get("/api/v1/payments/prices/public")
+
+        price = response.data[0]
+        self.assertEqual(price["unit_amount"], "100.00")
+        self.assertEqual(price["currency"], "eur")
+        self.assertEqual(price["slot_grant"], 4)
+        self.assertEqual(price["evaluation_tier"], "BOTH")
+
+
 class WebhookDualSecretTests(APITestCase):
     """The same production endpoint URL can be registered twice in the
     Stripe dashboard - once under Live mode, once under Test mode - each

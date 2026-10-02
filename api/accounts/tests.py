@@ -572,6 +572,7 @@ class AccountsWeek2Tests(APITestCase):
         self.assertEqual(validate_response.status_code, status.HTTP_200_OK, validate_response.data)
         self.assertTrue(validate_response.data["valid"])
 
+        mail.outbox.clear()
         reset_response = self.client.post(
             "/api/v1/auth/reset-password",
             {
@@ -582,6 +583,10 @@ class AccountsWeek2Tests(APITestCase):
             format="json",
         )
         self.assertEqual(reset_response.status_code, status.HTTP_200_OK, reset_response.data)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, [user.email])
+        self.assertIn("Password Has Been Changed", mail.outbox[0].subject)
 
         invalidated_response = self.client.post(
             "/api/v1/auth/validate-reset-token",
@@ -641,6 +646,34 @@ class AccountsWeek2Tests(APITestCase):
             "If an account exists with this email, you will receive a password reset link.",
         )
         mock_send.assert_called_once()
+
+    @patch("api.accounts.views.send_password_reset_confirmation_email")
+    def test_reset_password_succeeds_even_when_confirmation_email_fails(self, mock_send):
+        """The password reset itself has already succeeded by the time the
+        confirmation email is sent - an SMTP/infra failure there must not be
+        reported back as a failed reset (same reasoning as the forgot-
+        password request step above)."""
+        from api.accounts.utils import generate_password_reset_token
+
+        mock_send.side_effect = Exception("SMTP connection refused")
+        user = self.create_verified_b2c_user()
+        generate_password_reset_token(user)
+
+        response = self.client.post(
+            "/api/v1/auth/reset-password",
+            {
+                "token": user.password_reset_token,
+                "password": "NewPassword123!",
+                "confirm_password": "NewPassword123!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        mock_send.assert_called_once()
+
+        user.refresh_from_db()
+        self.assertTrue(user.check_password("NewPassword123!"))
 
     def test_change_password_enforces_number_and_symbol_requirement(self):
         """Regression test: ChangePasswordSerializer only enforced min_length=8

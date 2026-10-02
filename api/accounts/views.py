@@ -45,7 +45,7 @@ from .serializers import (
     UserStatusUpdateSerializer
 )
 from .utils import (
-    send_password_reset_email, send_verification_email, send_team_invitation_email,
+    send_password_reset_email, send_password_reset_confirmation_email, send_verification_email, send_team_invitation_email,
     send_admin_credentials_email, send_employer_welcome_email, invalidate_user_sessions,
     send_welcome_email, send_account_approved_email, send_account_rejected_email, send_admin_contact_email, notify_superadmins,
 )
@@ -931,7 +931,16 @@ class ResetPasswordView(APIView):
                     resource=user,
                     request=request
                 )
-                
+
+                try:
+                    send_password_reset_confirmation_email(user)
+                except Exception:
+                    # The reset itself already succeeded and must not be
+                    # undone or reported as failed just because the
+                    # confirmation email didn't send - log it so the
+                    # failure is still visible to us.
+                    logger.exception("Failed to send password reset confirmation email to user %s", user.id)
+
                 return Response({
                     'message': 'Password has been reset successfully. You can now log in with your new password.'
                 }, status=status.HTTP_200_OK)

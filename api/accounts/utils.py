@@ -171,6 +171,27 @@ def send_password_reset_email(user, request):
     
     safe_send_mail(subject, message, [user.email])
 
+def send_password_reset_confirmation_email(user):
+    """Sent after a forgot-password reset actually completes (not the
+    initial reset-link email above) - a standard security notification so
+    the account owner finds out immediately if a reset they didn't request
+    just succeeded."""
+    subject = "Your Meritlense Password Has Been Changed"
+    message = f"""
+    Hello {user.first_name},
+
+    This is a confirmation that the password for your Meritlense account ({user.email}) was just changed.
+
+    If you made this change, no further action is needed.
+
+    If you did not request this change, your account may be compromised - please contact support immediately.
+
+    Best regards,
+    Meritlense Team
+    """
+
+    safe_send_mail(subject, message, [user.email])
+
 def send_admin_credentials_email(user, permissions, request=None):
     locale = request.GET.get('locale', 'en') if request else 'en'
     login_url = f"{settings.FRONTEND_URL}/{locale}/auth/login"

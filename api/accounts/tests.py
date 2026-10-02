@@ -618,6 +618,30 @@ class AccountsWeek2Tests(APITestCase):
         )
         self.assertEqual(relogin_response.status_code, status.HTTP_200_OK, relogin_response.data)
 
+    @patch("api.accounts.views.send_password_reset_email")
+    def test_forgot_password_returns_generic_success_even_when_email_sending_fails(self, mock_send):
+        """An SMTP/infra failure (e.g. the mail server rejecting the
+        connection) must never surface as a raw 500 - that would also leak
+        that this address belongs to a real account, defeating the whole
+        point of the generic response. Regression guard for a real bug:
+        send_password_reset_email used to be called with no try/except at
+        all."""
+        mock_send.side_effect = Exception("SMTP connection refused")
+        user = self.create_verified_b2c_user()
+
+        response = self.client.post(
+            "/api/v1/auth/forgot-password",
+            {"email": user.email},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(
+            response.data["message"],
+            "If an account exists with this email, you will receive a password reset link.",
+        )
+        mock_send.assert_called_once()
+
     def test_change_password_enforces_number_and_symbol_requirement(self):
         """Regression test: ChangePasswordSerializer only enforced min_length=8
         server-side while the frontend displayed (and gated submission on) a

@@ -839,27 +839,38 @@ class ForgotPasswordView(APIView):
     )
     def post(self, request):
         serializer = ForgotPasswordSerializer(data=request.data, context={'request': request})
-        
+
         if serializer.is_valid():
             email = serializer.validated_data['email']
-            
+
             user = serializer.context.get('user')
-            
+
             if user:
-                send_password_reset_email(user, request)
-                AuditLogService.log(
-                    user=user,
-                    action=AuditLogAction.PASSWORD_RESET,
-                    category=AuditLogCategory.SECURITY,
-                    description=f"Password reset requested for user: {user.email}",
-                    resource=user,
-                    request=request
-                )
-            
+                try:
+                    send_password_reset_email(user, request)
+                except Exception:
+                    # An SMTP/infra failure here must never surface as a
+                    # raw 500 - that would also leak that this email DOES
+                    # belong to a real account (the one case this generic
+                    # response exists to hide). Log it loudly so the
+                    # failure is actually visible to us instead of silently
+                    # telling the user "check your email" for a mail that
+                    # was never sent.
+                    logger.exception("Failed to send password reset email to user %s", user.id)
+                else:
+                    AuditLogService.log(
+                        user=user,
+                        action=AuditLogAction.PASSWORD_RESET,
+                        category=AuditLogCategory.SECURITY,
+                        description=f"Password reset requested for user: {user.email}",
+                        resource=user,
+                        request=request
+                    )
+
             return Response({
                 'message': 'If an account exists with this email, you will receive a password reset link.'
             }, status=status.HTTP_200_OK)
-        
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 

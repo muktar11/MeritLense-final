@@ -1810,9 +1810,23 @@ class StripeWebhookView(viewsets.GenericViewSet):
             return HttpResponse(status=400)
         
         try:
-            event = stripe.Webhook.construct_event(
-                payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
-            )
+            # The same endpoint URL can be registered twice in the Stripe
+            # dashboard - once under Live mode, once under Test mode - each
+            # with its own signing secret. construct_event() only verifies
+            # against one secret at a time, so a Test Mode event is tried
+            # against STRIPE_WEBHOOK_SECRET_TEST (if configured) before
+            # giving up, rather than always failing signature verification
+            # whenever the primary secret happens to be the other mode's.
+            try:
+                event = stripe.Webhook.construct_event(
+                    payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+                )
+            except stripe.error.SignatureVerificationError:
+                if not settings.STRIPE_WEBHOOK_SECRET_TEST:
+                    raise
+                event = stripe.Webhook.construct_event(
+                    payload, sig_header, settings.STRIPE_WEBHOOK_SECRET_TEST
+                )
 
             logger.info(f"Webhook verified: {event['type']}")
 

@@ -349,6 +349,12 @@ IDENTITY_VERIFICATION_MATCH_THRESHOLD = float(os.getenv("IDENTITY_VERIFICATION_M
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+# A single endpoint can be registered twice in the Stripe dashboard - once
+# under Live mode, once under Test mode - each with its own distinct signing
+# secret, both pointed at the same URL. Optional: only needed if Test Mode
+# events are expected to hit this same production endpoint alongside Live
+# Mode ones (see StripeWebhookView, which tries both).
+STRIPE_WEBHOOK_SECRET_TEST = os.getenv("STRIPE_WEBHOOK_SECRET_TEST", "")
 CURRENCY = "eur"
 TAX_RATE = 0.0
 

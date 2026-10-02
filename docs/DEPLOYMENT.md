@@ -383,6 +383,7 @@ curl https://api.meritlense.com/api/v1/health
 | `STRIPE_PUBLISHABLE_KEY` | No | Stripe publishable key |
 | `STRIPE_SECRET_KEY` | No | Stripe secret key |
 | `STRIPE_WEBHOOK_SECRET` | No | Stripe webhook signing secret |
+| `STRIPE_WEBHOOK_SECRET_TEST` | No | Test Mode webhook signing secret, only needed if the same endpoint also receives Stripe Test Mode events alongside Live Mode ones (a single endpoint URL can be registered under both modes in the Stripe dashboard, each with its own secret) |
 | `AZURE_STORAGE_CONNECTION_STRING` | No | Azure Blob Storage connection string |
 | `AZURE_STORAGE_CONTAINER_NAME` | No | Blob container name (default `meritlense-media`) |
 | `AZURE_QUEUE_CONNECTION_STRING` | No | Azure Queue Storage connection string |

@@ -1926,6 +1926,85 @@ class WebhookIdempotencyTests(APITestCase):
         self.assertFalse(ProcessedStripeEvent.objects.filter(stripe_event_id="evt_fail").exists())
 
 
+class WebhookDualSecretTests(APITestCase):
+    """The same production endpoint URL can be registered twice in the
+    Stripe dashboard - once under Live mode, once under Test mode - each
+    with its own signing secret. A Test Mode event must not be rejected
+    just because the primary (Live) secret doesn't match it."""
+
+    def _fake_event(self, event_id="evt_dual_test", event_type="invoice.payment_succeeded"):
+        return {"id": event_id, "type": event_type, "data": {"object": {}}}
+
+    # views.py reads settings via "from meritlense import settings" (the
+    # settings module object itself, not Django's lazy django.conf.settings
+    # proxy) - override_settings() patches the latter, so it silently has no
+    # effect here. patch() on the dotted api.payments.views.settings.* path
+    # directly targets the exact object the view actually reads from.
+    @patch("api.payments.views.settings.STRIPE_WEBHOOK_SECRET_TEST", "whsec_test")
+    @patch("api.payments.views.settings.STRIPE_WEBHOOK_SECRET", "whsec_live")
+    @patch("api.payments.views.StripeService")
+    @patch("api.payments.views.stripe.Webhook.construct_event")
+    def test_falls_back_to_test_secret_when_live_secret_fails(self, mock_construct_event, mock_service_cls):
+        mock_construct_event.side_effect = [
+            stripe.error.SignatureVerificationError("No match", "sig"),
+            self._fake_event(),
+        ]
+        mock_service_cls.return_value.handle_webhook_event.return_value = {"ok": True}
+
+        response = self.client.post(
+            "/api/v1/payments/webhook", data=b"{}", content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="sig",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(mock_construct_event.call_count, 2)
+        self.assertEqual(mock_construct_event.call_args_list[0].args[2], "whsec_live")
+        self.assertEqual(mock_construct_event.call_args_list[1].args[2], "whsec_test")
+
+    @patch("api.payments.views.settings.STRIPE_WEBHOOK_SECRET", "whsec_live")
+    @patch("api.payments.views.StripeService")
+    @patch("api.payments.views.stripe.Webhook.construct_event")
+    def test_live_secret_succeeding_never_tries_test_secret(self, mock_construct_event, mock_service_cls):
+        mock_construct_event.return_value = self._fake_event()
+        mock_service_cls.return_value.handle_webhook_event.return_value = {"ok": True}
+
+        response = self.client.post(
+            "/api/v1/payments/webhook", data=b"{}", content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="sig",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(mock_construct_event.call_count, 1)
+
+    @patch("api.payments.views.settings.STRIPE_WEBHOOK_SECRET_TEST", "")
+    @patch("api.payments.views.settings.STRIPE_WEBHOOK_SECRET", "whsec_live")
+    @patch("api.payments.views.stripe.Webhook.construct_event")
+    def test_no_test_secret_configured_fails_immediately_like_before(self, mock_construct_event):
+        mock_construct_event.side_effect = stripe.error.SignatureVerificationError("No match", "sig")
+
+        response = self.client.post(
+            "/api/v1/payments/webhook", data=b"{}", content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="sig",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(mock_construct_event.call_count, 1)
+
+    @patch("api.payments.views.settings.STRIPE_WEBHOOK_SECRET_TEST", "whsec_test")
+    @patch("api.payments.views.settings.STRIPE_WEBHOOK_SECRET", "whsec_live")
+    @patch("api.payments.views.stripe.Webhook.construct_event")
+    def test_neither_secret_matches_returns_400(self, mock_construct_event):
+        mock_construct_event.side_effect = stripe.error.SignatureVerificationError("No match", "sig")
+
+        response = self.client.post(
+            "/api/v1/payments/webhook", data=b"{}", content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="sig",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(mock_construct_event.call_count, 2)
+
+
 class AdminInvoiceEndpointTests(APITestCase):
     def setUp(self):
         self.superadmin = User.objects.create_user(

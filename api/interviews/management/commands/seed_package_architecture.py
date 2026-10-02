@@ -29,7 +29,7 @@ PACKAGE_CONFIGS = [
         "video_introduction_enabled": False,
         "behavioral_indicators_enabled": False,
         "points_balance": 50,
-        "monthly_fee_display": "€50 one-time",
+        "monthly_fee_display": "€60 one-time",
     },
     {
         "package_code": "essential",
@@ -49,7 +49,7 @@ PACKAGE_CONFIGS = [
         "video_introduction_enabled": False,
         "behavioral_indicators_enabled": False,
         "points_balance": 80,
-        "monthly_fee_display": "€80 one-time",
+        "monthly_fee_display": "€100 one-time",
     },
     {
         "package_code": "advanced",
@@ -89,7 +89,7 @@ PACKAGE_CONFIGS = [
         "video_introduction_enabled": True,
         "behavioral_indicators_enabled": True,
         "points_balance": 250,
-        "monthly_fee_display": "€250 one-time",
+        "monthly_fee_display": "€200 one-time",
     },
     {
         "package_code": "starter",
@@ -199,28 +199,36 @@ B2B_ROLE_COVERAGE = {
 }
 
 
+# Basic/Essential are promoted to match Advanced's existing per-role
+# ceiling (MeritLense Commercial Package Alignment, Section 4: "Remove
+# Basic/Essential = Screening-only ... restrictions. All four packages
+# must support Screening or Full Evaluation per assessment"). This is a
+# pure commercial tier-gate removal, not a methodology change: the ~6
+# specialized/caregiving roles where Advanced itself is still only
+# "Partial" keep that same ceiling for Basic/Essential too, so Premium's
+# existing extra edge on those roles is untouched.
 B2C_ROLE_COVERAGE = {
-    "domestic_worker": "Screening,Screening,Full,Full",
-    "child_caregiver": "Screening,Screening,Full,Full",
-    "elderly_caregiver": "Screening,Screening,Full,Full",
-    "special_needs_caregiver": "Screening,Screening,Partial,Full",
-    "nursing_assistant": "Screening,Screening,Partial,Full",
-    "home_care_assistant": "Screening,Screening,Full,Full",
-    "elderly_medical_support": "Screening,Screening,Partial,Full",
-    "basic_patient_support": "Screening,Screening,Full,Full",
-    "hotel_housekeeper": "Screening,Screening,Full,Full",
-    "front_desk_agent": "Screening,Partial,Partial,Full",
-    "restaurant_staff": "Screening,Screening,Full,Full",
-    "security_guard": "Screening,Screening,Full,Full",
-    "event_security": "Screening,Screening,Full,Full",
-    "commercial_cleaner": "Screening,Screening,Full,Full",
-    "industrial_cleaner": "Screening,Screening,Partial,Full",
-    "warehouse_staff": "Screening,Screening,Full,Full",
-    "driver": "Screening,Screening,Full,Full",
-    "general_labor": "Screening,Screening,Full,Full",
-    "skilled_trades": "Screening,Screening,Partial,Full",
-    "farm_worker": "Screening,Screening,Full,Full",
-    "livestock_support": "Screening,Screening,Full,Full",
+    "domestic_worker": "Full,Full,Full,Full",
+    "child_caregiver": "Full,Full,Full,Full",
+    "elderly_caregiver": "Full,Full,Full,Full",
+    "special_needs_caregiver": "Partial,Partial,Partial,Full",
+    "nursing_assistant": "Partial,Partial,Partial,Full",
+    "home_care_assistant": "Full,Full,Full,Full",
+    "elderly_medical_support": "Partial,Partial,Partial,Full",
+    "basic_patient_support": "Full,Full,Full,Full",
+    "hotel_housekeeper": "Full,Full,Full,Full",
+    "front_desk_agent": "Partial,Partial,Partial,Full",
+    "restaurant_staff": "Full,Full,Full,Full",
+    "security_guard": "Full,Full,Full,Full",
+    "event_security": "Full,Full,Full,Full",
+    "commercial_cleaner": "Full,Full,Full,Full",
+    "industrial_cleaner": "Partial,Partial,Partial,Full",
+    "warehouse_staff": "Full,Full,Full,Full",
+    "driver": "Full,Full,Full,Full",
+    "general_labor": "Full,Full,Full,Full",
+    "skilled_trades": "Partial,Partial,Partial,Full",
+    "farm_worker": "Full,Full,Full,Full",
+    "livestock_support": "Full,Full,Full,Full",
 }
 
 
@@ -309,6 +317,7 @@ class Command(BaseCommand):
 
         self._sync_price_metadata()
         self._sync_price_entitlements()
+        self._sync_price_evaluation_tier()
         self.stdout.write(self.style.SUCCESS("Seeded package architecture v1.2"))
 
     def _coverage_to_tier(self, coverage_level):
@@ -350,6 +359,31 @@ class Command(BaseCommand):
             price.slot_grant = SLOT_GRANTS.get(package_code)
             price.points_grant = points_grants.get(package_code)
             price.save(update_fields=["slot_grant", "points_grant", "updated_at"])
+
+    def _sync_price_evaluation_tier(self):
+        """Keeps Price.evaluation_tier (drives the customer-facing
+        Screening/Full checklist badges via planCoverageFlags() on the
+        frontend) in sync with what RolePackageCoverage actually grants,
+        instead of being hand-set and silently drifting out of sync -
+        this was the root cause of Growth/Business reading as "Full
+        Assessment only" on cards even though the backend gate already
+        let those tiers run Screening too. Starter stays Screening-only
+        (its coverage is Screening across every role, unlike every other
+        package which gets Full coverage on at least some roles)."""
+        if Price is None:
+            return
+
+        both_tier_codes = {
+            "basic", "essential", "advanced", "premium",
+            "growth", "business", "enterprise",
+        }
+        for price in Price.objects.all():
+            package_code = self._infer_package_code_from_price_name(price.name)
+            if package_code not in both_tier_codes:
+                continue
+            if price.evaluation_tier != InterviewEvaluationTier.BOTH:
+                price.evaluation_tier = InterviewEvaluationTier.BOTH
+                price.save(update_fields=["evaluation_tier", "updated_at"])
 
     def _infer_package_code_from_price_name(self, price_name):
         normalized = (price_name or "").strip().lower()

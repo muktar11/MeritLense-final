@@ -13,7 +13,7 @@ from django.core import mail
 from django.core.files.base import ContentFile
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TransactionTestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 
@@ -23,7 +23,8 @@ from api.candidates.models import Candidate
 from api.core.constants import AuditLogAction, CoverageLevel, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, Roles
 from api.interviews.models import InterviewConfiguration, InterviewRubric, PackageSessionConfig, RolePackageCoverage
 from api.interviews.voice_services import VoiceProviderError
-from api.payments.models import PackageBalance, SlotReservation, BalanceTransaction
+from api.interviews.package_services import PackageArchitectureService
+from api.payments.models import PackageBalance, Price, SlotReservation, BalanceTransaction
 from api.questions.models import QuestionTemplate
 from api.questions.skill_tags import FIXED_QUESTION_SKILL_TAGS
 from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionArtifact, SessionObservedTask, TaskObservationResult
@@ -4192,3 +4193,82 @@ class InterviewSessionWebSocketTests(TransactionTestCase):
 
         await communicator.send_input({"type": "websocket.disconnect", "code": 1000})
         await communicator.wait(timeout=1)
+
+
+class SeedPackageArchitectureCommandTests(TestCase):
+    """Commercial Package Alignment: Basic/Essential (B2C) are promoted to
+    Advanced's existing per-role coverage ceiling, and Price.evaluation_tier
+    is kept in sync with that coverage instead of drifting independently."""
+
+    def setUp(self):
+        call_command("seed_package_architecture")
+
+    def test_basic_and_essential_match_advanced_ceiling_per_role(self):
+        # Most roles: Advanced is FULL, so Basic/Essential are promoted to FULL.
+        for package_code in ("basic", "essential", "advanced"):
+            coverage = RolePackageCoverage.objects.get(role_code="domestic_worker", package_code=package_code)
+            self.assertEqual(coverage.coverage_level, CoverageLevel.FULL)
+
+        # A specialized role where Advanced itself is only PARTIAL: Basic/
+        # Essential must match that same ceiling, not jump straight to FULL.
+        for package_code in ("basic", "essential", "advanced"):
+            coverage = RolePackageCoverage.objects.get(role_code="special_needs_caregiver", package_code=package_code)
+            self.assertEqual(coverage.coverage_level, CoverageLevel.PARTIAL)
+
+        # Premium's existing extra edge over Advanced on that same
+        # specialized role is untouched by the promotion.
+        premium_coverage = RolePackageCoverage.objects.get(role_code="special_needs_caregiver", package_code="premium")
+        self.assertEqual(premium_coverage.coverage_level, CoverageLevel.FULL)
+
+    def test_starter_stays_screening_only(self):
+        # Regression guard: the B2C tier-gate removal must not leak into B2B.
+        for role_code in ("domestic_worker", "special_needs_caregiver"):
+            coverage = RolePackageCoverage.objects.get(role_code=role_code, package_code="starter")
+            self.assertEqual(coverage.coverage_level, CoverageLevel.SCREENING)
+
+    def test_resolve_session_package_context_allows_full_on_basic(self):
+        # Ties the promoted seed data to the actual resolution service the
+        # session-creation gate (InterviewSessionService.create_session)
+        # reads from - this role used to resolve SCREENING under "basic"
+        # before the promotion.
+        context = PackageArchitectureService.resolve_session_package_context(
+            user=None, role_code="domestic_worker", requested_package_code="basic",
+        )
+        self.assertEqual(context["evaluation_tier"], InterviewEvaluationTier.FULL)
+
+    def test_price_evaluation_tier_synced_to_both_for_promoted_tiers(self):
+        for package_code, name in (("basic", "Basic package"), ("growth", "Growth package")):
+            Price.objects.create(
+                name=name,
+                stripe_price_id=f"price_test_{package_code}",
+                stripe_product_id=f"prod_test_{package_code}",
+                unit_amount=Decimal("1.00"),
+                evaluation_tier=InterviewEvaluationTier.SCREENING,
+            )
+
+        call_command("seed_package_architecture")
+
+        self.assertEqual(Price.objects.get(stripe_price_id="price_test_basic").evaluation_tier, InterviewEvaluationTier.BOTH)
+        self.assertEqual(Price.objects.get(stripe_price_id="price_test_growth").evaluation_tier, InterviewEvaluationTier.BOTH)
+
+    def test_price_evaluation_tier_not_touched_for_starter(self):
+        Price.objects.create(
+            name="Starter package",
+            stripe_price_id="price_test_starter",
+            stripe_product_id="prod_test_starter",
+            unit_amount=Decimal("1.00"),
+            evaluation_tier=InterviewEvaluationTier.SCREENING,
+        )
+
+        call_command("seed_package_architecture")
+
+        self.assertEqual(Price.objects.get(stripe_price_id="price_test_starter").evaluation_tier, InterviewEvaluationTier.SCREENING)
+
+    def test_command_is_idempotent(self):
+        before_coverage_count = RolePackageCoverage.objects.count()
+        before_config_count = PackageSessionConfig.objects.count()
+
+        call_command("seed_package_architecture")
+
+        self.assertEqual(RolePackageCoverage.objects.count(), before_coverage_count)
+        self.assertEqual(PackageSessionConfig.objects.count(), before_config_count)

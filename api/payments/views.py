@@ -22,7 +22,7 @@ from api.core.public_ids import PublicIdLookupMixin, get_by_identifier
 
 from .models import Price, Customer, PaymentMethod, Subscription, Payment, Invoice, ProcessedStripeEvent, DealRecord, PackageBalance, PackageRequest
 from .serializers import (
-    PriceSerializer, PriceAdminSerializer, CustomerSerializer, PaymentMethodSerializer,
+    PriceSerializer, PublicPriceSerializer, PriceAdminSerializer, CustomerSerializer, PaymentMethodSerializer,
     SubscriptionSerializer, PaymentSerializer, InvoiceSerializer,
     CreatePaymentIntentSerializer, AttachPaymentMethodSerializer, CreateSubscriptionSerializer,
     RefundPaymentSerializer, DealRecordSerializer, PackageBalanceSerializer, AdjustBalanceSerializer,
@@ -97,6 +97,20 @@ class PriceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
         
         return Response(serializer.data)
     
+    @action(detail=False, methods=['get'], permission_classes=[AllowAny])
+    def public(self, request):
+        """Unauthenticated price list for the public marketing pricing page
+        (Commercial Package Alignment spec: the homepage must read live
+        price/capacity data, not a separately hand-maintained copy that can
+        drift out of sync). No per-user eligibility filtering - there's no
+        user yet - just every active, publicly-priced plan. Starter/
+        Enterprise are intentionally excluded when no such Price row exists
+        (they're "Based on Scope"/"Custom" by design, not a fixed SKU) - the
+        frontend keeps its existing static copy for those two cards."""
+        queryset = Price.objects.filter(is_active=True).order_by('target_user_type', 'unit_amount')
+        serializer = PublicPriceSerializer(queryset, many=True)
+        return Response(serializer.data)
+
     @action(detail=False, methods=['post'])
     def sync_from_stripe(self, request):
         try:

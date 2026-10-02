@@ -34,6 +34,32 @@ class PriceSerializer(PublicIdModelSerializer):
         return dict(obj._meta.get_field('target_user_type').choices).get(obj.target_user_type, '')
 
 
+class PublicPriceSerializer(serializers.ModelSerializer):
+    """Unauthenticated-safe subset of Price, for the public marketing
+    pricing page - deliberately excludes stripe_price_id/stripe_product_id,
+    points_grant (an internal add-on currency, never customer-facing per
+    the Commercial Package Alignment spec), and the raw metadata dict
+    (may carry internal notes), surfacing only metadata.package_code so the
+    frontend can match a live price to its feature-bullet copy."""
+    formatted_price = serializers.SerializerMethodField()
+    package_code = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Price
+        fields = [
+            'id', 'name', 'target_user_type',
+            'unit_amount', 'currency', 'formatted_price',
+            'interval', 'interval_count', 'billing_type',
+            'evaluation_tier', 'slot_grant', 'package_code',
+        ]
+
+    def get_formatted_price(self, obj):
+        return obj.get_formatted_price()
+
+    def get_package_code(self, obj):
+        return (obj.metadata or {}).get('package_code', '')
+
+
 class PriceAdminSerializer(PublicIdModelSerializer):
     """Admin-facing serializer for creating/editing packages (Price rows).
 

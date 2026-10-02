@@ -702,7 +702,7 @@ class InviteTeamMemberSerializer(serializers.Serializer):
     permissions = serializers.ListField(
         child=serializers.ChoiceField(choices=CompanyTeamPermissions.CHOICES),
         required=False,
-        default=['view_candidates']
+        default=list
     )
     
     def validate_email(self, value):

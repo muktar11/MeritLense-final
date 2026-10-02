@@ -3,7 +3,7 @@ import secrets
 import logging
 from django.core.mail import EmailMessage, send_mail
 from django.conf import settings
-from api.core.constants import Roles
+from api.core.constants import CompanyTeamPermissions, Roles
 
 logger = logging.getLogger(__name__)
 
@@ -476,20 +476,15 @@ def send_team_invitation_email(invitation, request):
     
     expiration_date = invitation.expires_at.strftime("%B %d, %Y")
     
-    permission_descriptions = {
-        'view_candidates': 'View Candidates',
-        'evaluate_candidates': 'Evaluate Candidates',
-        'create_evaluations': 'Create Evaluations',
-        'view_reports': 'View Reports',
-    }
-    
+    permission_descriptions = dict(CompanyTeamPermissions.CHOICES)
+
     permissions_text = ""
     for perm in invitation.permissions:
         desc = permission_descriptions.get(perm, perm.replace('_', ' ').title())
         permissions_text += f"  • {desc}\n"
-    
+
     if not permissions_text:
-        permissions_text = "  • View Candidates (default)"
+        permissions_text = "  • No permissions assigned yet - contact your company admin"
     
     subject = f"Invitation to join {company_name} on Meritlense"
     

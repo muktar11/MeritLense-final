@@ -1,5 +1,5 @@
 from rest_framework.permissions import BasePermission, SAFE_METHODS
-from api.core.constants import Roles
+from api.core.constants import CompanyTeamPermissions, Roles
 
 
 def get_user_company(user):
@@ -80,6 +80,46 @@ class IsEmployer(BasePermission):
             request.user.role in [Roles.B2C, Roles.B2B, Roles.B2B_TEAM_MEMBER] and
             request.user.is_verified
         )
+
+
+class HasTeamMemberPermission(BasePermission):
+    """A narrow, additive restriction - not a general access gate. Only
+    ever restricts a Roles.B2B_TEAM_MEMBER (checked against their
+    invite-time TeamMemberProfile.permissions, set by the company admin
+    via Invite Team Member); every other role (B2B admin, B2C, Admin/
+    SuperAdmin, etc.) passes through unaffected, since this is meant to
+    be appended to a view's existing permission_classes - which already
+    decide who the view serves at all - not replace them. Subclass and
+    set `permission_code` to one of CompanyTeamPermissions' four values.
+
+    Usage: permission_classes = [IsAuthenticated, IsCompanyApproved, RequireSetEvaluation]
+    """
+    permission_code = None
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.role != Roles.B2B_TEAM_MEMBER:
+            return True
+        profile = getattr(user, 'team_member_profile', None)
+        return bool(profile and profile.has_permission(self.permission_code))
+
+
+class RequireAddCandidates(HasTeamMemberPermission):
+    permission_code = CompanyTeamPermissions.ADD_CANDIDATES
+
+
+class RequireSetEvaluation(HasTeamMemberPermission):
+    permission_code = CompanyTeamPermissions.SET_EVALUATION
+
+
+class RequireSetScores(HasTeamMemberPermission):
+    permission_code = CompanyTeamPermissions.SET_SCORES
+
+
+class RequireSetPayment(HasTeamMemberPermission):
+    permission_code = CompanyTeamPermissions.SET_PAYMENT
 
 
 class IsOwnerOrAdmin(BasePermission):

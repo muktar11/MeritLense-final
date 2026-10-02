@@ -899,6 +899,179 @@ class EntitlementServiceTests(TestCase):
             EntitlementService.spend_points(user=self.b2c_user, addon_code="not_a_real_addon")
 
 
+class B2CSlotExpiryTests(TestCase):
+    """Commercial Package Alignment: B2C one-time purchases are valid for
+    12 months from purchase (the approved B2C policy) - a real expiry,
+    enforced at consume/summary read time, not just display text."""
+
+    def setUp(self):
+        self.b2c_user = User.objects.create_user(
+            email="expiry-b2c@example.com", password="Password123!",
+            first_name="Expiry", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        self.customer = Customer.objects.create(user=self.b2c_user, stripe_customer_id="cus_expiry_b2c")
+        self.price = make_price(target_user_type="B2C", billing_type="ONE_TIME", slot_grant=2, points_grant=50)
+        self.subscription = make_subscription(self.b2c_user, self.price, status="ACTIVE")
+
+    def _make_payment(self, created_at):
+        payment = Payment.objects.create(
+            user=self.b2c_user, customer=self.customer, subscription=self.subscription,
+            stripe_payment_intent_id=f"pi_expiry_{created_at.timestamp()}",
+            amount=Decimal("60.00"), status="SUCCEEDED",
+        )
+        payment.created_at = created_at
+        payment.save(update_fields=["created_at"])
+        return payment
+
+    def test_grant_sets_expiry_365_days_from_purchase(self):
+        payment = self._make_payment(timezone.now())
+
+        EntitlementService.grant_b2c_balances(payment, self.price)
+
+        slots = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS)
+        points = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.POINTS)
+        self.assertAlmostEqual(
+            (slots.expires_at - payment.created_at).total_seconds(), timezone.timedelta(days=365).total_seconds(), delta=5,
+        )
+        self.assertAlmostEqual(
+            (points.expires_at - payment.created_at).total_seconds(), timezone.timedelta(days=365).total_seconds(), delta=5,
+        )
+
+    def test_expired_balance_is_not_spendable(self):
+        PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS,
+            fixed_amount=2, current_balance=2, expires_at=timezone.now() - timezone.timedelta(days=1),
+        )
+
+        with self.assertRaises(ValueError):
+            EntitlementService._consume_b2c(self.b2c_user, PackageBalance.SLOTS, reference="test:expired")
+
+    def test_unexpired_balance_still_spendable(self):
+        balance = PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS,
+            fixed_amount=2, current_balance=2, expires_at=timezone.now() + timezone.timedelta(days=30),
+        )
+
+        EntitlementService._consume_b2c(self.b2c_user, PackageBalance.SLOTS, reference="test:unexpired")
+
+        balance.refresh_from_db()
+        self.assertEqual(balance.current_balance, 1)
+
+    def test_never_expiring_balance_still_spendable(self):
+        # Pre-policy purchase (expires_at=None) - grandfathered, never blocked.
+        balance = PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS,
+            fixed_amount=2, current_balance=2, expires_at=None,
+        )
+
+        EntitlementService._consume_b2c(self.b2c_user, PackageBalance.SLOTS, reference="test:never-expires")
+
+        balance.refresh_from_db()
+        self.assertEqual(balance.current_balance, 1)
+
+    def test_consume_falls_through_to_unexpired_row_when_oldest_is_expired(self):
+        expired = PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS,
+            fixed_amount=2, current_balance=2, expires_at=timezone.now() - timezone.timedelta(days=1),
+        )
+        live = PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS,
+            fixed_amount=5, current_balance=5, expires_at=timezone.now() + timezone.timedelta(days=30),
+        )
+
+        EntitlementService._consume_b2c(self.b2c_user, PackageBalance.SLOTS, reference="test:skip-expired")
+
+        expired.refresh_from_db()
+        live.refresh_from_db()
+        self.assertEqual(expired.current_balance, 2)
+        self.assertEqual(live.current_balance, 4)
+
+    def test_balance_summary_excludes_expired_rows(self):
+        PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS,
+            fixed_amount=2, current_balance=2, expires_at=timezone.now() - timezone.timedelta(days=1),
+        )
+        PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS,
+            fixed_amount=4, current_balance=3, expires_at=timezone.now() + timezone.timedelta(days=30),
+        )
+
+        summary = EntitlementService.get_balance_summary("USER", self.b2c_user)[PackageBalance.SLOTS]
+
+        self.assertEqual(summary["remaining"], 3)
+        self.assertEqual(summary["limit"], 4)
+
+    def test_balance_summary_reports_nearest_expiry_among_usable_rows(self):
+        soonest = timezone.now() + timezone.timedelta(days=10)
+        PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS,
+            fixed_amount=2, current_balance=0, expires_at=timezone.now() + timezone.timedelta(days=1),
+        )  # fully consumed - must not count as the nearest expiry
+        PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS,
+            fixed_amount=2, current_balance=2, expires_at=soonest,
+        )
+        PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS,
+            fixed_amount=2, current_balance=2, expires_at=timezone.now() + timezone.timedelta(days=60),
+        )
+
+        summary = EntitlementService.get_balance_summary("USER", self.b2c_user)[PackageBalance.SLOTS]
+
+        self.assertEqual(summary["nearest_expiry"], soonest)
+
+    def test_b2b_balance_summary_nearest_expiry_is_always_none(self):
+        price = make_price(target_user_type="B2B", slot_grant=200, points_grant=2000)
+        owner = User.objects.create_user(
+            email="expiry-b2b@example.com", password="Password123!",
+            first_name="Expiry", last_name="B2B", role=Roles.B2B, is_verified=True,
+        )
+        company = make_company(owner)
+        make_subscription(owner, price, company=company, status="ACTIVE")
+
+        summary = EntitlementService.get_balance_summary("COMPANY", company)[PackageBalance.SLOTS]
+
+        self.assertIsNone(summary["nearest_expiry"])
+
+    def test_invoice_shows_validity_period_for_one_time_purchase(self):
+        from api.payments.invoice_services import _build_snapshot
+
+        payment = self._make_payment(timezone.now())
+        EntitlementService.grant_b2c_balances(payment, self.price)
+        balance = PackageBalance.objects.get(owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, source_payment=payment)
+
+        invoice = Invoice.objects.create(
+            user=self.b2c_user, customer=self.customer, stripe_invoice_id="in_expiry_test",
+            stripe_payment_intent=payment, number="INV-EXPIRY-1", status="PAID",
+            amount_due=Decimal("60.00"), amount_paid=Decimal("60.00"), amount_remaining=Decimal("0.00"), currency="eur",
+        )
+
+        snapshot = _build_snapshot(invoice)
+
+        line_item = snapshot["line_items"][0]
+        self.assertTrue(line_item["show_service_period"])
+        self.assertEqual(line_item["period_end"], balance.expires_at.strftime("%Y-%m-%d"))
+
+    def test_invoice_omits_validity_period_for_pre_policy_purchase(self):
+        from api.payments.invoice_services import _build_snapshot
+
+        payment = self._make_payment(timezone.now())
+        PackageBalance.objects.create(
+            owner_user=self.b2c_user, balance_type=PackageBalance.SLOTS, source_payment=payment,
+            fixed_amount=2, current_balance=2, expires_at=None,
+        )
+
+        invoice = Invoice.objects.create(
+            user=self.b2c_user, customer=self.customer, stripe_invoice_id="in_pre_policy_test",
+            stripe_payment_intent=payment, number="INV-PRE-1", status="PAID",
+            amount_due=Decimal("60.00"), amount_paid=Decimal("60.00"), amount_remaining=Decimal("0.00"), currency="eur",
+        )
+
+        snapshot = _build_snapshot(invoice)
+
+        self.assertFalse(snapshot["line_items"][0]["show_service_period"])
+
+
 class AddonReservationTests(TestCase):
     """Points spent on add-ons go through a real Reserve -> Consume/Release
     lifecycle (Package Architecture Sign-Off, Section 5), not an immediate

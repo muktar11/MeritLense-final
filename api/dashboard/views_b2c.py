@@ -71,6 +71,7 @@ class B2CDashboardStatsView(APIView):
             'reserved_slots': balances[PackageBalance.SLOTS]['reserved'],
             'consumed_slots': balances[PackageBalance.SLOTS]['consumed'],
             'pending_sessions': balances[PackageBalance.SLOTS]['pending_sessions'],
+            'nearest_slot_expiry': balances[PackageBalance.SLOTS]['nearest_expiry'],
             'remaining_points': balances[PackageBalance.POINTS]['remaining'],
             'points_limit': balances[PackageBalance.POINTS]['limit'],
             'points_unlimited': balances[PackageBalance.POINTS]['unlimited'],

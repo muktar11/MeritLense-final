@@ -185,7 +185,7 @@ class PackageBalanceSerializer(PublicIdModelSerializer):
         model = PackageBalance
         fields = [
             'id', 'owner_user', 'owner_user_email', 'owner_company', 'owner_company_name',
-            'balance_type', 'current_balance', 'fixed_amount',
+            'balance_type', 'current_balance', 'fixed_amount', 'expires_at',
             'source_subscription', 'source_payment', 'created_at', 'updated_at'
         ]
         read_only_fields = fields

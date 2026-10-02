@@ -482,8 +482,11 @@ class PackageBalance(TimeStampedModel):
 
     B2B: one row per (owner_company, balance_type), reset in place to the
     plan's fixed amount on every renewal - no rollover.
-    B2C: one row per one-time purchase (source_payment set), never expires;
-    multiple purchases accumulate as separate rows, consumed oldest-first.
+    B2C: one row per one-time purchase (source_payment set); multiple
+    purchases accumulate as separate rows, consumed oldest-first. Valid for
+    12 months from purchase (expires_at) per the approved B2C policy - rows
+    purchased before that policy shipped have expires_at=None (never
+    expires, grandfathered).
     """
     SLOTS = 'SLOTS'
     POINTS = 'POINTS'
@@ -527,6 +530,14 @@ class PackageBalance(TimeStampedModel):
         help_text="The grant/reset amount from Price at the time this row was created or last reset."
     )
     current_balance = models.PositiveIntegerField(default=0)
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="B2C one-time purchases only (12-month validity policy). Null = never expires "
+                   "- always true for B2B rows (reset every period), and for B2C rows purchased "
+                   "before this policy shipped (not backfilled, so existing purchases aren't "
+                   "retroactively revoked)."
+    )
 
     class Meta:
         verbose_name = "Package Balance"

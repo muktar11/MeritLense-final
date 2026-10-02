@@ -224,6 +224,24 @@ def _line_items_context(invoice):
             period_start = subscription.current_period_start
             period_end = subscription.current_period_end
             show_service_period = True
+    elif invoice.stripe_payment_intent_id:
+        # A B2C one-time purchase has no Subscription at all - show its
+        # 12-month validity window (approved B2C policy) instead, reusing
+        # the same Service Period row. Only the SLOTS balance carries
+        # expires_at meaningfully (POINTS is a separate add-on currency,
+        # never shown on the invoice); a pre-policy purchase has
+        # expires_at=None and simply shows no period, same as before.
+        from api.payments.models import PackageBalance
+
+        balance = PackageBalance.objects.filter(
+            source_payment_id=invoice.stripe_payment_intent_id,
+            balance_type=PackageBalance.SLOTS,
+            expires_at__isnull=False,
+        ).first()
+        if balance is not None:
+            period_start = balance.created_at
+            period_end = balance.expires_at
+            show_service_period = True
 
     net_amount = invoice.amount_due
     return [

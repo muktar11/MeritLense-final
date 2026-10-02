@@ -18,6 +18,7 @@ class DashboardStatsSerializer(serializers.Serializer):
     reserved_slots = serializers.IntegerField(required=False, allow_null=True)
     consumed_slots = serializers.IntegerField(required=False, allow_null=True)
     pending_sessions = serializers.IntegerField(required=False, allow_null=True)
+    nearest_slot_expiry = serializers.DateTimeField(required=False, allow_null=True)
     remaining_points = serializers.IntegerField(required=False, allow_null=True)
     points_limit = serializers.IntegerField(required=False, allow_null=True)
     points_unlimited = serializers.BooleanField(required=False)

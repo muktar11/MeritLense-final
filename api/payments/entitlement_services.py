@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from api.core.constants import Roles
@@ -328,6 +329,7 @@ class EntitlementService:
             rows = list(
                 PackageBalance.objects.select_for_update()
                 .filter(owner_user=user, balance_type=balance_type, current_balance__gt=0)
+                .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
                 .order_by("created_at")
             )
             remaining = amount
@@ -355,6 +357,9 @@ class EntitlementService:
 
     @classmethod
     def grant_b2c_balances(cls, payment, price):
+        # 12-month validity from the purchase date (approved B2C policy) -
+        # new grants only, never backfilled onto pre-existing rows.
+        expires_at = (payment.created_at or timezone.now()) + timezone.timedelta(days=365)
         for balance_type, grant in (
             (PackageBalance.SLOTS, price.slot_grant),
             (PackageBalance.POINTS, price.points_grant),
@@ -367,6 +372,7 @@ class EntitlementService:
                 source_payment=payment,
                 fixed_amount=grant,
                 current_balance=grant,
+                expires_at=expires_at,
             )
             BalanceTransaction.objects.create(
                 balance=balance,
@@ -490,23 +496,40 @@ class EntitlementService:
         summary = {}
         for balance_type in (PackageBalance.SLOTS, PackageBalance.POINTS):
             if owner_type == "COMPANY":
+                # B2B rows never expire (reset every period instead) -
+                # nearest_expiry is always None, just for a uniform shape
+                # with the B2C branch below.
                 balance = PackageBalance.objects.filter(owner_company=owner, balance_type=balance_type).first()
                 if balance:
-                    summary[balance_type] = {"remaining": balance.current_balance, "limit": balance.fixed_amount, "unlimited": False}
+                    summary[balance_type] = {"remaining": balance.current_balance, "limit": balance.fixed_amount, "unlimited": False, "nearest_expiry": None}
                 else:
                     subscription = cls._active_recurring_subscription(owner)
                     grant = None
                     if subscription and subscription.stripe_price:
                         grant = cls._resolve_grant(subscription.stripe_price, balance_type)
-                    summary[balance_type] = {"remaining": None, "limit": None, "unlimited": subscription is not None and grant is None}
+                    summary[balance_type] = {"remaining": None, "limit": None, "unlimited": subscription is not None and grant is None, "nearest_expiry": None}
             else:
-                rows = PackageBalance.objects.filter(owner_user=owner, balance_type=balance_type)
+                rows = PackageBalance.objects.filter(owner_user=owner, balance_type=balance_type).filter(
+                    Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())
+                )
                 if rows.exists():
                     remaining = sum(r.current_balance for r in rows)
                     total = sum(r.fixed_amount for r in rows)
-                    summary[balance_type] = {"remaining": remaining, "limit": total, "unlimited": False}
+                    # Earliest expiry among rows that still have usable
+                    # balance - a fully-consumed row's expiry is moot, so it
+                    # must not make an otherwise-distant expiry look closer.
+                    expiring_soonest = (
+                        rows.filter(current_balance__gt=0, expires_at__isnull=False)
+                        .order_by("expires_at")
+                        .values_list("expires_at", flat=True)
+                        .first()
+                    )
+                    summary[balance_type] = {
+                        "remaining": remaining, "limit": total, "unlimited": False,
+                        "nearest_expiry": expiring_soonest,
+                    }
                 else:
-                    summary[balance_type] = {"remaining": None, "limit": None, "unlimited": False}
+                    summary[balance_type] = {"remaining": None, "limit": None, "unlimited": False, "nearest_expiry": None}
 
             if balance_type == PackageBalance.SLOTS:
                 reservation_filter = {"owner_company": owner} if owner_type == "COMPANY" else {"owner_user": owner}

@@ -13,7 +13,7 @@ from django.utils import timezone
 import stripe
 from api.accounts.models import User
 from api.core.constants import Roles, SubscriptionStatus
-from api.core.permisssions import IsAdminOrSuperAdmin, IsSuperAdmin, IsB2BUser, get_user_company
+from api.core.permisssions import IsAdminOrSuperAdmin, IsSuperAdmin, IsB2BUser, RequireSetPayment, get_user_company
 from api.payments.subscription_serializers import CancelSubscriptionSerializer, ChangePlanSerializer, SubscriptionListSerializer, UpdateQuantitySerializer
 from meritlense import settings
 from api.audit.services import AuditLogService
@@ -404,7 +404,15 @@ class PaymentMethodViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
 class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
     queryset = Subscription.objects.none()
-    
+
+    def get_permissions(self):
+        # set_payment: the actions that actually change what the company
+        # is billed for - viewing (list/retrieve/usage/invoices/etc.) stays
+        # open to every team member regardless of their permissions.
+        if self.action in ['create', 'change_plan', 'update_quantity', 'cancel', 'reactivate']:
+            return [IsAuthenticated(), RequireSetPayment()]
+        return super().get_permissions()
+
     def get_serializer_class(self):
         if self.action == 'list':
             return SubscriptionListSerializer

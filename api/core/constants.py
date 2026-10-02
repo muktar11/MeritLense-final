@@ -343,17 +343,26 @@ class DocumentStatus:
 
 
 class CompanyTeamPermissions:
-    VIEW_CANDIDATES = "view_candidates"
-    EVALUATE_CANDIDATES = "evaluate_candidates"
-    CREATE_EVALUATIONS = "create_evaluations"
-    VIEW_REPORTS = "view_reports"
-    
+    """The four granular, independently-enforced permissions a company
+    admin can assign a team member at invite time (TeamMemberProfile.
+    permissions). "Full Access" is deliberately not a stored value here -
+    it's a frontend convenience that selects all four at once, so there's
+    only ever one source of truth for what a member can actually do
+    (checking all four, not a separate flag that could drift out of sync
+    with them)."""
+    ADD_CANDIDATES = "add_candidates"
+    SET_EVALUATION = "set_evaluation"
+    SET_SCORES = "set_scores"
+    SET_PAYMENT = "set_payment"
+
     CHOICES = [
-        (VIEW_CANDIDATES, "View Candidates"),
-        (EVALUATE_CANDIDATES, "Evaluate Candidates"),
-        (CREATE_EVALUATIONS, "Create Evaluations"),
-        (VIEW_REPORTS, "View Reports"),
+        (ADD_CANDIDATES, "Add Candidates"),
+        (SET_EVALUATION, "Set Evaluation"),
+        (SET_SCORES, "Set Scores"),
+        (SET_PAYMENT, "Set Payment"),
     ]
+
+    ALL = [ADD_CANDIDATES, SET_EVALUATION, SET_SCORES, SET_PAYMENT]
 
 class Languages:
     ENGLISH = "EN"

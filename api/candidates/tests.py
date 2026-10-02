@@ -142,7 +142,7 @@ class CandidatesWeek2Tests(APITestCase):
             job_title="Recruiter",
             department="Hiring",
             phone_number="+15557778888",
-            permissions=[CompanyTeamPermissions.VIEW_CANDIDATES],
+            permissions=[CompanyTeamPermissions.ADD_CANDIDATES],
             invited_by=company.admin_user,
         )
         self.create_active_subscription(user)
@@ -441,6 +441,34 @@ class CandidatesWeek2Tests(APITestCase):
         self.assertEqual(candidate.company, company)
         self.assertEqual(candidate.created_by, teammate)
         self.assertIn(teammate, candidate.shared_with.all())
+
+    def test_team_member_without_add_candidates_permission_is_blocked(self):
+        company_admin, company = self.create_b2b_company(
+            "no-perm-admin@example.com", "NoPermCo", "NOPERM-1"
+        )
+        teammate, _ = self.create_team_member(company, "no-perm-member@example.com")
+        teammate.team_member_profile.permissions = []
+        teammate.team_member_profile.save(update_fields=["permissions"])
+
+        self.authenticate(teammate)
+        response = self.client.post(
+            "/api/v1/candidates/candidates",
+            {
+                "first_name": "Should",
+                "last_name": "BeBlocked",
+                "email": "blocked-team-member@example.com",
+                "passport_id": "TEAM-BLOCKED-1",
+                "job_role": candidateJobRoles.HOUSEKEEPER,
+                "core_skills": "cleaning, organization",
+                "preferred_language": Languages.ENGLISH,
+                "passport_document": make_file("blocked-team-member.pdf"),
+            },
+            format="multipart",
+        )
+        self.client.credentials()
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN, response.data)
+        self.assertFalse(Candidate.objects.filter(email="blocked-team-member@example.com").exists())
 
     def test_candidate_create_schema_uses_multipart_form_data(self):
         schema = SchemaGenerator().get_schema(request=None, public=True)

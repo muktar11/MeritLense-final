@@ -2351,7 +2351,7 @@ class InviteTeamMemberView(APIView):
                     "job_title": "Recruiter",
                     "department": "Talent",
                     "phone_number": "+251911000000",
-                    "permissions": ["view_candidates", "create_evaluations"],
+                    "permissions": ["add_candidates", "set_evaluation"],
                 },
                 request_only=True,
             ),
@@ -2381,7 +2381,7 @@ class InviteTeamMemberView(APIView):
                     first_name=serializer.validated_data['first_name'],
                     last_name=serializer.validated_data['last_name'],
                     job_title=serializer.validated_data['job_title'],
-                    permissions=serializer.validated_data.get('permissions', ['view_candidates']),
+                    permissions=serializer.validated_data.get('permissions', []),
                     token=token,
                     expires_at=expires_at
                 )
@@ -2646,7 +2646,7 @@ class TeamMemberDetailView(APIView):
                     "job_title": "Senior Recruiter",
                     "department": "Talent",
                     "phone_number": "+251911000001",
-                    "permissions": ["view_candidates", "evaluate_candidates"],
+                    "permissions": ["add_candidates", "set_scores"],
                 },
                 request_only=True,
             ),

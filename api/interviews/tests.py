@@ -22,6 +22,7 @@ from api.audit.models import AuditLog
 from api.candidates.models import Candidate
 from api.core.constants import AuditLogAction, CoverageLevel, InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus, Roles
 from api.interviews.models import InterviewConfiguration, InterviewRubric, PackageSessionConfig, RolePackageCoverage
+from api.core.permisssions import RequireSetEvaluation
 from api.interviews.voice_services import VoiceProviderError
 from api.interviews.package_services import PackageArchitectureService
 from api.payments.models import PackageBalance, Price, SlotReservation, BalanceTransaction
@@ -4193,6 +4194,31 @@ class InterviewSessionWebSocketTests(TransactionTestCase):
 
         await communicator.send_input({"type": "websocket.disconnect", "code": 1000})
         await communicator.wait(timeout=1)
+
+
+class SessionSetEvaluationPermissionWiringTests(TestCase):
+    """Commercial team-permissions feature: scheduling/creating an
+    evaluation session is one of the four actions a B2B_TEAM_MEMBER needs
+    explicit set_evaluation permission for (api.core.permisssions.
+    RequireSetEvaluation - see api.core.tests.HasTeamMemberPermissionTests
+    for the permission class's own behavior). list stays open to every
+    team member regardless of permissions."""
+
+    def test_create_requires_set_evaluation(self):
+        from api.interviews.views import InterviewSessionViewSet
+
+        view = InterviewSessionViewSet()
+        view.action = "create"
+        classes = view.get_permissions()
+        self.assertTrue(any(isinstance(p, RequireSetEvaluation) for p in classes))
+
+    def test_list_does_not_require_set_evaluation(self):
+        from api.interviews.views import InterviewSessionViewSet
+
+        view = InterviewSessionViewSet()
+        view.action = "list"
+        classes = view.get_permissions()
+        self.assertFalse(any(isinstance(p, RequireSetEvaluation) for p in classes))
 
 
 class SeedPackageArchitectureCommandTests(TestCase):

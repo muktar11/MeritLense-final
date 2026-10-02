@@ -6,7 +6,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from api.audit.services import AuditLogService
-from api.core.permisssions import IsAdminOrSuperAdmin
+from api.core.permisssions import IsAdminOrSuperAdmin, RequireSetScores
 
 from .models import CandidateScore, ScoreSet, ScoreCategory
 from .serializers import (
@@ -143,7 +143,7 @@ class ScoreSetViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
     
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            self.permission_classes = [IsAuthenticated, CanManageScores]
+            self.permission_classes = [IsAuthenticated, CanManageScores, RequireSetScores]
         elif self.action in ['list', 'retrieve']:
             self.permission_classes = [IsAuthenticated, CanViewScores]
         
@@ -353,7 +353,7 @@ class CandidateScoreViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
     
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            self.permission_classes = [IsAuthenticated, CanManageScores]
+            self.permission_classes = [IsAuthenticated, CanManageScores, RequireSetScores]
         else:
             self.permission_classes = [IsAuthenticated, CanViewScores]
         return super().get_permissions()

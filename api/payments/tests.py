@@ -14,6 +14,7 @@ from api.accounts.models import Company, User
 from api.audit.models import AuditLog
 from api.candidates.models import Candidate
 from api.core.constants import InterviewEvaluationTier, InterviewSessionStatus, Roles
+from api.core.permisssions import RequireSetPayment
 from api.interviews.models import InterviewConfiguration
 from api.payments.entitlement_services import ADDON_POINTS_CATALOG, EntitlementService
 from api.payments.models import AddonRequest, BalanceTransaction, Customer, DealRecord, Invoice, PackageBalance, Payment, Price, ProcessedStripeEvent, SlotReservation, Subscription
@@ -21,6 +22,7 @@ from api.payments.serializers import DealRecordSerializer
 from api.payments.refund_services import CONFIRMED_BILLING_ERROR, PLATFORM_ERROR, RefundEligibilityService, RefundService
 from api.payments.serializers import CreateSubscriptionSerializer
 from api.payments.services import PaymentIntentInitializationError, StripeService
+from api.payments.views import SubscriptionViewSet
 from api.sessions.models import InterviewSession
 from api.sessions.services import InterviewSessionService
 
@@ -1924,6 +1926,35 @@ class WebhookIdempotencyTests(APITestCase):
 
         self.assertEqual(response.status_code, 500)
         self.assertFalse(ProcessedStripeEvent.objects.filter(stripe_event_id="evt_fail").exists())
+
+
+class SubscriptionSetPaymentPermissionWiringTests(TestCase):
+    """Commercial team-permissions feature: changing what the company is
+    billed for is one of the four actions a B2B_TEAM_MEMBER needs explicit
+    set_payment permission for (api.core.permisssions.RequireSetPayment -
+    see api.core.tests.HasTeamMemberPermissionTests for the permission
+    class's own behavior). Viewing (list/retrieve/usage/invoices/etc.)
+    stays open to every team member regardless of permissions."""
+
+    def test_mutating_actions_require_set_payment(self):
+        view = SubscriptionViewSet()
+        for action in ["create", "change_plan", "update_quantity", "cancel", "reactivate"]:
+            view.action = action
+            classes = view.get_permissions()
+            self.assertTrue(
+                any(isinstance(p, RequireSetPayment) for p in classes),
+                f"SubscriptionViewSet.{action} should require RequireSetPayment",
+            )
+
+    def test_viewing_actions_do_not_require_set_payment(self):
+        view = SubscriptionViewSet()
+        for action in ["list", "retrieve", "usage", "upcoming_invoice", "active", "invoices"]:
+            view.action = action
+            classes = view.get_permissions()
+            self.assertFalse(
+                any(isinstance(p, RequireSetPayment) for p in classes),
+                f"SubscriptionViewSet.{action} should stay open to every team member",
+            )
 
 
 class PublicPricesEndpointTests(APITestCase):

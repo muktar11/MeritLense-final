@@ -2,6 +2,9 @@ from django.core import signing
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from api.accounts.authentication import has_approved_company_license
+from api.core.constants import Roles
+
 
 TICKET_SALT = "meritlense.live-call.v1"
 
@@ -23,9 +26,20 @@ class OptionalJWTAuthentication(JWTAuthentication):
 
     def authenticate(self, request):
         try:
-            return super().authenticate(request)
+            result = super().authenticate(request)
         except AuthenticationFailed:
             return None
+        if result:
+            user, _ = result
+            if (
+                user.role in (Roles.B2B, Roles.B2B_TEAM_MEMBER)
+                and not has_approved_company_license(user)
+            ):
+                raise AuthenticationFailed(
+                    "Your company account is restricted until its trade license is approved.",
+                    code="company_verification_required",
+                )
+        return result
 
 
 def issue_socket_ticket(call, role):
@@ -34,4 +48,3 @@ def issue_socket_ticket(call, role):
 
 def read_socket_ticket(ticket, max_age):
     return signing.loads(ticket, salt=TICKET_SALT, max_age=max_age)
-

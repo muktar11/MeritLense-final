@@ -16,9 +16,9 @@ from drf_spectacular.utils import OpenApiExample, OpenApiResponse, PolymorphicPr
 from rest_framework import serializers
 from api.audit.services import AuditLogService
 from api.core.constants import AdminPermissions, AuditLogAction, AuditLogCategory, AuditLogSeverity, CompanyTeamPermissions, DocumentStatus, Roles
-from api.core.permisssions import CanVerifyDocuments, IsAdminOrSuperAdmin, IsB2BTeamMember, IsB2BUser, IsEmployer, IsOwnerOrAdmin, IsSuperAdmin, get_user_company
+from api.core.permisssions import CanVerifyDocuments, IsAdminOrSuperAdmin, IsB2BTeamMember, IsB2BUser, IsB2BUserOrTeamMember, IsEmployer, IsOwnerOrAdmin, IsSuperAdmin, get_user_company
 from api.core.public_ids import get_by_identifier
-from .models import Company, TeamInvitation, TeamMemberProfile, User, IndividualEmployerProfile, CompanyEmployerProfile, AdminProfile
+from .models import Company, CompanyDocumentRequest, TeamInvitation, TeamMemberProfile, User, IndividualEmployerProfile, CompanyEmployerProfile, AdminProfile
 from .serializers import (
     AcceptInvitationSerializer,
     AdminProfileSerializer,
@@ -47,7 +47,8 @@ from .serializers import (
 from .utils import (
     send_password_reset_email, send_password_reset_confirmation_email, send_verification_email, send_team_invitation_email,
     send_admin_credentials_email, send_employer_welcome_email, invalidate_user_sessions,
-    send_welcome_email, send_account_approved_email, send_account_rejected_email, send_admin_contact_email, notify_superadmins,
+    send_welcome_email, send_account_approved_email, send_account_rejected_email, send_license_received_email,
+    send_document_request_email, send_admin_contact_email, notify_superadmins,
 )
 import random
 
@@ -1113,6 +1114,19 @@ class ProfileDetailView(APIView):
             serializer = IndividualProfileSerializer(profile, data=request.data, partial=True)
         elif user.role == Roles.B2B:
             profile = get_object_or_404(CompanyEmployerProfile, user=user)
+            company = get_user_company(user)
+            approved_with_license = bool(
+                company and company.is_verified and profile.resachetified_license
+            )
+            document_fields = {
+                'registration_certificate', 'resachetified_license',
+                'tax_id_document', 'additional_documents',
+            }
+            if not approved_with_license and document_fields.intersection(request.data.keys()):
+                return Response(
+                    {'error': 'Upload the trade license through the document upload endpoint.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             serializer = CompanyProfileSerializer(profile, data=request.data, partial=True)
         elif user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
             try:
@@ -1199,6 +1213,15 @@ class ProfileDocumentUploadView(APIView):
             
         elif user.role == Roles.B2B:
             profile = get_object_or_404(CompanyEmployerProfile, user=user)
+            company = get_user_company(user)
+            approved_with_license = bool(
+                company and company.is_verified and profile.resachetified_license
+            )
+            if not approved_with_license and document_type != 'license':
+                return Response(
+                    {'error': 'Only the trade license can be uploaded while company access is restricted.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             
             if document_type == 'registration':
                 profile.registration_certificate = document_file
@@ -1212,6 +1235,27 @@ class ProfileDocumentUploadView(APIView):
                 return Response({'error': 'Invalid document type'}, status=status.HTTP_400_BAD_REQUEST)
             
             profile.save()
+            if document_type == 'license':
+                profile.documents_verified = False
+                profile.verified_at = None
+                profile.save(update_fields=['documents_verified', 'verified_at', 'updated_at'])
+                user.documents_verified = False
+                user.documents_verified_at = None
+                user.documents_verification_status = DocumentStatus.PENDING
+                user.rejection_reason = None
+                user.save(update_fields=[
+                    'documents_verified', 'documents_verified_at',
+                    'documents_verification_status', 'rejection_reason',
+                ])
+                if company:
+                    company.is_verified = False
+                    company.verified_at = None
+                    company.verified_by = None
+                    company.save(update_fields=['is_verified', 'verified_at', 'verified_by', 'updated_at'])
+                try:
+                    send_license_received_email(user)
+                except Exception:
+                    logger.exception("Unable to send license receipt email to %s", user.email)
             serializer = CompanyProfileSerializer(profile)
         else:
             return Response({'error': 'Invalid user role'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1660,7 +1704,9 @@ class EmployerListView(APIView):
         
         paginator = StandardResultsSetPagination()
         paginated_employers = paginator.paginate_queryset(employers, request)
-        serializer = EmployerListSerializer(paginated_employers, many=True)
+        serializer = EmployerListSerializer(
+            paginated_employers, many=True, context={'request': request}
+        )
         
         return paginator.get_paginated_response(serializer.data)
 
@@ -1686,7 +1732,7 @@ class EmployerDetailView(APIView):
         if not user:
             return Response({'error': 'Employer not found'}, status=status.HTTP_404_NOT_FOUND)
         
-        serializer = EmployerListSerializer(user)
+        serializer = EmployerListSerializer(user, context={'request': request})
         return Response(serializer.data)
 
     @extend_schema(
@@ -1767,7 +1813,7 @@ class PendingVerificationListView(APIView):
         result = []
         for user in pending_users:
             profile = user.get_profile()
-            user_data = EmployerListSerializer(user).data
+            user_data = EmployerListSerializer(user, context={'request': request}).data
 
             if not profile:
                 # Data-integrity edge case: a User row exists but its
@@ -1795,6 +1841,10 @@ class PendingVerificationListView(APIView):
                     'registration_certificate': request.build_absolute_uri(profile.registration_certificate.url) if profile.registration_certificate else None,
                     'resachetified_license': request.build_absolute_uri(profile.resachetified_license.url) if profile.resachetified_license else None,
                     'tax_id_document': request.build_absolute_uri(profile.tax_id_document.url) if profile.tax_id_document else None,
+                    'requested_documents': [
+                        serialize_company_document_request(item, request)
+                        for item in CompanyDocumentRequest.objects.filter(company=get_user_company(user))
+                    ],
                 }
 
             result.append(user_data)
@@ -1861,6 +1911,15 @@ class VerifyDocumentsView(APIView):
                 return Response({'error': 'User profile not found'}, status=status.HTTP_404_NOT_FOUND)
             
             status_value = serializer.validated_data['status']
+            if (
+                status_value == 'APPROVED'
+                and user.role == Roles.B2B
+                and not profile.resachetified_license
+            ):
+                return Response(
+                    {'error': 'A trade license must be uploaded before the company can be approved.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             
             if status_value == 'APPROVED':
                 user.documents_verified = True
@@ -2158,6 +2217,129 @@ class AdminDashboardStatsView(APIView):
             },
             'recent_users': recent_users_data
         })
+
+def serialize_company_document_request(document_request, request):
+    document_url = None
+    if document_request.document:
+        document_url = request.build_absolute_uri(document_request.document.url)
+    return {
+        "id": document_request.id,
+        "name": document_request.document_name,
+        "document_name": document_request.document_name,
+        "status": document_request.status,
+        "document_url": document_url,
+        "document": document_url,
+        "requested_at": document_request.created_at,
+        "created_at": document_request.created_at,
+        "uploaded_at": document_request.uploaded_at,
+    }
+
+
+class AdminCompanyDocumentRequestsView(APIView):
+    permission_classes = [IsAuthenticated, CanVerifyDocuments]
+
+    def _get_company_owner(self, user_id):
+        try:
+            user = get_by_identifier(User.objects.filter(role=Roles.B2B), user_id)
+        except User.DoesNotExist:
+            return None, Response({"error": "Company owner not found"}, status=status.HTTP_404_NOT_FOUND)
+        company = get_user_company(user)
+        if not company:
+            return None, Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+        return (user, company), None
+
+    def get(self, request, user_id):
+        owner_company, error = self._get_company_owner(user_id)
+        if error:
+            return error
+        _, company = owner_company
+        items = company.document_requests.select_related("requested_by").all()
+        return Response({
+            "results": [serialize_company_document_request(item, request) for item in items]
+        })
+
+    def post(self, request, user_id=None):
+        user_id = user_id or request.data.get("user_id")
+        if not user_id:
+            return Response({"user_id": "This field is required."}, status=status.HTTP_400_BAD_REQUEST)
+        owner_company, error = self._get_company_owner(user_id)
+        if error:
+            return error
+        user, company = owner_company
+
+        document_name = str(request.data.get("name", request.data.get("document_name", ""))).strip()
+        if not document_name or len(document_name) > 255:
+            return Response(
+                {"name": "Provide a document name of 1 to 255 characters."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        document_request = CompanyDocumentRequest.objects.create(
+            company=company,
+            requested_by=request.user,
+            document_name=document_name,
+        )
+        try:
+            send_document_request_email(user, document_name)
+        except Exception:
+            logger.exception("Unable to send document request email to %s", user.email)
+        AuditLogService.log(
+            user=request.user,
+            action=AuditLogAction.USER_UPDATED,
+            category=AuditLogCategory.DOCUMENT,
+            description=f"Requested {document_name} from {company.name}",
+            resource=user,
+            data={"document_request_id": document_request.id, "document_name": document_name},
+            request=request,
+        )
+        return Response(
+            serialize_company_document_request(document_request, request),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CompanyDocumentRequestsView(APIView):
+    permission_classes = [IsAuthenticated, IsB2BUserOrTeamMember]
+
+    def get(self, request):
+        company = get_user_company(request.user)
+        if not company:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+        items = company.document_requests.all()
+        return Response({
+            "results": [serialize_company_document_request(item, request) for item in items]
+        })
+
+
+class CompanyDocumentRequestUploadView(APIView):
+    permission_classes = [IsAuthenticated, IsB2BUserOrTeamMember]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, request_id):
+        company = get_user_company(request.user)
+        if not company:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            document_request = CompanyDocumentRequest.objects.get(id=request_id, company=company)
+        except CompanyDocumentRequest.DoesNotExist:
+            return Response({"error": "Document request not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if document_request.status != CompanyDocumentRequest.PENDING:
+            return Response({"error": "This document request is no longer pending."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        document = request.FILES.get("document")
+        if not document:
+            return Response({"error": "No document provided"}, status=status.HTTP_400_BAD_REQUEST)
+        if document.name.rsplit(".", 1)[-1].lower() not in {"pdf", "jpg", "jpeg", "png"}:
+            return Response({"error": "Only PDF, JPG, JPEG, or PNG files are accepted."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        document_request.document = document
+        document_request.status = CompanyDocumentRequest.UPLOADED
+        document_request.uploaded_at = timezone.now()
+        document_request.save(update_fields=["document", "status", "uploaded_at", "updated_at"])
+        return Response(serialize_company_document_request(document_request, request))
+
 
 class CompanyProfileView(APIView):
     permission_classes = [IsAuthenticated, IsB2BUser]
@@ -2468,10 +2650,15 @@ class CancelInvitationView(APIView):
                     status=status.HTTP_404_NOT_FOUND
                 )
             
-            invitation = TeamInvitation.objects.get(
-                id=invitation_id,
-                company=request.user.company_profile.company,
-                status='PENDING'
+            # Same public_id-vs-PK mismatch as TeamMemberDetailView below -
+            # TeamInvitationSerializer (PublicIdModelSerializer) returns
+            # "id" as the public_id UUID, not the raw PK.
+            invitation = get_by_identifier(
+                TeamInvitation.objects.filter(
+                    company=request.user.company_profile.company,
+                    status='PENDING',
+                ),
+                invitation_id,
             )
             
             invitation.status = 'CANCELLED'
@@ -2606,16 +2793,21 @@ class AcceptInvitationView(APIView):
 
 class TeamMemberDetailView(APIView):
     permission_classes = [IsAuthenticated, IsB2BUser]
-    
+
     def get_object(self, member_id, user):
         try:
             if not hasattr(user, 'company_profile'):
                 return None
-            
+
             company = user.company_profile.company
-            return TeamMemberProfile.objects.get(
-                id=member_id,
-                company=company
+            # TeamMemberProfileSerializer (PublicIdModelSerializer) returns
+            # "id" as the public_id UUID, not the raw PK - a plain
+            # TeamMemberProfile.objects.get(id=member_id) never matched
+            # what the frontend actually sends back here, so this endpoint
+            # 404'd on every edit/remove. get_by_identifier accepts either
+            # form, matching the convention used everywhere else in the app.
+            return get_by_identifier(
+                TeamMemberProfile.objects.filter(company=company), member_id,
             )
         except TeamMemberProfile.DoesNotExist:
             return None

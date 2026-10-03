@@ -1,5 +1,18 @@
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
+from api.core.constants import Roles
+from api.core.permisssions import get_user_company
+
+
+def has_approved_company_license(user):
+    company = get_user_company(user)
+    company_profile = getattr(company, "employer_profile", None) if company else None
+    return bool(
+        company
+        and company.is_verified
+        and company_profile
+        and company_profile.resachetified_license
+    )
 
 
 class PasswordChangeAwareJWTAuthentication(JWTAuthentication):
@@ -31,3 +44,33 @@ class PasswordChangeAwareJWTAuthentication(JWTAuthentication):
                 )
 
         return user
+
+    def authenticate(self, request):
+        result = super().authenticate(request)
+        if result is None:
+            return None
+
+        user, token = result
+        if user.role not in (Roles.B2B, Roles.B2B_TEAM_MEMBER):
+            return result
+
+        if has_approved_company_license(user):
+            return result
+
+        route_name = getattr(getattr(request, "resolver_match", None), "url_name", None)
+        allowed_routes = {
+            "profile-detail",
+            "profile-picture",
+            "company-profile",
+            "profile-document-upload",
+            "company-document-requests",
+            "company-document-request-upload",
+        }
+        if route_name in allowed_routes:
+            return result
+
+        raise AuthenticationFailed(
+            "Your company account is restricted until its trade license is approved. "
+            "You may access your profile and document uploads.",
+            code="company_verification_required",
+        )

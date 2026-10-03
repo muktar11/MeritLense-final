@@ -235,6 +235,8 @@ class CompanyEmployerProfile(TimeStampedModel, SoftDeleteModel):
     )
     resachetified_license = models.FileField(
         upload_to='b2b/documents/license/',
+        null=True,
+        blank=True,
         validators=[FileExtensionValidator(['pdf', 'jpg', 'jpeg', 'png'])]
     )
     tax_id_document = models.FileField(
@@ -353,6 +355,35 @@ class Company(TimeStampedModel):
     
     def get_team_member_count(self):
         return self.get_team_members().count()
+
+
+class CompanyDocumentRequest(TimeStampedModel):
+    PENDING = "PENDING"
+    UPLOADED = "UPLOADED"
+    STATUS_CHOICES = [
+        (PENDING, "Pending"),
+        (UPLOADED, "Uploaded"),
+    ]
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="document_requests")
+    requested_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="company_document_requests"
+    )
+    document_name = models.CharField(max_length=255)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=PENDING)
+    document = models.FileField(
+        upload_to="b2b/documents/requested/",
+        null=True,
+        blank=True,
+        validators=[FileExtensionValidator(["pdf", "jpg", "jpeg", "png"])],
+    )
+    uploaded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.document_name} - {self.company.name} ({self.status})"
 
 
 class TeamMemberProfile(TimeStampedModel):

@@ -79,6 +79,10 @@ def send_verification_email(user, request=None):
         Please enter this 5-digit code in the app to verify your email address.
         
         This code will expire in 24 hours.
+
+        Your account is ready for setup, but company access remains restricted
+        until you upload your trade license from your profile and an administrator
+        approves it.
         
         Best regards,
         Meritlense Team
@@ -295,6 +299,42 @@ Best regards,
 Meritlense Team
 """
     safe_send_mail(subject, message, [user.email])
+
+
+def send_license_received_email(user):
+    company_name = getattr(getattr(user, "company_profile", None), "company_name", "your company")
+    safe_send_mail(
+        "Trade license received",
+        f"""Hello {user.first_name},
+
+We received the trade license for {company_name}. Company access will remain
+restricted while an administrator reviews it. We will email you when a decision
+has been made.
+
+Best regards,
+Meritlense Team
+""",
+        [user.email],
+    )
+
+
+def send_document_request_email(user, document_name):
+    company_name = getattr(getattr(user, "company_profile", None), "company_name", "your company")
+    safe_send_mail(
+        f"Additional document requested: {document_name}",
+        f"""Hello {user.first_name},
+
+An administrator requested the following document for {company_name}:
+
+{document_name}
+
+Please sign in and upload it from your profile's requested documents section.
+
+Best regards,
+Meritlense Team
+""",
+        [user.email],
+    )
 
 
 def _format_currency_amount(unit_amount, currency):

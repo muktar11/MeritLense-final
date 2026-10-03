@@ -545,11 +545,21 @@ class AccountsWeek2Tests(APITestCase):
             },
             format="multipart",
         )
-        self.assertEqual(upload_response.status_code, status.HTTP_200_OK, upload_response.data)
-        self.assertEqual(upload_response.data["message"], "tax uploaded successfully")
+        self.assertEqual(upload_response.status_code, status.HTTP_403_FORBIDDEN, upload_response.data)
 
         user.company_profile.refresh_from_db()
-        self.assertTrue(bool(user.company_profile.tax_id_document))
+        self.assertFalse(bool(user.company_profile.tax_id_document))
+        license_response = self.client.post(
+            "/api/v1/auth/documents/upload",
+            {
+                "document_type": "license",
+                "document": make_file("updated-license.pdf"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(license_response.status_code, status.HTTP_200_OK, license_response.data)
+        user.refresh_from_db()
+        self.assertEqual(user.documents_verification_status, "PENDING")
 
     def test_password_reset_validate_reset_and_change_password_flow(self):
         user = self.create_verified_b2c_user()
@@ -1449,7 +1459,9 @@ class AccountsWeek2Tests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_contact_applicant_denied_for_non_admin(self):
-        b2b_user, _company = self.create_verified_b2b_owner(email="contact-denied-me@example.com")
+        b2b_user, company = self.create_verified_b2b_owner(email="contact-denied-me@example.com")
+        company.is_verified = True
+        company.save(update_fields=["is_verified"])
 
         self.authenticate(b2b_user.email, "Password123!")
         response = self.client.post(
@@ -1458,3 +1470,124 @@ class AccountsWeek2Tests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class TeamMemberAndInvitationLookupTests(APITestCase):
+    """Regression guard for a real bug: TeamMemberProfileSerializer and
+    TeamInvitationSerializer both extend PublicIdModelSerializer, which
+    returns "id" as the public_id UUID, not the raw PK - but
+    TeamMemberDetailView/CancelInvitationView looked members/invitations
+    up by raw PK (id=member_id against an <int:...> URL converter). Every
+    edit, removal, and invitation cancellation initiated from the frontend
+    (which only ever has the serialized public_id "id" to send back) 404'd,
+    silently, for as long as these two serializers have used public_id -
+    there was no test coverage of either endpoint at all before this."""
+
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            email="lookup-owner@example.com", password="Password123!",
+            first_name="Lookup", last_name="Owner", role=Roles.B2B, is_verified=True,
+        )
+        self.company = Company.objects.create(
+            name="Lookup Co", registration_number=f"LOOKUP-{self.owner.id}",
+            company_size=CompanySize.SMALL, phone_number="+15550000099",
+            country="United States", city="San Francisco", admin_user=self.owner,
+            is_verified=True,
+        )
+        CompanyEmployerProfile.objects.create(
+            user=self.owner, company_name=self.company.name,
+            company_registration_number=self.company.registration_number,
+            company_size=self.company.company_size, company=self.company,
+            country=self.company.country, city=self.company.city,
+            preferred_language=Languages.ENGLISH, phone_number=self.company.phone_number,
+            resachetified_license="approved-license.pdf",
+        )
+
+        login = self.client.post(
+            "/api/v1/auth/login", {"email": self.owner.email, "password": "Password123!"}, format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+    def _create_team_member(self):
+        from api.accounts.models import TeamMemberProfile
+
+        member_user = User.objects.create_user(
+            email="lookup-member@example.com", password="Password123!",
+            first_name="Team", last_name="Member", role=Roles.B2B_TEAM_MEMBER, is_verified=True,
+        )
+        return TeamMemberProfile.objects.create(
+            user=member_user, company=self.company, job_title="Recruiter",
+            phone_number="+15550000098", permissions=[],
+        )
+
+    def _create_invitation(self):
+        from api.accounts.models import TeamInvitation
+
+        return TeamInvitation.objects.create(
+            company=self.company, invited_by=self.owner, email="invitee@example.com",
+            first_name="Invitee", last_name="Person", job_title="Recruiter",
+            permissions=[], token="test-token-lookup-1",
+            expires_at=timezone.now() + timezone.timedelta(days=7),
+        )
+
+    def test_update_team_member_by_their_serialized_public_id(self):
+        profile = self._create_team_member()
+
+        response = self.client.patch(
+            f"/api/v1/auth/companies/team/members/{profile.public_id}",
+            {"job_title": "Senior Recruiter"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        profile.refresh_from_db()
+        self.assertEqual(profile.job_title, "Senior Recruiter")
+
+    def test_remove_team_member_by_their_serialized_public_id(self):
+        profile = self._create_team_member()
+        from api.accounts.models import TeamMemberProfile
+
+        response = self.client.delete(f"/api/v1/auth/companies/team/members/{profile.public_id}")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertFalse(TeamMemberProfile.objects.filter(pk=profile.pk).exists())
+
+    def test_cancel_invitation_by_its_serialized_public_id(self):
+        invitation = self._create_invitation()
+
+        response = self.client.post(
+            f"/api/v1/auth/companies/team/invitations/{invitation.public_id}/cancel",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, "CANCELLED")
+
+    def test_update_team_member_from_a_different_company_is_not_found(self):
+        other_owner = User.objects.create_user(
+            email="lookup-other-owner@example.com", password="Password123!",
+            first_name="Other", last_name="Owner", role=Roles.B2B, is_verified=True,
+        )
+        other_company = Company.objects.create(
+            name="Other Co", registration_number=f"LOOKUP-OTHER-{other_owner.id}",
+            company_size=CompanySize.SMALL, phone_number="+15550000097",
+            country="United States", city="San Francisco", admin_user=other_owner,
+        )
+        from api.accounts.models import TeamMemberProfile
+
+        other_user = User.objects.create_user(
+            email="lookup-other-member@example.com", password="Password123!",
+            first_name="Other", last_name="Member", role=Roles.B2B_TEAM_MEMBER, is_verified=True,
+        )
+        other_profile = TeamMemberProfile.objects.create(
+            user=other_user, company=other_company, job_title="Recruiter",
+            phone_number="+15550000096", permissions=[],
+        )
+
+        response = self.client.patch(
+            f"/api/v1/auth/companies/team/members/{other_profile.public_id}",
+            {"job_title": "Hijacked"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

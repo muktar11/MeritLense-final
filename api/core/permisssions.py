@@ -204,14 +204,11 @@ class CanManageUsers(BasePermission):
 
 
 class IsCompanyApproved(BasePermission):
-    """B2B company admins and their team members may only create or modify
-    core resources (candidates, evaluations) once their company has passed
-    admin document review (Company.is_verified). Not applied to B2C, which
-    has no Company and its own separate email-verification gate.
+    """Secondary write guard for core company resources.
 
-    Read-only requests (list/retrieve/GET) are always allowed so a pending
-    company can still see its own dashboard while awaiting approval - this
-    only blocks write actions.
+    The shared JWT authenticator applies the full company-license lockout to
+    B2B routes; this permission remains as a resource-level safeguard and is
+    not applied to B2C users.
     """
     message = "Your company's registration is still pending admin approval."
 

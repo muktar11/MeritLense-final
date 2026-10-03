@@ -138,7 +138,7 @@ class B2BRegistrationSerializer(UserRegistrationSerializer):
     timezone = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=64)
 
     registration_certificate = serializers.FileField()
-    resachetified_license = serializers.FileField()
+    resachetified_license = serializers.FileField(required=False, allow_null=True)
     tax_id_document = serializers.FileField(required=False, allow_null=True)
 
     def __init__(self, *args, **kwargs):
@@ -170,7 +170,7 @@ class B2BRegistrationSerializer(UserRegistrationSerializer):
             'target_market': validated_data.pop('target_market', None) or None,
             'timezone': validated_data.pop('timezone', None) or None,
             'registration_certificate': validated_data.pop('registration_certificate'),
-            'resachetified_license': validated_data.pop('resachetified_license'),
+            'resachetified_license': validated_data.pop('resachetified_license', None),
             'tax_id_document': validated_data.pop('tax_id_document', None),
         }
         
@@ -290,6 +290,11 @@ class CompanyProfileSerializer(PublicIdModelSerializer):
     last_name = serializers.CharField(source='user.last_name')
     admin_full_name = serializers.SerializerMethodField()
     role = serializers.CharField(source='user.role', read_only=True)
+    trade_license_uploaded = serializers.SerializerMethodField()
+    company_is_verified = serializers.SerializerMethodField()
+    documents_verification_status = serializers.CharField(
+        source='user.documents_verification_status', read_only=True
+    )
 
     class Meta:
         model = CompanyEmployerProfile
@@ -300,14 +305,25 @@ class CompanyProfileSerializer(PublicIdModelSerializer):
             'target_market', 'timezone',
             'website', 'preferred_language', 'notification_preference',
             'registration_certificate', 'resachetified_license',
+            'trade_license_uploaded', 'company_is_verified', 'documents_verification_status',
             'tax_id_document', 'additional_documents',
             'documents_verified', 'verified_at', 'verification_notes',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['documents_verified', 'verified_at', 'verification_notes', 'created_at', 'updated_at']
+        read_only_fields = [
+            'resachetified_license', 'trade_license_uploaded', 'company_is_verified',
+            'documents_verification_status', 'documents_verified', 'verified_at',
+            'verification_notes', 'created_at', 'updated_at',
+        ]
     
     def get_admin_full_name(self, obj):
         return obj.user.get_full_name()
+
+    def get_trade_license_uploaded(self, obj):
+        return bool(obj.resachetified_license)
+
+    def get_company_is_verified(self, obj):
+        return bool(obj.company and obj.company.is_verified)
     
     def update(self, instance, validated_data):
         user_data = validated_data.pop('user', {})
@@ -418,6 +434,13 @@ class ProfileSerializer(serializers.Serializer):
             if profile:
                 data = TeamMemberProfileSerializer(profile).data
                 data['profile_picture'] = picture_url
+                owner = profile.company.admin_user
+                company_profile = getattr(owner, 'company_profile', None)
+                data['company_is_verified'] = profile.company.is_verified
+                data['trade_license_uploaded'] = bool(
+                    company_profile and company_profile.resachetified_license
+                )
+                data['documents_verification_status'] = owner.documents_verification_status
                 return data
             else:
                 return {
@@ -594,6 +617,44 @@ class EmployerListSerializer(PublicIdModelSerializer):
             }
         return {}
 
+    def _absolute_file_url(self, file_field):
+        if not file_field:
+            return None
+        url = file_field.url
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request else url
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.role != Roles.B2B:
+            return data
+
+        profile = instance.get_profile()
+        if not profile:
+            data['documents'] = {}
+            data['requested_documents'] = []
+            return data
+
+        data['documents'] = {
+            'registration_certificate': self._absolute_file_url(profile.registration_certificate),
+            'resachetified_license': self._absolute_file_url(profile.resachetified_license),
+            'tax_id_document': self._absolute_file_url(profile.tax_id_document),
+        }
+        company = getattr(profile, 'company', None)
+        requests = company.document_requests.all() if company else []
+        data['requested_documents'] = [
+            {
+                'id': document_request.id,
+                'name': document_request.document_name,
+                'status': document_request.status,
+                'document_url': self._absolute_file_url(document_request.document),
+                'requested_at': document_request.created_at,
+                'uploaded_at': document_request.uploaded_at,
+            }
+            for document_request in requests
+        ]
+        return data
+
 
 class UserStatusUpdateSerializer(serializers.Serializer):
     is_active = serializers.BooleanField(required=False)
@@ -626,6 +687,7 @@ class CompanySerializer(PublicIdModelSerializer):
     admin_name = serializers.SerializerMethodField()
     team_member_count = serializers.SerializerMethodField()
     admin_user_email = serializers.EmailField(source='admin_user.email', read_only=True)
+    trade_license_uploaded = serializers.SerializerMethodField()
     
     class Meta:
         model = Company
@@ -633,7 +695,7 @@ class CompanySerializer(PublicIdModelSerializer):
             'id', 'name', 'registration_number', 'company_size',
             'industry', 'phone_number', 'country', 'city',
             'address', 'website', 'admin_user', 'admin_user_email', 'admin_name',
-            'is_verified', 'verified_at', 'team_member_count', 'stamp_image', 'logo',
+            'is_verified', 'verified_at', 'trade_license_uploaded', 'team_member_count', 'stamp_image', 'logo',
             'roles', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'admin_user', 'is_verified', 'verified_at', 'created_at', 'updated_at']
@@ -646,6 +708,10 @@ class CompanySerializer(PublicIdModelSerializer):
     def get_team_member_count(self, obj):
         from api.accounts.models import User
         return User.objects.filter(company=obj, role=Roles.B2B_TEAM_MEMBER).count()
+
+    def get_trade_license_uploaded(self, obj):
+        profile = getattr(obj, 'employer_profile', None)
+        return bool(profile and profile.resachetified_license)
 
     def validate_roles(self, value):
         if not isinstance(value, list):

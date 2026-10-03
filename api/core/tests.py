@@ -4,7 +4,14 @@ from django.test import TestCase
 
 from api.accounts.models import Company, TeamMemberProfile, User
 from api.core.constants import CompanyTeamPermissions, Countries, Roles
-from api.core.permisssions import RequireAddCandidates, RequireSetEvaluation, RequireSetPayment, RequireSetScores
+from api.core.permisssions import (
+    RequireAddCandidates,
+    RequireCandidateAccess,
+    RequireFullTeamAccess,
+    RequireSetEvaluation,
+    RequireSetPayment,
+    RequireSetScores,
+)
 
 
 class CountriesConstantTests(TestCase):
@@ -71,6 +78,28 @@ class HasTeamMemberPermissionTests(TestCase):
     def test_team_member_with_permission_is_allowed(self):
         user = self._team_member([CompanyTeamPermissions.ADD_CANDIDATES], "add-candidates")
         self.assertTrue(RequireAddCandidates().has_permission(self._request_for(user), None))
+
+    def test_candidate_area_access_requires_a_relevant_permission(self):
+        no_access = self._team_member([], "candidate-no-access")
+        evaluation_only = self._team_member(
+            [CompanyTeamPermissions.SET_EVALUATION], "candidate-evaluation-access"
+        )
+        self.assertFalse(RequireCandidateAccess().has_permission(self._request_for(no_access), None))
+        self.assertTrue(
+            RequireCandidateAccess().has_permission(self._request_for(evaluation_only), None)
+        )
+
+    def test_full_team_access_requires_every_permission(self):
+        partial_user = self._team_member(
+            [CompanyTeamPermissions.ADD_CANDIDATES], "partial-overview"
+        )
+        full_user = self._team_member(CompanyTeamPermissions.ALL, "full-overview")
+        self.assertFalse(
+            RequireFullTeamAccess().has_permission(self._request_for(partial_user), None)
+        )
+        self.assertTrue(
+            RequireFullTeamAccess().has_permission(self._request_for(full_user), None)
+        )
 
     def test_team_member_permissions_are_independent(self):
         user = self._team_member([CompanyTeamPermissions.SET_SCORES], "scores-only")

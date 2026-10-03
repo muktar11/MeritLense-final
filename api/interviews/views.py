@@ -70,7 +70,7 @@ class CanManageInterviewSetupMixin:
     setup_roles = {"ADMIN", "SUPERADMIN", "B2B", "B2C"}
 
     def get_permissions(self):
-        return [IsAuthenticated()]
+        return [IsAuthenticated(), RequireSetEvaluation()]
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -169,7 +169,7 @@ class TaskObservationResultViewSet(viewsets.ReadOnlyModelViewSet):
     lookup_value_regex = PUBLIC_ID_OR_PK_REGEX
 
     def get_permissions(self):
-        return [IsAuthenticated()]
+        return [IsAuthenticated(), RequireSetEvaluation()]
 
     def get_queryset(self):
         queryset = TaskObservationResult.objects.select_related(
@@ -223,7 +223,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         if self.action == "create":
             return [IsAuthenticated(), IsCompanyApproved(), RequireSetEvaluation()]
         if self.action == "list":
-            return [IsAuthenticated()]
+            return [IsAuthenticated(), RequireSetEvaluation()]
         return [AllowAny()]
 
     def get_queryset(self):
@@ -773,6 +773,12 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=["get"], url_path="tasks/results")
     def task_results(self, request, id=None):
         session = self._get_session()
+        if (
+            request.user.is_authenticated
+            and request.user.role == "B2B_TEAM_MEMBER"
+            and not RequireSetEvaluation().has_permission(request, self)
+        ):
+            raise PermissionDenied("Your team permissions do not allow evaluation access")
         if not request.user.is_authenticated or not session.can_manage(request.user):
             raise PermissionDenied("You do not have access to these task observation results")
         try:
@@ -785,6 +791,12 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=["get"], url_path="report")
     def report(self, request, id=None):
         session = self._get_session()
+        if (
+            request.user.is_authenticated
+            and request.user.role == "B2B_TEAM_MEMBER"
+            and not RequireSetEvaluation().has_permission(request, self)
+        ):
+            raise PermissionDenied("Your team permissions do not allow evaluation access")
         if not request.user.is_authenticated or not session.can_manage(request.user):
             raise PermissionDenied("You do not have access to this interview report")
         evaluation = InterviewSessionService._ensure_linked_evaluation(session)
@@ -807,6 +819,12 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         return get_object_or_404(queryset, **lookup)
 
     def _ensure_access(self, session, request):
+        if (
+            request.user.is_authenticated
+            and request.user.role == "B2B_TEAM_MEMBER"
+            and not RequireSetEvaluation().has_permission(request, self)
+        ):
+            raise PermissionDenied("Your team permissions do not allow evaluation access")
         if request.user.is_authenticated and session.can_manage(request.user):
             return
         token = self._get_token(request)
@@ -865,6 +883,12 @@ class ResponseAIProcessingViewSet(viewsets.GenericViewSet):
 
     def _ensure_access(self, response, request):
         session = response.session
+        if (
+            request.user.is_authenticated
+            and request.user.role == "B2B_TEAM_MEMBER"
+            and not RequireSetEvaluation().has_permission(request, self)
+        ):
+            raise PermissionDenied("Your team permissions do not allow evaluation access")
         if request.user.is_authenticated and session.can_manage(request.user):
             return
         token = self._get_token(request)

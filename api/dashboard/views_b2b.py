@@ -8,7 +8,7 @@ from datetime import timedelta
 
 from api.core.constants import CandidateJobRoles, EvaluationStatus, Languages, Roles
 from api.candidates.models import Candidate
-from api.core.permisssions import IsB2BTeamMember, IsB2BUser
+from api.core.permisssions import IsB2BTeamMember, IsB2BUser, RequireFullTeamAccess
 from api.evaluations.models import Evaluation
 from api.accounts.models import User
 from api.payments.entitlement_services import EntitlementService
@@ -30,7 +30,7 @@ from .serializers import (
 
 
 class B2BDashboardStatsView(APIView):
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
     
     def get_company(self, user):
         if user.role == Roles.B2B and hasattr(user, 'company_profile'):
@@ -103,7 +103,7 @@ class B2BDashboardStatsView(APIView):
 
 
 class B2BRecentCandidatesView(APIView):
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
     
     def get(self, request):
         limit = int(request.query_params.get('limit', 10))
@@ -127,7 +127,7 @@ class B2BRecentCandidatesView(APIView):
 
 
 class B2BRecentEvaluationsView(APIView):
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
     
     def get(self, request):
         limit = int(request.query_params.get('limit', 10))
@@ -150,7 +150,7 @@ class B2BRecentEvaluationsView(APIView):
 
 
 class B2BScoreDistributionView(APIView):
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
     
     def get(self, request):
         company = None
@@ -201,7 +201,7 @@ class B2BScoreDistributionView(APIView):
 
 
 class B2BEvaluationTrendView(APIView):
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
     
     def get(self, request):
         days = int(request.query_params.get('days', 30))
@@ -233,7 +233,7 @@ class B2BEvaluationTrendView(APIView):
 
 
 class B2BLanguageDistributionView(APIView):
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
     
     def get(self, request):
         company = None
@@ -271,7 +271,7 @@ class B2BLanguageDistributionView(APIView):
 
 
 class B2BPerformanceMetricsView(APIView):
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
     
     def get(self, request):
         months = int(request.query_params.get('months', 6))
@@ -314,7 +314,7 @@ class B2BPerformanceMetricsView(APIView):
 
 
 class B2BEvaluationStatusDistributionView(APIView):
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
     
     def get(self, request):
         company = None
@@ -347,7 +347,7 @@ class B2BEvaluationStatusDistributionView(APIView):
 
 
 class B2BMonthlyActivityView(APIView):
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
     
     def get(self, request):
         months = int(request.query_params.get('months', 6))
@@ -435,7 +435,7 @@ class B2BMonthlyActivityView(APIView):
 
 
 class B2BJobRoleDistributionView(APIView):
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
 
     def get(self, request):
         company = None
@@ -472,7 +472,7 @@ class B2BJobRoleDistributionView(APIView):
 
 
 class B2BEvaluationTimeRangeView(APIView):
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
 
     def get(self, request):
         company = None
@@ -513,7 +513,7 @@ class B2BEvaluationTimeRangeView(APIView):
 
 
 class B2BCandidateComparisonView(APIView):
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
 
     def get(self, request):
         company = None
@@ -564,7 +564,7 @@ def _resolve_b2b_company(user):
 class B2BComparisonRolesView(APIView):
     """Step 1 of role-based Candidate Comparison: which Job Roles actually
     have comparable (scored) candidates to choose from."""
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
 
     def get(self, request):
         company = _resolve_b2b_company(request.user)
@@ -575,7 +575,7 @@ class B2BComparisonRolesView(APIView):
 
 class B2BComparisonEligibleCandidatesView(APIView):
     """Step 2: candidates eligible for comparison under a chosen role."""
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
 
     def get(self, request):
         company = _resolve_b2b_company(request.user)
@@ -590,7 +590,7 @@ class B2BComparisonEligibleCandidatesView(APIView):
 class B2BComparisonFullView(APIView):
     """Steps 3+4: the real Candidate Summary + Competency Comparison data
     for 2-4 selected, role-eligible candidates."""
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
 
     def get(self, request):
         company = _resolve_b2b_company(request.user)
@@ -620,7 +620,7 @@ class B2BComparisonPdfView(APIView):
     """Spec item 8: backend-rendered bilingual Comparison PDF, same
     structure as the on-screen page - Candidate Summary, Competency
     Comparison, Key Differences, Radar Chart."""
-    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember)]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
 
     def get(self, request):
         company = _resolve_b2b_company(request.user)

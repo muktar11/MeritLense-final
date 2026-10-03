@@ -22,7 +22,7 @@ from .serializers import (
     CandidateShareSerializer
 )
 from .permissions import CanManageCandidate, CanViewCandidate
-from api.core.permisssions import IsCompanyApproved, RequireAddCandidates
+from api.core.permisssions import IsCompanyApproved, RequireAddCandidates, RequireCandidateAccess
 from api.core.constants import Roles
 from api.core.constants import AuditLogCategory, AuditLogAction
 from api.accounts.models import User
@@ -107,19 +107,19 @@ class CandidateViewSet(SubscriptionUsageMixin, viewsets.ModelViewSet):
         
     def get_permissions(self):
         if self.action == 'create':
-            # add_candidates is the one permission from the Commercial
-            # Package Alignment team-permissions set that applies here -
-            # update/destroy/reuse_certificate stay gated by
-            # CanManageCandidate's existing ownership rules only, not a
-            # separate permission the product spec never called out.
-            self.permission_classes = [IsAuthenticated, CanManageCandidate, IsCompanyApproved, RequireAddCandidates]
+            self.permission_classes = [IsAuthenticated, CanManageCandidate, IsCompanyApproved]
         elif self.action in ['update', 'partial_update', 'destroy', 'reuse_certificate', 'extract_document']:
             self.permission_classes = [IsAuthenticated, CanManageCandidate, IsCompanyApproved]
         elif self.action in ['list', 'retrieve']:
             self.permission_classes = [IsAuthenticated, CanViewCandidate]
         elif self.action == 'share':
             self.permission_classes = [IsAuthenticated]
-        
+
+        required_permission = (
+            RequireCandidateAccess if self.action in ['list', 'retrieve']
+            else RequireAddCandidates
+        )
+        self.permission_classes = [*self.permission_classes, required_permission]
         return super().get_permissions()
     
     def get_serializer_class(self):

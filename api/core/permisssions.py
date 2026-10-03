@@ -110,6 +110,27 @@ class RequireAddCandidates(HasTeamMemberPermission):
     permission_code = CompanyTeamPermissions.ADD_CANDIDATES
 
 
+class RequireCandidateAccess(HasTeamMemberPermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.role != Roles.B2B_TEAM_MEMBER:
+            return True
+        profile = getattr(user, 'team_member_profile', None)
+        return bool(
+            profile
+            and any(
+                profile.has_permission(permission)
+                for permission in (
+                    CompanyTeamPermissions.ADD_CANDIDATES,
+                    CompanyTeamPermissions.SET_EVALUATION,
+                    CompanyTeamPermissions.SET_SCORES,
+                )
+            )
+        )
+
+
 class RequireSetEvaluation(HasTeamMemberPermission):
     permission_code = CompanyTeamPermissions.SET_EVALUATION
 
@@ -120,6 +141,22 @@ class RequireSetScores(HasTeamMemberPermission):
 
 class RequireSetPayment(HasTeamMemberPermission):
     permission_code = CompanyTeamPermissions.SET_PAYMENT
+
+
+class RequireFullTeamAccess(HasTeamMemberPermission):
+    """Require all company-team permissions before showing the B2B overview."""
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.role != Roles.B2B_TEAM_MEMBER:
+            return True
+        profile = getattr(user, 'team_member_profile', None)
+        return bool(
+            profile
+            and all(profile.has_permission(permission) for permission in CompanyTeamPermissions.ALL)
+        )
 
 
 class IsOwnerOrAdmin(BasePermission):

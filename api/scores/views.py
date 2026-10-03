@@ -145,7 +145,9 @@ class ScoreSetViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             self.permission_classes = [IsAuthenticated, CanManageScores, RequireSetScores]
         elif self.action in ['list', 'retrieve']:
-            self.permission_classes = [IsAuthenticated, CanViewScores]
+            self.permission_classes = [IsAuthenticated, CanViewScores, RequireSetScores]
+        else:
+            self.permission_classes = [IsAuthenticated, RequireSetScores]
         
         return super().get_permissions()
     
@@ -354,8 +356,10 @@ class CandidateScoreViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             self.permission_classes = [IsAuthenticated, CanManageScores, RequireSetScores]
+        elif self.action in ['list', 'retrieve']:
+            self.permission_classes = [IsAuthenticated, CanViewScores, RequireSetScores]
         else:
-            self.permission_classes = [IsAuthenticated, CanViewScores]
+            self.permission_classes = [IsAuthenticated, RequireSetScores]
         return super().get_permissions()
     
     def perform_create(self, serializer):
@@ -472,7 +476,7 @@ class CandidateScoreViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
 
 
 class JobRoleScoreAreasView(viewsets.ViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequireSetScores]
     
     def list(self, request):
         from api.core.constants import CandidateJobRoles

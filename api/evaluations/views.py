@@ -35,7 +35,7 @@ from .serializers import (
     EvaluatorRatingWriteSerializer,
 )
 from .permissions import CanManageEvaluation, CanViewEvaluation
-from api.core.permisssions import IsCompanyApproved
+from api.core.permisssions import IsCompanyApproved, RequireSetEvaluation
 from api.core.constants import CertificateStatus, Roles, EvaluationStatus, EvaluationType
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
@@ -80,7 +80,7 @@ class CandidateScoreSummaryView(APIView):
     scores visible), ordered most-recent-first per candidate, including both
     certificate and transcript report artifacts when they exist."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequireSetEvaluation]
 
     def get(self, request):
         user = request.user
@@ -218,6 +218,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
                 else [IsAuthenticated, CanViewEvaluation]
             )
 
+        self.permission_classes = [*self.permission_classes, RequireSetEvaluation]
         return super().get_permissions()
 
     def create(self, request, *args, **kwargs):
@@ -822,7 +823,7 @@ class CertificateVerifyView(APIView):
 
 
 class ScoringRuleSetViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequireSetEvaluation]
     serializer_class = ScoringRuleSetSerializer
 
     def get_queryset(self):

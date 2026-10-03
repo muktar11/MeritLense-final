@@ -205,7 +205,7 @@ class PriceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
 
 
 class CustomerViewSet(viewsets.GenericViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequireSetPayment]
     serializer_class = CustomerSerializer
     
     def get_queryset(self):
@@ -240,7 +240,7 @@ class CustomerViewSet(viewsets.GenericViewSet):
 
 
 class PaymentMethodViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequireSetPayment]
     serializer_class = PaymentMethodSerializer
     queryset = PaymentMethod.objects.none()
     
@@ -406,12 +406,7 @@ class SubscriptionViewSet(PublicIdLookupMixin, viewsets.GenericViewSet):
     queryset = Subscription.objects.none()
 
     def get_permissions(self):
-        # set_payment: the actions that actually change what the company
-        # is billed for - viewing (list/retrieve/usage/invoices/etc.) stays
-        # open to every team member regardless of their permissions.
-        if self.action in ['create', 'change_plan', 'update_quantity', 'cancel', 'reactivate']:
-            return [IsAuthenticated(), RequireSetPayment()]
-        return super().get_permissions()
+        return [IsAuthenticated(), RequireSetPayment()]
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -1544,7 +1539,7 @@ class AdminSubscriptionViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSe
 
 
 class PaymentViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequireSetPayment]
     serializer_class = PaymentSerializer
     
     def get_queryset(self):
@@ -1666,7 +1661,7 @@ class InvoicePdfDownloadMixin:
 
 
 class InvoiceViewSet(InvoicePdfDownloadMixin, PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequireSetPayment]
     serializer_class = InvoiceSerializer
 
     def get_queryset(self):
@@ -1934,7 +1929,7 @@ class StripeWebhookView(viewsets.GenericViewSet):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, RequireSetPayment])
 def debug_subscription_data(request):
     """Debug endpoint to see raw subscription data"""
     user = request.user
@@ -1970,7 +1965,7 @@ def debug_subscription_data(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, RequireSetPayment])
 def retry_subscription_payment(request):
     subscription_id = request.data.get('subscription_id')
     
@@ -2019,7 +2014,7 @@ def retry_subscription_payment(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, RequireSetPayment])
 def debug_subscription_payment(request):
     user = request.user
     subscriptions = Subscription.objects.filter(user=user)
@@ -2065,7 +2060,7 @@ def debug_subscription_payment(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, RequireSetPayment])
 def sync_subscription_status(request):
     subscription_id = request.data.get('subscription_id')
     
@@ -2128,7 +2123,7 @@ def sync_subscription_status(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, RequireSetPayment])
 def check_all_subscriptions(request):
     user = request.user
     subscriptions = Subscription.objects.filter(user=user)
@@ -2166,7 +2161,7 @@ def check_all_subscriptions(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, RequireSetPayment])
 def sync_all_subscriptions(request):
     """Sync all subscriptions for the current user"""
     user = request.user
@@ -2213,7 +2208,7 @@ def sync_all_subscriptions(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, RequireSetPayment])
 def spend_points(request):
     from .entitlement_serializers import AddonSpendSerializer
     from .entitlement_services import EntitlementService

@@ -7,6 +7,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
+from api.core.permisssions import RequireSetEvaluation
 from rest_framework.response import Response
 
 from api.audit.services import AuditLogService
@@ -18,7 +19,7 @@ from api.reports.services import EvaluationReportError, EvaluationReportService
 
 
 class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequireSetEvaluation]
 
     def get_queryset(self):
         user = self.request.user

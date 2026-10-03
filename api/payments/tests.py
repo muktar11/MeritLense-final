@@ -22,7 +22,7 @@ from api.payments.serializers import DealRecordSerializer
 from api.payments.refund_services import CONFIRMED_BILLING_ERROR, PLATFORM_ERROR, RefundEligibilityService, RefundService
 from api.payments.serializers import CreateSubscriptionSerializer
 from api.payments.services import PaymentIntentInitializationError, StripeService
-from api.payments.views import SubscriptionViewSet
+from api.payments.views import PackageRequestViewSet, PriceViewSet, SubscriptionViewSet
 from api.sessions.models import InterviewSession
 from api.sessions.services import InterviewSessionService
 
@@ -1933,8 +1933,7 @@ class SubscriptionSetPaymentPermissionWiringTests(TestCase):
     billed for is one of the four actions a B2B_TEAM_MEMBER needs explicit
     set_payment permission for (api.core.permisssions.RequireSetPayment -
     see api.core.tests.HasTeamMemberPermissionTests for the permission
-    class's own behavior). Viewing (list/retrieve/usage/invoices/etc.)
-    stays open to every team member regardless of permissions."""
+    class's own behavior). Every subscription operation is permission-gated."""
 
     def test_mutating_actions_require_set_payment(self):
         view = SubscriptionViewSet()
@@ -1946,14 +1945,21 @@ class SubscriptionSetPaymentPermissionWiringTests(TestCase):
                 f"SubscriptionViewSet.{action} should require RequireSetPayment",
             )
 
-    def test_viewing_actions_do_not_require_set_payment(self):
+    def test_viewing_actions_require_set_payment(self):
         view = SubscriptionViewSet()
         for action in ["list", "retrieve", "usage", "upcoming_invoice", "active", "invoices"]:
             view.action = action
             classes = view.get_permissions()
-            self.assertFalse(
+            self.assertTrue(
                 any(isinstance(p, RequireSetPayment) for p in classes),
-                f"SubscriptionViewSet.{action} should stay open to every team member",
+                f"SubscriptionViewSet.{action} should require RequireSetPayment",
+            )
+
+    def test_company_payment_pages_require_set_payment(self):
+        for view in (PriceViewSet(), PackageRequestViewSet()):
+            self.assertTrue(
+                any(isinstance(p, RequireSetPayment) for p in view.get_permissions()),
+                f"{view.__class__.__name__} should require RequireSetPayment",
             )
 
 

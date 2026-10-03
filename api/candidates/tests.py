@@ -378,6 +378,79 @@ class CandidatesWeek2Tests(APITestCase):
         )
         self.assertEqual(other_company_detail.status_code, status.HTTP_404_NOT_FOUND)
 
+    def test_candidate_permission_allows_team_member_to_update_and_delete_company_candidates(self):
+        company_admin, company = self.create_b2b_company(
+            "crud-admin@example.com", "CandidateCrudCo", "CAND-CRUD-1"
+        )
+        teammate, _ = self.create_team_member(company, "crud-member@example.com")
+        candidate = self.create_candidate(
+            company_admin,
+            email="crud-candidate@example.com",
+            passport_id="CAND-CRUD-1",
+        )
+
+        self.authenticate(teammate)
+        update_response = self.client.patch(
+            f"/api/v1/candidates/candidates/{candidate.public_id}",
+            {"first_name": "Updated"},
+            format="json",
+        )
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK, update_response.data)
+        candidate.refresh_from_db()
+        self.assertEqual(candidate.first_name, "Updated")
+
+        delete_response = self.client.delete(
+            f"/api/v1/candidates/candidates/{candidate.public_id}"
+        )
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        missing_after_delete = self.client.get(
+            f"/api/v1/candidates/candidates/{candidate.public_id}"
+        )
+        self.assertEqual(missing_after_delete.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_score_permission_allows_team_member_crud_on_company_scores(self):
+        company_admin, company = self.create_b2b_company(
+            "scores-crud-admin@example.com", "ScoresCrudCo", "SCORES-CRUD-1"
+        )
+        teammate, _ = self.create_team_member(company, "scores-crud-member@example.com")
+        teammate.team_member_profile.permissions = [CompanyTeamPermissions.SET_SCORES]
+        teammate.team_member_profile.save(update_fields=["permissions"])
+        candidate = self.create_candidate(
+            company_admin,
+            email="scores-crud-candidate@example.com",
+            passport_id="SCORES-CRUD-1",
+        )
+
+        self.authenticate(teammate)
+        create_set_response = self.client.post(
+            "/api/v1/scores/sets",
+            {
+                "candidate_id": str(candidate.public_id),
+                "scores": {"COMMUNICATION": 82},
+                "notes": "Initial score",
+            },
+            format="json",
+        )
+        self.assertEqual(
+            create_set_response.status_code, status.HTTP_201_CREATED, create_set_response.data
+        )
+        score_set_id = create_set_response.data["id"]
+
+        list_response = self.client.get("/api/v1/scores/sets")
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK, list_response.data)
+        self.assertIn(score_set_id, {item["id"] for item in list_response.data})
+
+        update_response = self.client.patch(
+            f"/api/v1/scores/sets/{score_set_id}",
+            {"notes": "Updated by staff"},
+            format="json",
+        )
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK, update_response.data)
+        self.assertEqual(update_response.data["notes"], "Updated by staff")
+
+        delete_response = self.client.delete(f"/api/v1/scores/sets/{score_set_id}")
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+
     def test_share_and_unshare_control_team_member_access_and_edit_rights(self):
         company_admin, company = self.create_b2b_company(
             "sharing-admin@example.com", "ShareCo", "SHARE-1"

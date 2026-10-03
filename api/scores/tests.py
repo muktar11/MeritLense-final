@@ -9,8 +9,8 @@ class ScorePermissionWiringTests(TestCase):
     one of the four actions a B2B_TEAM_MEMBER needs explicit set_scores
     permission for (api.core.permisssions.RequireSetScores - see
     api.core.tests.HasTeamMemberPermissionTests for the permission class's
-    own behavior). These confirm the two score-mutating views actually
-    wire it in for the mutating actions, not just viewing."""
+    own behavior). All score operations are restricted to members with that
+    permission."""
 
     def test_score_set_mutating_actions_require_set_scores(self):
         view = ScoreSetViewSet()
@@ -22,14 +22,14 @@ class ScorePermissionWiringTests(TestCase):
                 f"ScoreSetViewSet.{action} should require RequireSetScores",
             )
 
-    def test_score_set_viewing_actions_do_not_require_set_scores(self):
+    def test_score_set_viewing_actions_require_set_scores(self):
         view = ScoreSetViewSet()
         for action in ("list", "retrieve"):
             view.action = action
             classes = view.get_permissions()
-            self.assertFalse(
+            self.assertTrue(
                 any(isinstance(p, RequireSetScores) for p in classes),
-                f"ScoreSetViewSet.{action} should stay open to every team member",
+                f"ScoreSetViewSet.{action} should require RequireSetScores",
             )
 
     def test_candidate_score_mutating_actions_require_set_scores(self):
@@ -42,12 +42,12 @@ class ScorePermissionWiringTests(TestCase):
                 f"CandidateScoreViewSet.{action} should require RequireSetScores",
             )
 
-    def test_candidate_score_viewing_actions_do_not_require_set_scores(self):
+    def test_candidate_score_viewing_actions_require_set_scores(self):
         view = CandidateScoreViewSet()
         for action in ("list", "retrieve"):
             view.action = action
             classes = view.get_permissions()
-            self.assertFalse(
+            self.assertTrue(
                 any(isinstance(p, RequireSetScores) for p in classes),
-                f"CandidateScoreViewSet.{action} should stay open to every team member",
+                f"CandidateScoreViewSet.{action} should require RequireSetScores",
             )

@@ -25,7 +25,8 @@ class CanManageCandidate(BasePermission):
             return True
         
         if user.role == Roles.B2B_TEAM_MEMBER:
-            return obj.created_by == user
+            profile = getattr(user, 'team_member_profile', None)
+            return bool(profile and obj.company == profile.company)
         
         return False
 

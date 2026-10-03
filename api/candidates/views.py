@@ -132,6 +132,9 @@ class CandidateViewSet(SubscriptionUsageMixin, viewsets.ModelViewSet):
             return True
         if hasattr(user, 'company_profile') and candidate.company == user.company_profile.company:
             return True
+        if user.role == Roles.B2B_TEAM_MEMBER:
+            profile = getattr(user, 'team_member_profile', None)
+            return bool(profile and candidate.company == profile.company)
         return False
     
     def create(self, request, *args, **kwargs):

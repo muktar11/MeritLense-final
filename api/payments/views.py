@@ -13,7 +13,7 @@ from django.utils import timezone
 import stripe
 from api.accounts.models import User
 from api.core.constants import Roles, SubscriptionStatus
-from api.core.permisssions import IsAdminOrSuperAdmin, IsSuperAdmin, IsB2BUser, RequireSetPayment, get_user_company
+from api.core.permisssions import IsAdminOrSuperAdmin, IsSuperAdmin, IsB2BUser, IsB2BTeamMember, RequireSetPayment, get_user_company
 from api.payments.subscription_serializers import CancelSubscriptionSerializer, ChangePlanSerializer, SubscriptionListSerializer, UpdateQuantitySerializer
 from meritlense import settings
 from api.audit.services import AuditLogService
@@ -34,7 +34,7 @@ from .package_request_services import PackageRequestService, PackageRequestError
 
 
 class PriceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequireSetPayment]
     serializer_class = PriceSerializer
     
     def get_queryset(self):
@@ -111,7 +111,7 @@ class PriceViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
         serializer = PublicPriceSerializer(queryset, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated, IsAdminOrSuperAdmin])
     def sync_from_stripe(self, request):
         try:
             import stripe
@@ -1256,7 +1256,7 @@ class PackageRequestViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
     see their own company's requests and their decisions. No update/delete
     - a submitted request is reviewed by a SuperAdmin (AdminPackageRequestViewSet),
     never edited by the requester after the fact."""
-    permission_classes = [IsAuthenticated, IsB2BUser]
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireSetPayment]
     serializer_class = PackageRequestSerializer
 
     def get_queryset(self):

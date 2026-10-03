@@ -134,10 +134,11 @@ class ScoreSetViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
             return queryset.none()
         
         if user.role == Roles.B2B_TEAM_MEMBER:
-            return queryset.filter(
-                Q(created_by=user) |
-                Q(candidate__shared_with=user)
-            ).distinct()
+            profile = getattr(user, 'team_member_profile', None)
+            return (
+                queryset.filter(Q(company=profile.company) | Q(candidate__company=profile.company))
+                if profile else queryset.none()
+            )
         
         return queryset.none()
     
@@ -346,10 +347,11 @@ class CandidateScoreViewSet(PublicIdLookupMixin, viewsets.ModelViewSet):
             return queryset.none()
         
         if user.role == Roles.B2B_TEAM_MEMBER:
-            return queryset.filter(
-                Q(created_by=user) |
-                Q(candidate__shared_with=user)
-            ).distinct()
+            profile = getattr(user, 'team_member_profile', None)
+            return (
+                queryset.filter(Q(company=profile.company) | Q(candidate__company=profile.company))
+                if profile else queryset.none()
+            )
         
         return queryset.none()
     

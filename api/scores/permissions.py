@@ -2,6 +2,16 @@ from rest_framework.permissions import BasePermission
 from api.core.constants import Roles
 
 
+def _user_company(user):
+    if user.role == Roles.B2B_TEAM_MEMBER:
+        profile = getattr(user, 'team_member_profile', None)
+        return profile.company if profile else None
+    if user.role == Roles.B2B:
+        profile = getattr(user, 'company_profile', None)
+        return profile.company if profile else None
+    return getattr(user, 'managed_company', None)
+
+
 class CanManageScores(BasePermission):
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
@@ -27,11 +37,9 @@ class CanManageScores(BasePermission):
         if hasattr(user, 'managed_company') and obj.company == user.managed_company:
             return True
         
-        if user.role == Roles.B2B_TEAM_MEMBER and hasattr(obj, 'candidate'):
-            if user in obj.candidate.shared_with.all():
-                return True
-        
-        return False
+        company = _user_company(user)
+        candidate = getattr(obj, 'candidate', None)
+        return bool(company and (obj.company == company or (candidate and candidate.company == company)))
 
 
 class CanViewScores(BasePermission):
@@ -50,11 +58,6 @@ class CanViewScores(BasePermission):
         if hasattr(obj, 'candidate') and obj.candidate.created_by == user:
             return True
         
-        if hasattr(user, 'company_profile') and obj.company == user.company_profile.company:
-            return True
-        
-        if user.role == Roles.B2B_TEAM_MEMBER and hasattr(obj, 'candidate'):
-            if user in obj.candidate.shared_with.all():
-                return True
-        
-        return False
+        company = _user_company(user)
+        candidate = getattr(obj, 'candidate', None)
+        return bool(company and (obj.company == company or (candidate and candidate.company == company)))

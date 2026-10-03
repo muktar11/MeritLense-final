@@ -119,7 +119,8 @@ class Candidate(TimeStampedModel, SoftDeleteModel):
         if hasattr(user, 'managed_company') and user.managed_company == self.company:
             return True
         
-        if user.role == 'B2B_TEAM_MEMBER' and user in self.shared_with.all():
-            return True
+        if user.role == 'B2B_TEAM_MEMBER':
+            profile = getattr(user, 'team_member_profile', None)
+            return bool(profile and profile.company == self.company)
         
         return False

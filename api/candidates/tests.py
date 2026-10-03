@@ -479,10 +479,12 @@ class CandidatesWeek2Tests(APITestCase):
 
         update_response = self.client.patch(
             f"/api/v1/candidates/candidates/{candidate.public_id}",
-            {"first_name": "Blocked"},
+            {"first_name": "UpdatedByCandidatePermission"},
             format="json",
         )
-        self.assertEqual(update_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK, update_response.data)
+        candidate.refresh_from_db()
+        self.assertEqual(candidate.first_name, "UpdatedByCandidatePermission")
 
         self.client.credentials()
         self.authenticate(company_admin)
@@ -554,6 +556,41 @@ class CandidatesWeek2Tests(APITestCase):
         self.assertEqual(candidate.company, company)
         self.assertEqual(candidate.created_by, teammate)
         self.assertIn(teammate, candidate.shared_with.all())
+
+    def test_team_member_candidate_creation_uses_company_subscription(self):
+        _, company = self.create_b2b_company(
+            "subscription-admin@example.com", "SubscriptionCo", "SUBSCRIPTION-1"
+        )
+        teammate, _ = self.create_team_member(company, "subscription-member@example.com")
+        Subscription.objects.filter(user=teammate).delete()
+        company_subscription = Subscription.objects.get(company=company)
+
+        self.authenticate(teammate)
+        create_response = self.client.post(
+            "/api/v1/candidates/candidates",
+            {
+                "first_name": "Company",
+                "last_name": "Subscription",
+                "email": "company-subscription-candidate@example.com",
+                "passport_id": "COMPANY-SUBSCRIPTION-1",
+                "job_role": candidateJobRoles.HOUSEKEEPER,
+                "core_skills": "cleaning, organization",
+                "preferred_language": Languages.ENGLISH,
+                "passport_document": make_file("company-subscription-candidate.pdf"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED, create_response.data)
+        company_subscription.refresh_from_db()
+        self.assertEqual(company_subscription.current_usage["candidate_limit"], 1)
+
+        candidate = Candidate.objects.get(email="company-subscription-candidate@example.com")
+        delete_response = self.client.delete(
+            f"/api/v1/candidates/candidates/{candidate.public_id}"
+        )
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        company_subscription.refresh_from_db()
+        self.assertEqual(company_subscription.current_usage["candidate_limit"], 0)
 
     def test_team_member_without_add_candidates_permission_is_blocked(self):
         company_admin, company = self.create_b2b_company(

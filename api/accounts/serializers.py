@@ -323,7 +323,7 @@ class CompanyProfileSerializer(PublicIdModelSerializer):
         return bool(obj.resachetified_license)
 
     def get_company_is_verified(self, obj):
-        return bool(obj.company and obj.company.is_verified)
+        return bool(obj.company and obj.company.is_verified and obj.resachetified_license)
     
     def update(self, instance, validated_data):
         user_data = validated_data.pop('user', {})
@@ -436,7 +436,11 @@ class ProfileSerializer(serializers.Serializer):
                 data['profile_picture'] = picture_url
                 owner = profile.company.admin_user
                 company_profile = getattr(owner, 'company_profile', None)
-                data['company_is_verified'] = profile.company.is_verified
+                data['company_is_verified'] = bool(
+                    profile.company.is_verified
+                    and company_profile
+                    and company_profile.resachetified_license
+                )
                 data['trade_license_uploaded'] = bool(
                     company_profile and company_profile.resachetified_license
                 )

@@ -73,6 +73,43 @@ class B2BDocumentWorkflowTests(TestCase):
         )
         self.assertEqual(blocked_document_patch.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_legacy_approval_without_license_is_not_reported_as_license_approved(self):
+        self.company.is_verified = True
+        self.company.save(update_fields=["is_verified"])
+
+        profile_response = self.client.get("/api/v1/auth/me")
+
+        self.assertEqual(profile_response.status_code, status.HTTP_200_OK, profile_response.data)
+        self.assertFalse(profile_response.data["company_is_verified"])
+        self.assertFalse(profile_response.data["trade_license_uploaded"])
+
+        team_user = User.objects.create_user(
+            email="legacy-status-staff@example.com",
+            password="TestPassword123!",
+            first_name="Legacy",
+            last_name="Staff",
+            role=Roles.B2B_TEAM_MEMBER,
+            is_verified=True,
+        )
+        TeamMemberProfile.objects.create(
+            user=team_user,
+            company=self.company,
+            job_title="Recruiter",
+            phone_number="+15550000004",
+            permissions=[],
+        )
+        team_client = APIClient()
+        team_client.credentials(HTTP_AUTHORIZATION=f"Bearer {AccessToken.for_user(team_user)}")
+
+        team_response = team_client.get("/api/v1/auth/me")
+
+        self.assertEqual(team_response.status_code, status.HTTP_200_OK, team_response.data)
+        self.assertFalse(team_response.data["company_is_verified"])
+        self.assertFalse(team_response.data["trade_license_uploaded"])
+
+        locked = self.client.get("/api/v1/auth/companies/team")
+        self.assertNotIn(locked.status_code, (status.HTTP_200_OK, status.HTTP_404_NOT_FOUND))
+
     def test_optional_live_call_authentication_cannot_bypass_company_lockout(self):
         request = APIRequestFactory().post("/api/live-calls/session/join")
         request.META["HTTP_AUTHORIZATION"] = f"Bearer {AccessToken.for_user(self.owner)}"

@@ -342,6 +342,42 @@ class CandidatesWeek2Tests(APITestCase):
         )
         self.assertEqual(forbidden_detail.status_code, status.HTTP_404_NOT_FOUND)
 
+    def test_team_member_can_access_all_candidates_registered_under_their_company(self):
+        company_admin, company = self.create_b2b_company(
+            "company-candidates-admin@example.com", "CompanyCandidatesCo", "COMP-CAND-1"
+        )
+        teammate, _ = self.create_team_member(company, "company-candidates-member@example.com")
+        company_candidate = self.create_candidate(
+            company_admin,
+            email="original-company-candidate@example.com",
+            passport_id="COMP-ORIGINAL-1",
+        )
+        other_admin, _ = self.create_b2b_company(
+            "other-company-admin@example.com", "OtherCandidatesCo", "OTHER-CAND-1"
+        )
+        other_candidate = self.create_candidate(
+            other_admin,
+            email="other-company-candidate@example.com",
+            passport_id="OTHER-COMP-CAND-1",
+        )
+
+        self.authenticate(teammate)
+        list_response = self.client.get("/api/v1/candidates/candidates")
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK, list_response.data)
+        listed_ids = {item["id"] for item in list_response.data}
+        self.assertIn(str(company_candidate.public_id), listed_ids)
+        self.assertNotIn(str(other_candidate.public_id), listed_ids)
+
+        detail_response = self.client.get(
+            f"/api/v1/candidates/candidates/{company_candidate.public_id}"
+        )
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK, detail_response.data)
+
+        other_company_detail = self.client.get(
+            f"/api/v1/candidates/candidates/{other_candidate.public_id}"
+        )
+        self.assertEqual(other_company_detail.status_code, status.HTTP_404_NOT_FOUND)
+
     def test_share_and_unshare_control_team_member_access_and_edit_rights(self):
         company_admin, company = self.create_b2b_company(
             "sharing-admin@example.com", "ShareCo", "SHARE-1"
@@ -386,10 +422,14 @@ class CandidatesWeek2Tests(APITestCase):
 
         self.client.credentials()
         self.authenticate(teammate)
-        missing_after_unshare = self.client.get(
+        company_candidate_after_unshare = self.client.get(
             f"/api/v1/candidates/candidates/{candidate.public_id}"
         )
-        self.assertEqual(missing_after_unshare.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(
+            company_candidate_after_unshare.status_code,
+            status.HTTP_200_OK,
+            company_candidate_after_unshare.data,
+        )
 
     def test_share_rejects_team_members_from_other_companies(self):
         company_admin, company = self.create_b2b_company(

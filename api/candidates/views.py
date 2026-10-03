@@ -5,7 +5,6 @@ from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Q
 from drf_spectacular.utils import OpenApiExample, extend_schema, extend_schema_view
 
 from api.audit.services import AuditLogService
@@ -94,14 +93,7 @@ class CandidateViewSet(SubscriptionUsageMixin, viewsets.ModelViewSet):
                 company = user.team_member_profile.company
             
             if company:
-                queryset = Candidate.objects.filter(company=company)
-                
-                if user.role == Roles.B2B_TEAM_MEMBER:
-                    queryset = queryset.filter(
-                        Q(created_by=user) | Q(shared_with=user)
-                    ).distinct()
-                
-                return queryset
+                return Candidate.objects.filter(company=company)
         
         return Candidate.objects.none()
         

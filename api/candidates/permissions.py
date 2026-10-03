@@ -46,7 +46,8 @@ class CanViewCandidate(BasePermission):
         if hasattr(user, 'company_profile') and obj.company == user.company_profile.company:
             return True
         
-        if user.role == Roles.B2B_TEAM_MEMBER and user in obj.shared_with.all():
-            return True
+        if user.role == Roles.B2B_TEAM_MEMBER:
+            profile = getattr(user, 'team_member_profile', None)
+            return bool(profile and obj.company == profile.company)
         
         return False

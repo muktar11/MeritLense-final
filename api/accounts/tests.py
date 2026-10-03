@@ -1182,6 +1182,21 @@ class AccountsWeek2Tests(APITestCase):
         get_after_upload = self.client.get("/api/v1/auth/companies/profile")
         self.assertIsNotNone(get_after_upload.data["logo"])
 
+    def test_company_profile_does_not_report_license_approved_without_license(self):
+        user, company = self.create_verified_b2b_owner()
+        profile = user.company_profile
+        profile.resachetified_license = ""
+        profile.save(update_fields=["resachetified_license"])
+        company.business_license_verified = True
+        company.save(update_fields=["business_license_verified"])
+        self.authenticate(user.email, "Password123!")
+
+        response = self.client.get("/api/v1/auth/companies/profile")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertFalse(response.data["trade_license_uploaded"])
+        self.assertFalse(response.data["business_license_verified"])
+
     def test_company_logo_upload_rejected_for_team_member(self):
         _owner, company = self.create_verified_b2b_owner()
         team_member = User.objects.create_user(

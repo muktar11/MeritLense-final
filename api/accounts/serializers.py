@@ -704,7 +704,7 @@ class CompanySerializer(PublicIdModelSerializer):
     team_member_count = serializers.SerializerMethodField()
     admin_user_email = serializers.EmailField(source='admin_user.email', read_only=True)
     trade_license_uploaded = serializers.SerializerMethodField()
-    business_license_verified = serializers.BooleanField(read_only=True)
+    business_license_verified = serializers.SerializerMethodField()
     
     class Meta:
         model = Company
@@ -732,6 +732,14 @@ class CompanySerializer(PublicIdModelSerializer):
     def get_trade_license_uploaded(self, obj):
         profile = getattr(obj, 'employer_profile', None)
         return bool(profile and profile.resachetified_license)
+
+    def get_business_license_verified(self, obj):
+        profile = getattr(obj, 'employer_profile', None)
+        return bool(
+            obj.business_license_verified
+            and profile
+            and profile.resachetified_license
+        )
 
     def validate_roles(self, value):
         if not isinstance(value, list):

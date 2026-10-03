@@ -2060,6 +2060,7 @@ class InterviewSessionApiTests(APITestCase):
             admin_user=b2b_user,
             registration_certificate=make_file(),
             is_verified=True,
+            business_license_verified=True,
         )
         CompanyEmployerProfile.objects.create(
             user=b2b_user,

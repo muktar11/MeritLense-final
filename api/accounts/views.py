@@ -1116,7 +1116,7 @@ class ProfileDetailView(APIView):
             profile = get_object_or_404(CompanyEmployerProfile, user=user)
             company = get_user_company(user)
             approved_with_license = bool(
-                company and company.is_verified and profile.resachetified_license
+                company and company.business_license_verified and profile.resachetified_license
             )
             document_fields = {
                 'registration_certificate', 'resachetified_license',
@@ -1215,7 +1215,7 @@ class ProfileDocumentUploadView(APIView):
             profile = get_object_or_404(CompanyEmployerProfile, user=user)
             company = get_user_company(user)
             approved_with_license = bool(
-                company and company.is_verified and profile.resachetified_license
+                company and company.business_license_verified and profile.resachetified_license
             )
             if not approved_with_license and document_type != 'license':
                 return Response(
@@ -1249,9 +1249,13 @@ class ProfileDocumentUploadView(APIView):
                 ])
                 if company:
                     company.is_verified = False
+                    company.business_license_verified = False
                     company.verified_at = None
                     company.verified_by = None
-                    company.save(update_fields=['is_verified', 'verified_at', 'verified_by', 'updated_at'])
+                    company.save(update_fields=[
+                        'is_verified', 'business_license_verified',
+                        'verified_at', 'verified_by', 'updated_at',
+                    ])
                 try:
                     send_license_received_email(user)
                 except Exception:
@@ -1933,9 +1937,13 @@ class VerifyDocumentsView(APIView):
                     company = get_user_company(user)
                     if company:
                         company.is_verified = True
+                        company.business_license_verified = True
                         company.verified_at = timezone.now()
                         company.verified_by = request.user
-                        company.save(update_fields=['is_verified', 'verified_at', 'verified_by', 'updated_at'])
+                        company.save(update_fields=[
+                            'is_verified', 'business_license_verified',
+                            'verified_at', 'verified_by', 'updated_at',
+                        ])
 
                 message = 'Documents approved successfully'
                 
@@ -1966,9 +1974,13 @@ class VerifyDocumentsView(APIView):
                     company = get_user_company(user)
                     if company:
                         company.is_verified = False
+                        company.business_license_verified = False
                         company.verified_at = None
                         company.verified_by = None
-                        company.save(update_fields=['is_verified', 'verified_at', 'verified_by', 'updated_at'])
+                        company.save(update_fields=[
+                            'is_verified', 'business_license_verified',
+                            'verified_at', 'verified_by', 'updated_at',
+                        ])
 
                 message = 'Documents rejected'
                 
@@ -2077,9 +2089,13 @@ class RejectDocumentsView(APIView):
             company = get_user_company(user)
             if company:
                 company.is_verified = False
+                company.business_license_verified = False
                 company.verified_at = None
                 company.verified_by = None
-                company.save(update_fields=['is_verified', 'verified_at', 'verified_by', 'updated_at'])
+                company.save(update_fields=[
+                    'is_verified', 'business_license_verified',
+                    'verified_at', 'verified_by', 'updated_at',
+                ])
 
         AuditLogService.log(
             user=request.user,

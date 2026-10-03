@@ -106,6 +106,7 @@ class CandidatesWeek2Tests(APITestCase):
             admin_user=user,
             registration_certificate=make_file(f"{registration_number}-certificate.pdf"),
             is_verified=True,
+            business_license_verified=True,
         )
         CompanyEmployerProfile.objects.create(
             user=user,
@@ -193,7 +194,7 @@ class CandidatesWeek2Tests(APITestCase):
         return Candidate.objects.get(email=defaults["email"])
 
     def test_unverified_b2b_company_cannot_create_candidates(self):
-        """Company.is_verified gates candidate creation (IsCompanyApproved) -
+        """Company.business_license_verified gates candidate creation -
         this is the real enforcement of "B2B users need admin approval
         before they can fully use the system"; the frontend's own
         sign-agreements redirect was never backed by anything server-side."""
@@ -201,7 +202,8 @@ class CandidatesWeek2Tests(APITestCase):
             "unverified-admin@example.com", "PendingCo", "PENDING-1"
         )
         company.is_verified = False
-        company.save(update_fields=["is_verified"])
+        company.business_license_verified = False
+        company.save(update_fields=["is_verified", "business_license_verified"])
 
         self.authenticate(company_admin)
         response = self.client.post(
@@ -219,7 +221,7 @@ class CandidatesWeek2Tests(APITestCase):
             format="multipart",
         )
         self.client.credentials()
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN, response.data)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED, response.data)
         self.assertFalse(Candidate.objects.filter(email="blocked-candidate@example.com").exists())
 
     def test_verified_b2b_company_can_create_candidates(self):
@@ -715,6 +717,7 @@ class CandidateVerificationPhotoStalenessTests(APITestCase):
             admin_user=user,
             registration_certificate=make_file(f"{registration_number}-certificate.pdf"),
             is_verified=True,
+            business_license_verified=True,
         )
         CompanyEmployerProfile.objects.create(
             user=user,

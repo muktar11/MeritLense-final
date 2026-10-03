@@ -292,6 +292,7 @@ class CompanyProfileSerializer(PublicIdModelSerializer):
     role = serializers.CharField(source='user.role', read_only=True)
     trade_license_uploaded = serializers.SerializerMethodField()
     company_is_verified = serializers.SerializerMethodField()
+    business_license_verified = serializers.SerializerMethodField()
     documents_verification_status = serializers.CharField(
         source='user.documents_verification_status', read_only=True
     )
@@ -305,13 +306,15 @@ class CompanyProfileSerializer(PublicIdModelSerializer):
             'target_market', 'timezone',
             'website', 'preferred_language', 'notification_preference',
             'registration_certificate', 'resachetified_license',
-            'trade_license_uploaded', 'company_is_verified', 'documents_verification_status',
+            'trade_license_uploaded', 'company_is_verified', 'business_license_verified',
+            'documents_verification_status',
             'tax_id_document', 'additional_documents',
             'documents_verified', 'verified_at', 'verification_notes',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
             'resachetified_license', 'trade_license_uploaded', 'company_is_verified',
+            'business_license_verified',
             'documents_verification_status', 'documents_verified', 'verified_at',
             'verification_notes', 'created_at', 'updated_at',
         ]
@@ -323,7 +326,14 @@ class CompanyProfileSerializer(PublicIdModelSerializer):
         return bool(obj.resachetified_license)
 
     def get_company_is_verified(self, obj):
-        return bool(obj.company and obj.company.is_verified and obj.resachetified_license)
+        return bool(obj.company and obj.company.is_verified)
+
+    def get_business_license_verified(self, obj):
+        return bool(
+            obj.company
+            and obj.company.business_license_verified
+            and obj.resachetified_license
+        )
     
     def update(self, instance, validated_data):
         user_data = validated_data.pop('user', {})
@@ -436,8 +446,9 @@ class ProfileSerializer(serializers.Serializer):
                 data['profile_picture'] = picture_url
                 owner = profile.company.admin_user
                 company_profile = getattr(owner, 'company_profile', None)
-                data['company_is_verified'] = bool(
-                    profile.company.is_verified
+                data['company_is_verified'] = profile.company.is_verified
+                data['business_license_verified'] = bool(
+                    profile.company.business_license_verified
                     and company_profile
                     and company_profile.resachetified_license
                 )
@@ -454,6 +465,7 @@ class ProfileSerializer(serializers.Serializer):
                     'last_name': user.last_name,
                     'role': user.role,
                     'is_verified': user.is_verified,
+                    'business_license_verified': False,
                     'department': '',
                     'phone_number': '',
                     'profile_picture': picture_url,
@@ -692,6 +704,7 @@ class CompanySerializer(PublicIdModelSerializer):
     team_member_count = serializers.SerializerMethodField()
     admin_user_email = serializers.EmailField(source='admin_user.email', read_only=True)
     trade_license_uploaded = serializers.SerializerMethodField()
+    business_license_verified = serializers.BooleanField(read_only=True)
     
     class Meta:
         model = Company
@@ -699,10 +712,13 @@ class CompanySerializer(PublicIdModelSerializer):
             'id', 'name', 'registration_number', 'company_size',
             'industry', 'phone_number', 'country', 'city',
             'address', 'website', 'admin_user', 'admin_user_email', 'admin_name',
-            'is_verified', 'verified_at', 'trade_license_uploaded', 'team_member_count', 'stamp_image', 'logo',
-            'roles', 'created_at', 'updated_at'
+            'is_verified', 'verified_at', 'trade_license_uploaded', 'business_license_verified',
+            'team_member_count', 'stamp_image', 'logo', 'roles', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'admin_user', 'is_verified', 'verified_at', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'admin_user', 'is_verified', 'business_license_verified',
+            'verified_at', 'created_at', 'updated_at',
+        ]
 
     def get_admin_name(self, obj):
         if obj.admin_user:

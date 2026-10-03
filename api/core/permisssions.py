@@ -210,7 +210,7 @@ class IsCompanyApproved(BasePermission):
     B2B routes; this permission remains as a resource-level safeguard and is
     not applied to B2C users.
     """
-    message = "Your company's registration is still pending admin approval."
+    message = "Your company's trade license is still pending admin approval."
 
     def has_permission(self, request, view):
         if request.method in SAFE_METHODS:
@@ -219,7 +219,13 @@ class IsCompanyApproved(BasePermission):
         if not user or not user.is_authenticated or user.role not in (Roles.B2B, Roles.B2B_TEAM_MEMBER):
             return True
         company = get_user_company(user)
-        return bool(company and company.is_verified)
+        company_profile = getattr(company, "employer_profile", None) if company else None
+        return bool(
+            company
+            and company.business_license_verified
+            and company_profile
+            and company_profile.resachetified_license
+        )
 
 
 class IsCompanyAdmin(BasePermission):

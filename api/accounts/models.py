@@ -304,6 +304,7 @@ class Company(TimeStampedModel):
     )
     
     is_verified = models.BooleanField(default=False)
+    business_license_verified = models.BooleanField(default=False)
     verified_at = models.DateTimeField(null=True, blank=True)
     verified_by = models.ForeignKey(
         User,

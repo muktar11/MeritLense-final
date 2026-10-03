@@ -62,6 +62,7 @@ class B2BDocumentWorkflowTests(TestCase):
         self.assertEqual(profile.status_code, status.HTTP_200_OK, profile.data)
         self.assertFalse(profile.data["trade_license_uploaded"])
         self.assertFalse(profile.data["company_is_verified"])
+        self.assertFalse(profile.data["business_license_verified"])
         self.assertEqual(profile.data["documents_verification_status"], "PENDING")
 
         company_profile = self.client.get("/api/v1/auth/companies/profile")
@@ -80,7 +81,8 @@ class B2BDocumentWorkflowTests(TestCase):
         profile_response = self.client.get("/api/v1/auth/me")
 
         self.assertEqual(profile_response.status_code, status.HTTP_200_OK, profile_response.data)
-        self.assertFalse(profile_response.data["company_is_verified"])
+        self.assertTrue(profile_response.data["company_is_verified"])
+        self.assertFalse(profile_response.data["business_license_verified"])
         self.assertFalse(profile_response.data["trade_license_uploaded"])
 
         team_user = User.objects.create_user(
@@ -104,7 +106,8 @@ class B2BDocumentWorkflowTests(TestCase):
         team_response = team_client.get("/api/v1/auth/me")
 
         self.assertEqual(team_response.status_code, status.HTTP_200_OK, team_response.data)
-        self.assertFalse(team_response.data["company_is_verified"])
+        self.assertTrue(team_response.data["company_is_verified"])
+        self.assertFalse(team_response.data["business_license_verified"])
         self.assertFalse(team_response.data["trade_license_uploaded"])
 
         locked = self.client.get("/api/v1/auth/companies/team")
@@ -168,6 +171,7 @@ class B2BDocumentWorkflowTests(TestCase):
         self.owner.refresh_from_db()
         self.profile.refresh_from_db()
         self.assertFalse(self.company.is_verified)
+        self.assertFalse(self.company.business_license_verified)
         self.assertFalse(self.owner.documents_verified)
         self.assertEqual(self.owner.documents_verification_status, "PENDING")
         self.assertTrue(self.profile.resachetified_license)

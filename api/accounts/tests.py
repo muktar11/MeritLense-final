@@ -896,6 +896,7 @@ class AccountsWeek2Tests(APITestCase):
 
         company.refresh_from_db()
         self.assertTrue(company.is_verified)
+        self.assertTrue(company.business_license_verified)
         self.assertIsNotNone(company.verified_at)
         self.assertEqual(company.verified_by_id, superadmin.id)
 
@@ -915,6 +916,7 @@ class AccountsWeek2Tests(APITestCase):
 
         company.refresh_from_db()
         self.assertFalse(company.is_verified)
+        self.assertFalse(company.business_license_verified)
         self.assertIsNone(company.verified_at)
 
     @patch("google.oauth2.id_token.verify_oauth2_token")

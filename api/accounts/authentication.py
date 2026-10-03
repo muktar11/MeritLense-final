@@ -9,7 +9,7 @@ def has_approved_company_license(user):
     company_profile = getattr(company, "employer_profile", None) if company else None
     return bool(
         company
-        and company.is_verified
+        and company.business_license_verified
         and company_profile
         and company_profile.resachetified_license
     )

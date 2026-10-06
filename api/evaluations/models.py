@@ -112,6 +112,24 @@ class Evaluation(TimeStampedModel, SoftDeleteModel):
         help_text="Package-controlled evaluation tier for this session"
     )
 
+    # Pinned the first time this evaluation is scored (Week6ScoringService.
+    # _resolve_rule_set) and reused on every subsequent (re)score - without
+    # this, re-scoring (session completion retried, the admin "run scoring"
+    # action, or `regenerate_report`) re-resolved "whichever ScoringRuleSet
+    # is newest for this role+tier+company" each time, so activating a new
+    # rule set for a role could silently change what an already-scored
+    # evaluation gets re-scored against, even though the candidate's actual
+    # interview ran under the rules in effect at the time. Scoring itself
+    # (weights, thresholds, categorization) is unchanged - this only fixes
+    # WHICH rule set an evaluation sticks to.
+    scoring_rule_set = models.ForeignKey(
+        "evaluations.ScoringRuleSet",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pinned_evaluations",
+    )
+
     package_code = models.CharField(
         max_length=50,
         blank=True,

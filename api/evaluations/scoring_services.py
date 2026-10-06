@@ -107,28 +107,38 @@ class Week6ScoringService:
 
     @classmethod
     def _resolve_rule_set(cls, evaluation):
+        # Authoritative-snapshot fix: once an evaluation has been scored
+        # against a rule set, that rule set is pinned on the evaluation and
+        # always reused - never re-resolved by "newest for this
+        # role/tier/company" again. Without this, a rule set activated
+        # after the candidate's interview already ran could silently
+        # become what a re-score (retry, admin "run scoring", or
+        # `regenerate_report`) scores that historical evaluation against.
+        if evaluation.scoring_rule_set_id:
+            return evaluation.scoring_rule_set
+
         session = evaluation.session
         queryset = ScoringRuleSet.objects.filter(
             evaluation_tier=evaluation.evaluation_tier,
             is_active=True,
         ).order_by("-created_at")
+        resolved = None
         if evaluation.company_id:
             company_queryset = queryset.filter(company=evaluation.company)
             if session.role_code:
-                exact = company_queryset.filter(role_code=session.role_code).first()
-                if exact:
-                    return exact
-            fallback = company_queryset.filter(role_code="").first()
-            if fallback:
-                return fallback
-        if session.role_code:
-            exact = queryset.filter(role_code=session.role_code).first()
-            if exact:
-                return exact
-        fallback = queryset.filter(role_code="").first()
-        if fallback:
-            return fallback
-        raise Week6ScoringError("No active scoring rule set matches this evaluation")
+                resolved = company_queryset.filter(role_code=session.role_code).first()
+            if resolved is None:
+                resolved = company_queryset.filter(role_code="").first()
+        if resolved is None and session.role_code:
+            resolved = queryset.filter(role_code=session.role_code).first()
+        if resolved is None:
+            resolved = queryset.filter(role_code="").first()
+        if resolved is None:
+            raise Week6ScoringError("No active scoring rule set matches this evaluation")
+
+        evaluation.scoring_rule_set = resolved
+        evaluation.save(update_fields=["scoring_rule_set"])
+        return resolved
 
     @classmethod
     def _score_response(cls, *, evaluation, response, rule_set):

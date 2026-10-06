@@ -884,6 +884,43 @@ class Week6ScoringServiceTests(TestCase):
             ).exists()
         )
 
+    def test_resolved_rule_set_is_pinned_and_survives_a_newer_rule_set(self):
+        """Authoritative-snapshot fix: once an evaluation has been scored,
+        re-scoring it (a retry, the admin "run scoring" action, or
+        `regenerate_report`) must keep using the SAME rule set, even after
+        a newer one is activated for the same role/tier/company - the
+        candidate's interview ran under one set of rules and must stay
+        scored against those rules, not whatever is newest at re-score
+        time."""
+        Week6ScoringService.run_for_evaluation(evaluation=self.evaluation, actor=self.user)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.scoring_rule_set_id, self.rule_set.id)
+
+        newer_rule_set = ScoringRuleSet.objects.create(
+            name="Week 6 Revised", version="week6-v2", role_code="domestic_worker",
+            role_name="Housekeeper", evaluation_tier=InterviewEvaluationTier.FULL,
+            is_active=True, created_by=self.user, company=self.candidate.company,
+        )
+
+        resolved = Week6ScoringService._resolve_rule_set(self.evaluation)
+
+        self.assertEqual(resolved.id, self.rule_set.id)
+        self.assertNotEqual(resolved.id, newer_rule_set.id)
+
+    def test_a_fresh_evaluation_still_resolves_the_newest_active_rule_set(self):
+        """Pinning only kicks in once an evaluation has actually been
+        scored - an evaluation that hasn't been scored yet must still pick
+        up the newest active rule set, exactly as before this fix."""
+        newer_rule_set = ScoringRuleSet.objects.create(
+            name="Week 6 Revised", version="week6-v2", role_code="domestic_worker",
+            role_name="Housekeeper", evaluation_tier=InterviewEvaluationTier.FULL,
+            is_active=True, created_by=self.user, company=self.candidate.company,
+        )
+
+        resolved = Week6ScoringService._resolve_rule_set(self.evaluation)
+
+        self.assertEqual(resolved.id, newer_rule_set.id)
+
     def test_scoring_only_uses_the_latest_attempt_per_question(self):
         """Attempt isolation regression: if a question is ever answered
         more than once (CandidateResponse.attempt_number), scoring must

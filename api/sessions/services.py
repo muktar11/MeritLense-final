@@ -439,7 +439,21 @@ class InterviewSessionService:
         if package_context is not None:
             package_session_config = package_context["package"]
             coverage = package_context["coverage"]
-            session_evaluation_tier = package_context["evaluation_tier"]
+            # This is the package's coverage CEILING for this role, used only
+            # to check entitlement below - never assigned to
+            # session_evaluation_tier. The evaluation type the admin
+            # explicitly selected (config.evaluation_tier) is the single
+            # authoritative value for this session from here through
+            # scoring, readiness and certificate eligibility; a commercial
+            # package controls whether that selection is *allowed*, never
+            # what it silently becomes. See api/sessions/tests.py
+            # SilentTierUpgradeRegressionTests for the incident this guards
+            # against: a Screening selection was previously overwritten to
+            # Full whenever the active package's coverage for the role
+            # resolved to Full/Partial, so a 2-question Screening session
+            # was scored and certified under Full-tier rules with nothing
+            # visibly wrong at creation time.
+            package_coverage_tier = package_context["evaluation_tier"]
             resolved_package_code = package_session_config.package_code
             resolved_package_name = package_session_config.package_name
             coverage_level = coverage.coverage_level
@@ -450,16 +464,14 @@ class InterviewSessionService:
             # The package's coverage can be lower than what this
             # InterviewConfiguration was explicitly built/selected for (e.g.
             # a FULL config picked under a package whose coverage for this
-            # role is only SCREENING). This used to silently downgrade the
-            # session to the lower tier - confusing (the admin picked Full
-            # and got Screening with no explanation) and, worse, previously
-            # unscoreable (no SCREENING-tier scoring rule set existed for
-            # any role). Refuse instead: the admin must either pick a
-            # config that matches what their package actually covers, or
-            # upgrade the package - never a silent swap.
+            # role is only SCREENING). Refuse rather than silently change
+            # the selected tier in either direction: the admin must either
+            # pick a configuration that matches what their package actually
+            # covers, or upgrade the package - never a silent swap, up or
+            # down.
             if (
                 config.evaluation_tier == InterviewEvaluationTier.FULL
-                and session_evaluation_tier != InterviewEvaluationTier.FULL
+                and package_coverage_tier != InterviewEvaluationTier.FULL
             ):
                 raise ValueError(
                     f"The {package_session_config.package_name} package only covers Screening-tier "

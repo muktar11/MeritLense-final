@@ -11,9 +11,16 @@ from django.utils import timezone
 from api.accounts.models import User
 from api.audit.models import AuditLog
 from api.candidates.models import Candidate
-from api.core.constants import EvaluationStatus, EvaluationType, InterviewEvaluationTier, InterviewSessionStatus, Roles
+from api.core.constants import (
+    CoverageLevel,
+    EvaluationStatus,
+    EvaluationType,
+    InterviewEvaluationTier,
+    InterviewSessionStatus,
+    Roles,
+)
 from api.evaluations.models import Evaluation
-from api.interviews.models import InterviewConfiguration
+from api.interviews.models import InterviewConfiguration, PackageSessionConfig, RolePackageCoverage
 from api.payments.models import PackageBalance, SlotReservation
 from api.sessions.models import CandidateResponse, InterviewSession, SessionArtifact, SessionQuestion
 from api.sessions.services import InterviewSessionService
@@ -302,3 +309,92 @@ class ExpireStaleSessionsCommandTests(TestCase):
 
         self.balance.refresh_from_db()
         self.assertEqual(self.balance.current_balance, 5)
+
+
+class SilentTierUpgradeRegressionTests(TestCase):
+    """P0 fix: a user-selected evaluation type (InterviewConfiguration.
+    evaluation_tier) must stay authoritative through create_session,
+    regardless of what tier the active package's RolePackageCoverage
+    resolves to for this role. Before this fix, a Screening config was
+    unconditionally overwritten to Full whenever the resolved package
+    coverage was Full/Partial (api/sessions/services.py's package_context
+    branch) - total_questions stayed at the Screening count (e.g. 2), but
+    evaluation_tier flipped to FULL, so the session was scored against the
+    Full-tier ScoringRuleSet and could reach Full-tier certificate
+    eligibility despite only asking Screening-depth questions. A FULL
+    config was already correctly refused (not silently downgraded) when the
+    package only covered Screening - that direction must stay refused."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="tier-guard-owner@example.com", password="testpass123",
+            first_name="Owner", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        self.candidate = Candidate.objects.create(
+            first_name="Tier", last_name="Candidate", email="tier-guard-candidate@example.com",
+            passport_id="PASS-TIER-001", job_role="NA", core_skills="care", preferred_language="EN",
+            passport_document=make_file("passport.pdf"), created_by=self.user,
+        )
+        self.balance = PackageBalance.objects.create(
+            owner_user=self.user, balance_type=PackageBalance.SLOTS, fixed_amount=5, current_balance=5,
+        )
+        PackageSessionConfig.objects.create(
+            package_code="full-coverage-package", package_name="Full Coverage Package",
+            evaluation_tier=InterviewEvaluationTier.FULL, is_active=True,
+        )
+        RolePackageCoverage.objects.create(
+            role_name="Nanny", role_code="nanny", package_code="full-coverage-package",
+            package_name="Full Coverage Package", coverage_level=CoverageLevel.FULL,
+            evaluation_tier=InterviewEvaluationTier.FULL, is_active=True,
+        )
+        PackageSessionConfig.objects.create(
+            package_code="screening-only-package", package_name="Screening Only Package",
+            evaluation_tier=InterviewEvaluationTier.SCREENING, is_active=True,
+        )
+        RolePackageCoverage.objects.create(
+            role_name="Nanny", role_code="nanny", package_code="screening-only-package",
+            package_name="Screening Only Package", coverage_level=CoverageLevel.SCREENING,
+            evaluation_tier=InterviewEvaluationTier.SCREENING, is_active=True,
+        )
+        self.screening_config = InterviewConfiguration.objects.create(
+            role_name="Nanny", role_code="nanny", language="EN",
+            evaluation_tier=InterviewEvaluationTier.SCREENING, duration_minutes=15,
+            total_questions=2, allow_retries=True, max_retries=1,
+            rubric_version="v1", question_set_version="v1",
+        )
+        self.full_config = InterviewConfiguration.objects.create(
+            role_name="Nanny", role_code="nanny", language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL, duration_minutes=45,
+            total_questions=21, allow_retries=True, max_retries=1,
+            rubric_version="v1", question_set_version="v1",
+        )
+
+    def test_screening_selection_is_not_upgraded_by_a_full_coverage_package(self):
+        session = InterviewSessionService.create_session(
+            candidate=self.candidate, config=self.screening_config, created_by=self.user,
+            package_code="full-coverage-package",
+        )
+
+        self.assertEqual(session.evaluation_tier, InterviewEvaluationTier.SCREENING)
+        self.assertEqual(session.config_id, self.screening_config.id)
+
+    def test_full_selection_under_a_full_coverage_package_stays_full(self):
+        session = InterviewSessionService.create_session(
+            candidate=self.candidate, config=self.full_config, created_by=self.user,
+            package_code="full-coverage-package",
+        )
+
+        self.assertEqual(session.evaluation_tier, InterviewEvaluationTier.FULL)
+        self.assertEqual(session.config_id, self.full_config.id)
+
+    def test_full_selection_under_a_screening_only_package_is_refused_not_downgraded(self):
+        with self.assertRaises(ValueError):
+            InterviewSessionService.create_session(
+                candidate=self.candidate, config=self.full_config, created_by=self.user,
+                package_code="screening-only-package",
+            )
+
+        self.assertFalse(
+            InterviewSession.objects.filter(candidate=self.candidate).exists(),
+            "a refused session must not be created at a silently-downgraded tier",
+        )

@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from api.accounts.models import Company, User
+from api.accounts.models import Company, CompanyEmployerProfile, User
 from api.contracts.constants import CURRENT_VERSIONS
 from api.contracts.models import Agreement
 from api.contracts.pdf_service import render_preview_html
@@ -186,9 +186,18 @@ def make_company(admin_user, **overrides):
         city="San Francisco",
         admin_user=admin_user,
         registration_certificate=SimpleUploadedFile("cert.pdf", b"cert", content_type="application/pdf"),
+        business_license_verified=True,
     )
     defaults.update(overrides)
-    return Company.objects.create(**defaults)
+    company = Company.objects.create(**defaults)
+    CompanyEmployerProfile.objects.create(
+        user=admin_user, company_name=company.name, company_registration_number=f"{company.registration_number}-profile",
+        company_size=company.company_size, phone_number=company.phone_number, country=company.country, city=company.city,
+        registration_certificate=SimpleUploadedFile("profile-cert.pdf", b"cert", content_type="application/pdf"),
+        resachetified_license=SimpleUploadedFile("license.pdf", b"license", content_type="application/pdf"),
+        company=company,
+    )
+    return company
 
 
 class AdminAgreementEndpointTests(APITestCase):

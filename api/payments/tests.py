@@ -10,7 +10,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 
-from api.accounts.models import Company, User
+from api.accounts.models import Company, TeamMemberProfile, User
 from api.audit.models import AuditLog
 from api.candidates.models import Candidate
 from api.core.constants import InterviewEvaluationTier, InterviewSessionStatus, Roles
@@ -53,6 +53,7 @@ def make_company(admin_user, **overrides):
         city="San Francisco",
         admin_user=admin_user,
         registration_certificate=SimpleUploadedFile("cert.pdf", b"cert", content_type="application/pdf"),
+        business_license_verified=True,
     )
     defaults.update(overrides)
     return Company.objects.create(**defaults)
@@ -546,6 +547,7 @@ class AdminDealRecordEndpointTests(APITestCase):
             role=Roles.B2B, is_verified=True,
         )
         self.company = make_company(self.owner)
+        _link_company_profile(self.owner, self.company)
 
     def test_superadmin_can_create_a_deal_record(self):
         response = self.client.post(
@@ -628,6 +630,7 @@ class AdminPackageBalanceEndpointTests(APITestCase):
             role=Roles.B2B, is_verified=True,
         )
         self.company = make_company(self.owner)
+        _link_company_profile(self.owner, self.company)
         self.balance = PackageBalance.objects.create(
             owner_company=self.company, balance_type=PackageBalance.SLOTS, fixed_amount=200, current_balance=30,
         )
@@ -3541,6 +3544,9 @@ class PackageRequestEndpointTests(APITestCase):
         self.team_member = User.objects.create_user(
             email="pkgreq-ep-team@example.com", password="Password123!",
             first_name="Team", last_name="Member", role=Roles.B2B_TEAM_MEMBER, is_verified=True,
+        )
+        TeamMemberProfile.objects.create(
+            user=self.team_member, company=self.company, job_title="Analyst", phone_number="+15550000001",
         )
 
         self.superadmin = User.objects.create_user(

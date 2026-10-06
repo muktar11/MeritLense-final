@@ -4202,8 +4202,8 @@ class SessionSetEvaluationPermissionWiringTests(TestCase):
     evaluation session is one of the four actions a B2B_TEAM_MEMBER needs
     explicit set_evaluation permission for (api.core.permisssions.
     RequireSetEvaluation - see api.core.tests.HasTeamMemberPermissionTests
-    for the permission class's own behavior). list stays open to every
-    team member regardless of permissions."""
+    for the permission class's own behavior). list is gated the same way,
+    consistent with the equivalent scores/payment endpoints."""
 
     def test_create_requires_set_evaluation(self):
         from api.interviews.views import InterviewSessionViewSet
@@ -4213,13 +4213,13 @@ class SessionSetEvaluationPermissionWiringTests(TestCase):
         classes = view.get_permissions()
         self.assertTrue(any(isinstance(p, RequireSetEvaluation) for p in classes))
 
-    def test_list_does_not_require_set_evaluation(self):
+    def test_list_requires_set_evaluation(self):
         from api.interviews.views import InterviewSessionViewSet
 
         view = InterviewSessionViewSet()
         view.action = "list"
         classes = view.get_permissions()
-        self.assertFalse(any(isinstance(p, RequireSetEvaluation) for p in classes))
+        self.assertTrue(any(isinstance(p, RequireSetEvaluation) for p in classes))
 
 
 class SeedPackageArchitectureCommandTests(TestCase):

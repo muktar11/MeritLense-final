@@ -83,6 +83,7 @@ class AccountsWeek2Tests(APITestCase):
             city=profile.city,
             admin_user=user,
             registration_certificate=make_file(f"company-cert-{user.id}.pdf"),
+            business_license_verified=True,
         )
         profile.company = company
         profile.save(update_fields=["company"])
@@ -1509,7 +1510,7 @@ class TeamMemberAndInvitationLookupTests(APITestCase):
             name="Lookup Co", registration_number=f"LOOKUP-{self.owner.id}",
             company_size=CompanySize.SMALL, phone_number="+15550000099",
             country="United States", city="San Francisco", admin_user=self.owner,
-            is_verified=True,
+            business_license_verified=True,
         )
         CompanyEmployerProfile.objects.create(
             user=self.owner, company_name=self.company.name,

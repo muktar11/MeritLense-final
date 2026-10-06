@@ -910,6 +910,7 @@ class CertificateReuseTests(APITestCase):
             industry="Technology", phone_number="+15550000000", country="US", city="New York",
             address="1 Company Way", website="https://example.com", admin_user=user,
             registration_certificate=make_file(f"{registration_number}-certificate.pdf"), is_verified=True,
+            business_license_verified=True,
         )
         CompanyEmployerProfile.objects.create(
             user=user, company_name=company_name, company_registration_number=registration_number,

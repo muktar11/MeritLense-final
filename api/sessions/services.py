@@ -27,6 +27,7 @@ from api.core.constants import (
 from api.evaluations.models import Evaluation
 from api.evaluations.scoring_services import Week6ScoringError, Week6ScoringService
 from api.evaluations.certificate_services import generate_certificate
+from api.reports.services import EvaluationReportService
 from api.interviews.package_services import PackageArchitectureService
 from api.payments.entitlement_services import EntitlementService
 from api.payments.models import PackageBalance, SlotReservation
@@ -1019,6 +1020,30 @@ class InterviewSessionService:
                             action=AuditLogAction.SESSION_COMPLETED,
                             category=AuditLogCategory.SESSION,
                             description=f"Automatic certificate generation failed for {session.candidate.get_full_name()}",
+                            resource=session,
+                            data=session_event_payload(session),
+                            severity=AuditLogSeverity.ERROR,
+                        )
+            # The employer-facing AI report previously had no automatic
+            # trigger anywhere - it only ever got created if someone
+            # manually clicked "Generate Report" in a secondary modal, so a
+            # fully scored evaluation could sit with no report at all
+            # unless a human happened to go looking for that action.
+            # Generate it as part of the same best-effort completion bundle
+            # as scoring/certificate: requires real scoring output to exist
+            # (same precondition as the certificate above), and a failure
+            # here must not roll back session completion any more than a
+            # scoring or certificate failure does.
+            if summary is not None:
+                try:
+                    EvaluationReportService.generate_for_evaluation(evaluation=evaluation, actor=actor)
+                except Exception:
+                    if actor:
+                        AuditLogService.log(
+                            user=actor,
+                            action=AuditLogAction.SESSION_COMPLETED,
+                            category=AuditLogCategory.SESSION,
+                            description=f"Automatic report generation failed for {session.candidate.get_full_name()}",
                             resource=session,
                             data=session_event_payload(session),
                             severity=AuditLogSeverity.ERROR,

@@ -2117,6 +2117,22 @@ class AutomaticScoringOnCompletionTests(TestCase):
             expires_at=InterviewSession.build_expiry(30),
             created_by=self.user,
         )
+        # EvaluationReportService._get_summary refuses to generate a report
+        # without a signed CANDIDATE_CONSENT agreement linked to the
+        # session - a real completed session always has one (captured
+        # before/at session start), but this fixture predates the report
+        # being generated automatically and needs it added explicitly.
+        from api.contracts.models import Agreement
+        from api.core.constants import AgreementMethod, AgreementStatus, AgreementType
+
+        self.session.candidate_consent_agreement = Agreement.objects.create(
+            user=self.user,
+            agreement_type=AgreementType.CANDIDATE_CONSENT,
+            version="v1",
+            method=AgreementMethod.OTP_SIGNATURE,
+            status=AgreementStatus.SIGNED,
+        )
+        self.session.save(update_fields=["candidate_consent_agreement"])
 
     def test_completion_without_any_matching_rule_set_still_completes(self):
         from api.sessions.services import InterviewSessionService
@@ -2222,6 +2238,18 @@ class AutomaticScoringOnCompletionTests(TestCase):
 
         summary = SessionEvaluationSummary.objects.get(session=self.session)
         self.assertEqual(float(summary.overall_percentage), 100.0)
+
+        # The AI report previously had no automatic trigger at all - it
+        # only ever got created if someone manually clicked "Generate
+        # Report" in a secondary modal, so a fully scored evaluation could
+        # sit with no report indefinitely. It must now exist as part of
+        # the same completion bundle as scoring/certificate.
+        from api.reports.models import EvaluationReport
+
+        evaluation = self.session.linked_evaluation
+        report = EvaluationReport.objects.get(evaluation=evaluation)
+        self.assertEqual(report.report_status, EvaluationReport.STATUS_ACTIVE)
+        self.assertEqual(float(report.overall_percentage), 100.0)
 
     def test_completion_does_not_issue_a_certificate_when_coverage_is_insufficient(self):
         from api.sessions.services import InterviewSessionService

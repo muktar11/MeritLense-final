@@ -87,6 +87,18 @@ _register_aliases(
     "behavior_reliability",
     "integrity_guest_relations",
     "behavioral_score",
+    # "Behavioral Indicators" is the Governance v1.2 approved display name
+    # for this exact competency (Canonical Competency Mapping sheet,
+    # MeritLense_Question_Bank_FINAL_APPROVED_FOR_IMPLEMENTATION_CORRECTED)
+    # - registering it here, rather than treating it as a second canonical
+    # code, is what the governance doc explicitly requires ("do not use
+    # practical_task_execution as a second canonical code" applies by the
+    # same logic to behavioral_indicators). A prior one-off production
+    # retag (Driver, Sept 2026) assumed the opposite direction and left
+    # "behavioral_indicators" unregistered, which is exactly why it showed
+    # up as an orphaned duplicate competency code instead of merging here.
+    "Behavioral Indicators",
+    "behavioral_indicators",
 )
 _register_aliases(
     "Psych & Professional",
@@ -114,6 +126,10 @@ _register_aliases(
     "Task Execution",
     "task_execution",
     "task_score",
+    # Governance v1.2 approved display name for this same competency -
+    # see the "Behavioral Indicators" note above, same rationale.
+    "Practical Task Execution",
+    "practical_task_execution",
 )
 # Deliberately no legacy raw-label variants re-pointed here yet (e.g. the
 # "Hygiene & Infection Control"/"Service & Hygiene Knowledge" labels above

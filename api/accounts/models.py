@@ -231,6 +231,8 @@ class CompanyEmployerProfile(TimeStampedModel, SoftDeleteModel):
 
     registration_certificate = models.FileField(
         upload_to='b2b/documents/registration/',
+        null=True,
+        blank=True,
         validators=[FileExtensionValidator(['pdf', 'jpg', 'jpeg', 'png'])]
     )
     resachetified_license = models.FileField(
@@ -314,7 +316,7 @@ class Company(TimeStampedModel):
         related_name='verified_companies'
     )
     
-    registration_certificate = models.FileField(upload_to='companies/certificates/')
+    registration_certificate = models.FileField(upload_to='companies/certificates/', null=True, blank=True)
     tax_id_document = models.FileField(upload_to='companies/tax/', null=True, blank=True)
 
     stamp_image = models.ImageField(

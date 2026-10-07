@@ -137,7 +137,10 @@ class B2BRegistrationSerializer(UserRegistrationSerializer):
     target_market = serializers.ChoiceField(choices=[], required=False, allow_null=True, allow_blank=True)
     timezone = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=64)
 
-    registration_certificate = serializers.FileField()
+    # All three are now collected later from Company Profile, not at
+    # signup - see the "Document Uploads" removal from the registration
+    # form and the matching null=True/blank=True on the two models below.
+    registration_certificate = serializers.FileField(required=False, allow_null=True)
     resachetified_license = serializers.FileField(required=False, allow_null=True)
     tax_id_document = serializers.FileField(required=False, allow_null=True)
 
@@ -169,7 +172,7 @@ class B2BRegistrationSerializer(UserRegistrationSerializer):
             'address': validated_data.pop('address', ''),
             'target_market': validated_data.pop('target_market', None) or None,
             'timezone': validated_data.pop('timezone', None) or None,
-            'registration_certificate': validated_data.pop('registration_certificate'),
+            'registration_certificate': validated_data.pop('registration_certificate', None),
             'resachetified_license': validated_data.pop('resachetified_license', None),
             'tax_id_document': validated_data.pop('tax_id_document', None),
         }

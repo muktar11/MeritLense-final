@@ -396,6 +396,38 @@ class AccountsWeek2Tests(APITestCase):
         self.assertEqual(profile.target_market, "SA")
         self.assertEqual(profile.timezone, "Asia/Dubai")
 
+    def test_b2b_registration_succeeds_with_no_documents_uploaded(self):
+        # Document Uploads was removed from the registration form entirely -
+        # registration_certificate, resachetified_license and
+        # tax_id_document are now all collected later from Company Profile,
+        # not at signup. Registration must succeed with none of the three.
+        response = self.client.post(
+            "/api/v1/auth/register/b2b",
+            {
+                "email": "no-documents-b2b@example.com",
+                "first_name": "No",
+                "last_name": "Documents",
+                "password": "Password123!",
+                "confirm_password": "Password123!",
+                "company_name": "No Documents Co",
+                "company_registration_number": "COMP-REG-NODOC-001",
+                "company_size": "1-10",
+                "country": "United States",
+                "city": "Austin",
+                "preferred_language": Languages.ENGLISH,
+                "phone_number": "+15557778888",
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+
+        profile = CompanyEmployerProfile.objects.get(company_registration_number="COMP-REG-NODOC-001")
+        self.assertFalse(profile.registration_certificate)
+        self.assertFalse(profile.resachetified_license)
+        self.assertFalse(profile.tax_id_document)
+        company = Company.objects.get(registration_number="COMP-REG-NODOC-001")
+        self.assertFalse(company.registration_certificate)
+
     def test_b2b_registration_resend_verification_and_login_flow(self):
         registration_payload = {
             "email": "company-admin@example.com",

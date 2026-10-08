@@ -327,12 +327,19 @@ GEMINI_INTERPRETATION_API_URL = os.getenv(
 )
 GEMINI_INTERPRETATION_MODEL = os.getenv("GEMINI_INTERPRETATION_MODEL", "gemini-1.5-flash")
 AI_INTERPRETATION_TIMEOUT_SECONDS = int(os.getenv("AI_INTERPRETATION_TIMEOUT_SECONDS", "45"))
-AI_INTERPRETATION_PROMPT_VERSION = os.getenv("AI_INTERPRETATION_PROMPT_VERSION", "week7-v3-bilingual-negative-indicators")
+AI_INTERPRETATION_PROMPT_VERSION = os.getenv("AI_INTERPRETATION_PROMPT_VERSION", "week5-v2-semantic-matching")
 AI_INTERPRETATION_MIN_CONFIDENCE = float(os.getenv("AI_INTERPRETATION_MIN_CONFIDENCE", "0.75"))
 
 ENABLE_TRANSLATION_PIPELINE = env_bool("ENABLE_TRANSLATION_PIPELINE", True)
 ENABLE_RESPONSE_INTERPRETATION = env_bool("ENABLE_RESPONSE_INTERPRETATION", True)
 ENABLE_RULE_INPUT_PREPARATION = env_bool("ENABLE_RULE_INPUT_PREPARATION", True)
+# Priority 9 indicator-ID evidence extraction (handoff deliverable C). Off by
+# default: with it off, interpretation behaves exactly as before. Staging only
+# until release is explicitly approved.
+INDICATOR_ID_EXTRACTION_ENABLED = env_bool("INDICATOR_ID_EXTRACTION_ENABLED", False)
+# Policy D-01: draft (not SME-approved) Arabic indicator text may be loaded and
+# used only where this is explicitly enabled - Staging, never Production.
+ALLOW_DRAFT_INDICATOR_TRANSLATIONS = env_bool("ALLOW_DRAFT_INDICATOR_TRANSLATIONS", False)
 AI_PROCESSING_RETRY_LIMIT = int(os.getenv("AI_PROCESSING_RETRY_LIMIT", "2"))
 ENABLE_ASYNC_AI_PROCESSING = env_bool("ENABLE_ASYNC_AI_PROCESSING", False)
 

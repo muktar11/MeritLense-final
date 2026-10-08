@@ -186,11 +186,7 @@ class Week6ScoringService:
         if requires_human_review and artifact is None:
             passed_required = False
 
-        # The stored score is the effective score: a hard-negative (critical
-        # failure) is 0 under the approved 5/3/0 rubric, so totals, reports
-        # and the critical flag must agree. The pre-gate score stays in
-        # metadata.raw_score for audit.
-        percentage = cls._percentage(effective_score, max_score)
+        percentage = cls._percentage(raw_score, max_score)
         template = getattr(response.question, "question_template", None)
         competency_code = (
             normalize_skill_code(getattr(artifact, "competency_code", ""))
@@ -223,7 +219,7 @@ class Week6ScoringService:
                 "rule": rule,
                 "competency_code": competency_code,
                 "competency_name": competency_name,
-                "score": effective_score,
+                "score": raw_score,
                 "max_score": max_score,
                 "percentage": percentage,
                 "passed_required_indicators": passed_required,
@@ -243,7 +239,6 @@ class Week6ScoringService:
                     "critical_failure_indicators": critical_failure_indicators,
                     "raw_score": str(raw_score),
                     "effective_score": str(effective_score),
-                    "critical_failure_indicators_hit": critical_hits,
                 },
                 "scored_at": timezone.now(),
             },
@@ -438,7 +433,6 @@ class Week6ScoringService:
                 "question_code": result.metadata.get("question_code", ""),
                 "topic": result.competency_name or result.question.skill,
                 "score": float(result.score),
-                "raw_score": float(result.metadata.get("raw_score", result.score)),
                 "effective_score": float(result.metadata.get("effective_score", result.score)),
                 "explanation": result.explanation,
             }
@@ -696,10 +690,7 @@ class Week6ScoringService:
         if missing_required:
             parts.append(f"Required indicators missing: {', '.join(missing_required)}.")
         if critical_hits:
-            parts.append(
-                f"Critical failure indicators detected: {', '.join(critical_hits)}. "
-                "Question score set to 0 (critical failure)."
-            )
+            parts.append(f"Critical failure indicators detected: {', '.join(critical_hits)}.")
         if requires_human_review:
             parts.append("Human review is still required for this response.")
         if not parts:

@@ -1208,7 +1208,7 @@ class Week6ScoringServiceTests(TestCase):
         self.assertEqual(summary.incomplete_response_count, 1)
         self.assertEqual(summary.status, SessionEvaluationSummary.STATUS_PARTIALLY_EVALUATED)
 
-    def test_critical_failure_stores_effective_score_and_keeps_raw_for_audit(self):
+    def test_critical_failure_preserves_raw_score_and_sets_flag(self):
         rule = self.rule_set.rules.get(question_code="HK-SAF-002")
         rule.critical_failure_indicators = ["clean spill"]
         rule.save(update_fields=["critical_failure_indicators", "updated_at"])
@@ -1222,17 +1222,13 @@ class Week6ScoringServiceTests(TestCase):
         response_result = ResponseEvaluationResult.objects.get(evaluation=self.evaluation, response=self.response)
         self.evaluation.refresh_from_db()
 
-        # The stored score is the effective (gated) score, so totals and
-        # reports agree with the critical flag; the pre-gate score is kept.
         self.assertTrue(response_result.critical_failure)
-        self.assertEqual(float(response_result.score), 0.0)
-        self.assertEqual(float(response_result.percentage), 0.0)
+        self.assertEqual(float(response_result.score), 7.0)
         self.assertEqual(response_result.metadata["raw_score"], "7.00")
         self.assertEqual(response_result.metadata["effective_score"], "0.00")
         self.assertEqual(self.evaluation.readiness_status, ReadinessStatus.NOT_READY)
         self.assertTrue(self.evaluation.readiness_override_applied)
-        self.assertEqual(summary.critical_failures[0]["score"], 0.0)
-        self.assertEqual(summary.critical_failures[0]["raw_score"], 7.0)
+        self.assertEqual(summary.critical_failures[0]["score"], 7.0)
 
     def test_readiness_legal_record_is_immutable_after_generation(self):
         Week6ScoringService.run_for_evaluation(

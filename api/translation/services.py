@@ -123,6 +123,25 @@ def parse_confidence_score(value):
     return score.quantize(Decimal("0.001"))
 
 
+def _indicator_key(value):
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def parse_negative_indicator_evidence(value):
+    """[{"indicator": ..., "quote": ...}] - anything malformed is dropped."""
+    if not isinstance(value, list):
+        return []
+    evidence = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        indicator = str(item.get("indicator") or "").strip()
+        quote = str(item.get("quote") or "").strip()
+        if indicator:
+            evidence.append({"indicator": indicator, "quote": quote})
+    return evidence
+
+
 class GoogleTranslationProvider:
     def __init__(self):
         self.provider = settings.TRANSLATION_PROVIDER
@@ -452,9 +471,74 @@ class ResponseInterpretationService:
             return GeminiInterpretationProvider()
         return OpenAIInterpretationProvider()
 
+    VOCABULARY_SOURCE_ENGLISH = "english_template"
+    VOCABULARY_SOURCE_TEMPLATE = "question_template"
+
     @classmethod
-    def build_prompt(cls, *, response, transcript, input_language, input_transcript_type):
+    def _english_sibling(cls, template):
+        """The English version of a non-English question (same role, code and
+        version). ScoringRule indicators are English-only and were built from
+        the English Must Include, so this is the vocabulary scoring needs."""
+        if not template or (template.language or "").upper() == "EN" or not template.question_code:
+            return None
+        from api.questions.models import QuestionTemplate
+
+        return (
+            QuestionTemplate.objects.filter(
+                role_code=template.role_code,
+                question_code=template.question_code,
+                question_version=template.question_version,
+                language__iexact="EN",
+            )
+            .exclude(expected_steps=[])
+            .first()
+        )
+
+    @classmethod
+    def indicator_vocabulary(cls, response):
+        """The closed vocabularies the interpreter must label against:
+        Must Include steps and Negative Indicators, both in the English
+        wording the Rule Engine matches on - whatever language the candidate
+        answered in. Returns a dict that is also stored for audit."""
         template = getattr(response.question, "question_template", None)
+        if template is None:
+            return {"expected_steps": [], "local_expected_steps": [], "negative_indicators": [],
+                    "source": cls.VOCABULARY_SOURCE_TEMPLATE, "negative_indicator_rule_id": None}
+
+        sibling = cls._english_sibling(template)
+        expected_steps = list(sibling.expected_steps) if sibling else list(template.expected_steps or [])
+        source = cls.VOCABULARY_SOURCE_ENGLISH if sibling else cls.VOCABULARY_SOURCE_TEMPLATE
+
+        from django.db.models import Case, IntegerField, Q, Value, When
+
+        from api.evaluations.models import ScoringRule
+
+        match = Q(question_template=template)
+        if sibling is not None:
+            match |= Q(question_template=sibling)
+        if template.question_code:
+            match |= Q(question_code=template.question_code, rule_set__role_code=template.role_code)
+        tier = getattr(response.session, "evaluation_tier", "") or ""
+        rule = (
+            ScoringRule.objects.filter(match, is_active=True, rule_set__is_active=True)
+            .annotate(tier_match=Case(When(rule_set__evaluation_tier=tier, then=Value(0)), default=Value(1),
+                                      output_field=IntegerField()))
+            .order_by("tier_match", "-rule_set__created_at")
+            .first()
+        )
+        negatives = sanitize_list(rule.critical_failure_indicators) if rule else []
+        return {
+            "expected_steps": expected_steps,
+            "local_expected_steps": list(template.expected_steps or []) if sibling else [],
+            "negative_indicators": negatives,
+            "source": source,
+            "negative_indicator_rule_id": str(rule.public_id) if rule else None,
+        }
+
+    @classmethod
+    def build_prompt(cls, *, response, transcript, input_language, input_transcript_type, vocabulary=None):
+        template = getattr(response.question, "question_template", None)
+        vocabulary = vocabulary or cls.indicator_vocabulary(response)
         rubric = None
         normalized_skill_tag = normalize_skill_tag(getattr(template, "skill_tag", ""))
         if template and normalized_skill_tag:
@@ -467,7 +551,7 @@ class ResponseInterpretationService:
                 .first()
             )
 
-        expected_steps = template.expected_steps if template else []
+        expected_steps = vocabulary["expected_steps"]
         keywords = template.keywords if template else []
         rubric_notes = rubric.evaluation_criteria if rubric else []
         prompt_payload = {
@@ -493,7 +577,18 @@ class ResponseInterpretationService:
                 "verbatim (exact text, not translated or paraphrased) - do not invent new step phrasing; this "
                 "verbatim requirement applies only to how you label a matched step, not to how you judge whether "
                 "it was addressed. If a step from expected_steps was not clearly addressed by any reasonable "
-                "reading of the transcript, omit it from mentioned_steps rather than guessing."
+                "reading of the transcript, omit it from mentioned_steps rather than guessing. "
+                "expected_steps and negative_indicators are written in English even when the transcript is in "
+                "another language; judge the candidate's meaning in their own language and label with the English "
+                "entries. question.local_expected_steps, when present, is the same blueprint in the question's own "
+                "language for context only - never use it as a label. "
+                "Also return observed_negative_indicators and negative_indicator_evidence. Choose "
+                "observed_negative_indicators only from question.negative_indicators, copied verbatim, and only "
+                "when the candidate actually states or clearly describes doing that unsafe or prohibited thing "
+                "(in any wording or language). A step the candidate merely did not mention is NOT a negative "
+                "indicator - report it in missing_steps instead. For every observed negative indicator add one "
+                "negative_indicator_evidence entry {\"indicator\": <the verbatim negative indicator>, \"quote\": "
+                "<the candidate's own words, copied from the transcript>}."
             ),
             "legal_disclaimer": LEGAL_DISCLAIMER_TEXT,
             "session": {
@@ -508,6 +603,8 @@ class ResponseInterpretationService:
                 "skill": normalized_skill_tag or response.question.skill,
                 "domain": response.question.domain,
                 "expected_steps": expected_steps,
+                "local_expected_steps": vocabulary["local_expected_steps"],
+                "negative_indicators": vocabulary["negative_indicators"],
                 "keywords": keywords,
                 "rubric_notes": rubric_notes,
             },
@@ -556,6 +653,8 @@ class ResponseInterpretationService:
             "uncertainty_notes": sanitize_list(payload.get("uncertainty_notes")),
             "transcript_issues": sanitize_list(payload.get("transcript_issues")),
             "key_evidence_phrases": sanitize_list(payload.get("key_evidence_phrases")),
+            "observed_negative_indicators": sanitize_list(payload.get("observed_negative_indicators")),
+            "negative_indicator_evidence": parse_negative_indicator_evidence(payload.get("negative_indicator_evidence")),
         }
         normalized["risk_flags"] = normalized["safety_risks"] + normalized["compliance_risks"]
         return payload, normalized
@@ -580,18 +679,19 @@ class ResponseInterpretationService:
     @classmethod
     def interpret(cls, *, response, transcript, input_language, input_transcript_type):
         provider = cls.get_provider()
+        vocabulary = cls.indicator_vocabulary(response)
         prompt = cls.build_prompt(
             response=response,
             transcript=transcript,
             input_language=input_language,
             input_transcript_type=input_transcript_type,
+            vocabulary=vocabulary,
         )
         prompt_hash = cls.build_prompt_hash(prompt)
         result = provider.interpret(prompt=prompt)
         structured_output, normalized = cls.parse_and_validate(result["raw_content"])
 
-        template = getattr(response.question, "question_template", None)
-        canonical_steps = template.expected_steps if template else []
+        canonical_steps = vocabulary["expected_steps"]
         if canonical_steps:
             kept_mentioned, dropped_mentioned = cls._constrain_to_canonical_steps(
                 normalized["mentioned_steps"], canonical_steps
@@ -604,6 +704,28 @@ class ResponseInterpretationService:
             unmatched = dropped_mentioned + dropped_missing
             if unmatched:
                 normalized["unmatched_step_phrases"] = unmatched
+
+        # Negative Indicators: closed vocabulary, and an observed one only
+        # counts when the interpreter quotes the candidate's own words for
+        # it. A labelled negative without a quote is held back for human
+        # review rather than silently failing (or silently passing) the
+        # candidate. Everything is kept on the interpretation for audit.
+        kept_negatives, dropped_negatives = cls._constrain_to_canonical_steps(
+            normalized["observed_negative_indicators"], vocabulary["negative_indicators"]
+        )
+        quotes = {}
+        for item in normalized["negative_indicator_evidence"]:
+            if item["quote"]:
+                quotes.setdefault(_indicator_key(item["indicator"]), item["quote"])
+        verified = [n for n in kept_negatives if quotes.get(_indicator_key(n))]
+        normalized["observed_negative_indicators"] = verified
+        normalized["unverified_negative_indicators"] = [n for n in kept_negatives if n not in verified]
+        normalized["negative_indicator_evidence"] = [
+            {"indicator": n, "quote": quotes[_indicator_key(n)]} for n in verified
+        ]
+        if dropped_negatives:
+            normalized["unmatched_negative_phrases"] = dropped_negatives
+        normalized["indicator_vocabulary"] = vocabulary
 
         confidence_score = normalized.get("extraction_confidence")
         storage_normalized = {
@@ -622,16 +744,20 @@ class EvaluationInputBuilderService:
     @classmethod
     def build(cls, *, response, interpretation):
         template = getattr(response.question, "question_template", None)
-        expected_indicators = template.expected_steps if template else []
-        observed_indicators = interpretation.normalized_indicators.get("mentioned_steps") or []
-        missing_indicators = interpretation.normalized_indicators.get("missing_steps") or []
+        indicators = interpretation.normalized_indicators or {}
+        vocabulary = indicators.get("indicator_vocabulary") or {}
+        expected_indicators = vocabulary.get("expected_steps") or (template.expected_steps if template else [])
+        observed_indicators = indicators.get("mentioned_steps") or []
+        missing_indicators = indicators.get("missing_steps") or []
+        verified_negatives = indicators.get("observed_negative_indicators") or []
+        unverified_negatives = indicators.get("unverified_negative_indicators") or []
         # ScoringRule's own indicator lists are English-only (see
-        # TranslationService.resolve_indicator_phrase_to_english) - a
-        # non-English session's indicators, correctly extracted against the
-        # question's own (e.g. Arabic) expected_steps, must be normalized
-        # back to that same English vocabulary before the Rule Engine can
-        # match them against rule.expected_indicators.
-        if (interpretation.input_language or "").lower() not in ("", "en"):
+        # TranslationService.resolve_indicator_phrase_to_english). When the
+        # interpreter already labelled against the English vocabulary there is
+        # nothing to resolve; the cache lookup below remains only for older
+        # interpretations made against a non-English template's own steps.
+        english_vocabulary = vocabulary.get("source") == ResponseInterpretationService.VOCABULARY_SOURCE_ENGLISH
+        if not english_vocabulary and (interpretation.input_language or "").lower() not in ("", "en"):
             observed_indicators = [
                 TranslationService.resolve_indicator_phrase_to_english(phrase) for phrase in observed_indicators
             ]
@@ -661,12 +787,22 @@ class EvaluationInputBuilderService:
             review_reasons.append(
                 "Translation failed; interpretation used the original-language transcript without translation."
             )
+        if unverified_negatives:
+            review_reasons.append(
+                "Negative indicator(s) reported without a supporting quote from the candidate: "
+                + "; ".join(unverified_negatives) + "."
+            )
+        # Verified negative indicators are added to risk_flags in their exact
+        # rule wording, which is what the Rule Engine's critical-failure gate
+        # matches on; free-text risk notes stay alongside them, unchanged.
+        risk_flags = list(interpretation.risk_flags or [])
+        risk_flags += [n for n in verified_negatives if n not in risk_flags]
         return {
             "competency_code": competency_code,
             "expected_indicators": expected_indicators,
             "observed_indicators": observed_indicators,
             "missing_indicators": missing_indicators,
-            "risk_flags": interpretation.risk_flags,
+            "risk_flags": risk_flags,
             "language_notes": language_notes,
             "requires_human_review": bool(review_reasons),
             "review_reason": " ".join(review_reasons).strip(),
@@ -679,6 +815,11 @@ class EvaluationInputBuilderService:
                 "prompt_hash": interpretation.prompt_hash,
                 "confidence_score": str(confidence_score) if confidence_score is not None else None,
                 "legal_disclaimer": LEGAL_DISCLAIMER_TEXT,
+                "indicator_vocabulary_source": vocabulary.get("source", ""),
+                "negative_indicator_rule_id": vocabulary.get("negative_indicator_rule_id"),
+                "observed_negative_indicators": verified_negatives,
+                "negative_indicator_evidence": indicators.get("negative_indicator_evidence") or [],
+                "unverified_negative_indicators": unverified_negatives,
             },
         }
 

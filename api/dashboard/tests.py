@@ -4,16 +4,22 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.accounts.models import Company, CompanyEmployerProfile, User
+from api.accounts.models import Company, CompanyEmployerProfile, TeamMemberProfile, User
 from api.candidates.models import Candidate
-from api.core.constants import EvaluationType, InterviewEvaluationTier, Roles
+from api.core.constants import CompanyTeamPermissions, EvaluationType, InterviewEvaluationTier, Roles
+from api.dashboard.dashboard_layout import DEFAULT_WIDGETS
 from api.dashboard.comparison_services import (
     build_full_comparison,
     compute_key_differences,
     get_comparable_roles,
     get_eligible_candidates,
 )
-from api.evaluations.models import Evaluation, ScoringRuleSet, SessionEvaluationSummary
+from api.evaluations.models import (
+    Evaluation,
+    EvaluationReadinessCorrection,
+    ScoringRuleSet,
+    SessionEvaluationSummary,
+)
 from api.interviews.models import InterviewConfiguration
 from api.payments.models import Customer, Invoice, Payment, Price, Subscription
 from api.reports.models import EvaluationReport
@@ -1206,3 +1212,213 @@ class AdminRevenueAccuracyTests(TestCase):
         self.assertIn("Unknown Package", names)
         unknown = next(item for item in response.data if item["package_name"] == "Unknown Package")
         self.assertEqual(unknown["subscriber_count"], 1)
+
+
+class B2BDashboardCustomizationApiTests(TestCase):
+    """Company-level dashboard layout, the real Readiness Index (by
+    readiness outcome, not evaluation status), and the decision-oriented
+    Requires Attention queue."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user(
+            email="dash-owner@example.com", password="testpass123", first_name="Dash", last_name="Owner",
+            role=Roles.B2B, is_verified=True,
+        )
+        self.company = Company.objects.create(
+            name="Dash Co", registration_number="DASH-001", company_size="11-50", industry="Care",
+            phone_number="+251900000101", country="Ethiopia", city="Addis Ababa", admin_user=self.owner,
+        )
+        CompanyEmployerProfile.objects.create(
+            user=self.owner, company_name=self.company.name,
+            company_registration_number=self.company.registration_number,
+            company_size=self.company.company_size, company=self.company,
+        )
+        self.config = InterviewConfiguration.objects.create(
+            role_name="Housekeeper", role_code="domestic_worker", language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL, duration_minutes=45, total_questions=1,
+            allow_retries=True, max_retries=1, rubric_version="v2.0", question_set_version="v1.2",
+        )
+        self._seq = 0
+
+    def _make_team_member(self, permissions):
+        member = User.objects.create_user(
+            email=f"dash-member-{len(permissions)}@example.com", password="testpass123",
+            first_name="Team", last_name="Member", role=Roles.B2B_TEAM_MEMBER, is_verified=True,
+            company=self.company,
+        )
+        TeamMemberProfile.objects.create(
+            user=member, company=self.company, job_title="Recruiter", phone_number="+251900000102",
+            permissions=permissions,
+        )
+        return member
+
+    def _make_evaluation(self, *, readiness="READY", status="COMPLETED", company=None, owner=None,
+                         readiness_enabled=True, human_review=None):
+        self._seq += 1
+        company = company or self.company
+        owner = owner or self.owner
+        candidate = Candidate.objects.create(
+            first_name=f"Cand{self._seq}", last_name="Test", email=f"dash-cand-{self._seq}@example.com",
+            passport_id=f"DASH-{self._seq}", job_role="NA", core_skills="care", preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf", created_by=owner, company=company,
+        )
+        session = InterviewSession.objects.create(
+            candidate=candidate, organization=company, config=self.config, role_name="Housekeeper",
+            role_code="domestic_worker", ui_language="EN", candidate_language="EN", tts_language_code="en-US",
+            stt_language_code="en-US", total_questions=1, evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0", question_set_version="v1.2", expires_at=InterviewSession.build_expiry(30),
+            created_by=owner,
+        )
+        evaluation = Evaluation.objects.create(
+            session=session, candidate=candidate, evaluation_type=EvaluationType.INTERVIEW, status=status,
+            scheduled_date=timezone.now(), duration_minutes=45, created_by=owner, company=company,
+            readiness_status=readiness, readiness_indicator_enabled=readiness_enabled, score=Decimal("80"),
+        )
+        if human_review is not None:
+            EvaluationReport.objects.create(
+                evaluation=evaluation, session=session, candidate=candidate,
+                report_number=f"RPT-DASH-{self._seq}", report_status=EvaluationReport.STATUS_ACTIVE,
+                readiness_status=readiness, requires_human_review=human_review,
+            )
+        return evaluation
+
+    # -- layout -------------------------------------------------------------
+
+    def test_layout_defaults_until_customized_then_persists_per_company(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.get("/api/v1/dashboard/b2b/dashboard-layout")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["is_default"])
+        self.assertEqual(response.data["widgets"], list(DEFAULT_WIDGETS))
+        self.assertTrue(response.data["can_edit"])
+
+        response = self.client.put(
+            "/api/v1/dashboard/b2b/dashboard-layout",
+            {"widgets": ["readiness_index", "language_distribution"]}, format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["widgets"], ["readiness_index", "language_distribution"])
+        self.company.refresh_from_db()
+        self.assertEqual(self.company.dashboard_layout, {"widgets": ["readiness_index", "language_distribution"]})
+
+        # Saved at company level: a full-access team member sees the same layout but can't change it.
+        member = self._make_team_member(list(CompanyTeamPermissions.ALL))
+        self.client.force_authenticate(member)
+        response = self.client.get("/api/v1/dashboard/b2b/dashboard-layout")
+        self.assertEqual(response.data["widgets"], ["readiness_index", "language_distribution"])
+        self.assertFalse(response.data["can_edit"])
+        response = self.client.put(
+            "/api/v1/dashboard/b2b/dashboard-layout", {"widgets": []}, format="json",
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_layout_rejects_unknown_and_duplicate_widgets_and_supports_reset(self):
+        self.client.force_authenticate(self.owner)
+        url = "/api/v1/dashboard/b2b/dashboard-layout"
+        self.assertEqual(self.client.put(url, {"widgets": ["nope"]}, format="json").status_code, 400)
+        self.assertEqual(
+            self.client.put(url, {"widgets": ["readiness_index", "readiness_index"]}, format="json").status_code, 400,
+        )
+        self.assertEqual(self.client.put(url, {"widgets": "readiness_index"}, format="json").status_code, 400)
+
+        # An explicitly empty layout is a valid choice (everything hidden), distinct from "default".
+        response = self.client.put(url, {"widgets": []}, format="json")
+        self.assertEqual(response.data["widgets"], [])
+        self.assertFalse(response.data["is_default"])
+
+        response = self.client.put(url, {"reset": True}, format="json")
+        self.assertTrue(response.data["is_default"])
+        self.assertEqual(response.data["widgets"], list(DEFAULT_WIDGETS))
+
+    def test_layout_drops_retired_widget_ids_instead_of_failing(self):
+        self.company.dashboard_layout = {"widgets": ["retired_widget", "evaluation_trend"]}
+        self.company.save()
+        self.client.force_authenticate(self.owner)
+        response = self.client.get("/api/v1/dashboard/b2b/dashboard-layout")
+        self.assertEqual(response.data["widgets"], ["evaluation_trend"])
+
+    # -- readiness ----------------------------------------------------------
+
+    def test_readiness_distribution_uses_readiness_outcome_and_corrections(self):
+        self._make_evaluation(readiness="READY")
+        self._make_evaluation(readiness="READY")
+        self._make_evaluation(readiness="NOT_READY")
+        corrected = self._make_evaluation(readiness="NOT_READY")
+        EvaluationReadinessCorrection.objects.create(
+            evaluation=corrected, original_readiness_status="NOT_READY",
+            corrected_readiness_status="READY", reason="Reviewed", corrected_by=self.owner,
+        )
+        # Not counted: not completed, readiness disabled (e.g. Screening), other company.
+        self._make_evaluation(readiness="PENDING", status="SCHEDULED")
+        self._make_evaluation(readiness="READY", readiness_enabled=False)
+        other_owner = User.objects.create_user(
+            email="dash-other@example.com", password="testpass123", first_name="O", last_name="O",
+            role=Roles.B2B, is_verified=True,
+        )
+        other_company = Company.objects.create(
+            name="Other", registration_number="DASH-002", company_size="11-50", industry="Care",
+            phone_number="+251900000103", country="Ethiopia", city="Addis Ababa", admin_user=other_owner,
+        )
+        self._make_evaluation(readiness="NOT_READY", company=other_company, owner=other_owner)
+
+        self.client.force_authenticate(self.owner)
+        response = self.client.get("/api/v1/dashboard/b2b/readiness-distribution")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["total"], 4)
+        by_status = {row["status"]: row["count"] for row in response.data["distribution"]}
+        self.assertEqual(by_status["READY"], 3)
+        self.assertEqual(by_status["NOT_READY"], 1)
+        self.assertEqual(response.data["ready_rate"], 75.0)
+
+    def test_readiness_distribution_empty_company(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.get("/api/v1/dashboard/b2b/readiness-distribution")
+        self.assertEqual(response.data["total"], 0)
+        self.assertIsNone(response.data["ready_rate"])
+
+    # -- requires attention -------------------------------------------------
+
+    def test_requires_attention_lists_human_review_and_insufficient_evidence(self):
+        review = self._make_evaluation(readiness="READY", human_review=True)
+        incomplete = self._make_evaluation(readiness="INCOMPLETE")
+        both = self._make_evaluation(readiness="INCOMPLETE", human_review=True)
+        # Not flagged: clean report, report flagged but already corrected, still scheduled.
+        self._make_evaluation(readiness="READY", human_review=False)
+        resolved = self._make_evaluation(readiness="NOT_READY", human_review=True)
+        EvaluationReadinessCorrection.objects.create(
+            evaluation=resolved, original_readiness_status="NOT_READY",
+            corrected_readiness_status="READY", reason="Reviewed", corrected_by=self.owner,
+        )
+        self._make_evaluation(readiness="INCOMPLETE", status="SCHEDULED")
+
+        self.client.force_authenticate(self.owner)
+        response = self.client.get("/api/v1/dashboard/b2b/requires-attention")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["total"], 3)
+        self.assertEqual(response.data["human_review"], 2)
+        self.assertEqual(response.data["insufficient_evidence"], 2)
+        reasons = {item["evaluation_id"]: item["reasons"] for item in response.data["items"]}
+        self.assertEqual(reasons[str(review.public_id)], ["HUMAN_REVIEW"])
+        self.assertEqual(reasons[str(incomplete.public_id)], ["INSUFFICIENT_EVIDENCE"])
+        self.assertEqual(reasons[str(both.public_id)], ["HUMAN_REVIEW", "INSUFFICIENT_EVIDENCE"])
+
+    def test_requires_attention_respects_limit_but_counts_everything(self):
+        for _ in range(3):
+            self._make_evaluation(readiness="INCOMPLETE")
+        self.client.force_authenticate(self.owner)
+        response = self.client.get("/api/v1/dashboard/b2b/requires-attention?limit=2")
+        self.assertEqual(response.data["total"], 3)
+        self.assertEqual(len(response.data["items"]), 2)
+
+    def test_new_endpoints_require_full_team_access(self):
+        member = self._make_team_member([CompanyTeamPermissions.ADD_CANDIDATES])
+        self.client.force_authenticate(member)
+        for url in (
+            "/api/v1/dashboard/b2b/dashboard-layout",
+            "/api/v1/dashboard/b2b/readiness-distribution",
+            "/api/v1/dashboard/b2b/requires-attention",
+        ):
+            self.assertEqual(self.client.get(url).status_code, 403, url)

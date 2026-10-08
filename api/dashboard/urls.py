@@ -21,6 +21,9 @@ urlpatterns = [
     path('b2b/candidate-comparison/pdf', views_b2b.B2BComparisonPdfView.as_view(), name='b2b-comparison-pdf'),
     path('b2b/job-role-distribution', views_b2b.B2BJobRoleDistributionView.as_view(), name='b2b-job-role-distribution'),
     path('b2b/evaluation-time-range', views_b2b.B2BEvaluationTimeRangeView.as_view(), name='b2b-evaluation-time-range'),
+    path('b2b/dashboard-layout', views_b2b.B2BDashboardLayoutView.as_view(), name='b2b-dashboard-layout'),
+    path('b2b/readiness-distribution', views_b2b.B2BReadinessDistributionView.as_view(), name='b2b-readiness-distribution'),
+    path('b2b/requires-attention', views_b2b.B2BRequiresAttentionView.as_view(), name='b2b-requires-attention'),
 
     path('b2c/stats', views_b2c.B2CDashboardStatsView.as_view(), name='b2c-stats'),
     path('b2c/candidates/recent', views_b2c.B2CRecentCandidatesView.as_view(), name='b2c-recent-candidates'),

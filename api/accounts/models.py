@@ -342,6 +342,14 @@ class Company(TimeStampedModel):
                    "to Candidate.job_role or the interview role_code taxonomy.",
     )
 
+    dashboard_layout = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Company-wide B2B overview dashboard customization: "
+                  "{'widgets': [ordered visible widget ids]}. Empty means the "
+                  "default layout (see api/dashboard/dashboard_layout.py).",
+    )
+
     class Meta:
         verbose_name = "Company"
         verbose_name_plural = "Companies"

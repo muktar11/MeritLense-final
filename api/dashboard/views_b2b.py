@@ -1,18 +1,19 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Count, Avg, Q, Max
-from django.db.models.functions import TruncDate, TruncMonth
+from django.db.models import Avg, BooleanField, Count, Exists, ExpressionWrapper, Max, OuterRef, Q
+from django.db.models.functions import Coalesce, TruncDate, TruncMonth
 from django.utils import timezone
 from datetime import timedelta
 
-from api.core.constants import CandidateJobRoles, EvaluationStatus, Languages, Roles
+from api.core.constants import CandidateJobRoles, EvaluationStatus, Languages, ReadinessStatus, Roles
 from api.candidates.models import Candidate
 from api.core.permisssions import IsB2BTeamMember, IsB2BUser, RequireFullTeamAccess
 from api.evaluations.models import Evaluation
 from api.accounts.models import User
 from api.payments.entitlement_services import EntitlementService
 from api.payments.models import PackageBalance
+from api.reports.models import EvaluationReport
 from .comparison_services import (
     build_candidate_comparison_entry,
     build_full_comparison,
@@ -21,6 +22,7 @@ from .comparison_services import (
     get_eligible_candidates,
 )
 from .comparison_pdf_services import render_comparison_pdf
+from .dashboard_layout import DEFAULT_WIDGETS, WIDGET_IDS, resolve_layout, validate_widgets
 from .serializers import (
     DashboardStatsSerializer, RecentCandidateSerializer, RecentEvaluationSerializer,
     ScoreDistributionSerializer, EvaluationTrendSerializer, LanguageDistributionSerializer,
@@ -648,3 +650,156 @@ class B2BComparisonPdfView(APIView):
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
         response['Content-Disposition'] = 'attachment; filename="candidate-comparison.pdf"'
         return response
+
+
+class B2BDashboardLayoutView(APIView):
+    """Company-level overview dashboard customization (which widgets are
+    visible, in what order). Every company user reads the same layout;
+    only the company's B2B admin can change it, so one team member's
+    preferences can't silently rearrange everyone else's dashboard."""
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
+
+    def _payload(self, request, company):
+        return {
+            **resolve_layout(company),
+            'available_widgets': list(WIDGET_IDS),
+            'default_widgets': list(DEFAULT_WIDGETS),
+            'can_edit': request.user.role == Roles.B2B,
+        }
+
+    def get(self, request):
+        company = _resolve_b2b_company(request.user)
+        if not company:
+            return Response({'error': 'Company not found'}, status=400)
+        return Response(self._payload(request, company))
+
+    def put(self, request):
+        company = _resolve_b2b_company(request.user)
+        if not company:
+            return Response({'error': 'Company not found'}, status=400)
+        if request.user.role != Roles.B2B:
+            return Response({'error': 'Only the company administrator can customize the dashboard.'}, status=403)
+
+        if request.data.get('reset'):
+            company.dashboard_layout = {}
+        else:
+            try:
+                widgets = validate_widgets(request.data.get('widgets'))
+            except ValueError as exc:
+                return Response({'error': str(exc)}, status=400)
+            company.dashboard_layout = {'widgets': widgets}
+        company.save(update_fields=['dashboard_layout', 'updated_at'])
+        return Response(self._payload(request, company))
+
+
+def _completed_with_current_readiness(company):
+    """Completed evaluations that carry a readiness result, annotated with
+    the readiness as it stands today - an EvaluationReadinessCorrection
+    supersedes the original decision (see
+    ReadinessRecordService.current_readiness_status), done in SQL here so
+    the dashboard doesn't run a query per evaluation."""
+    return Evaluation.objects.filter(
+        company=company,
+        status=EvaluationStatus.COMPLETED,
+        readiness_indicator_enabled=True,
+    ).annotate(
+        current_readiness=Coalesce(
+            'readiness_correction__corrected_readiness_status', 'readiness_status'
+        ),
+    )
+
+
+class B2BReadinessDistributionView(APIView):
+    """Overall Readiness Index: completed evaluations by their actual
+    readiness outcome (not by evaluation status)."""
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
+
+    def get(self, request):
+        company = _resolve_b2b_company(request.user)
+        if not company:
+            return Response({'error': 'Company not found'}, status=400)
+
+        counts = dict(
+            _completed_with_current_readiness(company)
+            .values('current_readiness')
+            .annotate(n=Count('id'))
+            .values_list('current_readiness', 'n')
+        )
+        total = sum(counts.values())
+        distribution = [
+            {
+                'status': status,
+                'status_display': display,
+                'count': counts.get(status, 0),
+                'percentage': round(counts.get(status, 0) / total * 100, 2) if total else 0,
+            }
+            for status, display in ReadinessStatus.CHOICES
+        ]
+        decided = sum(
+            counts.get(s, 0)
+            for s in (ReadinessStatus.READY, ReadinessStatus.PARTIALLY_READY, ReadinessStatus.NOT_READY)
+        )
+        ready_rate = round(counts.get(ReadinessStatus.READY, 0) / decided * 100, 2) if decided else None
+        return Response({'total': total, 'ready_rate': ready_rate, 'distribution': distribution})
+
+
+class B2BRequiresAttentionView(APIView):
+    """Decision-oriented queue: completed evaluations an employer should
+    look at next - the scoring engine flagged them for human review (and
+    no readiness correction has been recorded since), or there wasn't
+    enough evidence to reach any readiness decision."""
+    permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
+
+    REASON_HUMAN_REVIEW = 'HUMAN_REVIEW'
+    REASON_INSUFFICIENT_EVIDENCE = 'INSUFFICIENT_EVIDENCE'
+
+    def get(self, request):
+        company = _resolve_b2b_company(request.user)
+        if not company:
+            return Response({'error': 'Company not found'}, status=400)
+        try:
+            limit = max(1, min(int(request.query_params.get('limit', 5)), 50))
+        except ValueError:
+            limit = 5
+
+        flagged_report = EvaluationReport.objects.filter(
+            evaluation=OuterRef('pk'),
+            report_status=EvaluationReport.STATUS_ACTIVE,
+            requires_human_review=True,
+        )
+        needs_review = Q(Exists(flagged_report)) & Q(readiness_correction__isnull=True)
+        insufficient = Q(current_readiness=ReadinessStatus.INCOMPLETE)
+        queryset = (
+            _completed_with_current_readiness(company)
+            .filter(needs_review | insufficient)
+            .annotate(
+                needs_review=ExpressionWrapper(needs_review, output_field=BooleanField()),
+                activity_at=Coalesce('last_evaluation_date', 'updated_at'),
+            )
+        )
+        counts = queryset.aggregate(
+            total=Count('id'),
+            human_review=Count('id', filter=needs_review),
+            insufficient_evidence=Count('id', filter=insufficient),
+        )
+
+        role_dict = dict(CandidateJobRoles.CHOICES)
+        items = []
+        for evaluation in queryset.select_related('candidate').order_by('-activity_at')[:limit]:
+            reasons = []
+            if evaluation.needs_review:
+                reasons.append(self.REASON_HUMAN_REVIEW)
+            if evaluation.current_readiness == ReadinessStatus.INCOMPLETE:
+                reasons.append(self.REASON_INSUFFICIENT_EVIDENCE)
+            name = f"{evaluation.candidate_first_name} {evaluation.candidate_last_name}".strip()
+            items.append({
+                'evaluation_id': str(evaluation.public_id),
+                'candidate_name': name or (evaluation.candidate.get_full_name() if evaluation.candidate else ''),
+                'job_role': evaluation.candidate_job_role,
+                'job_role_display': role_dict.get(evaluation.candidate_job_role, evaluation.candidate_job_role),
+                'readiness_status': evaluation.current_readiness,
+                'score': float(evaluation.score) if evaluation.score is not None else None,
+                'reasons': reasons,
+                'activity_at': evaluation.activity_at,
+            })
+        return Response({**counts, 'items': items})

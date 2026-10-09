@@ -7,6 +7,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from api.accounts.serializers import CustomTokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
 from api.core.views import health_check
+from api.payments.views import payment_short_link_redirect
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
@@ -32,6 +33,7 @@ api_v1_patterns = [
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('p/<str:code>', payment_short_link_redirect, name='payment-short-link'),
     path('api/v1/', include(api_v1_patterns)),
 ]
 

@@ -1059,3 +1059,27 @@ class ProcessedStripeEvent(TimeStampedModel):
 
     def __str__(self):
         return f"{self.event_type} ({self.stripe_event_id})"
+
+class PaymentShortLink(TimeStampedModel):
+    """A short, stable link (https://api.meritlense.com/p/<code>) that
+    redirects to a long payment or invoice URL - emails show a "Pay now"
+    button and this short link instead of the full Stripe URL. Only server
+    code creates these, and only for allow-listed hosts (see
+    api/payments/short_links.py), so the redirect is never open to
+    arbitrary targets."""
+
+    code = models.CharField(max_length=16, unique=True)
+    target_url = models.URLField(max_length=2000)
+    purpose = models.CharField(max_length=40, blank=True)
+    click_count = models.PositiveIntegerField(default=0)
+    last_clicked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Payment Short Link"
+        verbose_name_plural = "Payment Short Links"
+        indexes = [
+            models.Index(fields=['target_url']),
+        ]
+
+    def __str__(self):
+        return f"{self.code} -> {self.target_url}"

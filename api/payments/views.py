@@ -12,7 +12,7 @@ from django.db.models import Q
 from django.utils import timezone
 import stripe
 from api.accounts.models import User
-from api.core.constants import Roles, SubscriptionStatus
+from api.core.constants import InvoiceStatus, Roles, SubscriptionStatus
 from api.core.permisssions import IsAdminOrSuperAdmin, IsSuperAdmin, IsB2BUser, IsB2BTeamMember, RequireSetPayment, get_user_company
 from api.payments.subscription_serializers import CancelSubscriptionSerializer, ChangePlanSerializer, SubscriptionListSerializer, UpdateQuantitySerializer
 from meritlense import settings
@@ -1775,26 +1775,48 @@ class AdminInvoiceViewSet(InvoicePdfDownloadMixin, PublicIdLookupMixin, viewsets
             )
 
         from api.accounts.utils import safe_send_mail
+        from .short_links import email_button_html, short_url
 
         reference = invoice.number or invoice.stripe_invoice_id
         attachments = invoice_pdf_email_attachments(invoice)
+        is_payable = invoice.status in (InvoiceStatus.OPEN, InvoiceStatus.DRAFT) and bool(invoice.hosted_invoice_url)
+        # A local PDF's .url is a server-relative path an email client can't
+        # open - the PDF is attached instead, so only absolute links are shown.
+        link = invoice.hosted_invoice_url if is_payable else pdf_link
+        link = short_url(link, purpose="invoice_payment" if is_payable else "invoice_view") if link.startswith("http") else ""
+        button_label = "Pay now" if is_payable else "View invoice"
+        link_line = f"{'Pay online' if is_payable else 'View invoice'}: {link}\n" if link else ""
         subject = f"Your MeritLense invoice {reference}"
-        message = f"""
-        Hello {invoice.user.get_full_name()},
+        message = f"""Hello {invoice.user.get_full_name()},
 
-        Your invoice from MeritLense is ready. A PDF copy is attached.
-        {pdf_link}
+Your invoice from MeritLense is ready.{" A PDF copy is attached." if attachments else ""}
 
-        Amount due: {invoice.amount_due} {invoice.currency.upper()}
-        Status: {invoice.get_status_display()}
+Amount due: {invoice.amount_due} {invoice.currency.upper()}
+Status: {invoice.get_status_display()}
+{link_line}
+If you have any questions about this invoice, reply to this email
+or contact us at info@meritlense.com.
 
-        If you have any questions about this invoice, reply to this email
-        or contact us at info@meritlense.com.
-
-        Best regards,
-        MeritLense Team
-        """
-        safe_send_mail(subject, message, [invoice.user.email], attachments=attachments)
+Best regards,
+MeritLense Team
+"""
+        html_message = email_button_html(
+            greeting=f"Hello {invoice.user.get_full_name()},",
+            paragraphs=[
+                f"Your invoice {reference} from MeritLense is ready." + (" A PDF copy is attached." if attachments else ""),
+                f"Amount due: {invoice.amount_due} {invoice.currency.upper()} · Status: {invoice.get_status_display()}",
+            ],
+            button_label=button_label,
+            button_url=link,
+            icon="💳" if is_payable else "📄",
+            footer_lines=[
+                "If you have any questions about this invoice, reply to this email or contact us at info@meritlense.com.",
+                "",
+                "Best regards,",
+                "MeritLense Team",
+            ],
+        ) if link else None
+        safe_send_mail(subject, message, [invoice.user.email], attachments=attachments, html_message=html_message)
 
         AuditLogService.log(
             user=request.user,
@@ -2226,3 +2248,19 @@ def spend_points(request):
         'addon_code': addon_code,
         'remaining_points': balance.current_balance if balance else None,
     })
+
+
+def payment_short_link_redirect(request, code):
+    """GET /p/<code> - the short link shown in payment and invoice emails.
+    Redirects to the stored payment/invoice URL (see short_links.py)."""
+    from django.db.models import F
+    from django.http import Http404, HttpResponseRedirect
+    from django.utils import timezone
+
+    from .models import PaymentShortLink
+
+    link = PaymentShortLink.objects.filter(code=code).first()
+    if link is None:
+        raise Http404("Link not found")
+    PaymentShortLink.objects.filter(pk=link.pk).update(click_count=F("click_count") + 1, last_clicked_at=timezone.now())
+    return HttpResponseRedirect(link.target_url)

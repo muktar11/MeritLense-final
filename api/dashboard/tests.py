@@ -471,6 +471,39 @@ class CandidateComparisonFullFlowApiTests(TestCase):
 
     # -- get_comparable_roles / get_eligible_candidates --------------------
 
+    def test_full_assessment_candidates_stay_comparable_when_a_screening_rule_set_exists(self):
+        """The approved question bank creates a role's Full rule set and
+        then its Screening rule set. Comparison used to treat only the
+        newest one per role (Screening) as current, so every Full
+        Assessment candidate was silently excluded."""
+        from api.dashboard.comparison_services import (
+            build_full_comparison, get_comparable_roles, get_eligible_candidates,
+        )
+
+        user = User.objects.create_user(
+            email="tiers-b2c@example.com", password="testpass123",
+            first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        full_rules = self._make_rule_set(created_by=user, company=None, role_code="driver")
+        screening_rules = ScoringRuleSet.objects.create(
+            name="Driver Screening", version="v1", role_code="driver", role_name="Driver",
+            evaluation_tier=InterviewEvaluationTier.SCREENING, is_active=True, created_by=user,
+        )
+        a, _ = self._make_scored_candidate(created_by=user, company=None, suffix="tier-a", role_code="driver",
+                                           dimension_percentages={"SAFETY": 80}, rule_set=full_rules)
+        b, _ = self._make_scored_candidate(created_by=user, company=None, suffix="tier-b", role_code="driver",
+                                           dimension_percentages={"SAFETY": 60}, rule_set=full_rules)
+        c, _ = self._make_scored_candidate(created_by=user, company=None, suffix="tier-c", role_code="driver",
+                                           dimension_percentages={"SAFETY": 70}, rule_set=screening_rules)
+
+        self.assertEqual(get_comparable_roles(owner_type="USER", owner=user)[0]["candidate_count"], 3)
+        eligible = {row["candidate_id"] for row in get_eligible_candidates(owner_type="USER", owner=user, role_code="driver")}
+        self.assertEqual(eligible, {str(a.public_id), str(b.public_id), str(c.public_id)})
+
+        entries = build_full_comparison(owner_type="USER", owner=user, role_code="driver",
+                                        candidate_ids=[str(a.public_id), str(b.public_id)], language="en", actor=user)
+        self.assertEqual([e["evaluation_tier"] for e in entries], ["FULL", "FULL"])
+
     def test_get_comparable_roles_groups_by_role_and_counts_distinct_candidates(self):
         user = User.objects.create_user(
             email="roles-b2c@example.com", password="testpass123",

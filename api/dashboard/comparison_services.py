@@ -32,31 +32,62 @@ def _scored_summaries_for_owner(owner_type, owner):
     )
 
 
-def _current_rule_set_id(owner_type, owner, role_code):
-    """The id of the ScoringRuleSet a brand-new evaluation under this role
-    would be scored against today - mirrors ScoringService._resolve_rule_set's
-    own "most recently created, is_active" selection (company-specific rule
-    set first, falling back to a non-company one). This is what Candidate
-    Comparison treats as "this role's current, compatible assessment
-    version" (spec item 2): nothing in the data model automatically retires
-    an older ScoringRuleSet once a newer one is added for the same role, so
-    without this check two candidates scored months apart under genuinely
-    different rules (different competency weighting, maybe a different
-    dimension set) would silently end up side by side in one table."""
+def _current_rule_set_ids(owner_type, owner, role_code):
+    """The ScoringRuleSets a brand-new evaluation under this role would be
+    scored against today - one per assessment type (Full and Screening each
+    have their own rule set for a role). Mirrors ScoringService's own
+    "most recently created, is_active" selection (company-specific rule set
+    first, falling back to a non-company one), per evaluation_tier.
+
+    This is what Candidate Comparison treats as "this role's current,
+    compatible assessment version" (spec item 2): nothing in the data model
+    automatically retires an older ScoringRuleSet once a newer one is added
+    for the same role, so without this check two candidates scored months
+    apart under genuinely different rules would silently end up side by
+    side in one table.
+
+    Previously this picked a single newest rule set per role, ignoring the
+    tier. The approved bank creates the Full rule set and then the
+    Screening one, so Screening always won and every Full Assessment
+    candidate was excluded from comparison."""
     from api.evaluations.models import ScoringRuleSet
 
     company = owner if owner_type == "COMPANY" else None
-    queryset = ScoringRuleSet.objects.filter(role_code=role_code, is_active=True).order_by("-created_at")
-    rule_set = None
-    if company is not None:
-        rule_set = queryset.filter(company=company).first()
-    if rule_set is None:
-        rule_set = queryset.first()
-    return rule_set.id if rule_set else None
+    active = ScoringRuleSet.objects.filter(role_code=role_code, is_active=True).order_by("-created_at")
+    current = set()
+    for tier in active.values_list("evaluation_tier", flat=True).distinct():
+        tier_sets = active.filter(evaluation_tier=tier)
+        rule_set = tier_sets.filter(company=company).first() if company is not None else None
+        if rule_set is None:
+            rule_set = tier_sets.filter(company__isnull=True).first() or tier_sets.first()
+        if rule_set is not None:
+            current.add(rule_set.id)
+    return current
 
 
 def _current_rule_set_ids_by_role(owner_type, owner, role_codes):
-    return {role_code: _current_rule_set_id(owner_type, owner, role_code) for role_code in role_codes}
+    return {role_code: _current_rule_set_ids(owner_type, owner, role_code) for role_code in role_codes}
+
+
+def _latest_current_summary(summaries):
+    """A candidate's comparison result: their most complete current
+    assessment - the latest Full Assessment if they have one, otherwise
+    their latest Screening."""
+    from django.db.models import Case, IntegerField, Value, When
+
+    from api.core.constants import InterviewEvaluationTier
+
+    return (
+        summaries.annotate(
+            tier_rank=Case(
+                When(rule_set__evaluation_tier=InterviewEvaluationTier.FULL, then=Value(0)),
+                default=Value(1),
+                output_field=IntegerField(),
+            )
+        )
+        .order_by("tier_rank", "-created_at")
+        .first()
+    )
 
 
 def get_comparable_roles(*, owner_type, owner):
@@ -76,7 +107,7 @@ def get_comparable_roles(*, owner_type, owner):
     by_role = {}
     for row in rows:
         role_code = row["session__role_code"]
-        if row["rule_set_id"] != current_rule_set_by_role.get(role_code):
+        if row["rule_set_id"] not in current_rule_set_by_role.get(role_code, set()):
             continue
         by_role.setdefault(role_code, set()).add(row["candidate_id"])
     return [
@@ -89,15 +120,15 @@ def get_eligible_candidates(*, owner_type, owner, role_code):
     """Step 2 of Candidate Comparison: candidates with a scored evaluation
     under this exact role_code, scored under that role's CURRENT
     ScoringRuleSet - the only ones eligible to be selected for comparison
-    once a role is chosen (see _current_rule_set_id for why this matters:
+    once a role is chosen (see _current_rule_set_ids for why this matters:
     a candidate's only matching evaluation might have used a since-
     superseded, incompatible version of the rules). A candidate
     re-assessed since the rules changed is still eligible, via their newer,
     current-version attempt - only the stale attempt itself is excluded."""
-    current_rule_set_id = _current_rule_set_id(owner_type, owner, role_code)
+    current_rule_set_ids = _current_rule_set_ids(owner_type, owner, role_code)
     summaries = (
         _scored_summaries_for_owner(owner_type, owner)
-        .filter(session__role_code=role_code, rule_set_id=current_rule_set_id)
+        .filter(session__role_code=role_code, rule_set_id__in=current_rule_set_ids)
         .order_by("-created_at")
     )
     seen = {}
@@ -211,7 +242,7 @@ def build_full_comparison(*, owner_type, owner, role_code, candidate_ids, langua
     output, so it's the last line of defense against ever placing two
     candidates scored under incompatible rule versions in one table,
     even if eligibility shifted between selection and this call."""
-    current_rule_set_id = _current_rule_set_id(owner_type, owner, role_code)
+    current_rule_set_ids = _current_rule_set_ids(owner_type, owner, role_code)
     candidates = _candidate_queryset_for_owner(owner_type, owner).filter(public_id__in=candidate_ids)
     by_id = {str(c.public_id): c for c in candidates}
 
@@ -220,11 +251,9 @@ def build_full_comparison(*, owner_type, owner, role_code, candidate_ids, langua
         candidate = by_id.get(candidate_id)
         if candidate is None:
             continue
-        summary = (
+        summary = _latest_current_summary(
             _scored_summaries_for_owner(owner_type, owner)
-            .filter(candidate=candidate, session__role_code=role_code, rule_set_id=current_rule_set_id)
-            .order_by("-created_at")
-            .first()
+            .filter(candidate=candidate, session__role_code=role_code, rule_set_id__in=current_rule_set_ids)
         )
         if summary is None:
             continue
@@ -241,6 +270,7 @@ def build_full_comparison(*, owner_type, owner, role_code, candidate_ids, langua
             "candidate_id": str(candidate.public_id),
             "candidate_name": candidate.get_full_name(),
             "evaluation_id": str(summary.evaluation.public_id),
+            "evaluation_tier": summary.rule_set.evaluation_tier if summary.rule_set_id else "",
             "readiness_status": report.readiness_status,
             "readiness_display": _readiness_display(report.readiness_status, language),
             "assessment_coverage": coverage_pct,

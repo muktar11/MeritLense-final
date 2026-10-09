@@ -235,7 +235,31 @@ class Evaluation(TimeStampedModel, SoftDeleteModel):
         blank=True,
         help_text="Reason for cancellation"
     )
-    
+
+    # Human-review release safeguard. While REQUIRED, the result, report and
+    # certificate are withheld from the employer; only an admin reviewer's
+    # recorded decision (HumanReviewService.approve) releases them.
+    REVIEW_NOT_REQUIRED = "NOT_REQUIRED"
+    REVIEW_REQUIRED = "REQUIRED"
+    REVIEW_APPROVED = "APPROVED"
+    REVIEW_STATUS_CHOICES = [
+        (REVIEW_NOT_REQUIRED, "Not required"),
+        (REVIEW_REQUIRED, "Awaiting human review"),
+        (REVIEW_APPROVED, "Reviewed and released"),
+    ]
+    review_status = models.CharField(max_length=20, choices=REVIEW_STATUS_CHOICES, default=REVIEW_NOT_REQUIRED,
+                                     db_index=True)
+    review_reasons = models.JSONField(default=list, blank=True)
+    reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name="reviewed_evaluations")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_decision = models.CharField(max_length=20, blank=True, help_text="Readiness decided by the reviewer.")
+    review_notes = models.TextField(blank=True)
+
+    @property
+    def is_held_for_review(self):
+        return self.review_status == self.REVIEW_REQUIRED
+
     class Meta:
         verbose_name = "Evaluation"
         verbose_name_plural = "Evaluations"

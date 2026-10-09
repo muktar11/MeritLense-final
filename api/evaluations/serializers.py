@@ -54,7 +54,37 @@ class CandidateScoreSummarySerializer(serializers.Serializer):
     report = CandidateReportSummarySerializer(allow_null=True)
 
 
-class EvaluationSerializer(PublicIdModelSerializer):
+
+MASKED_WHILE_HELD = {
+    "score": None,
+    "readiness_status": "PENDING",
+    "readiness_override_applied": False,
+    "readiness_override_reason": "",
+    "latest_session_summary": None,
+    "readiness_legal_record": None,
+    "latest_report": None,
+}
+
+
+class ReviewHoldMaskMixin:
+    """Release safeguard: while an evaluation awaits human review, its
+    score, readiness and report links are withheld from the employer.
+    Admin reviewers see everything."""
+
+    def to_representation(self, instance):
+        from api.evaluations.human_review_services import is_hidden_from
+
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        if is_hidden_from(instance, getattr(request, "user", None)):
+            for field, value in MASKED_WHILE_HELD.items():
+                if field in data:
+                    data[field] = value
+        data["review_status"] = instance.review_status
+        return data
+
+
+class EvaluationSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):
     candidate_details = CandidateSerializer(source='candidate', read_only=True)
     evaluation_type_display = serializers.CharField(source='get_evaluation_type_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
@@ -350,7 +380,7 @@ class EvaluatorRatingWriteSerializer(serializers.Serializer):
     task_execution = serializers.IntegerField(min_value=0, max_value=100)
 
 
-class EvaluationListSerializer(PublicIdModelSerializer):
+class EvaluationListSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):
     candidate_name = serializers.SerializerMethodField()
     evaluation_type_display = serializers.CharField(source='get_evaluation_type_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)

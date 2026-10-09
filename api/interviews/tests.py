@@ -1973,7 +1973,7 @@ class InterviewSessionApiTests(APITestCase):
         self.assertIn("Basic", response.data["detail"])
         self.assertFalse(InterviewSession.objects.filter(candidate=self.candidate).exists())
 
-    def test_b2c_screening_package_still_grants_certificate_and_readiness(self):
+    def test_b2c_screening_package_grants_readiness_but_never_a_certificate(self):
         # A B2C package (Basic/Essential) is configured with
         # certificate_enabled=False and readiness_indicator_enabled=False at
         # both the package and role-coverage level - the pre-change data
@@ -2029,7 +2029,10 @@ class InterviewSessionApiTests(APITestCase):
         session = InterviewSession.objects.get(public_id=response.data["id"])
         self.assertEqual(session.evaluation_tier, InterviewEvaluationTier.SCREENING)
         self.assertTrue(session.readiness_indicator_enabled)
-        self.assertTrue(session.certificate_enabled)
+        # Decision of 9 Oct 2026: Screening never issues a certificate,
+        # whatever the account type or package (supersedes the earlier
+        # B2C-only certificate grant).
+        self.assertFalse(session.certificate_enabled)
 
     def test_b2b_screening_package_still_withholds_certificate_and_readiness(self):
         # Control for the B2C override above: a B2B package on Screening
@@ -2342,7 +2345,8 @@ class InterviewSessionApiTests(APITestCase):
         # in certificate_eligibility(), which this minimal scored session
         # doesn't clear.
         self.assertTrue(evaluation.readiness_indicator_enabled)
-        self.assertTrue(evaluation.certificate_enabled)
+        # Decision of 9 Oct 2026: never a certificate for Screening.
+        self.assertFalse(evaluation.certificate_enabled)
         self.assertEqual(evaluation.certificate_status, "NOT_ISSUED")
 
     def test_current_question_endpoint_returns_active_question(self):

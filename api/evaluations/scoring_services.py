@@ -95,6 +95,11 @@ class Week6ScoringService:
             competency_results=competency_results,
         )
         cls._apply_evaluation_rollups(evaluation=evaluation, summary=summary, actor=actor)
+        # Release safeguard: anything that needs a person's judgement is held
+        # from the employer until a reviewer records a decision.
+        from .human_review_services import HumanReviewService
+
+        HumanReviewService.flag_after_scoring(evaluation, summary)
         cls._log_scoring_events(
             actor=actor,
             evaluation=evaluation,

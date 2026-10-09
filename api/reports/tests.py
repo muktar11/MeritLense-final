@@ -48,6 +48,15 @@ from api.reports.services import EvaluationReportService
 
 
 class EvaluationReportApiTests(TestCase):
+    def _release_human_review(self):
+        """Stands in for an admin reviewer approving the held result (see
+        HumanReviewService.approve) without regenerating the report, so the
+        report-level assertions below still refer to the same report."""
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.review_status, "REQUIRED")
+        self.evaluation.review_status = "APPROVED"
+        self.evaluation.save(update_fields=["review_status"])
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -392,6 +401,13 @@ class EvaluationReportApiTests(TestCase):
         self.assertTrue(report.employer_pdf.name.endswith(".pdf"))
         self.assertTrue(report.pdf_hash)
 
+        # This fixture's interpretation is low-confidence, so the report needs
+        # human review: it is withheld from the employer until released.
+        held = self.client.get(f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/report")
+        self.assertEqual(held.status_code, 403)
+        self.assertEqual(held.data["code"], "awaiting_human_review")
+        self._release_human_review()
+
         latest_report = self.client.get(f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/report")
         self.assertEqual(latest_report.status_code, 200)
         self.assertEqual(latest_report.data["id"], str(report.public_id))
@@ -456,6 +472,7 @@ class EvaluationReportApiTests(TestCase):
             {},
             format="json",
         )
+        self._release_human_review()
         report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status=EvaluationReport.STATUS_ACTIVE)
 
         response = self.client.get("/api/v1/evaluations/candidate-scores")
@@ -479,6 +496,7 @@ class EvaluationReportApiTests(TestCase):
             {},
             format="json",
         )
+        self._release_human_review()
         report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status=EvaluationReport.STATUS_ACTIVE)
         self.assertTrue(report.employer_pdf.storage.exists(report.employer_pdf.name))
 
@@ -498,6 +516,7 @@ class EvaluationReportApiTests(TestCase):
             {},
             format="json",
         )
+        self._release_human_review()
         report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status=EvaluationReport.STATUS_ACTIVE)
 
         response = self.client.get(f"/api/v1/evaluations/reports/{report.public_id}/documents-bundle")
@@ -892,6 +911,7 @@ class EvaluationReportApiTests(TestCase):
             {},
             format="json",
         )
+        self._release_human_review()
         first_report_id = first.data["id"]
         first_report = EvaluationReport.objects.get(public_id=first_report_id)
 
@@ -911,6 +931,7 @@ class EvaluationReportApiTests(TestCase):
             {},
             format="json",
         )
+        self._release_human_review()
         first_report = EvaluationReport.objects.get(public_id=first.data["id"])
 
         before = self.client.get(f"/api/v1/evaluations/reports/verify/{first_report.report_number}")

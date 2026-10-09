@@ -24,6 +24,9 @@ RULE_SET_VERSION = "governance-v1.2-corrected"
 LANGUAGES = ("EN", "AR")
 
 
+ARABIC_SEMICOLON = "؛"  # ؛
+
+
 def _split_points(text):
     if not text:
         return []
@@ -33,8 +36,14 @@ def _split_points(text):
     # to comma splitting only when no semicolon is present, rather than
     # always splitting on both, which would wrongly fragment a
     # semicolon-delimited phrase that also happens to contain a comma.
-    delimiter = ";" if ";" in text else ","
-    return [p.strip() for p in text.split(delimiter) if p.strip()]
+    # Every Arabic Must Include uses the Arabic semicolon, which must count
+    # as a semicolon too - otherwise each Arabic blueprint imports as one
+    # single step containing the whole paragraph.
+    if ";" in text or ARABIC_SEMICOLON in text:
+        parts = re.split(f"[;{ARABIC_SEMICOLON}]", text)
+    else:
+        parts = text.split(",")
+    return [p.strip() for p in parts if p.strip()]
 
 
 def _scoring_shape(score_note):

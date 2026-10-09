@@ -31,6 +31,9 @@ class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet
         )
         if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
             return queryset
+        # Release safeguard: reports awaiting human review are not available
+        # to employers until a reviewer approves them.
+        queryset = queryset.exclude(evaluation__review_status="REQUIRED")
         if user.role == Roles.B2C:
             return queryset.filter(evaluation__created_by=user)
         if user.role == Roles.B2B:

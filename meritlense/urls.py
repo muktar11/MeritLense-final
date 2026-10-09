@@ -34,6 +34,7 @@ api_v1_patterns = [
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('p/<str:code>', payment_short_link_redirect, name='payment-short-link'),
+    path('s/<str:code>', payment_short_link_redirect, name='interview-short-link'),
     path('api/v1/', include(api_v1_patterns)),
 ]
 

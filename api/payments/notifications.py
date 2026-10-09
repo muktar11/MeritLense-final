@@ -1,7 +1,8 @@
-from django.core.mail import send_mail
 from django.conf import settings
 
-# Mirrors api/evaluations/utils.py's email pattern (plain send_mail, no
+from api.core.emails import Email, send_email
+
+# Mirrors api/evaluations/utils.py's email pattern (branded api.core.emails, sent directly, no
 # queue/async - this codebase has no Celery or other background-job
 # infrastructure) for the two "material events" the Slot Reservation
 # Lifecycle spec calls out (Section 3, #3): a scheduling attempt that
@@ -33,26 +34,24 @@ def send_reservation_failed_email(*, candidate, created_by, company, role_name, 
     fix it (buy more Slots) and may not otherwise ever hear that someone
     on their team hit this wall."""
     recipients = _recipients(created_by=created_by, company=company)
-    subject = f"Interview scheduling blocked: no Assessment Slots available"
-
     for email, name in recipients.items():
-        message = f"""
-Hello {name},
+        send_email(Email(
+            subject="Interview scheduling blocked: no Assessment Slots available",
+            eyebrow="Action needed", title="Add Assessment Slots to keep scheduling",
+            greeting=f"Hello {name},",
+            intro=["An interview couldn't be scheduled because your account has no Assessment Slots available. "
+                   "No interview was created and nothing was charged."],
+            details=[("Candidate", candidate.get_full_name()), ("Role", role_name),
+                     ("Attempted by", f"{created_by.get_full_name()} ({created_by.email})"), ("Reason", reason)],
+            button=("Add Assessment Slots", _packages_url()) if _packages_url() else None,
+            after_button=["Add Slots from the Packages & Subscription page, then schedule the interview again."],
+            notes=["We'll only send this once. You won't get another reminder for repeated attempts."],
+            tone="warning",
+        ), [email])
 
-An attempt to schedule an interview on MeritLense could not be completed:
 
-- Candidate: {candidate.get_full_name()}
-- Role: {role_name}
-- Attempted by: {created_by.get_full_name()} ({created_by.email})
-- Reason: {reason}
-
-No interview was scheduled and no Slot was used. To resolve this, add more
-Assessment Slots to your account from the Packages & Subscription page.
-
-Best regards,
-MeritLense Team
-"""
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+def _packages_url():
+    return f"{settings.FRONTEND_URL}/en/auth/login" if settings.FRONTEND_URL else ""
 
 
 def _owner_key(*, created_by, company):
@@ -96,26 +95,17 @@ def send_reservation_invalidated_email(*, candidate, created_by, company):
     account/billing owner - not the candidate, who has no visibility into
     the employer's billing and doesn't need to."""
     recipients = _recipients(created_by=created_by, company=company)
-    subject = f"Interview cancelled: underlying purchase was refunded"
-
     for email, name in recipients.items():
-        message = f"""
-Hello {name},
-
-A scheduled interview on MeritLense has been automatically cancelled:
-
-- Candidate: {candidate.get_full_name()}
-
-This happened because the package purchase that reserved its Assessment
-Slot was refunded or reversed, so the reservation could no longer be
-honored. No Slot was charged for this cancelled interview.
-
-If this was unexpected, please contact MeritLense support.
-
-Best regards,
-MeritLense Team
-"""
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+        send_email(Email(
+            subject="Interview cancelled: underlying purchase was refunded",
+            eyebrow="Interview cancelled", title="A scheduled interview was cancelled",
+            greeting=f"Hello {name},",
+            intro=["A scheduled interview was cancelled automatically because the package purchase that reserved "
+                   "its Assessment Slot was refunded or reversed. No Slot was charged for it."],
+            details=[("Candidate", candidate.get_full_name())],
+            notes=["If this was unexpected, contact us at info@meritlense.com."],
+            tone="danger",
+        ), [email])
 
 
 # A grant this small already reads as "nearly out" in absolute terms
@@ -143,23 +133,17 @@ def send_certificate_reused_email(*, candidate, requested_by, company, remaining
     who notices the Slot count and should know why it moved without a new
     interview being scheduled."""
     recipients = _recipients(created_by=requested_by, company=company)
-    subject = "Assessment Slot used: existing certificate reused"
-
     for email, name in recipients.items():
-        message = f"""
-Hello {name},
-
-An existing certificate was reused instead of running a new interview on MeritLense:
-
-- Candidate: {candidate.get_full_name()}
-- Requested by: {requested_by.get_full_name()} ({requested_by.email})
-
-One Assessment Slot has been deducted from your package for this ({remaining} remaining), the same as it would be for a new interview.
-
-Best regards,
-MeritLense Team
-"""
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+        send_email(Email(
+            subject="Assessment Slot used: existing certificate reused",
+            eyebrow="Certificate reused", title="An existing certificate was reused",
+            greeting=f"Hello {name},",
+            intro=["An existing certificate was reused instead of running a new interview. One Assessment Slot "
+                   "was used, the same as for a new interview."],
+            details=[("Candidate", candidate.get_full_name()),
+                     ("Requested by", f"{requested_by.get_full_name()} ({requested_by.email})"),
+                     ("Slots remaining", remaining)],
+        ), [email])
 
 
 def maybe_send_low_balance_warning(*, created_by, company, remaining, limit, role_name=None):
@@ -175,20 +159,14 @@ def maybe_send_low_balance_warning(*, created_by, company, remaining, limit, rol
         return
 
     recipients = _recipients(created_by=created_by, company=company)
-    subject = "Low Assessment Slot balance on your MeritLense account"
-
     for email, name in recipients.items():
-        message = f"""
-Hello {name},
-
-Your MeritLense account is running low on Assessment Slots:
-
-- Available: {remaining} of {limit}
-
-Once Available reaches 0, scheduling new interviews will be blocked until
-more Slots are added. Visit the Packages & Subscription page to top up.
-
-Best regards,
-MeritLense Team
-"""
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+        send_email(Email(
+            subject="Low Assessment Slot balance on your MeritLense account",
+            eyebrow="Balance running low", title=f"Only {remaining} Assessment Slot{'' if remaining == 1 else 's'} left",
+            greeting=f"Hello {name},",
+            intro=["Your account is running low on Assessment Slots. When it reaches 0, new interviews "
+                   "can't be scheduled until more Slots are added."],
+            details=[("Available", f"{remaining} of {limit}")],
+            button=("Top up Slots", _packages_url()) if _packages_url() else None,
+            tone="warning",
+        ), [email])

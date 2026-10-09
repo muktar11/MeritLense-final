@@ -1765,6 +1765,51 @@ class InterviewVoicePipelineService:
         return response
 
     @classmethod
+    def _read_aloud_text(cls, question, language_code):
+        """The text the voice should read, in the read-aloud language.
+
+        A session's questions are in the candidate's language (an Arabic
+        session asks the approved Arabic templates), so:
+        1. If the question is already in the read-aloud language, read it
+           exactly as shown on screen - never machine-translate approved text.
+        2. Otherwise read the approved version of the same question
+           (same question code and question-set version) in that language.
+        3. Only if there is none, machine-translate from the question's own
+           language. If that fails, return the original text; the voice
+           then reads the on-screen wording rather than nothing.
+        """
+        target = language_code.split("-")[0].lower()
+        template = question.question_template
+        source = ((template.language if template else "") or "EN").split("-")[0].lower()
+        if source == target:
+            return question.question_text
+
+        if template and template.question_code:
+            sibling = (
+                QuestionTemplate.objects.filter(
+                    question_code=template.question_code,
+                    question_set_version=template.question_set_version,
+                    language__iexact=target,
+                    is_active=True,
+                )
+                .exclude(question_text="")
+                .order_by("-id")
+                .first()
+            )
+            if sibling is not None:
+                return sibling.question_text
+
+        try:
+            translation = TranslationService.translate(
+                text=question.question_text,
+                source_language=source,
+                target_language=target,
+            )
+            return translation["translated_text"] or question.question_text
+        except AIProcessingError:
+            return question.question_text
+
+    @classmethod
     @transaction.atomic
     def get_or_generate_question_audio(cls, *, session, actor=None, language_code=None):
         question, completed = InterviewSessionService.get_or_activate_current_question(session, actor=actor)
@@ -1794,28 +1839,7 @@ class InterviewVoicePipelineService:
         if existing and existing.audio_file:
             return existing
 
-        # question.question_text is always authored in English - previously
-        # this got sent straight to the TTS provider under whatever
-        # language_code was requested, which doesn't translate anything: the
-        # provider just reads the English words using that language's voice/
-        # phoneme model, producing English content in a foreign accent
-        # rather than actual speech in that language. Translate first for
-        # any non-English target.
-        text_to_speak = question.question_text
-        if not language_code.startswith("en"):
-            try:
-                translation = TranslationService.translate(
-                    text=question.question_text,
-                    source_language="en",
-                    target_language=language_code.split("-")[0],
-                )
-                text_to_speak = translation["translated_text"] or question.question_text
-            except AIProcessingError:
-                # Fall back to the original English text rather than failing
-                # the whole request - reading it in English is still more
-                # useful than no audio at all, and the candidate can read
-                # the on-screen text either way.
-                text_to_speak = question.question_text
+        text_to_speak = cls._read_aloud_text(question, language_code)
 
         try:
             synthesis = tts_service.synthesize(text=text_to_speak, language_code=language_code)

@@ -38,20 +38,19 @@ class OTPService:
 
     def send(self, email, code):
         from api.accounts.utils import safe_send_mail
+        from api.core.emails import Email
 
-        subject = "Your MeritLense signing code"
-        message = f"""
-        Your verification code to sign your MeritLense agreement is: {code}
-
-        This code expires in {settings.AGREEMENT_OTP_VALIDITY_MINUTES} minutes and can only be used once.
-
-        If you didn't request this code, you can safely ignore this email.
-
-        Best regards,
-        MeritLense Team
-        """
+        email_content = Email(
+            subject="Your MeritLense signing code", eyebrow="Agreement signing",
+            title="Your signing code",
+            intro=["Use this code to sign your MeritLense agreement."],
+            code=code, code_label="Signing code",
+            notes=[f"The code expires in {settings.AGREEMENT_OTP_VALIDITY_MINUTES} minutes and can only be used once.",
+                   "If you didn't request this code, you can ignore this email."],
+            preheader=f"Your MeritLense signing code is {code}",
+        )
         try:
-            sent_count = safe_send_mail(subject, message, [email])
+            sent_count = safe_send_mail(None, None, [email], email=email_content)
             return sent_count > 0
         except Exception:
             logger.exception("Failed to send OTP email to %s", email)

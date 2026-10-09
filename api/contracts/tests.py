@@ -319,7 +319,7 @@ class AdminAgreementEndpointTests(APITestCase):
         self.assertEqual(initiate.status_code, 200, initiate.data)
 
         otp_email = next(m for m in mail.outbox if "signing code" in m.subject.lower())
-        code = re.search(r"is:\s*(\d+)", otp_email.body).group(1)
+        code = re.search(r"Signing code:\s*(\d+)", otp_email.body).group(1)
 
         mail.outbox = []
         confirm = self.client.post(

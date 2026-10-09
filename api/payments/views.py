@@ -1775,7 +1775,8 @@ class AdminInvoiceViewSet(InvoicePdfDownloadMixin, PublicIdLookupMixin, viewsets
             )
 
         from api.accounts.utils import safe_send_mail
-        from .short_links import email_button_html, short_url
+        from api.core.emails import Email
+        from .short_links import short_url
 
         reference = invoice.number or invoice.stripe_invoice_id
         attachments = invoice_pdf_email_attachments(invoice)
@@ -1784,39 +1785,17 @@ class AdminInvoiceViewSet(InvoicePdfDownloadMixin, PublicIdLookupMixin, viewsets
         # open - the PDF is attached instead, so only absolute links are shown.
         link = invoice.hosted_invoice_url if is_payable else pdf_link
         link = short_url(link, purpose="invoice_payment" if is_payable else "invoice_view") if link.startswith("http") else ""
-        button_label = "Pay now" if is_payable else "View invoice"
-        link_line = f"{'Pay online' if is_payable else 'View invoice'}: {link}\n" if link else ""
-        subject = f"Your MeritLense invoice {reference}"
-        message = f"""Hello {invoice.user.get_full_name()},
-
-Your invoice from MeritLense is ready.{" A PDF copy is attached." if attachments else ""}
-
-Amount due: {invoice.amount_due} {invoice.currency.upper()}
-Status: {invoice.get_status_display()}
-{link_line}
-If you have any questions about this invoice, reply to this email
-or contact us at info@meritlense.com.
-
-Best regards,
-MeritLense Team
-"""
-        html_message = email_button_html(
-            greeting=f"Hello {invoice.user.get_full_name()},",
-            paragraphs=[
-                f"Your invoice {reference} from MeritLense is ready." + (" A PDF copy is attached." if attachments else ""),
-                f"Amount due: {invoice.amount_due} {invoice.currency.upper()} · Status: {invoice.get_status_display()}",
-            ],
-            button_label=button_label,
-            button_url=link,
-            icon="💳" if is_payable else "📄",
-            footer_lines=[
-                "If you have any questions about this invoice, reply to this email or contact us at info@meritlense.com.",
-                "",
-                "Best regards,",
-                "MeritLense Team",
-            ],
-        ) if link else None
-        safe_send_mail(subject, message, [invoice.user.email], attachments=attachments, html_message=html_message)
+        safe_send_mail(None, None, [invoice.user.email], attachments=attachments, email=Email(
+            subject=f"Your MeritLense invoice {reference}",
+            eyebrow="Payment due" if is_payable else "Invoice",
+            title=f"Invoice {reference}" + (" is ready for payment" if is_payable else ""),
+            greeting=f"Hello {invoice.user.first_name or invoice.user.get_full_name()},",
+            intro=["Your invoice from MeritLense is ready." + (" A PDF copy is attached." if attachments else "")],
+            details=[("Invoice", reference), ("Amount due", f"{invoice.amount_due} {invoice.currency.upper()}"),
+                     ("Status", invoice.get_status_display())],
+            button=(("💳  Pay now" if is_payable else "📄  View invoice"), link) if link else None,
+            notes=["Questions about this invoice? Reply to this email or contact info@meritlense.com."],
+        ))
 
         AuditLogService.log(
             user=request.user,

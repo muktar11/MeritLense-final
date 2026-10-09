@@ -1,42 +1,41 @@
 from django.utils import timezone
 import secrets
 import logging
-from django.core.mail import EmailMultiAlternatives, send_mail
+from django.core.mail import EmailMultiAlternatives
 from django.conf import settings
 from api.core.constants import CompanyTeamPermissions, Roles
 
 logger = logging.getLogger(__name__)
 
 
-def safe_send_mail(subject, message, recipients, attachments=None, html_message=None):
-    """html_message, when given, is sent as the HTML alternative; `message`
-    stays the plain-text version for clients that don't render HTML."""
-    from_email = settings.DEFAULT_FROM_EMAIL or "no-reply@localhost"
+def safe_send_mail(subject, message, recipients, attachments=None, html_message=None, email=None, calendar=None):
+    """Sends a branded email (see api/core/emails.py).
+
+    - email: a structured api.core.emails.Email - its HTML and plain-text
+      versions are both generated from it (subject/message are ignored).
+    - html_message: a ready-made HTML version; `message` is the plain text.
+    - neither: the plain-text `message` is wrapped in the branded layout.
+    - calendar: (ics_text, method) to send a calendar invite.
+    """
+    from api.core.emails import build_message, email_from_plain_text, render_html
 
     if not settings.EMAIL_HOST:
         logger.warning(
             "Email skipped because EMAIL_HOST is not configured. subject=%s recipients=%s",
-            subject,
+            subject if email is None else email.subject,
             recipients,
         )
         return 0
 
     try:
-        if attachments or html_message:
-            email = EmailMultiAlternatives(subject, message, from_email, recipients)
-            if html_message:
-                email.attach_alternative(html_message, "text/html")
-            for attachment in attachments or []:
-                email.attach(*attachment)
-            return email.send(fail_silently=False)
-
-        return send_mail(
-            subject,
-            message,
-            from_email,
-            recipients,
-            fail_silently=False,
-        )
+        if email is not None:
+            return build_message(email, recipients, attachments=attachments, calendar=calendar).send(fail_silently=False)
+        from_email = settings.DEFAULT_FROM_EMAIL or "no-reply@localhost"
+        msg = EmailMultiAlternatives(subject, message, from_email, recipients)
+        msg.attach_alternative(html_message or render_html(email_from_plain_text(subject, message)), "text/html")
+        for attachment in attachments or []:
+            msg.attach(*attachment)
+        return msg.send(fail_silently=False)
     except Exception:
         if settings.DEBUG:
             logger.exception(
@@ -49,63 +48,27 @@ def safe_send_mail(subject, message, recipients, attachments=None, html_message=
 
 
 def send_verification_email(user, request=None):
-    code = user.email_verification_code
-    
-    if user.role == Roles.B2C:
-        subject = "Verify Your Individual Employer Account"
-        message = f"""
-        Hello {user.first_name},
-        
-        Thank you for registering as an Individual Employer.
-        
-        Your verification code is: {code}
-        
-        Please enter this 5-digit code in the app to verify your email address.
-        
-        This code will expire in 24 hours.
-        
-        Best regards,
-        Meritlense Team
-        """
-    elif user.role == Roles.B2B:
-        subject = "Verify Your Company Account"
-        company_name = "Your Company"
-        if hasattr(user, 'company_profile'):
-            company_name = user.company_profile.company_name
-        
-        message = f"""
-        Hello {user.first_name},
-        
-        Thank you for registering {company_name} as a Company Employer.
-        
-        Your verification code is: {code}
-        
-        Please enter this 5-digit code in the app to verify your email address.
-        
-        This code will expire in 24 hours.
+    from api.core.emails import Email
 
-        Your account is ready for setup, but company access remains restricted
-        until you upload your trade license from your profile and an administrator
-        approves it.
-        
-        Best regards,
-        Meritlense Team
-        """
+    code = user.email_verification_code
+    intro = ["Thanks for signing up. Enter this code in MeritLense to verify your email address."]
+    notes = ["The code expires in 24 hours. If you didn't create a MeritLense account, you can ignore this email."]
+    if user.role == Roles.B2C:
+        subject, title = "Verify your MeritLense account", "Verify your email address"
+    elif user.role == Roles.B2B:
+        company_name = getattr(getattr(user, "company_profile", None), "company_name", "") or "your company"
+        subject, title = "Verify your MeritLense company account", f"Verify your email for {company_name}"
+        intro.append("After verifying, upload your trade license from your profile. Company access opens "
+                     "once an administrator approves it.")
     else:
-        subject = "Verify Your Account"
-        message = f"""
-        Hello {user.first_name},
-        
-        Your verification code is: {code}
-        
-        Please enter this 5-digit code to verify your email address.
-        
-        Best regards,
-        Meritlense Team
-        """
-    
-    safe_send_mail(subject, message, [user.email])
-    
+        subject, title = "Verify your MeritLense account", "Verify your email address"
+    safe_send_mail(None, None, [user.email], email=Email(
+        subject=subject, eyebrow="Email verification", title=title, greeting=f"Hello {user.first_name},",
+        intro=intro, code=code, code_label="Your verification code", notes=notes,
+        preheader=f"Your MeritLense verification code is {code}",
+    ))
+
+
 def generate_password_reset_token(user):
     token = secrets.token_urlsafe(32)
     user.password_reset_token = token
@@ -115,95 +78,50 @@ def generate_password_reset_token(user):
 
 
 def send_password_reset_email(user, request):
+    from api.core.emails import Email
+
     token = generate_password_reset_token(user)
     locale = 'en'
     if hasattr(user, 'preferred_language'):
         locale = user.preferred_language.lower()
     reset_url = f"{settings.FRONTEND_URL}/{locale}/auth/reset-password?token={token}"
-    
-    if user.role == Roles.B2C:
-        subject = "Reset Your Individual Employer Password"
-        message = f"""
-        Hello {user.first_name},
-        
-        We received a request to reset your password for your Individual Employer account.
-        
-        Please click the link below to reset your password:
-        {reset_url}
-        
-        This link will expire in 24 hours.
-        
-        If you didn't request this, please ignore this email or contact support.
-        
-        Best regards,
-        Meritlense Team
-        """
-    elif user.role == Roles.B2B:
-        company_name = "Your Company"
-        if hasattr(user, 'company_profile'):
-            company_name = user.company_profile.company_name
-            
-        subject = "Reset Your Company Account Password"
-        message = f"""
-        Hello {user.first_name},
-        
-        We received a request to reset your password for {company_name}'s account.
-        
-        Please click the link below to reset your password:
-        {reset_url}
-        
-        This link will expire in 24 hours.
-        
-        If you didn't request this, please ignore this email or contact support.
-        
-        Best regards,
-        Meritlense Team
-        """
-    else:
-        subject = "Reset Your Password"
-        message = f"""
-        Hello {user.first_name},
-        
-        We received a request to reset your password.
-        
-        Please click the link below to reset your password:
-        {reset_url}
-        
-        This link will expire in 24 hours.
-        
-        If you didn't request this, please ignore this email or contact support.
-        
-        Best regards,
-        Meritlense Team
-        """
-    
-    safe_send_mail(subject, message, [user.email])
+    account = ""
+    if user.role == Roles.B2B:
+        company_name = getattr(getattr(user, "company_profile", None), "company_name", "")
+        account = f" for {company_name}" if company_name else ""
+    safe_send_mail(None, None, [user.email], email=Email(
+        subject="Reset your MeritLense password", eyebrow="Password reset", title="Reset your password",
+        greeting=f"Hello {user.first_name},",
+        intro=[f"We received a request to reset the password for your MeritLense account{account}."],
+        button=("Reset password", reset_url),
+        notes=["This link expires in 24 hours.",
+               "If you didn't ask to reset your password, you can ignore this email. Your password won't change."],
+    ))
+
 
 def send_password_reset_confirmation_email(user):
     """Sent after a forgot-password reset actually completes (not the
     initial reset-link email above) - a standard security notification so
     the account owner finds out immediately if a reset they didn't request
     just succeeded."""
-    subject = "Your Meritlense Password Has Been Changed"
-    message = f"""
-    Hello {user.first_name},
+    from api.core.emails import Email, format_local
 
-    This is a confirmation that the password for your Meritlense account ({user.email}) was just changed.
+    safe_send_mail(None, None, [user.email], email=Email(
+        subject="Your MeritLense Password Has Been Changed", eyebrow="Security notice",
+        title="Your password was changed", greeting=f"Hello {user.first_name},",
+        intro=["The password for your MeritLense account was just changed."],
+        details=[("Account", user.email), ("Changed", format_local(timezone.now()))],
+        after_button=["If you made this change, no further action is needed."],
+        notes=["If you did not make this change, contact us immediately at info@meritlense.com."],
+        tone="warning",
+    ))
 
-    If you made this change, no further action is needed.
-
-    If you did not request this change, your account may be compromised - please contact support immediately.
-
-    Best regards,
-    Meritlense Team
-    """
-
-    safe_send_mail(subject, message, [user.email])
 
 def send_admin_credentials_email(user, permissions, request=None):
+    from api.core.emails import Email
+
     locale = request.GET.get('locale', 'en') if request else 'en'
     login_url = f"{settings.FRONTEND_URL}/{locale}/auth/login"
-
     permission_descriptions = {
         'can_manage_users': 'Manage Staff',
         'can_verify_companies': 'Company Verification',
@@ -211,134 +129,88 @@ def send_admin_credentials_email(user, permissions, request=None):
         'can_access_financial': 'Financial Access',
         'can_access_reports': 'Reports Access',
     }
-
-    permissions_text = ""
-    for perm in permissions:
-        desc = permission_descriptions.get(perm, perm.replace('_', ' ').title())
-        permissions_text += f"  • {desc}\n"
-
-    if not permissions_text:
-        permissions_text = "  • No additional permissions assigned\n"
-
-    subject = "Your Meritlense Admin Account"
-
-    message = f"""
-Hello {user.first_name},
-
-An administrator account has been created for you on Meritlense.
-
-Login Email: {user.email}
-
-Your Access Permissions:
-{permissions_text}
-
-To sign in, go to:
-{login_url}
-
-If you don't already have your password, use "Forgot Password" on the login page to set one.
-
-Best regards,
-Meritlense Team
-"""
-
-    safe_send_mail(subject, message, [user.email])
+    access = [permission_descriptions.get(p, p.replace('_', ' ').title()) for p in permissions]
+    safe_send_mail(None, None, [user.email], email=Email(
+        subject="Your MeritLense Admin Account", eyebrow="Admin access", title="Your admin account is ready",
+        greeting=f"Hello {user.first_name},",
+        intro=["An administrator account has been created for you on MeritLense."],
+        details=[("Login email", user.email)],
+        checklist_title="Your access", checklist=access or ["No additional permissions assigned"],
+        button=("Sign in to MeritLense", login_url),
+        notes=['No password yet? Use "Forgot password" on the sign-in page to set one.'],
+    ))
 
 
 def send_welcome_email(user, request=None):
     """Sent once, right after a self-registered user verifies their email
     (EmailVerificationView) - distinct from send_employer_welcome_email,
     which is only for accounts an admin created on someone's behalf."""
+    from api.core.emails import Email
+
     locale = request.GET.get('locale', 'en') if request else 'en'
     login_url = f"{settings.FRONTEND_URL}/{locale}/auth/login"
-
-    if user.role == Roles.B2C:
-        account_type = "Individual Employer"
-    elif user.role == Roles.B2B:
-        account_type = "Company Employer"
-    else:
-        account_type = "Employer"
-
-    subject = "Welcome to Meritlense"
-    message = f"""
-Hello {user.first_name},
-
-Welcome to Meritlense! Your {account_type} account is verified and ready to use.
-
-To sign in, go to:
-{login_url}
-
-Best regards,
-Meritlense Team
-"""
-    safe_send_mail(subject, message, [user.email])
+    account_type = {Roles.B2C: "individual employer", Roles.B2B: "company"}.get(user.role, "employer")
+    safe_send_mail(None, None, [user.email], email=Email(
+        subject="Welcome to MeritLense", eyebrow="Welcome", title=f"Welcome to MeritLense, {user.first_name}",
+        greeting=f"Hello {user.first_name},",
+        intro=[f"Your {account_type} account is verified and ready to use."],
+        checklist_title="Get started in three steps",
+        checklist=["Add your first candidate.", "Schedule an AI interview for the role you're hiring for.",
+                   "Review the readiness report and certificate."],
+        button=("Sign in to MeritLense", login_url), tone="success",
+    ))
 
 
 def send_account_approved_email(user):
-    subject = "Your Meritlense Account Has Been Approved"
-    message = f"""
-Hello {user.first_name},
+    from api.core.emails import Email
 
-Good news - your documents have been reviewed and your Meritlense account
-has been approved. You now have full access to the platform.
-
-Best regards,
-Meritlense Team
-"""
-    safe_send_mail(subject, message, [user.email])
+    safe_send_mail(None, None, [user.email], email=Email(
+        subject="Your MeritLense Account Has Been Approved", eyebrow="Account approved",
+        title="Your account is approved", greeting=f"Hello {user.first_name},",
+        intro=["Good news: your documents have been reviewed and your MeritLense account is approved. "
+               "You now have full access to the platform."],
+        button=("Sign in to MeritLense", f"{settings.FRONTEND_URL}/en/auth/login") if settings.FRONTEND_URL else None,
+        tone="success",
+    ))
 
 
 def send_account_rejected_email(user, reason):
-    subject = "Update on Your Meritlense Account"
-    message = f"""
-Hello {user.first_name},
+    from api.core.emails import Email
 
-Your submitted documents could not be verified.
-
-Reason: {reason or 'Not specified'}
-
-Please review and resubmit your documents, or contact support if you have
-any questions.
-
-Best regards,
-Meritlense Team
-"""
-    safe_send_mail(subject, message, [user.email])
+    safe_send_mail(None, None, [user.email], email=Email(
+        subject="Update on Your MeritLense Account", eyebrow="Account review",
+        title="We couldn't verify your documents", greeting=f"Hello {user.first_name},",
+        intro=["We reviewed the documents you submitted but couldn't verify them."],
+        details=[("Reason", reason or "Not specified")],
+        after_button=["Please review and resubmit your documents from your profile."],
+        notes=["Questions? Reply to this email or contact info@meritlense.com."], tone="danger",
+    ))
 
 
 def send_license_received_email(user):
+    from api.core.emails import Email
+
     company_name = getattr(getattr(user, "company_profile", None), "company_name", "your company")
-    safe_send_mail(
-        "Trade license received",
-        f"""Hello {user.first_name},
-
-We received the trade license for {company_name}. Company access will remain
-restricted while an administrator reviews it. We will email you when a decision
-has been made.
-
-Best regards,
-Meritlense Team
-""",
-        [user.email],
-    )
+    safe_send_mail(None, None, [user.email], email=Email(
+        subject="Trade license received", eyebrow="Verification in progress",
+        title="We've received your trade license", greeting=f"Hello {user.first_name},",
+        intro=[f"Thanks, we received the trade license for {company_name}. An administrator is reviewing it, "
+               "and company access stays restricted until it's approved. We'll email you as soon as there's a decision."],
+    ))
 
 
 def send_document_request_email(user, document_name):
+    from api.core.emails import Email
+
     company_name = getattr(getattr(user, "company_profile", None), "company_name", "your company")
-    safe_send_mail(
-        f"Additional document requested: {document_name}",
-        f"""Hello {user.first_name},
-
-An administrator requested the following document for {company_name}:
-
-{document_name}
-
-Please sign in and upload it from your profile's requested documents section.
-
-Best regards,
-Meritlense Team
-""",
-        [user.email],
-    )
+    safe_send_mail(None, None, [user.email], email=Email(
+        subject=f"Additional document requested: {document_name}", eyebrow="Action needed",
+        title="Please upload an additional document", greeting=f"Hello {user.first_name},",
+        intro=[f"To continue reviewing {company_name}, we need one more document."],
+        details=[("Document", document_name)],
+        after_button=["Sign in and upload it from the requested documents section of your profile."],
+        tone="warning",
+    ))
 
 
 def _format_currency_amount(unit_amount, currency):
@@ -354,83 +226,55 @@ def send_package_request_approved_email(user, package_request):
     once Stripe confirms the payment made through this link - see
     send_package_request_payment_confirmed_email. The attached invoice
     (if its PDF generated successfully) carries the same payment link as
-    its "Pay Online" option, plus bank transfer details - the email text
-    only needs to point the requester at it, not repeat everything."""
-    subject = f"Your {package_request.get_deal_type_display()} Request Has Been Approved - Payment Required"
-    slot_line = f"Assessment Slots: {package_request.approved_slot_grant}\n" if package_request.approved_slot_grant is not None else ""
-    points_line = f"Points: {package_request.approved_points_grant}\n" if package_request.approved_points_grant is not None else ""
+    its "Pay Online" option, plus bank transfer details."""
+    from api.core.emails import Email
+    from api.payments.short_links import short_url
+
+    deal = package_request.get_deal_type_display()
     amount = _format_currency_amount(package_request.unit_amount, package_request.currency)
-    billing_line = "billed once" if package_request.billing_type == "ONE_TIME" else "billed monthly"
-    invoice_line = f"Invoice: {package_request.invoice.number}\n" if package_request.invoice_id else ""
-    from api.payments.short_links import email_button_html, short_url
-
+    billing = "One-time payment" if package_request.billing_type == "ONE_TIME" else "Billed monthly"
     pay_link = short_url(package_request.stripe_payment_link_url, purpose="package_request_payment")
-    message = f"""
-Hello {user.first_name},
-
-Good news - your {package_request.get_deal_type_display()} request for {package_request.company.name}
-has been approved.
-
-{slot_line}{points_line}{invoice_line}
-Amount due: {amount} ({billing_line})
-
-To activate your package, complete payment here:
-{pay_link}
-
-The attached invoice also includes this payment link and bank transfer
-details as an alternative.
-
-Your package will be activated automatically as soon as payment is confirmed.
-If you have any questions, please contact support.
-
-Best regards,
-Meritlense Team
-"""
-    html_message = email_button_html(
-        greeting=f"Hello {user.first_name},",
-        paragraphs=[
-            f"Good news - your {package_request.get_deal_type_display()} request for "
-            f"{package_request.company.name} has been approved.",
-            " · ".join(line.strip() for line in (slot_line, points_line, invoice_line) if line.strip()),
-            f"Amount due: {amount} ({billing_line})",
-            "To activate your package, complete payment:",
-        ],
-        button_label="Pay now",
-        button_url=pay_link,
-        footer_lines=[
-            "The attached invoice also includes bank transfer details as an alternative.",
-            "Your package will be activated automatically as soon as payment is confirmed.",
-            "",
-            "Best regards,",
-            "Meritlense Team",
-        ],
-    ) if pay_link else None
     attachments = _invoice_email_attachments(package_request.invoice) if package_request.invoice_id else []
-    safe_send_mail(subject, message, [user.email], attachments=attachments, html_message=html_message)
+    safe_send_mail(None, None, [user.email], attachments=attachments, email=Email(
+        subject=f"Your {deal} Request Has Been Approved - Payment Required",
+        eyebrow="Request approved", title=f"Your {deal} package is approved",
+        greeting=f"Hello {user.first_name},",
+        intro=[f"Good news: your {deal} request for {package_request.company.name} has been approved. "
+               "Complete payment to activate it."],
+        details=[
+            ("Package", deal),
+            ("Assessment slots", package_request.approved_slot_grant),
+            ("Points", package_request.approved_points_grant),
+            ("Invoice", package_request.invoice.number if package_request.invoice_id else ""),
+            ("Amount due", amount),
+            ("Billing", billing),
+        ],
+        button=("💳  Pay now", pay_link) if pay_link else None,
+        after_button=["Your package activates automatically as soon as payment is confirmed."],
+        notes=["Prefer bank transfer? The attached invoice has our bank details."
+               if attachments else "Prefer bank transfer? Contact info@meritlense.com for our bank details."],
+        preheader=f"Amount due: {amount}. Pay online to activate your package.",
+    ))
 
 
 def send_package_request_payment_confirmed_email(user, package_request, deal_record):
     """Sent once activate_after_payment has created the real DealRecord -
     this is when the package actually becomes usable. The attached invoice
     is the same one sent at approval, now regenerated as PAID/€0.00 due."""
-    subject = f"Your {package_request.get_deal_type_display()} Package Is Now Active"
-    slot_line = f"Assessment Slots: {deal_record.slot_grant}\n" if deal_record.slot_grant is not None else ""
-    points_line = f"Points: {deal_record.points_grant}\n" if deal_record.points_grant is not None else ""
-    message = f"""
-Hello {user.first_name},
+    from api.core.emails import Email
 
-Payment received - your {package_request.get_deal_type_display()} package for
-{package_request.company.name} is now active.
-
-{slot_line}{points_line}
-Our team will be in touch with next steps. If you have any questions, please
-contact support.
-
-Best regards,
-Meritlense Team
-"""
+    deal = package_request.get_deal_type_display()
     attachments = _invoice_email_attachments(package_request.invoice) if package_request.invoice_id else []
-    safe_send_mail(subject, message, [user.email], attachments=attachments)
+    safe_send_mail(None, None, [user.email], attachments=attachments, email=Email(
+        subject=f"Your {deal} Package Is Now Active", eyebrow="Payment received",
+        title=f"Your {deal} package is active", greeting=f"Hello {user.first_name},",
+        intro=[f"Thank you, we've received your payment. The {deal} package for "
+               f"{package_request.company.name} is now active."],
+        details=[("Assessment slots", deal_record.slot_grant), ("Points", deal_record.points_grant),
+                 ("Invoice", package_request.invoice.number if package_request.invoice_id else "")],
+        button=("Go to your dashboard", f"{settings.FRONTEND_URL}/en/auth/login") if settings.FRONTEND_URL else None,
+        notes=["Your paid invoice is attached." if attachments else ""], tone="success",
+    ))
 
 
 def _invoice_email_attachments(invoice):
@@ -439,21 +283,16 @@ def _invoice_email_attachments(invoice):
 
 
 def send_package_request_denied_email(user, package_request, reason):
-    subject = f"Update on Your {package_request.get_deal_type_display()} Request"
-    message = f"""
-Hello {user.first_name},
+    from api.core.emails import Email
 
-Your {package_request.get_deal_type_display()} request for {package_request.company.name} was not approved.
-
-Reason: {reason or 'Not specified'}
-
-Please contact support if you have any questions or would like to discuss
-this further.
-
-Best regards,
-Meritlense Team
-"""
-    safe_send_mail(subject, message, [user.email])
+    deal = package_request.get_deal_type_display()
+    safe_send_mail(None, None, [user.email], email=Email(
+        subject=f"Update on Your {deal} Request", eyebrow="Package request",
+        title=f"Your {deal} request wasn't approved", greeting=f"Hello {user.first_name},",
+        intro=[f"We reviewed your {deal} request for {package_request.company.name} and couldn't approve it."],
+        details=[("Reason", reason or "Not specified")],
+        notes=["Want to discuss it? Reply to this email or contact info@meritlense.com."],
+    ))
 
 
 def send_admin_contact_email(user, message, sender):
@@ -461,22 +300,14 @@ def send_admin_contact_email(user, message, sender):
     with submitted documents without changing the account's verification
     status at all, so the applicant isn't blocked from resubmitting or
     left in a REJECTED state over something that just needs clarifying."""
-    subject = "A question about your Meritlense account documents"
-    body = f"""
-Hello {user.first_name},
+    from api.core.emails import Email
 
-{sender.get_full_name()} from the Meritlense team has a question about your
-submitted documents:
-
-{message}
-
-Please reply to this email or contact support so we can continue reviewing
-your account.
-
-Best regards,
-Meritlense Team
-"""
-    safe_send_mail(subject, body, [user.email])
+    safe_send_mail(None, None, [user.email], email=Email(
+        subject="A question about your MeritLense account documents", eyebrow="Message from our team",
+        title="We have a question about your documents", greeting=f"Hello {user.first_name},",
+        intro=[f"{sender.get_full_name()} from the MeritLense team sent you this message:", message],
+        after_button=["Please reply to this email so we can continue reviewing your account."],
+    ))
 
 
 def notify_superadmins(subject, message):
@@ -499,85 +330,41 @@ def notify_superadmins(subject, message):
 
 
 def send_employer_welcome_email(user, request=None):
+    from api.core.emails import Email
+
     locale = request.GET.get('locale', 'en') if request else 'en'
     login_url = f"{settings.FRONTEND_URL}/{locale}/auth/login"
-
-    if user.role == Roles.B2C:
-        account_type = "Individual Employer"
-    elif user.role == Roles.B2B:
-        account_type = "Company Employer"
-    else:
-        account_type = "Employer"
-
-    subject = "Your Meritlense Account Has Been Created"
-
-    message = f"""
-Hello {user.first_name},
-
-An administrator has created a {account_type} account for you on Meritlense.
-
-Login Email: {user.email}
-
-To sign in, go to:
-{login_url}
-
-If you don't already have your password, use "Forgot Password" on the login page to set one.
-
-Best regards,
-Meritlense Team
-"""
-
-    safe_send_mail(subject, message, [user.email])
+    account_type = {Roles.B2C: "individual employer", Roles.B2B: "company"}.get(user.role, "employer")
+    safe_send_mail(None, None, [user.email], email=Email(
+        subject="Your MeritLense Account Has Been Created", eyebrow="Welcome",
+        title="Your MeritLense account is ready", greeting=f"Hello {user.first_name},",
+        intro=[f"An administrator has created a {account_type} account for you on MeritLense."],
+        details=[("Login email", user.email)],
+        button=("Sign in to MeritLense", login_url),
+        notes=['No password yet? Use "Forgot password" on the sign-in page to set one.'],
+    ))
 
 
 def send_team_invitation_email(invitation, request):
-    
+    from api.core.emails import Email
+
     locale = request.GET.get('locale', 'en') if request else 'ar'
-    
     accept_url = f"{settings.FRONTEND_URL}/{locale}/auth/accept-invitation?token={invitation.token}"
-    
     company_name = invitation.company.name
-    
     inviter_name = invitation.invited_by.get_full_name()
-    
-    expiration_date = invitation.expires_at.strftime("%B %d, %Y")
-    
     permission_descriptions = dict(CompanyTeamPermissions.CHOICES)
-
-    permissions_text = ""
-    for perm in invitation.permissions:
-        desc = permission_descriptions.get(perm, perm.replace('_', ' ').title())
-        permissions_text += f"  • {desc}\n"
-
-    if not permissions_text:
-        permissions_text = "  • No permissions assigned yet - contact your company admin"
-    
-    subject = f"Invitation to join {company_name} on Meritlense"
-    
-    message = f"""
-Hello {invitation.first_name},
-
-You have been invited to join {company_name} on Meritlense by {inviter_name}.
-
-Invitation Details:
-- Company: {company_name}
-- Role: {invitation.job_title}
-
-Your Access Permissions:
-{permissions_text}
-
-To accept this invitation and set up your account, please click the link below:
-{accept_url}
-
-This invitation link will expire on {expiration_date}.
-
-If you did not expect this invitation, please ignore this email or contact support.
-
-Best regards,
-Meritlense Team
-"""
-    
-    safe_send_mail(subject, message, [invitation.email])
+    access = [permission_descriptions.get(p, p.replace('_', ' ').title()) for p in invitation.permissions]
+    safe_send_mail(None, None, [invitation.email], email=Email(
+        subject=f"Invitation to join {company_name} on MeritLense", eyebrow="Team invitation",
+        title=f"Join {company_name} on MeritLense", greeting=f"Hello {invitation.first_name},",
+        intro=[f"{inviter_name} has invited you to join the {company_name} team on MeritLense."],
+        details=[("Company", company_name), ("Your role", invitation.job_title), ("Invited by", inviter_name),
+                 ("Invitation expires", invitation.expires_at.strftime("%d %B %Y"))],
+        checklist_title="Your access",
+        checklist=access or ["No permissions assigned yet. Your company admin can add them."],
+        button=("Accept invitation", accept_url),
+        notes=["If you weren't expecting this invitation, you can ignore this email."],
+    ))
 
 
 def invalidate_user_sessions(user):

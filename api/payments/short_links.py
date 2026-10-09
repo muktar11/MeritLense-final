@@ -27,10 +27,11 @@ def _host_allowed(url):
     return any(host == h or host.endswith("." + h) for h in allowed)
 
 
-def short_url(target_url, *, purpose=""):
+def short_url(target_url, *, purpose="", prefix="p"):
     """Return a short link for target_url, reusing an existing one for the
     same target. Returns target_url unchanged when it can't be shortened
-    (empty, not https, or not an allowed host)."""
+    (empty, not https, or not an allowed host). prefix is the URL path
+    segment: "p" for payment/invoice links, "s" for interview sessions."""
     from .models import PaymentShortLink
 
     if not _host_allowed(target_url):
@@ -45,7 +46,7 @@ def short_url(target_url, *, purpose=""):
                                                    purpose=purpose)
         except IntegrityError:  # code collision - try another
             link = None
-    return f"{base}/p/{link.code}"
+    return f"{base}/{prefix}/{link.code}"
 
 
 def email_button_html(*, greeting, paragraphs, button_label, button_url, icon="💳", footer_lines=()):

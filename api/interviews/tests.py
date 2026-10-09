@@ -636,6 +636,27 @@ class InterviewSessionApiTests(APITestCase):
         self.assertIn("scheduling blocked", mail.outbox[0].subject.lower())
         self.assertEqual(mail.outbox[0].to, [self.user.email])
 
+    @override_settings(FRONTEND_URL="https://meritlense.com", SHORT_LINK_BASE_URL="https://api.meritlense.com")
+    def test_created_session_returns_a_short_link_that_redirects_to_the_interview(self):
+        response = self.client.post(
+            "/api/v1/interviews/",
+            {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        session = InterviewSession.objects.get(public_id=response.data["id"])
+        full = response.data["interview_link"]
+        self.assertTrue(full.startswith("https://meritlense.com/en/interview?"))
+        self.assertIn(f"sessionId={session.public_id}", full)
+        self.assertIn(f"token={session.access_token}", full)
+        self.assertRegex(response.data["short_link"], r"^https://api\.meritlense\.com/s/[A-Za-z0-9_-]{8}$")
+
+        code = response.data["short_link"].rsplit("/", 1)[1]
+        redirect = self.client.get(f"/s/{code}")
+        self.assertEqual(redirect.status_code, 302)
+        self.assertEqual(redirect["Location"], full)
+
     def test_reservation_failure_emails_once_until_the_account_can_schedule_again(self):
         payload = {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id)}
         PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(current_balance=0)

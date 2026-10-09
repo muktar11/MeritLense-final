@@ -31,7 +31,11 @@ from api.reports.services import EvaluationReportService
 from api.interviews.package_services import PackageArchitectureService
 from api.payments.entitlement_services import EntitlementService
 from api.payments.models import PackageBalance, SlotReservation
-from api.payments.notifications import send_reservation_failed_email, maybe_send_low_balance_warning
+from api.payments.notifications import (
+    clear_reservation_failed_marker,
+    maybe_send_low_balance_warning,
+    send_reservation_failed_email_once,
+)
 from api.interviews.voice_services import (
     SpeechToTextService,
     TextToSpeechService,
@@ -405,10 +409,32 @@ class QuestionGenerationService:
         )
 
 
+class SlotUnavailableError(ValueError):
+    """No Assessment Slot could be reserved for a new session."""
+
+    def __init__(self, message, *, candidate, created_by, company, role_name):
+        super().__init__(message)
+        self.candidate, self.created_by, self.company, self.role_name = candidate, created_by, company, role_name
+
+
 class InterviewSessionService:
     @classmethod
-    @transaction.atomic
     def create_session(cls, *, candidate, config, created_by, package_code="", scheduled_start_at=None):
+        try:
+            return cls._create_session(candidate=candidate, config=config, created_by=created_by,
+                                       package_code=package_code, scheduled_start_at=scheduled_start_at)
+        except SlotUnavailableError as exc:
+            # Outside the rolled-back transaction, so the "sent once" marker
+            # persists and repeated attempts don't email again.
+            send_reservation_failed_email_once(
+                candidate=exc.candidate, created_by=exc.created_by, company=exc.company,
+                role_name=exc.role_name, reason=str(exc),
+            )
+            raise
+
+    @classmethod
+    @transaction.atomic
+    def _create_session(cls, *, candidate, config, created_by, package_code="", scheduled_start_at=None):
         # The InterviewConfiguration chosen for THIS interview wins over the
         # candidate's general profile-level preferred_language - the latter
         # is a separate, unrelated form field that defaults to "EN" and is
@@ -517,11 +543,11 @@ class InterviewSessionService:
         try:
             EntitlementService.reserve_slot(session=session, actor=created_by)
         except ValueError as exc:
-            send_reservation_failed_email(
-                candidate=candidate, created_by=created_by, company=candidate.company,
-                role_name=config.role_name, reason=str(exc),
-            )
-            raise
+            raise SlotUnavailableError(
+                str(exc), candidate=candidate, created_by=created_by, company=candidate.company,
+                role_name=config.role_name,
+            ) from exc
+        clear_reservation_failed_marker(created_by=created_by, company=candidate.company)
 
         owner_type, owner = EntitlementService.resolve_owner(session)
         slot_summary = EntitlementService.get_balance_summary(owner_type, owner)[PackageBalance.SLOTS]

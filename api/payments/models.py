@@ -1083,3 +1083,27 @@ class PaymentShortLink(TimeStampedModel):
 
     def __str__(self):
         return f"{self.code} -> {self.target_url}"
+
+
+class OwnerNotificationMarker(TimeStampedModel):
+    """Records that a one-time account notification has been sent, so it
+    isn't repeated on every attempt. For example, the "no Assessment Slots
+    available" email goes out once per account; the marker is cleared when
+    that account next schedules an interview successfully (i.e. after it
+    has paid for Slots), so a later shortage notifies again once."""
+
+    NO_SLOTS_AVAILABLE = "NO_SLOTS_AVAILABLE"
+    KIND_CHOICES = [(NO_SLOTS_AVAILABLE, "No Assessment Slots available")]
+
+    kind = models.CharField(max_length=40, choices=KIND_CHOICES)
+    owner_key = models.CharField(max_length=64, help_text='"COMPANY:<id>" or "USER:<id>"')
+
+    class Meta:
+        verbose_name = "Owner Notification Marker"
+        verbose_name_plural = "Owner Notification Markers"
+        constraints = [
+            models.UniqueConstraint(fields=["kind", "owner_key"], name="unique_owner_notification_marker"),
+        ]
+
+    def __str__(self):
+        return f"{self.kind} - {self.owner_key}"

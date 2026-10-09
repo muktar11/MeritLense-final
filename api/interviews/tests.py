@@ -636,6 +636,25 @@ class InterviewSessionApiTests(APITestCase):
         self.assertIn("scheduling blocked", mail.outbox[0].subject.lower())
         self.assertEqual(mail.outbox[0].to, [self.user.email])
 
+    def test_reservation_failure_emails_once_until_the_account_can_schedule_again(self):
+        payload = {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id)}
+        PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(current_balance=0)
+        mail.outbox = []
+
+        for _ in range(4):
+            self.assertEqual(self.client.post("/api/v1/interviews/", payload, format="json").status_code, 400)
+        self.assertEqual(len([m for m in mail.outbox if "scheduling blocked" in m.subject.lower()]), 1)
+
+        # The account pays for Slots and schedules successfully...
+        PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(current_balance=1)
+        self.assertEqual(self.client.post("/api/v1/interviews/", payload, format="json").status_code, 201)
+
+        # ...so the next shortage notifies once again.
+        mail.outbox = []
+        for _ in range(3):
+            self.assertEqual(self.client.post("/api/v1/interviews/", payload, format="json").status_code, 400)
+        self.assertEqual(len([m for m in mail.outbox if "scheduling blocked" in m.subject.lower()]), 1)
+
     def test_low_balance_warning_fires_once_on_the_crossing_reservation(self):
         # threshold = max(1, round(10 * 0.1)) = 1
         PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(

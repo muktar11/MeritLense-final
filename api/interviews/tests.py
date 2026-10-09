@@ -3444,6 +3444,26 @@ class InterviewSessionApiTests(APITestCase):
         self.assertIn("Text-to-speech provider timed out", str(response.data["detail"]))
         self.assertFalse(session.question_audio_artifacts.exists())
 
+    def test_question_audio_failure_is_kept_in_the_audit_log_with_the_provider_reason(self):
+        session = self._create_and_start_session()
+
+        class BillingDisabledTts:
+            provider = "GOOGLE"
+
+            def synthesize(self, **kwargs):
+                raise VoiceProviderError(
+                    "Text-to-speech provider request failed", code="tts_request_failed",
+                    metadata={"status_code": 403, "provider_message": "This API method requires billing to be enabled."},
+                )
+
+        with patch("api.sessions.services.InterviewVoicePipelineService.tts_service_class", BillingDisabledTts):
+            response = self.client.post(f"/api/v1/interviews/{session.public_id}/question-audio/", {}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        failure = AuditLog.objects.get(action=AuditLogAction.QUESTION_AUDIO_GENERATED, severity="ERROR")
+        self.assertIn("billing", str(failure.data))
+        self.assertIn("403", str(failure.data))
+
     def test_process_ai_runs_translation_interpretation_and_rule_input_end_to_end(self):
         session = self._create_and_start_session()
         session.translation_target = "EN"

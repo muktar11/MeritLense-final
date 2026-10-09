@@ -1836,8 +1836,11 @@ class InterviewVoicePipelineService:
             return question.question_text
 
     @classmethod
-    @transaction.atomic
     def get_or_generate_question_audio(cls, *, session, actor=None, language_code=None):
+        # Not one transaction: a provider failure must leave its audit entry
+        # behind. When this whole method was atomic, raising after logging
+        # rolled the error log back too, so read-aloud failures (e.g. the
+        # provider refusing every request) left no trace at all.
         question, completed = InterviewSessionService.get_or_activate_current_question(session, actor=actor)
         if completed or question is None:
             raise ValueError("Session is already completed")
@@ -1884,11 +1887,20 @@ class InterviewVoicePipelineService:
                         "provider": tts_service.provider,
                         "error_code": exc.code,
                         "error_message": str(exc),
+                        "status_code": (getattr(exc, "metadata", None) or {}).get("status_code"),
+                        "provider_message": (getattr(exc, "metadata", None) or {}).get("provider_message", ""),
+                        "language_code": language_code,
                     },
                 ),
             )
             raise ValueError(str(exc)) from exc
 
+        with transaction.atomic():
+            artifact = cls._store_question_audio(session=session, question=question, synthesis=synthesis)
+        return cls._log_question_audio_generated(session=session, question=question, artifact=artifact, actor=actor)
+
+    @classmethod
+    def _store_question_audio(cls, *, session, question, synthesis):
         artifact = QuestionAudioArtifact.objects.create(
             session=session,
             question=question,
@@ -1906,7 +1918,10 @@ class InterviewVoicePipelineService:
         artifact.audio_url = stored["storage_url"]
         artifact.file_size_bytes = stored["file_size_bytes"] or len(synthesis["audio_bytes"])
         artifact.save(update_fields=["audio_file", "audio_url", "file_size_bytes", "updated_at"])
+        return artifact
 
+    @classmethod
+    def _log_question_audio_generated(cls, *, session, question, artifact, actor):
         InterviewSessionService._log_voice_or_session_event(
             actor=actor,
             action=AuditLogAction.QUESTION_AUDIO_GENERATED,

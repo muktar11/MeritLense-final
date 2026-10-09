@@ -507,7 +507,18 @@ def certificate_eligibility(evaluation, summary):
     "PARTIALLY_READY" (both eligible), or "NOT_READY", "INCOMPLETE",
     "VERIFICATION_FAILED" (not eligible), for audit logging.
     """
+    from api.core.constants import InterviewEvaluationTier
     from api.reports.services import EvaluationReportService
+
+    # Governance: certificates are restricted to Full Assessments (21
+    # questions). A Screening (7 questions) never issues one, whatever the
+    # account type or package - checked here so no caller can bypass it.
+    if evaluation.evaluation_tier != InterviewEvaluationTier.FULL:
+        return False, "SCREENING_NO_CERTIFICATE"
+    # Release safeguard: nothing is certified while awaiting human review.
+    if evaluation.is_held_for_review:
+        return False, "HUMAN_REVIEW_PENDING"
+    review_approved = evaluation.review_status == evaluation.REVIEW_APPROVED
 
     readiness_record = EvaluationReadinessRecordService.get_existing(evaluation)
     indicator = EvaluationReportService._resolve_readiness_indicator(evaluation, readiness_record)
@@ -576,7 +587,9 @@ def certificate_eligibility(evaluation, summary):
         failed_required_dimensions = below_threshold_dimensions(summary) & set(required_dimensions_for_role(role_code))
         if failed_required_dimensions:
             return False, "REQUIRED_COMPETENCY_BELOW_THRESHOLD"
-    if human_review_flags or _human_review_pending(summary):
+    # A reviewer's recorded approval resolves the review flags; the
+    # threshold and coverage checks above still apply to the actual scores.
+    if not review_approved and (human_review_flags or _human_review_pending(summary)):
         return False, "HUMAN_REVIEW_PENDING"
     if session and session.is_scheduled_interview and getattr(evaluation, "evaluator_rating", None) is None:
         return False, "EVALUATOR_RATING_PENDING"

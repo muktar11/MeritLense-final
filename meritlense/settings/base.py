@@ -337,6 +337,10 @@ ENABLE_RULE_INPUT_PREPARATION = env_bool("ENABLE_RULE_INPUT_PREPARATION", True)
 # default: with it off, interpretation behaves exactly as before. Staging only
 # until release is explicitly approved.
 INDICATOR_ID_EXTRACTION_ENABLED = env_bool("INDICATOR_ID_EXTRACTION_ENABLED", False)
+# Initial-launch control: when on, EVERY scored result is held for human
+# review before release to the employer (not only uncertain/unsafe ones).
+# Switch off by environment variable once launch confidence is established.
+REVIEW_ALL_RESULTS = env_bool("REVIEW_ALL_RESULTS", False)
 # Policy D-01: draft (not SME-approved) Arabic indicator text may be loaded and
 # used only where this is explicitly enabled - Staging, never Production.
 ALLOW_DRAFT_INDICATOR_TRANSLATIONS = env_bool("ALLOW_DRAFT_INDICATOR_TRANSLATIONS", False)

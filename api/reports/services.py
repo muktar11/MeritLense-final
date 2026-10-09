@@ -249,6 +249,9 @@ class EvaluationReportService:
                 report=report,
                 stale_previous_reports=stale_count,
             )
+            from api.evaluations.human_review_services import HumanReviewService
+
+            HumanReviewService.flag_from_report(evaluation, report)
             return report
         except EvaluationReportError:
             cls._log_failed(evaluation=evaluation, actor=actor)

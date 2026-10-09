@@ -433,8 +433,11 @@ class InterviewSessionService:
         # unlike B2B, where only Full (or a package explicitly configured
         # for it below) qualifies.
         is_b2c = getattr(created_by, "role", None) == Roles.B2C
-        readiness_indicator_enabled = is_b2c or config.evaluation_tier == InterviewEvaluationTier.FULL
-        certificate_enabled = is_b2c or config.evaluation_tier == InterviewEvaluationTier.FULL
+        is_full = config.evaluation_tier == InterviewEvaluationTier.FULL
+        readiness_indicator_enabled = is_b2c or is_full
+        # Governance: certificates only for Full Assessments, for every
+        # account type and package (Screening never issues one).
+        certificate_enabled = is_full
         expiry_duration = config.duration_minutes
 
         if package_context is not None:
@@ -460,7 +463,7 @@ class InterviewSessionService:
             coverage_level = coverage.coverage_level
             task_observation_enabled = package_context["task_observation_enabled"]
             readiness_indicator_enabled = package_context["readiness_indicator_enabled"]
-            certificate_enabled = package_context["certificate_enabled"]
+            certificate_enabled = package_context["certificate_enabled"] and is_full
             expiry_duration = package_session_config.duration_minutes or config.duration_minutes
             # The package's coverage can be lower than what this
             # InterviewConfiguration was explicitly built/selected for (e.g.

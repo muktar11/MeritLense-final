@@ -117,6 +117,9 @@ class CandidateScoreSummaryView(APIView):
             ).distinct()
         else:
             summaries = summaries.none()
+        if user.role not in [Roles.ADMIN, Roles.SUPERADMIN]:
+            # Release safeguard: results awaiting human review are withheld.
+            summaries = summaries.exclude(evaluation__review_status="REQUIRED")
 
         results = []
         for summary in summaries:
@@ -460,9 +463,78 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         serializer = SessionEvaluationSummarySerializer(summary)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=['get'], url_path='pending-review')
+    def pending_review(self, request):
+        """Admin reviewer queue: results held from employers until reviewed."""
+        from api.evaluations.human_review_services import can_see_held_results
+
+        if not can_see_held_results(request.user):
+            return Response({"detail": "Only an admin reviewer can view the review queue."},
+                            status=status.HTTP_403_FORBIDDEN)
+        held = Evaluation.objects.filter(review_status=Evaluation.REVIEW_REQUIRED).select_related(
+            "session", "company").order_by("completed_at", "created_at")
+        return Response([
+            {
+                "evaluation_id": str(e.public_id),
+                "candidate_name": f"{e.candidate_first_name} {e.candidate_last_name}".strip(),
+                "role_code": e.session.role_code if e.session_id else e.candidate_job_role,
+                "language": e.session.candidate_language if e.session_id else e.candidate_preferred_language,
+                "evaluation_tier": e.evaluation_tier,
+                "company": e.company.name if e.company_id else None,
+                "automatic_readiness": e.readiness_status,
+                "score": float(e.score) if e.score is not None else None,
+                "review_reasons": e.review_reasons,
+                "completed_at": e.completed_at,
+            }
+            for e in held
+        ])
+
+    @action(detail=True, methods=['post'], url_path='human-review')
+    def human_review(self, request, id=None):
+        """Record a reviewer's decision and release the held result.
+        Body: {"decision": "READY|PARTIALLY_READY|NOT_READY|INCOMPLETE", "notes": "..."}"""
+        from api.evaluations.human_review_services import HumanReviewError, HumanReviewService
+
+        evaluation = self.get_object()
+        try:
+            evaluation, report = HumanReviewService.approve(
+                evaluation=evaluation,
+                reviewer=request.user,
+                decision=str(request.data.get("decision") or "").strip().upper(),
+                notes=str(request.data.get("notes") or ""),
+            )
+        except HumanReviewError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        evaluation.refresh_from_db()
+        return Response({
+            "evaluation_id": str(evaluation.public_id),
+            "review_status": evaluation.review_status,
+            "decision": evaluation.review_decision,
+            "reviewed_by": evaluation.reviewed_by.email if evaluation.reviewed_by else None,
+            "reviewed_at": evaluation.reviewed_at,
+            "report_number": getattr(report, "report_number", None),
+            "certificate_status": evaluation.certificate_status,
+        })
+
+    def _held_for_review_response(self, evaluation):
+        """Release safeguard: a result awaiting human review is not shown
+        to the employer (reviewers - admins - still see it)."""
+        from api.evaluations.human_review_services import is_hidden_from
+
+        if is_hidden_from(evaluation, self.request.user):
+            return Response(
+                {"detail": "This result is awaiting human review and will be released after approval.",
+                 "code": "awaiting_human_review"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
     @action(detail=True, methods=['get'], url_path='scoring-summary')
     def scoring_summary(self, request, id=None):
         evaluation = self.get_object()
+        held = self._held_for_review_response(evaluation)
+        if held is not None:
+            return held
         summary = evaluation.session_summaries.select_related("rule_set").first()
         if summary is None:
             return Response({"detail": "No scoring summary has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
@@ -471,6 +543,9 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
     @action(detail=True, methods=['get'], url_path='certificate')
     def certificate(self, request, id=None):
         evaluation = self.get_object()
+        held = self._held_for_review_response(evaluation)
+        if held is not None:
+            return held
         cert = getattr(evaluation, "certificate", None)
         if cert is None or not cert.pdf_file:
             return Response({"detail": "No certificate has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
@@ -484,18 +559,27 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
     @action(detail=True, methods=['get'], url_path='response-results')
     def response_results(self, request, id=None):
         evaluation = self.get_object()
+        held = self._held_for_review_response(evaluation)
+        if held is not None:
+            return held
         results = evaluation.response_results.select_related("rule_set", "question", "response").all()
         return Response(ResponseEvaluationResultSerializer(results, many=True).data)
 
     @action(detail=True, methods=['get'], url_path='competency-results')
     def competency_results(self, request, id=None):
         evaluation = self.get_object()
+        held = self._held_for_review_response(evaluation)
+        if held is not None:
+            return held
         results = evaluation.competency_results.select_related("rule_set").all()
         return Response(CompetencyEvaluationResultSerializer(results, many=True).data)
 
     @action(detail=True, methods=['get'], url_path='readiness-legal-record')
     def readiness_legal_record(self, request, id=None):
         evaluation = self.get_object()
+        held = self._held_for_review_response(evaluation)
+        if held is not None:
+            return held
         try:
             record = evaluation.readiness_legal_record
         except EvaluationReadinessDecisionRecord.DoesNotExist:
@@ -558,6 +642,9 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
     @action(detail=True, methods=["get"], url_path="report")
     def report(self, request, id=None):
         evaluation = self.get_object()
+        held = self._held_for_review_response(evaluation)
+        if held is not None:
+            return held
         report = evaluation.reports.filter(report_status="ACTIVE").select_related("generated_by").first()
         if report is None:
             return Response(

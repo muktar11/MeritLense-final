@@ -123,6 +123,10 @@ def parse_confidence_score(value):
     return score.quantize(Decimal("0.001"))
 
 
+def _indicator_key(value):
+    return " ".join(str(value or "").strip().lower().split())
+
+
 def parse_indicator_observations(value):
     """Structured indicator observations from the interpreter; malformed
     entries are dropped, fields normalized. Policy is applied separately."""
@@ -522,11 +526,16 @@ class ResponseInterpretationService:
         "candidate's own words copied exactly from the transcript. source_language is the language of the quote. "
         "uncertain is true when you are not confident the indicator applies. Judge meaning in whatever language "
         "the candidate used. Only report indicators the transcript actually addresses: an indicator the candidate "
-        "never mentions is simply absent, not negated."
+        "never mentions is simply absent, not negated. Every Must Include indicator you list in mentioned_steps "
+        "must also appear in observations with its quote - never return an empty observations list for an answer "
+        "that addresses any indicator. Separately, list in safety_risks any unsafe, prohibited or "
+        "out-of-scope action the candidate says they would take themselves - even if it is not on the indicator "
+        "list and even if the rest of the answer is correct - and nothing the candidate refuses, warns against or "
+        "attributes to someone else."
     )
 
     @classmethod
-    def apply_indicator_policy(cls, observations, indicators):
+    def apply_indicator_policy(cls, observations, indicators, step_labels=None):
         """Deterministic, auditable decision for each observation. Must
         Include evidence counts only when affirmative, about the candidate's
         own conduct, quoted, and not uncertain. A Negative Indicator is never
@@ -561,6 +570,20 @@ class ResponseInterpretationService:
             decisions.append(entry)
 
         must_include = [i for i in indicators if i.indicator_type == IndicatorDefinition.TYPE_MUST_INCLUDE]
+        # Live testing (9 Oct 2026) showed the interpreter sometimes returns an
+        # empty observations list while correctly labelling the points it found
+        # in mentioned_steps (closed vocabulary: the locked English wording).
+        # Those labels count as evidence too - unless the interpreter itself
+        # gave that indicator a non-affirmative / other-person / uncertain
+        # observation, which always wins.
+        observed_ids = {o["indicator_id"] for o in decisions}
+        label_keys = {_indicator_key(label) for label in (step_labels or [])}
+        for indicator in must_include:
+            if indicator.indicator_id not in observed_ids and _indicator_key(indicator.text_en) in label_keys:
+                accepted.add(indicator.indicator_id)
+                decisions.append({"indicator_id": indicator.indicator_id, "polarity": "affirmative",
+                                  "attribution": "self", "quote": "", "source_language": "",
+                                  "uncertain": False, "decision": "evidence_accepted_from_step_label"})
         return {
             "indicator_mode": cls.INDICATOR_MODE,
             "indicator_observations": decisions,
@@ -732,7 +755,11 @@ class ResponseInterpretationService:
             # Indicator-ID mode: the deterministic policy, not the free-text
             # step labels, decides which Must Include evidence counts.
             normalized.pop("unmatched_step_phrases", None)
-            normalized.update(cls.apply_indicator_policy(normalized.pop("observations", []), indicators))
+            labels, _ = cls._constrain_to_canonical_steps(
+                normalized.get("mentioned_steps") or [],
+                [i.text_en for i in indicators if i.indicator_type == "MUST_INCLUDE"],
+            )
+            normalized.update(cls.apply_indicator_policy(normalized.pop("observations", []), indicators, labels))
             canonical_steps = []
         if canonical_steps:
             kept_mentioned, dropped_mentioned = cls._constrain_to_canonical_steps(
@@ -784,6 +811,13 @@ class EvaluationInputBuilderService:
             review_reasons.append(
                 "Translation failed; interpretation used the original-language transcript without translation."
             )
+        # Safety net: any safety or compliance concern the interpreter raises
+        # in its own words holds the answer for review, even when it does not
+        # match a listed Negative Indicator - an unsafe answer that also lists
+        # the correct steps must never become an unreviewed Ready result.
+        concerns = list(indicators.get("safety_risks") or []) + list(indicators.get("compliance_risks") or [])
+        if concerns:
+            review_reasons.append("Possible safety or compliance concern: " + "; ".join(concerns)[:500] + ".")
         if indicators.get("negative_evidence_ids"):
             review_reasons.append(
                 "Negative indicator evidence recorded for human review (severity not yet assigned): "

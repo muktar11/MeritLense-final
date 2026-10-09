@@ -798,7 +798,8 @@ class B2BRequiresAttentionView(APIView):
                 'job_role': evaluation.candidate_job_role,
                 'job_role_display': role_dict.get(evaluation.candidate_job_role, evaluation.candidate_job_role),
                 'readiness_status': evaluation.current_readiness,
-                'score': float(evaluation.score) if evaluation.score is not None else None,
+                # Withheld while awaiting human review (release safeguard).
+                'score': float(evaluation.score) if evaluation.score is not None and not evaluation.is_held_for_review else None,
                 'reasons': reasons,
                 'activity_at': evaluation.activity_at,
             })

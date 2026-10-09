@@ -84,7 +84,7 @@ class IndicatorExtractionTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         call_command("import_governance_question_bank", verbosity=0)
-        call_command("load_indicator_registry", verbosity=0)
+        call_command("load_indicator_registry", "--priority-nine", verbosity=0)
         cls.owner = User.objects.create_user(email="idx@example.com", password="x", first_name="I", last_name="D",
                                              role=Roles.B2B, is_verified=True)
         cls.company = Company.objects.create(name="Indicator QA", registration_number="IDX-1", company_size="11-50",
@@ -156,11 +156,11 @@ class IndicatorExtractionTests(TestCase):
         self.assertFalse(IndicatorDefinition.objects.exclude(mandatory=None).exists())
 
     def test_registry_reload_is_idempotent_and_never_changes_english(self):
-        call_command("load_indicator_registry", verbosity=0)
+        call_command("load_indicator_registry", "--priority-nine", verbosity=0)
         self.assertEqual(IndicatorDefinition.objects.count(), 69)
         IndicatorDefinition.objects.filter(indicator_id="ECG-TSK-001-MI-03").update(text_en="something else")
         with self.assertRaises(CommandError):
-            call_command("load_indicator_registry", verbosity=0)
+            call_command("load_indicator_registry", "--priority-nine", verbosity=0)
 
     def _draft_workbook(self, rows):
         path = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False).name
@@ -175,9 +175,9 @@ class IndicatorExtractionTests(TestCase):
     def test_draft_arabic_is_refused_unless_explicitly_allowed(self):
         path = self._draft_workbook([["ECG-TSK-001-MI-03", "ECG-TSK-001", "checks balance", "التحقق من توازن الشخص"]])
         with self.assertRaises(CommandError):
-            call_command("load_indicator_registry", "--arabic-draft", path, verbosity=0)
+            call_command("load_indicator_registry", "--priority-nine", "--arabic-draft", path, verbosity=0)
         with override_settings(ALLOW_DRAFT_INDICATOR_TRANSLATIONS=True):
-            call_command("load_indicator_registry", "--arabic-draft", path, verbosity=0)
+            call_command("load_indicator_registry", "--priority-nine", "--arabic-draft", path, verbosity=0)
         record = IndicatorDefinition.objects.get(indicator_id="ECG-TSK-001-MI-03")
         self.assertEqual(record.text_ar, "التحقق من توازن الشخص")
         self.assertEqual(record.text_ar_status, IndicatorDefinition.STATUS_DRAFT)
@@ -185,7 +185,7 @@ class IndicatorExtractionTests(TestCase):
     def test_draft_arabic_with_different_english_is_rejected(self):
         path = self._draft_workbook([["ECG-TSK-001-MI-03", "ECG-TSK-001", "checks posture", "x"]])
         with override_settings(ALLOW_DRAFT_INDICATOR_TRANSLATIONS=True), self.assertRaises(CommandError):
-            call_command("load_indicator_registry", "--arabic-draft", path, verbosity=0)
+            call_command("load_indicator_registry", "--priority-nine", "--arabic-draft", path, verbosity=0)
 
     # -- off by default ----------------------------------------------------
 
@@ -278,6 +278,41 @@ class IndicatorExtractionTests(TestCase):
         decision = next(o for o in artifact.metadata["indicator_observations"] if o["indicator_id"] == "HK-TSK-001-NI-99")
         self.assertEqual(decision["decision"], "ignored_unknown_indicator")
         self.assertEqual(result.score, result.max_score)
+
+    @override_settings(**ID_MODE)
+    def test_step_labels_count_when_the_interpreter_omits_observations(self):
+        # Seen in live testing: observations empty, required points correctly
+        # labelled in mentioned_steps - must not silently score zero.
+        class LabelsOnly(ControlledExtractor):
+            def interpret(self, *, prompt):
+                out = super().interpret(prompt=prompt)
+                body = json.loads(out["raw_content"])
+                body["mentioned_steps"] = json.loads(prompt)["question"]["expected_steps"]
+                body["observations"] = []
+                out["raw_content"] = json.dumps(body)
+                return out
+
+        for lang in ("EN", "AR"):
+            with self.subTest(lang=lang):
+                result, _ = self._score("ECG-TSK-001", lang, LabelsOnly())
+                self.assertEqual(result.score, result.max_score)
+
+    @override_settings(**ID_MODE)
+    def test_a_non_affirmative_observation_overrides_the_step_label(self):
+        class NegatedButLabelled(ControlledExtractor):
+            def interpret(self, *, prompt):
+                out = super().interpret(prompt=prompt)
+                body = json.loads(out["raw_content"])
+                body["mentioned_steps"] = json.loads(prompt)["question"]["expected_steps"]
+                for o in body["observations"]:
+                    if o["indicator_id"].endswith("MI-03"):
+                        o["polarity"] = "negated"
+                out["raw_content"] = json.dumps(body)
+                return out
+
+        result, _ = self._score("ECG-TSK-001", "EN", NegatedButLabelled())
+        self.assertEqual(result.score, 0)
+        self.assertIn("checks balance", result.missing_indicators)
 
     # -- Arabic text gating (D-01) ------------------------------------------
 

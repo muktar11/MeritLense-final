@@ -48,8 +48,8 @@ def _read_arabic_drafts(path):
 
 class Command(BaseCommand):
     help = (
-        "Create the canonical indicator-ID registry for the Priority 9 questions from the "
-        "approved bank (English, locked). Optionally attach DRAFT Arabic text from a package "
+        "Create the canonical indicator-ID registry for the approved bank (all 441 questions, or "
+        "--priority-nine) with locked English. Optionally attach DRAFT Arabic text from a package "
         "workbook - only where ALLOW_DRAFT_INDICATOR_TRANSLATIONS is enabled (Staging, policy "
         "D-01). Never changes existing English text; re-running is safe."
     )
@@ -58,6 +58,8 @@ class Command(BaseCommand):
         parser.add_argument("--arabic-draft", help="Workbook with draft Arabic per Indicator ID (Staging only).")
         parser.add_argument("--fixture", default=str(DEFAULT_FIXTURE))
         parser.add_argument("--dry-run", action="store_true")
+        parser.add_argument("--priority-nine", action="store_true",
+                            help="Limit the registry to the nine Priority 9 questions (default: whole approved bank).")
 
     def handle(self, *args, **options):
         if options["arabic_draft"] and not settings.ALLOW_DRAFT_INDICATOR_TRANSLATIONS:
@@ -70,9 +72,10 @@ class Command(BaseCommand):
         missing = [code for code in PRIORITY_NINE if code not in bank]
         if missing:
             raise CommandError(f"Priority 9 codes missing from the bank: {missing}")
+        codes = PRIORITY_NINE if options["priority_nine"] else list(bank)
 
         planned = []
-        for code in PRIORITY_NINE:
+        for code in codes:
             q = bank[code]
             for kind, source, prefix in (
                 (IndicatorDefinition.TYPE_MUST_INCLUDE, q["must_include_en"], "MI"),
@@ -86,7 +89,7 @@ class Command(BaseCommand):
             drafts, sheet_name = _read_arabic_drafts(options["arabic_draft"])
             unknown = sorted(set(drafts) - {p[0] for p in planned})
             if unknown:
-                raise CommandError(f"Draft workbook has IDs not in the Priority 9 registry: {unknown[:5]}")
+                raise CommandError(f"Draft workbook has IDs not in the registry: {unknown[:5]}")
             mismatched = [
                 indicator_id for indicator_id, _, _, _, text in planned
                 if indicator_id in drafts and _comparable(drafts[indicator_id][0]) != _comparable(text)

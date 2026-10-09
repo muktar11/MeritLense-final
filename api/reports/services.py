@@ -2832,6 +2832,10 @@ class EvaluationReportService:
         return rows
 
     @classmethod
+    def render_ai_analysis_pdf(cls, report):
+        return cls._render_qa_and_score_pdf(report)
+
+    @classmethod
     def _render_qa_and_score_pdf(cls, report):
         payload = report.report_payload or {}
         language = payload.get("language", "en")

@@ -163,6 +163,37 @@ class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet
             filename=filename,
         )
 
+    @action(detail=True, methods=["get"], url_path="ai-analysis-pdf")
+    def ai_analysis_pdf(self, request, id=None):
+        report = self.get_object()
+        try:
+            pdf_bytes = EvaluationReportService.render_ai_analysis_pdf(report)
+        except EvaluationReportError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        AuditLogService.log(
+            user=request.user,
+            action=AuditLogAction.REPORT_EXPORT_PAYLOAD_REQUESTED,
+            category=AuditLogCategory.EVALUATION,
+            description=f"AI assessment analysis PDF requested for evaluation {report.evaluation.public_id}",
+            resource=report,
+            data={
+                "report_id": str(report.public_id),
+                "evaluation_id": str(report.evaluation.public_id),
+                "report_version": report.report_version,
+                "export_type": "ai_analysis_pdf",
+            },
+            request=request,
+        )
+        pdf_stream = BytesIO(pdf_bytes)
+        pdf_stream.seek(0)
+        return FileResponse(
+            pdf_stream,
+            content_type="application/pdf",
+            as_attachment=True,
+            filename=f"{report.report_number}-ai-analysis.pdf",
+        )
+
     @action(detail=True, methods=["get"], url_path="documents-bundle")
     def documents_bundle(self, request, id=None):
         report = self.get_object()

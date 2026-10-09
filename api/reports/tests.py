@@ -526,6 +526,23 @@ class EvaluationReportApiTests(TestCase):
         qa_and_score_pdf_bytes = archive.read(f"{report.report_number}-questions-answers-and-score.pdf")
         self.assertGreater(len(qa_and_score_pdf_bytes), 0)
 
+    def test_ai_analysis_pdf_can_be_downloaded_individually(self):
+        self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+        report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status=EvaluationReport.STATUS_ACTIVE)
+
+        response = self.client.get(
+            f"/api/v1/evaluations/reports/{report.public_id}/ai-analysis-pdf"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn(f"{report.report_number}-ai-analysis.pdf", response["Content-Disposition"])
+        self.assertTrue(b"".join(response.streaming_content).startswith(b"%PDF"))
+
     def test_qa_and_score_rows_join_by_question_id_not_order(self):
         """_build_qa_and_score_rows must pair each answer with its own
         score by the question's stable public_id, never by question_order/

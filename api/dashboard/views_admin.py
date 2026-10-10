@@ -16,6 +16,7 @@ from api.payments.models import Subscription, Payment, Invoice
 from django.http import HttpResponse
 
 from .comparison_pdf_services import render_comparison_pdf
+from .readiness_services import readiness_distribution
 from .comparison_services import (
     build_full_comparison,
     compute_key_differences,
@@ -318,6 +319,15 @@ class AdminEvaluationStatusDistributionView(APIView):
                 })
         
         return Response(result)
+
+
+class AdminReadinessDistributionView(APIView):
+    """Platform-wide Overall Readiness Index: every completed evaluation by
+    its actual readiness outcome - same calculation as the B2B/B2C ones."""
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def get(self, request):
+        return Response(readiness_distribution(Evaluation.objects.all()))
 
 
 class AdminUserTypeDistributionView(APIView):

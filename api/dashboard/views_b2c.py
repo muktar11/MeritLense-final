@@ -20,6 +20,7 @@ from .comparison_services import (
     get_eligible_candidates,
 )
 from .comparison_pdf_services import render_comparison_pdf
+from .readiness_services import readiness_distribution
 from .serializers import (
     DashboardStatsSerializer, RecentCandidateSerializer, RecentEvaluationSerializer,
     CandidateComparisonSerializer, EvaluationStatusDistributionSerializer,
@@ -191,6 +192,17 @@ class B2CEvaluationTimeRangeView(APIView):
         ]
         
         return Response(result)
+
+
+class B2CReadinessDistributionView(APIView):
+    """Overall Readiness Index: the user's completed evaluations by their
+    actual readiness outcome (not by evaluation status) - same calculation
+    as the B2B dashboard's."""
+    permission_classes = [IsAuthenticated, IsB2CUser]
+
+    def get(self, request):
+        candidates = Candidate.objects.filter(created_by=request.user)
+        return Response(readiness_distribution(Evaluation.objects.filter(candidate__in=candidates)))
 
 
 class B2CEvaluationStatusDistributionView(APIView):

@@ -1567,6 +1567,47 @@ class B2BDashboardCustomizationApiTests(TestCase):
         self.assertEqual(by_status["NOT_READY"], 1)
         self.assertEqual(response.data["ready_rate"], 75.0)
 
+    def test_b2c_readiness_distribution_scoped_to_own_candidates(self):
+        b2c_user = User.objects.create_user(
+            email="dash-b2c@example.com", password="testpass123", first_name="B", last_name="C",
+            role=Roles.B2C, is_verified=True,
+        )
+        self._make_evaluation(readiness="READY", company=None, owner=b2c_user)
+        self._make_evaluation(readiness="PARTIALLY_READY", company=None, owner=b2c_user)
+        self._make_evaluation(readiness="READY", status="SCHEDULED", company=None, owner=b2c_user)
+        # The company's evaluations never count toward a B2C user's index.
+        self._make_evaluation(readiness="NOT_READY")
+
+        self.client.force_authenticate(b2c_user)
+        response = self.client.get("/api/v1/dashboard/b2c/readiness-distribution")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["total"], 2)
+        by_status = {row["status"]: row["count"] for row in response.data["distribution"]}
+        self.assertEqual((by_status["READY"], by_status["PARTIALLY_READY"], by_status["NOT_READY"]), (1, 1, 0))
+        self.assertEqual(response.data["ready_rate"], 50.0)
+
+    def test_admin_readiness_distribution_is_platform_wide_and_admin_only(self):
+        b2c_user = User.objects.create_user(
+            email="dash-b2c-2@example.com", password="testpass123", first_name="B", last_name="C",
+            role=Roles.B2C, is_verified=True,
+        )
+        self._make_evaluation(readiness="READY")
+        self._make_evaluation(readiness="NOT_READY", company=None, owner=b2c_user)
+        admin = User.objects.create_user(
+            email="dash-admin@example.com", password="testpass123", first_name="A", last_name="D",
+            role=Roles.ADMIN, is_verified=True,
+        )
+
+        self.client.force_authenticate(admin)
+        response = self.client.get("/api/v1/dashboard/admin/readiness-distribution")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["total"], 2)
+        self.assertEqual(response.data["ready_rate"], 50.0)
+
+        self.client.force_authenticate(self.owner)
+        self.assertEqual(self.client.get("/api/v1/dashboard/admin/readiness-distribution").status_code, 403)
+
     def test_readiness_distribution_empty_company(self):
         self.client.force_authenticate(self.owner)
         response = self.client.get("/api/v1/dashboard/b2b/readiness-distribution")

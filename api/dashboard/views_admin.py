@@ -13,6 +13,17 @@ from api.candidates.models import Candidate
 from api.core.permisssions import IsAdminOrSuperAdmin
 from api.evaluations.models import Evaluation
 from api.payments.models import Subscription, Payment, Invoice
+from django.http import HttpResponse
+
+from .comparison_pdf_services import render_comparison_pdf
+from .comparison_services import (
+    build_full_comparison,
+    compute_key_differences,
+    get_comparable_roles,
+    get_comparison_accounts,
+    get_eligible_candidates,
+    resolve_comparison_owner,
+)
 
 class AdminDashboardStatsView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
@@ -547,5 +558,146 @@ class AdminGeographicDistributionView(APIView):
             for country, count in country_counts.items()
         ]
         result.sort(key=lambda x: x['count'], reverse=True)
-        
+
         return Response(result)
+
+
+# -- Candidate Comparison (Admin / Superadmin) --------------------------------
+# Same role-based flow as the B2B and B2C dashboards (Select Job Role ->
+# Select 2-4 Eligible Candidates -> Compare), with one extra first step:
+# pick the account (B2B company or B2C user) whose candidates to compare.
+# Comparison never mixes accounts, so every step below takes the selected
+# owner_type + owner_id and reuses the same comparison_services functions
+# those dashboards use.
+
+def _resolve_admin_comparison_owner(request):
+    """(owner_type, owner, error_response) from ?owner_type=&owner_id=."""
+    owner_type = request.query_params.get('owner_type', '').strip().upper()
+    owner_id = request.query_params.get('owner_id', '').strip()
+    if owner_type not in ('COMPANY', 'USER') or not owner_id:
+        return None, None, Response({'error': 'owner_type (COMPANY or USER) and owner_id are required'}, status=400)
+    owner = resolve_comparison_owner(owner_type, owner_id)
+    if owner is None:
+        return None, None, Response({'error': 'Account not found'}, status=404)
+    return owner_type, owner, None
+
+
+def _admin_comparison_params(request):
+    role_code = request.query_params.get('role_code', '').strip()
+    raw_ids = request.query_params.get('candidate_ids', '')
+    candidate_ids = [v.strip() for v in raw_ids.split(',') if v.strip()]
+    language = "ar" if request.query_params.get('lang') == "ar" else "en"
+    return role_code, candidate_ids, language
+
+
+def _admin_role_name(owner_type, owner, role_code):
+    roles = get_comparable_roles(owner_type=owner_type, owner=owner)
+    return dict((r['role_code'], r['role_name']) for r in roles).get(role_code, role_code)
+
+
+def _log_admin_comparison(request, action, description, owner_type, owner, role_code, entries):
+    AuditLogService.log(
+        user=request.user,
+        action=action,
+        category=AuditLogCategory.CANDIDATE,
+        description=description,
+        data={
+            'owner_type': owner_type,
+            'owner_id': str(owner.public_id),
+            'role_code': role_code,
+            'candidate_ids': [e['candidate_id'] for e in entries],
+        },
+        request=request,
+    )
+
+
+class AdminComparisonAccountsView(APIView):
+    """Step 0: accounts with at least one scored candidate."""
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def get(self, request):
+        return Response(get_comparison_accounts())
+
+
+class AdminComparisonRolesView(APIView):
+    """Step 1: Job Roles with comparable candidates in the chosen account."""
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def get(self, request):
+        owner_type, owner, error = _resolve_admin_comparison_owner(request)
+        if error:
+            return error
+        return Response(get_comparable_roles(owner_type=owner_type, owner=owner))
+
+
+class AdminComparisonEligibleCandidatesView(APIView):
+    """Step 2: candidates eligible for comparison under a chosen role."""
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def get(self, request):
+        owner_type, owner, error = _resolve_admin_comparison_owner(request)
+        if error:
+            return error
+        role_code = request.query_params.get('role_code', '').strip()
+        if not role_code:
+            return Response({'error': 'role_code is required'}, status=400)
+        return Response(get_eligible_candidates(owner_type=owner_type, owner=owner, role_code=role_code))
+
+
+class AdminComparisonFullView(APIView):
+    """Steps 3+4: Candidate Summary + Competency Comparison for 2-4
+    selected, role-eligible candidates of the chosen account. Logged, since
+    it is an admin viewing a customer's candidate results."""
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def get(self, request):
+        owner_type, owner, error = _resolve_admin_comparison_owner(request)
+        if error:
+            return error
+        role_code, candidate_ids, language = _admin_comparison_params(request)
+        if not role_code or not (2 <= len(candidate_ids) <= 4):
+            return Response({'error': 'role_code and 2-4 candidate_ids are required'}, status=400)
+
+        entries = build_full_comparison(
+            owner_type=owner_type, owner=owner, role_code=role_code,
+            candidate_ids=candidate_ids, language=language, actor=request.user,
+        )
+        _log_admin_comparison(request, 'VIEW_CANDIDATE_COMPARISON', "Candidate comparison viewed by admin",
+                              owner_type, owner, role_code, entries)
+        return Response({
+            'role_code': role_code,
+            'role_name': _admin_role_name(owner_type, owner, role_code),
+            'candidates': entries,
+            'key_differences': compute_key_differences(entries, language=language),
+        })
+
+
+class AdminComparisonPdfView(APIView):
+    """Bilingual Comparison PDF, same document as the B2B/B2C download."""
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def get(self, request):
+        owner_type, owner, error = _resolve_admin_comparison_owner(request)
+        if error:
+            return error
+        role_code, candidate_ids, language = _admin_comparison_params(request)
+        if not role_code or not (2 <= len(candidate_ids) <= 4):
+            return Response({'error': 'role_code and 2-4 candidate_ids are required'}, status=400)
+
+        entries = build_full_comparison(
+            owner_type=owner_type, owner=owner, role_code=role_code,
+            candidate_ids=candidate_ids, language=language, actor=request.user,
+        )
+        if len(entries) < 2:
+            return Response({'error': 'At least 2 comparable candidates are required.'}, status=400)
+
+        _log_admin_comparison(request, 'EXPORT_CANDIDATE_COMPARISON', "Candidate comparison PDF exported by admin",
+                              owner_type, owner, role_code, entries)
+        key_differences = compute_key_differences(entries, language=language)
+        pdf_bytes = render_comparison_pdf(
+            role_name=_admin_role_name(owner_type, owner, role_code),
+            entries=entries, key_differences=key_differences, language=language,
+        )
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="candidate-comparison.pdf"'
+        return response

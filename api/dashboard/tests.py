@@ -827,6 +827,168 @@ class CandidateComparisonFullFlowApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    # -- Admin / Superadmin endpoint integration -----------------------------
+
+    def _make_admin_comparison_fixture(self):
+        """One B2B company and one B2C user, each with two comparable
+        driver candidates, plus an admin and a superadmin."""
+        b2b_user = User.objects.create_user(
+            email="adm-cmp-b2b@example.com", password="testpass123",
+            first_name="B2B", last_name="Owner", role=Roles.B2B, is_verified=True,
+        )
+        company = Company.objects.create(
+            name="Admin Compare Co", registration_number="ADM-CMP-1", company_size="11-50",
+            industry="Care", phone_number="+251900000009", country="Ethiopia",
+            city="Addis Ababa", admin_user=b2b_user,
+        )
+        b2c_user = User.objects.create_user(
+            email="adm-cmp-b2c@example.com", password="testpass123",
+            first_name="Solo", last_name="Sponsor", role=Roles.B2C, is_verified=True,
+        )
+        dims = {"SAFETY": 90, "PRACTICAL_TASKS": 80, "BEHAVIORAL": 70, "COMMUNICATION": 60}
+        other_dims = {"SAFETY": 50, "PRACTICAL_TASKS": 60, "BEHAVIORAL": 85, "COMMUNICATION": 90}
+
+        company_rules = self._make_rule_set(created_by=b2b_user, company=company, role_code="driver")
+        co_a, _ = self._make_scored_candidate(
+            created_by=b2b_user, company=company, suffix="adm1", role_code="driver",
+            dimension_percentages=dims, not_applicable={"HYGIENE"}, rule_set=company_rules,
+        )
+        co_b, _ = self._make_scored_candidate(
+            created_by=b2b_user, company=company, suffix="adm2", role_code="driver",
+            dimension_percentages=other_dims, not_applicable={"HYGIENE"}, rule_set=company_rules,
+        )
+        user_rules = self._make_rule_set(created_by=b2c_user, company=None, role_code="driver")
+        b2c_a, _ = self._make_scored_candidate(
+            created_by=b2c_user, company=None, suffix="adm3", role_code="driver",
+            dimension_percentages=dims, not_applicable={"HYGIENE"}, rule_set=user_rules,
+        )
+        b2c_b, _ = self._make_scored_candidate(
+            created_by=b2c_user, company=None, suffix="adm4", role_code="driver",
+            dimension_percentages=other_dims, not_applicable={"HYGIENE"}, rule_set=user_rules,
+        )
+        admin = User.objects.create_user(
+            email="adm-cmp-admin@example.com", password="testpass123",
+            first_name="Ad", last_name="Min", role=Roles.ADMIN, is_verified=True,
+        )
+        superadmin = User.objects.create_user(
+            email="adm-cmp-super@example.com", password="testpass123",
+            first_name="Super", last_name="Admin", role=Roles.SUPERADMIN, is_verified=True,
+        )
+        return {
+            "company": company, "b2c_user": b2c_user, "b2b_user": b2b_user,
+            "company_candidates": (co_a, co_b), "b2c_candidates": (b2c_a, b2c_b),
+            "admin": admin, "superadmin": superadmin,
+        }
+
+    def test_admin_comparison_accounts_lists_companies_and_b2c_users_with_scored_candidates(self):
+        f = self._make_admin_comparison_fixture()
+        self.client.force_authenticate(f["admin"])
+
+        response = self.client.get("/api/v1/dashboard/admin/candidate-comparison/accounts")
+
+        self.assertEqual(response.status_code, 200)
+        accounts = {(a["owner_type"], a["owner_id"]) for a in response.data}
+        self.assertEqual(accounts, {
+            ("COMPANY", str(f["company"].public_id)),
+            ("USER", str(f["b2c_user"].public_id)),
+        })
+        self.assertEqual({a["candidate_count"] for a in response.data}, {2})
+
+    def test_admin_comparison_accounts_skips_accounts_with_nothing_comparable(self):
+        f = self._make_admin_comparison_fixture()
+        stale_owner = User.objects.create_user(
+            email="adm-cmp-stale@example.com", password="testpass123",
+            first_name="Stale", last_name="Owner", role=Roles.B2C, is_verified=True,
+        )
+        retired_rules = ScoringRuleSet.objects.create(
+            name="Retired driver rules", version="v0", role_code="driver", role_name="Driver",
+            evaluation_tier=InterviewEvaluationTier.FULL, is_active=False, created_by=stale_owner,
+        )
+        self._make_scored_candidate(
+            created_by=stale_owner, company=None, suffix="adm5", role_code="driver",
+            dimension_percentages={"SAFETY": 70}, not_applicable={"HYGIENE"}, rule_set=retired_rules,
+        )
+        self.client.force_authenticate(f["admin"])
+
+        response = self.client.get("/api/v1/dashboard/admin/candidate-comparison/accounts")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(str(stale_owner.public_id), {a["owner_id"] for a in response.data})
+
+    def test_admin_comparison_flow_is_scoped_to_the_selected_account(self):
+        f = self._make_admin_comparison_fixture()
+        self.client.force_authenticate(f["superadmin"])
+        company_scope = {"owner_type": "COMPANY", "owner_id": str(f["company"].public_id)}
+
+        roles = self.client.get("/api/v1/dashboard/admin/candidate-comparison/roles", company_scope)
+        self.assertEqual(roles.status_code, 200)
+        self.assertEqual([(r["role_code"], r["candidate_count"]) for r in roles.data], [("driver", 2)])
+
+        eligible = self.client.get(
+            "/api/v1/dashboard/admin/candidate-comparison/eligible-candidates",
+            {**company_scope, "role_code": "driver"},
+        )
+        self.assertEqual(eligible.status_code, 200)
+        self.assertEqual(
+            {c["candidate_id"] for c in eligible.data},
+            {str(c.public_id) for c in f["company_candidates"]},
+        )
+
+        # A B2C user's candidate passed under the company scope is dropped.
+        co_a, _ = f["company_candidates"]
+        b2c_a, _ = f["b2c_candidates"]
+        full = self.client.get(
+            "/api/v1/dashboard/admin/candidate-comparison/full",
+            {**company_scope, "role_code": "driver", "candidate_ids": f"{co_a.public_id},{b2c_a.public_id}"},
+        )
+        self.assertEqual(full.status_code, 200)
+        self.assertEqual([e["candidate_id"] for e in full.data["candidates"]], [str(co_a.public_id)])
+
+    def test_admin_comparison_full_and_pdf_for_b2c_account(self):
+        f = self._make_admin_comparison_fixture()
+        self.client.force_authenticate(f["admin"])
+        a, b = f["b2c_candidates"]
+        params = {
+            "owner_type": "USER", "owner_id": str(f["b2c_user"].public_id),
+            "role_code": "driver", "candidate_ids": f"{a.public_id},{b.public_id}",
+        }
+
+        full = self.client.get("/api/v1/dashboard/admin/candidate-comparison/full", params)
+        self.assertEqual(full.status_code, 200)
+        self.assertEqual(full.data["role_name"], "Driver")
+        self.assertEqual(len(full.data["candidates"]), 2)
+        self.assertTrue(len(full.data["key_differences"]) >= 1)
+
+        pdf = self.client.get("/api/v1/dashboard/admin/candidate-comparison/pdf", params)
+        self.assertEqual(pdf.status_code, 200)
+        self.assertTrue(pdf.content.startswith(b"%PDF"))
+
+        from api.audit.models import AuditLog
+        self.assertEqual(
+            sorted(AuditLog.objects.filter(user=f["admin"]).values_list("action", flat=True)),
+            ["EXPORT_CANDIDATE_COMPARISON", "VIEW_CANDIDATE_COMPARISON"],
+        )
+
+    def test_admin_comparison_rejects_missing_or_invalid_account(self):
+        f = self._make_admin_comparison_fixture()
+        self.client.force_authenticate(f["admin"])
+        url = "/api/v1/dashboard/admin/candidate-comparison/roles"
+
+        self.assertEqual(self.client.get(url).status_code, 400)
+        self.assertEqual(self.client.get(url, {"owner_type": "COMPANY", "owner_id": "not-an-id"}).status_code, 404)
+        # A B2B user is never a comparison owner on their own - only their company is.
+        self.assertEqual(
+            self.client.get(url, {"owner_type": "USER", "owner_id": str(f["b2b_user"].public_id)}).status_code,
+            404,
+        )
+
+    def test_admin_comparison_endpoints_forbid_non_admins(self):
+        f = self._make_admin_comparison_fixture()
+        for user in (f["b2b_user"], f["b2c_user"]):
+            self.client.force_authenticate(user)
+            response = self.client.get("/api/v1/dashboard/admin/candidate-comparison/accounts")
+            self.assertEqual(response.status_code, 403)
+
     # -- assessment-version compatibility (spec item 2) ----------------------
     # Nothing in the data model retires an older ScoringRuleSet once a newer
     # one is added for the same role (is_active is never auto-flipped), so

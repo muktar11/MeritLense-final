@@ -52,4 +52,9 @@ urlpatterns = [
     path('admin/top-candidates', views_admin.AdminTopPerformingCandidatesView.as_view(), name='admin-top-candidates'),
     path('admin/recent-activity', views_admin.AdminRecentActivityView.as_view(), name='admin-recent-activity'),
     path('admin/geographic-distribution', views_admin.AdminGeographicDistributionView.as_view(), name='admin-geographic-distribution'),
+    path('admin/candidate-comparison/accounts', views_admin.AdminComparisonAccountsView.as_view(), name='admin-comparison-accounts'),
+    path('admin/candidate-comparison/roles', views_admin.AdminComparisonRolesView.as_view(), name='admin-comparison-roles'),
+    path('admin/candidate-comparison/eligible-candidates', views_admin.AdminComparisonEligibleCandidatesView.as_view(), name='admin-comparison-eligible-candidates'),
+    path('admin/candidate-comparison/full', views_admin.AdminComparisonFullView.as_view(), name='admin-comparison-full'),
+    path('admin/candidate-comparison/pdf', views_admin.AdminComparisonPdfView.as_view(), name='admin-comparison-pdf'),
 ]

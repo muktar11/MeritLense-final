@@ -32,6 +32,71 @@ def _scored_summaries_for_owner(owner_type, owner):
     )
 
 
+def get_comparison_accounts():
+    """Admin/Superadmin step 0 of Candidate Comparison: the accounts
+    (B2B companies and B2C users) with at least one comparable role - the
+    same test get_comparable_roles applies, so picking any listed account
+    always leads to a non-empty role list. Comparison never mixes accounts
+    - each company or B2C user is compared within its own candidates and
+    its own current rule sets, exactly as that account sees it on its own
+    dashboard - so the admin first picks whose candidates to compare."""
+    from api.accounts.models import Company, User
+    from api.core.constants import Roles
+    from api.evaluations.models import SessionEvaluationSummary
+
+    scored = (
+        SessionEvaluationSummary.objects
+        .filter(status__in=[
+            SessionEvaluationSummary.STATUS_EVALUATED,
+            SessionEvaluationSummary.STATUS_REQUIRES_HUMAN_REVIEW,
+        ])
+        .exclude(session__role_code="")
+    )
+    company_ids = set(scored.filter(candidate__company__isnull=False).values_list("candidate__company_id", flat=True))
+    user_ids = set(
+        scored.filter(candidate__company__isnull=True, candidate__created_by__role=Roles.B2C)
+        .values_list("candidate__created_by_id", flat=True)
+    )
+
+    owners = [("COMPANY", c, c.name, "") for c in Company.objects.filter(id__in=company_ids)]
+    owners += [("USER", u, u.get_full_name() or u.email, u.email) for u in User.objects.filter(id__in=user_ids)]
+
+    accounts = []
+    for owner_type, owner, name, email in owners:
+        roles = get_comparable_roles(owner_type=owner_type, owner=owner)
+        if not roles:
+            continue
+        accounts.append({
+            "owner_type": owner_type,
+            "owner_id": str(owner.public_id),
+            "name": name,
+            "email": email,
+            "candidate_count": sum(r["candidate_count"] for r in roles),
+        })
+    accounts.sort(key=lambda a: (a["owner_type"], a["name"].lower()))
+    return accounts
+
+
+def resolve_comparison_owner(owner_type, owner_id):
+    """Turns an admin's (owner_type, owner_id) selection back into the
+    owner object the rest of this module scopes by, or None. A USER owner
+    must be a B2C account - B2B users' candidates are compared under their
+    company, never per individual user."""
+    from api.accounts.models import Company, User
+    from api.core.constants import Roles
+    from api.core.public_ids import build_object_identifier_filter
+
+    try:
+        lookup = build_object_identifier_filter(owner_id)
+    except ValueError:
+        return None
+    if owner_type == "COMPANY":
+        return Company.objects.filter(**lookup).first()
+    if owner_type == "USER":
+        return User.objects.filter(role=Roles.B2C, **lookup).first()
+    return None
+
+
 def _current_rule_set_ids(owner_type, owner, role_code):
     """The ScoringRuleSets a brand-new evaluation under this role would be
     scored against today - one per assessment type (Full and Screening each

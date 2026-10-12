@@ -22,6 +22,7 @@ from .comparison_services import (
     get_eligible_candidates,
 )
 from .comparison_pdf_services import render_comparison_pdf
+from .readiness_services import completed_with_current_readiness, readiness_distribution
 from .dashboard_layout import DEFAULT_WIDGETS, WIDGET_IDS, resolve_layout, validate_widgets
 from .serializers import (
     DashboardStatsSerializer, RecentCandidateSerializer, RecentEvaluationSerializer,
@@ -692,23 +693,6 @@ class B2BDashboardLayoutView(APIView):
         return Response(self._payload(request, company))
 
 
-def _completed_with_current_readiness(company):
-    """Completed evaluations that carry a readiness result, annotated with
-    the readiness as it stands today - an EvaluationReadinessCorrection
-    supersedes the original decision (see
-    ReadinessRecordService.current_readiness_status), done in SQL here so
-    the dashboard doesn't run a query per evaluation."""
-    return Evaluation.objects.filter(
-        company=company,
-        status=EvaluationStatus.COMPLETED,
-        readiness_indicator_enabled=True,
-    ).annotate(
-        current_readiness=Coalesce(
-            'readiness_correction__corrected_readiness_status', 'readiness_status'
-        ),
-    )
-
-
 class B2BReadinessDistributionView(APIView):
     """Overall Readiness Index: completed evaluations by their actual
     readiness outcome (not by evaluation status)."""
@@ -719,28 +703,7 @@ class B2BReadinessDistributionView(APIView):
         if not company:
             return Response({'error': 'Company not found'}, status=400)
 
-        counts = dict(
-            _completed_with_current_readiness(company)
-            .values('current_readiness')
-            .annotate(n=Count('id'))
-            .values_list('current_readiness', 'n')
-        )
-        total = sum(counts.values())
-        distribution = [
-            {
-                'status': status,
-                'status_display': display,
-                'count': counts.get(status, 0),
-                'percentage': round(counts.get(status, 0) / total * 100, 2) if total else 0,
-            }
-            for status, display in ReadinessStatus.CHOICES
-        ]
-        decided = sum(
-            counts.get(s, 0)
-            for s in (ReadinessStatus.READY, ReadinessStatus.PARTIALLY_READY, ReadinessStatus.NOT_READY)
-        )
-        ready_rate = round(counts.get(ReadinessStatus.READY, 0) / decided * 100, 2) if decided else None
-        return Response({'total': total, 'ready_rate': ready_rate, 'distribution': distribution})
+        return Response(readiness_distribution(Evaluation.objects.filter(company=company)))
 
 
 class B2BRequiresAttentionView(APIView):
@@ -770,7 +733,7 @@ class B2BRequiresAttentionView(APIView):
         needs_review = Q(Exists(flagged_report)) & Q(readiness_correction__isnull=True)
         insufficient = Q(current_readiness=ReadinessStatus.INCOMPLETE)
         queryset = (
-            _completed_with_current_readiness(company)
+            completed_with_current_readiness(Evaluation.objects.filter(company=company))
             .filter(needs_review | insufficient)
             .annotate(
                 needs_review=ExpressionWrapper(needs_review, output_field=BooleanField()),

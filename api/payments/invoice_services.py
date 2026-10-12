@@ -303,6 +303,10 @@ def _build_snapshot(invoice):
     # A real online-payment link for this specific outstanding balance -
     # only ever meaningful while unpaid; never surfaced once is_paid.
     pay_online_url = invoice.hosted_invoice_url if (not is_paid and invoice.hosted_invoice_url) else None
+    if pay_online_url:
+        from .short_links import short_url
+
+        pay_online_url = short_url(pay_online_url, purpose="invoice_payment")
 
     return {
         "language": language,

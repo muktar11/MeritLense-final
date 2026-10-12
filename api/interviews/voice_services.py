@@ -350,10 +350,17 @@ class TextToSpeechService:
             ) from exc
         except requests.RequestException as exc:
             status_code = getattr(exc.response, "status_code", None)
+            # Google's own reason (e.g. "requires billing to be enabled") -
+            # kept so the audit log says why read-aloud failed. The API key
+            # is only in the request URL, never in this message.
+            try:
+                provider_message = (exc.response.json().get("error") or {}).get("message", "")[:300]
+            except Exception:
+                provider_message = ""
             raise VoiceProviderError(
                 "Text-to-speech provider request failed",
                 code="tts_request_failed",
-                metadata={"status_code": status_code},
+                metadata={"status_code": status_code, "provider_message": provider_message},
             ) from exc
 
         body = response.json()

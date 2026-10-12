@@ -315,7 +315,15 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         except ValueError as exc:
             raise ValidationError({"detail": str(exc)}) from exc
         output = InterviewSessionSerializer(session, context={"request": request})
-        return Response(output.data, status=status.HTTP_201_CREATED)
+        data = dict(output.data)
+        # Short, shareable link for the employer (redirects to the full
+        # interview link); the full link stays available as before.
+        from api.sessions.links import interview_link, interview_short_link
+
+        locale = request.query_params.get("locale")
+        data["interview_link"] = interview_link(session, locale)
+        data["short_link"] = interview_short_link(session, locale)
+        return Response(data, status=status.HTTP_201_CREATED)
 
     def retrieve(self, request, *args, **kwargs):
         session = self._get_session()

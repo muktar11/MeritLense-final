@@ -240,6 +240,9 @@ EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL")
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "")
+# Base for the short payment/invoice links in emails (<base>/p/<code>).
+# Must be a host that routes to this Django app.
+SHORT_LINK_BASE_URL = os.getenv("SHORT_LINK_BASE_URL", "https://api.meritlense.com")
 INTERVIEW_FRONTEND_PATH_TEMPLATE = os.getenv(
     "INTERVIEW_FRONTEND_PATH_TEMPLATE",
     "/{locale}/interview",

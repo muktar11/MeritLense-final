@@ -12,6 +12,7 @@ from .models import (
     Subscription, Payment, Invoice
 )
 from .refund_services import RefundService
+from .short_links import email_button_html, short_url
 
 import logging
 logger = logging.getLogger(__name__)
@@ -80,12 +81,26 @@ def _notify_one_time_payment_confirmed(payment, price, invoice):
 
         pdf_link = f"{settings.FRONTEND_URL}/{_invoice_language(invoice)}/dashboard/indivisual/profile?tab=billing"
     attachments = invoice_pdf_email_attachments(invoice)
+    pdf_link = short_url(pdf_link, purpose="invoice_view") if pdf_link else pdf_link
     invoice_message = (
         "A PDF copy of your invoice is attached.\n"
         f"Invoice: {pdf_link or 'available in your Billing settings'}"
         if attachments
         else f"Invoice: {pdf_link or 'available in your Billing settings'}"
     )
+    html_message = email_button_html(
+        greeting=f"Hello {payment.user.get_full_name()},",
+        paragraphs=[
+            "We've received your payment - thank you!",
+            f"Package: {price.name} · Amount paid: {payment.amount} {payment.currency.upper()}",
+            "A PDF copy of your invoice is attached." if attachments else "",
+            "Your package is now active and ready to use.",
+        ],
+        button_label="View invoice",
+        button_url=pdf_link,
+        icon="📄",
+        footer_lines=["Best regards,", "Meritlense Team"],
+    ) if pdf_link else None
     try:
         from api.accounts.utils import safe_send_mail
         safe_send_mail(
@@ -105,6 +120,7 @@ Meritlense Team
 """,
             [payment.user.email],
             attachments=attachments,
+            html_message=html_message,
         )
     except Exception:
         logger.exception("Failed to send payment-confirmed email for payment %s", payment.stripe_payment_intent_id)
@@ -124,10 +140,23 @@ def _notify_invoice_generated(invoice):
     if not pdf_link:
         return
     attachments = invoice_pdf_email_attachments(invoice)
+    pdf_link = short_url(pdf_link, purpose="invoice_view")
     invoice_message = (
         f"A PDF copy of your invoice is attached.\n\nInvoice: {pdf_link}"
         if attachments
         else f"Invoice: {pdf_link}"
+    )
+    html_message = email_button_html(
+        greeting=f"Hello {invoice.user.get_full_name()},",
+        paragraphs=[
+            "A new invoice has been generated for your Meritlense subscription.",
+            f"Amount: {invoice.amount_paid} {invoice.currency.upper()}",
+            "A PDF copy of your invoice is attached." if attachments else "",
+        ],
+        button_label="View invoice",
+        button_url=pdf_link,
+        icon="📄",
+        footer_lines=["Best regards,", "Meritlense Team"],
     )
     try:
         from api.accounts.utils import safe_send_mail
@@ -145,6 +174,7 @@ Meritlense Team
 """,
             [invoice.user.email],
             attachments=attachments,
+            html_message=html_message,
         )
     except Exception:
         logger.exception("Failed to send invoice-generated email for invoice %s", invoice.stripe_invoice_id)

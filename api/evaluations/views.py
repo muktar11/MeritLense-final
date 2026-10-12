@@ -124,9 +124,6 @@ class CandidateScoreSummaryView(APIView):
         results = []
         for summary in summaries:
             evaluation = summary.evaluation
-            cert = getattr(evaluation, "certificate", None) if evaluation else None
-            active_report = next(iter(evaluation.reports.all()), None) if evaluation else None
-
             results.append(
                 {
                     "candidate_id": str(summary.candidate.public_id),
@@ -135,6 +132,7 @@ class CandidateScoreSummaryView(APIView):
                     "evaluation_tier": evaluation.evaluation_tier if evaluation else None,
                     "overall_percentage": float(summary.overall_percentage),
                     "status": summary.status,
+                    "source": self.SOURCE_AI_SCORING,
                     "generated_at": summary.generated_at,
                     "competencies": [
                         {
@@ -145,26 +143,101 @@ class CandidateScoreSummaryView(APIView):
                         }
                         for item in (summary.competencies_summary or [])
                     ],
-                    "certificate": {
-                        "certificate_id": cert.certificate_id,
-                        "pdf_url": request.build_absolute_uri(cert.pdf_file.url),
-                        "issued_at": cert.issued_at,
-                    }
-                    if cert and cert.pdf_file
-                    else None,
-                    "report": {
-                        "report_id": str(active_report.public_id),
-                        "report_number": active_report.report_number,
-                        "report_status": active_report.report_status,
-                        "pdf_url": request.build_absolute_uri(active_report.employer_pdf.url),
-                        "generated_at": active_report.generated_at,
-                    }
-                    if active_report and active_report.employer_pdf
-                    else None,
+                    **self._documents(request, evaluation),
+                    "_sort": (summary.candidate_id, summary.generated_at or summary.created_at),
                 }
             )
 
+        results.extend(self._evaluator_rating_rows(request, user))
+        # Same order as before (per candidate, most recent first), now with
+        # evaluator-rated scheduled interviews interleaved by date.
+        results.sort(key=lambda row: row["_sort"][1], reverse=True)
+        results.sort(key=lambda row: row["_sort"][0])
+        for row in results:
+            del row["_sort"]
         return Response(CandidateScoreSummarySerializer(results, many=True).data)
+
+    SOURCE_AI_SCORING = "AI_SCORING"
+    SOURCE_EVALUATOR_RATING = "EVALUATOR_RATING"
+    # The 5 approved report dimensions an evaluator rates (psych_professional
+    # is not one of them; consistency is a reliability metric, not a rating).
+    EVALUATOR_DIMENSIONS = (
+        ("safety_awareness", "safety_awareness", "Safety Awareness"),
+        ("hygiene", "hygiene_standards", "Hygiene & Standards"),
+        ("communication", "communication_ability", "Communication Ability"),
+        ("task_execution", "task_execution", "Practical Task Execution"),
+        ("behavior_integrity", "behavior_integrity", "Behavioral Indicators"),
+    )
+
+    @staticmethod
+    def _documents(request, evaluation):
+        cert = getattr(evaluation, "certificate", None) if evaluation else None
+        active_report = next(iter(evaluation.reports.all()), None) if evaluation else None
+        return {
+            "certificate": {
+                "certificate_id": cert.certificate_id,
+                "pdf_url": request.build_absolute_uri(cert.pdf_file.url),
+                "issued_at": cert.issued_at,
+            }
+            if cert and cert.pdf_file
+            else None,
+            "report": {
+                "report_id": str(active_report.public_id),
+                "report_number": active_report.report_number,
+                "report_status": active_report.report_status,
+                "pdf_url": request.build_absolute_uri(active_report.employer_pdf.url),
+                "generated_at": active_report.generated_at,
+            }
+            if active_report and active_report.employer_pdf
+            else None,
+        }
+
+    def _evaluator_rating_rows(self, request, user):
+        """Scheduled interviews are scored by a person (EvaluatorRating), not
+        by the AI pipeline, so they never get a SessionEvaluationSummary.
+        Without these rows a rated scheduled interview was invisible on the
+        Scores page. The overall score is the average of the rated
+        dimensions - the same figure the Evaluations table shows."""
+        evaluations = (
+            _accessible_evaluations_queryset(user)
+            .filter(evaluator_rating__isnull=False, session__scheduled_start_at__isnull=False)
+            .select_related("candidate", "certificate")
+            .prefetch_related(
+                Prefetch(
+                    "reports",
+                    queryset=EvaluationReport.objects.filter(
+                        report_status=EvaluationReport.STATUS_ACTIVE,
+                    ).order_by("-generated_at", "-created_at"),
+                )
+            )
+        )
+        rows = []
+        for evaluation in evaluations:
+            rating = evaluation.evaluator_rating
+            competencies = [
+                {"code": code, "name": name, "percentage": float(getattr(rating, field))}
+                for field, code, name in self.EVALUATOR_DIMENSIONS
+                if getattr(rating, field) is not None
+            ]
+            if not competencies:
+                continue
+            rated_at = rating.rated_at or rating.updated_at
+            rows.append(
+                {
+                    "candidate_id": str(evaluation.candidate.public_id),
+                    "evaluation_id": str(evaluation.public_id),
+                    "role_code": evaluation.session.role_code or evaluation.candidate.job_role,
+                    "evaluation_tier": evaluation.evaluation_tier,
+                    "overall_percentage": round(sum(c["percentage"] for c in competencies) / len(competencies), 2),
+                    "status": SessionEvaluationSummary.STATUS_EVALUATED,
+                    "source": self.SOURCE_EVALUATOR_RATING,
+                    "generated_at": rated_at,
+                    "competencies": competencies,
+                    **self._documents(request, evaluation),
+                    "_sort": (evaluation.candidate_id, rated_at),
+                }
+            )
+        return rows
 
 
 class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.ModelViewSet):

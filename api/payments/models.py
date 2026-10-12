@@ -1059,3 +1059,51 @@ class ProcessedStripeEvent(TimeStampedModel):
 
     def __str__(self):
         return f"{self.event_type} ({self.stripe_event_id})"
+
+class PaymentShortLink(TimeStampedModel):
+    """A short, stable link (https://api.meritlense.com/p/<code>) that
+    redirects to a long payment or invoice URL - emails show a "Pay now"
+    button and this short link instead of the full Stripe URL. Only server
+    code creates these, and only for allow-listed hosts (see
+    api/payments/short_links.py), so the redirect is never open to
+    arbitrary targets."""
+
+    code = models.CharField(max_length=16, unique=True)
+    target_url = models.URLField(max_length=2000)
+    purpose = models.CharField(max_length=40, blank=True)
+    click_count = models.PositiveIntegerField(default=0)
+    last_clicked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Payment Short Link"
+        verbose_name_plural = "Payment Short Links"
+        indexes = [
+            models.Index(fields=['target_url']),
+        ]
+
+    def __str__(self):
+        return f"{self.code} -> {self.target_url}"
+
+
+class OwnerNotificationMarker(TimeStampedModel):
+    """Records that a one-time account notification has been sent, so it
+    isn't repeated on every attempt. For example, the "no Assessment Slots
+    available" email goes out once per account; the marker is cleared when
+    that account next schedules an interview successfully (i.e. after it
+    has paid for Slots), so a later shortage notifies again once."""
+
+    NO_SLOTS_AVAILABLE = "NO_SLOTS_AVAILABLE"
+    KIND_CHOICES = [(NO_SLOTS_AVAILABLE, "No Assessment Slots available")]
+
+    kind = models.CharField(max_length=40, choices=KIND_CHOICES)
+    owner_key = models.CharField(max_length=64, help_text='"COMPANY:<id>" or "USER:<id>"')
+
+    class Meta:
+        verbose_name = "Owner Notification Marker"
+        verbose_name_plural = "Owner Notification Markers"
+        constraints = [
+            models.UniqueConstraint(fields=["kind", "owner_key"], name="unique_owner_notification_marker"),
+        ]
+
+    def __str__(self):
+        return f"{self.kind} - {self.owner_key}"

@@ -17,7 +17,7 @@ from api.core.constants import InterviewEvaluationTier, InterviewSessionStatus, 
 from api.core.permisssions import RequireSetPayment
 from api.interviews.models import InterviewConfiguration
 from api.payments.entitlement_services import ADDON_POINTS_CATALOG, EntitlementService
-from api.payments.models import AddonRequest, BalanceTransaction, Customer, DealRecord, Invoice, PackageBalance, Payment, Price, ProcessedStripeEvent, SlotReservation, Subscription
+from api.payments.models import AddonRequest, BalanceTransaction, Customer, DealRecord, Invoice, PackageBalance, Payment, PaymentShortLink, Price, ProcessedStripeEvent, SlotReservation, Subscription
 from api.payments.serializers import DealRecordSerializer
 from api.payments.refund_services import CONFIRMED_BILLING_ERROR, PLATFORM_ERROR, RefundEligibilityService, RefundService
 from api.payments.serializers import CreateSubscriptionSerializer
@@ -3002,9 +3002,10 @@ class InvoicePaidStatusTests(TestCase):
 
         html, snapshot = self._render(invoice)
 
-        self.assertEqual(snapshot["pay_online_url"], "https://buy.stripe.com/test_abc123")
+        link = PaymentShortLink.objects.get(target_url="https://buy.stripe.com/test_abc123")
+        self.assertEqual(snapshot["pay_online_url"], f"https://api.meritlense.com/p/{link.code}")
         self.assertIn("Pay Online", html)
-        self.assertIn("https://buy.stripe.com/test_abc123", html)
+        self.assertIn(snapshot["pay_online_url"], html)
 
     def test_payment_method_label_resolved_from_linked_payment(self):
         from api.payments.invoice_services import _build_snapshot
@@ -3124,7 +3125,19 @@ class PackageRequestServiceTests(TestCase):
         self.assertEqual(approved.unit_amount, Decimal("5000.00"))
         self.assertEqual(approved.stripe_payment_link_url, "https://buy.stripe.com/test_pkgreq_1")
         self.assertEqual(mail.outbox[-1].to, [self.owner.email])
-        self.assertIn("https://buy.stripe.com/test_pkgreq_1", mail.outbox[-1].body)
+        # The email shows a short link and a "Pay now" button, not the full
+        # Stripe URL; the short link redirects to it.
+        short = PaymentShortLink.objects.get(target_url="https://buy.stripe.com/test_pkgreq_1")
+        short_link = f"https://api.meritlense.com/p/{short.code}"
+        self.assertIn(short_link, mail.outbox[-1].body)
+        self.assertNotIn("https://buy.stripe.com/test_pkgreq_1", mail.outbox[-1].body)
+        html_body, mimetype = mail.outbox[-1].alternatives[0]
+        self.assertEqual(mimetype, "text/html")
+        self.assertIn("Pay now", html_body)
+        self.assertIn(short_link, html_body)
+        redirect = self.client.get(f"/p/{short.code}")
+        self.assertEqual(redirect.status_code, 302)
+        self.assertEqual(redirect["Location"], "https://buy.stripe.com/test_pkgreq_1")
 
         self.assertIsNotNone(approved.invoice)
         invoice = approved.invoice
@@ -3811,3 +3824,66 @@ class GenerateInvoicePdfsCommandTests(TestCase):
 
         self.invoice.refresh_from_db()
         self.assertTrue(self.invoice.local_pdf_file)
+
+
+class PaymentShortLinkTests(AdminInvoiceEndpointTests):
+    """Short links and the "Pay now" button in payment and invoice emails."""
+
+    def test_short_url_reuses_one_code_per_target(self):
+        from api.payments.short_links import short_url
+
+        first = short_url("https://buy.stripe.com/test_reuse")
+        second = short_url("https://buy.stripe.com/test_reuse")
+        self.assertEqual(first, second)
+        self.assertRegex(first, r"^https://api\.meritlense\.com/p/[A-Za-z0-9_-]{8}$")
+        self.assertEqual(PaymentShortLink.objects.filter(target_url="https://buy.stripe.com/test_reuse").count(), 1)
+
+    def test_only_allowed_hosts_are_shortened(self):
+        from api.payments.short_links import short_url
+
+        for url in ("https://evil.example.com/pay", "http://buy.stripe.com/insecure", "", "/media/invoices/1.pdf"):
+            with self.subTest(url=url):
+                self.assertEqual(short_url(url), url)
+        self.assertFalse(PaymentShortLink.objects.exists())
+
+    def test_redirect_counts_clicks_and_unknown_codes_are_404(self):
+        from api.payments.short_links import short_url
+
+        code = short_url("https://invoice.stripe.com/i/acct_1/test_long").rsplit("/", 1)[1]
+        response = self.client.get(f"/p/{code}")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "https://invoice.stripe.com/i/acct_1/test_long")
+        self.assertEqual(PaymentShortLink.objects.get(code=code).click_count, 1)
+        self.assertEqual(self.client.get("/p/doesnotexist").status_code, 404)
+
+    @override_settings(EMAIL_HOST="localhost")
+    def test_admin_send_of_unpaid_invoice_shows_pay_now_button_and_short_link(self):
+        unpaid = Invoice.objects.create(
+            user=self.b2c_user, customer=self.customer, stripe_invoice_id="in_unpaid_send",
+            number="INV-UNPAID-SEND", status="OPEN", amount_due=Decimal("120.00"),
+            amount_paid=Decimal("0.00"), amount_remaining=Decimal("120.00"), currency="eur",
+            hosted_invoice_url="https://invoice.stripe.com/i/acct_123/live_very_long_hosted_invoice_token?s=ap",
+        )
+
+        response = self.client.post(f"/api/v1/payments/admin/invoices/{unpaid.id}/send", {}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        message = mail.outbox[-1]
+        short = PaymentShortLink.objects.get(target_url=unpaid.hosted_invoice_url)
+        self.assertIn(f"https://api.meritlense.com/p/{short.code}", message.body)
+        self.assertNotIn("live_very_long_hosted_invoice_token", message.body)
+        html_body, _ = message.alternatives[0]
+        self.assertIn("Pay now", html_body)
+        self.assertNotIn("live_very_long_hosted_invoice_token", html_body)
+
+    @override_settings(EMAIL_HOST="localhost")
+    def test_admin_send_of_paid_invoice_shows_view_button_not_pay(self):
+        response = self.client.post(f"/api/v1/payments/admin/invoices/{self.invoice.id}/send", {}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        message = mail.outbox[-1]
+        # stripe.example is not an allowed host, so the link is left as is.
+        self.assertIn("https://stripe.example/inv.pdf", message.body)
+        html_body, _ = message.alternatives[0]
+        self.assertIn("View invoice", html_body)
+        self.assertNotIn("Pay now", html_body)

@@ -1,14 +1,16 @@
 from django.utils import timezone
 import secrets
 import logging
-from django.core.mail import EmailMessage, send_mail
+from django.core.mail import EmailMultiAlternatives, send_mail
 from django.conf import settings
 from api.core.constants import CompanyTeamPermissions, Roles
 
 logger = logging.getLogger(__name__)
 
 
-def safe_send_mail(subject, message, recipients, attachments=None):
+def safe_send_mail(subject, message, recipients, attachments=None, html_message=None):
+    """html_message, when given, is sent as the HTML alternative; `message`
+    stays the plain-text version for clients that don't render HTML."""
     from_email = settings.DEFAULT_FROM_EMAIL or "no-reply@localhost"
 
     if not settings.EMAIL_HOST:
@@ -20,9 +22,11 @@ def safe_send_mail(subject, message, recipients, attachments=None):
         return 0
 
     try:
-        if attachments:
-            email = EmailMessage(subject, message, from_email, recipients)
-            for attachment in attachments:
+        if attachments or html_message:
+            email = EmailMultiAlternatives(subject, message, from_email, recipients)
+            if html_message:
+                email.attach_alternative(html_message, "text/html")
+            for attachment in attachments or []:
                 email.attach(*attachment)
             return email.send(fail_silently=False)
 
@@ -358,6 +362,9 @@ def send_package_request_approved_email(user, package_request):
     amount = _format_currency_amount(package_request.unit_amount, package_request.currency)
     billing_line = "billed once" if package_request.billing_type == "ONE_TIME" else "billed monthly"
     invoice_line = f"Invoice: {package_request.invoice.number}\n" if package_request.invoice_id else ""
+    from api.payments.short_links import email_button_html, short_url
+
+    pay_link = short_url(package_request.stripe_payment_link_url, purpose="package_request_payment")
     message = f"""
 Hello {user.first_name},
 
@@ -368,7 +375,7 @@ has been approved.
 Amount due: {amount} ({billing_line})
 
 To activate your package, complete payment here:
-{package_request.stripe_payment_link_url}
+{pay_link}
 
 The attached invoice also includes this payment link and bank transfer
 details as an alternative.
@@ -379,8 +386,27 @@ If you have any questions, please contact support.
 Best regards,
 Meritlense Team
 """
+    html_message = email_button_html(
+        greeting=f"Hello {user.first_name},",
+        paragraphs=[
+            f"Good news - your {package_request.get_deal_type_display()} request for "
+            f"{package_request.company.name} has been approved.",
+            " · ".join(line.strip() for line in (slot_line, points_line, invoice_line) if line.strip()),
+            f"Amount due: {amount} ({billing_line})",
+            "To activate your package, complete payment:",
+        ],
+        button_label="Pay now",
+        button_url=pay_link,
+        footer_lines=[
+            "The attached invoice also includes bank transfer details as an alternative.",
+            "Your package will be activated automatically as soon as payment is confirmed.",
+            "",
+            "Best regards,",
+            "Meritlense Team",
+        ],
+    ) if pay_link else None
     attachments = _invoice_email_attachments(package_request.invoice) if package_request.invoice_id else []
-    safe_send_mail(subject, message, [user.email], attachments=attachments)
+    safe_send_mail(subject, message, [user.email], attachments=attachments, html_message=html_message)
 
 
 def send_package_request_payment_confirmed_email(user, package_request, deal_record):

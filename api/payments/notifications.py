@@ -55,6 +55,39 @@ MeritLense Team
         send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
 
 
+def _owner_key(*, created_by, company):
+    return f"COMPANY:{company.id}" if company else f"USER:{created_by.id}"
+
+
+def send_reservation_failed_email_once(*, candidate, created_by, company, role_name, reason):
+    """send_reservation_failed_email, but only once per account until it
+    can schedule again. Repeated attempts before the account pays for Slots
+    used to send the same email every time. Must be called outside the
+    failed session-creation transaction, or the marker is rolled back with
+    it."""
+    from .models import OwnerNotificationMarker
+
+    _, created = OwnerNotificationMarker.objects.get_or_create(
+        kind=OwnerNotificationMarker.NO_SLOTS_AVAILABLE,
+        owner_key=_owner_key(created_by=created_by, company=company),
+    )
+    if created:
+        send_reservation_failed_email(candidate=candidate, created_by=created_by, company=company,
+                                      role_name=role_name, reason=reason)
+    return created
+
+
+def clear_reservation_failed_marker(*, created_by, company):
+    """Called after a successful reservation: the account has Slots again,
+    so a future shortage should notify (once) again."""
+    from .models import OwnerNotificationMarker
+
+    OwnerNotificationMarker.objects.filter(
+        kind=OwnerNotificationMarker.NO_SLOTS_AVAILABLE,
+        owner_key=_owner_key(created_by=created_by, company=company),
+    ).delete()
+
+
 def send_reservation_invalidated_email(*, candidate, created_by, company):
     """A scheduled interview's Slot reservation lost its entitlement
     backing (Slot Reservation Lifecycle spec, Section 7) because the

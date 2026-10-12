@@ -31,7 +31,11 @@ from api.reports.services import EvaluationReportService
 from api.interviews.package_services import PackageArchitectureService
 from api.payments.entitlement_services import EntitlementService
 from api.payments.models import PackageBalance, SlotReservation
-from api.payments.notifications import send_reservation_failed_email, maybe_send_low_balance_warning
+from api.payments.notifications import (
+    clear_reservation_failed_marker,
+    maybe_send_low_balance_warning,
+    send_reservation_failed_email_once,
+)
 from api.interviews.voice_services import (
     SpeechToTextService,
     TextToSpeechService,
@@ -405,10 +409,32 @@ class QuestionGenerationService:
         )
 
 
+class SlotUnavailableError(ValueError):
+    """No Assessment Slot could be reserved for a new session."""
+
+    def __init__(self, message, *, candidate, created_by, company, role_name):
+        super().__init__(message)
+        self.candidate, self.created_by, self.company, self.role_name = candidate, created_by, company, role_name
+
+
 class InterviewSessionService:
     @classmethod
-    @transaction.atomic
     def create_session(cls, *, candidate, config, created_by, package_code="", scheduled_start_at=None):
+        try:
+            return cls._create_session(candidate=candidate, config=config, created_by=created_by,
+                                       package_code=package_code, scheduled_start_at=scheduled_start_at)
+        except SlotUnavailableError as exc:
+            # Outside the rolled-back transaction, so the "sent once" marker
+            # persists and repeated attempts don't email again.
+            send_reservation_failed_email_once(
+                candidate=exc.candidate, created_by=exc.created_by, company=exc.company,
+                role_name=exc.role_name, reason=str(exc),
+            )
+            raise
+
+    @classmethod
+    @transaction.atomic
+    def _create_session(cls, *, candidate, config, created_by, package_code="", scheduled_start_at=None):
         # The InterviewConfiguration chosen for THIS interview wins over the
         # candidate's general profile-level preferred_language - the latter
         # is a separate, unrelated form field that defaults to "EN" and is
@@ -520,11 +546,11 @@ class InterviewSessionService:
         try:
             EntitlementService.reserve_slot(session=session, actor=created_by)
         except ValueError as exc:
-            send_reservation_failed_email(
-                candidate=candidate, created_by=created_by, company=candidate.company,
-                role_name=config.role_name, reason=str(exc),
-            )
-            raise
+            raise SlotUnavailableError(
+                str(exc), candidate=candidate, created_by=created_by, company=candidate.company,
+                role_name=config.role_name,
+            ) from exc
+        clear_reservation_failed_marker(created_by=created_by, company=candidate.company)
 
         owner_type, owner = EntitlementService.resolve_owner(session)
         slot_summary = EntitlementService.get_balance_summary(owner_type, owner)[PackageBalance.SLOTS]
@@ -1768,8 +1794,56 @@ class InterviewVoicePipelineService:
         return response
 
     @classmethod
-    @transaction.atomic
+    def _read_aloud_text(cls, question, language_code):
+        """The text the voice should read, in the read-aloud language.
+
+        A session's questions are in the candidate's language (an Arabic
+        session asks the approved Arabic templates), so:
+        1. If the question is already in the read-aloud language, read it
+           exactly as shown on screen - never machine-translate approved text.
+        2. Otherwise read the approved version of the same question
+           (same question code and question-set version) in that language.
+        3. Only if there is none, machine-translate from the question's own
+           language. If that fails, return the original text; the voice
+           then reads the on-screen wording rather than nothing.
+        """
+        target = language_code.split("-")[0].lower()
+        template = question.question_template
+        source = ((template.language if template else "") or "EN").split("-")[0].lower()
+        if source == target:
+            return question.question_text
+
+        if template and template.question_code:
+            sibling = (
+                QuestionTemplate.objects.filter(
+                    question_code=template.question_code,
+                    question_set_version=template.question_set_version,
+                    language__iexact=target,
+                    is_active=True,
+                )
+                .exclude(question_text="")
+                .order_by("-id")
+                .first()
+            )
+            if sibling is not None:
+                return sibling.question_text
+
+        try:
+            translation = TranslationService.translate(
+                text=question.question_text,
+                source_language=source,
+                target_language=target,
+            )
+            return translation["translated_text"] or question.question_text
+        except AIProcessingError:
+            return question.question_text
+
+    @classmethod
     def get_or_generate_question_audio(cls, *, session, actor=None, language_code=None):
+        # Not one transaction: a provider failure must leave its audit entry
+        # behind. When this whole method was atomic, raising after logging
+        # rolled the error log back too, so read-aloud failures (e.g. the
+        # provider refusing every request) left no trace at all.
         question, completed = InterviewSessionService.get_or_activate_current_question(session, actor=actor)
         if completed or question is None:
             raise ValueError("Session is already completed")
@@ -1797,28 +1871,7 @@ class InterviewVoicePipelineService:
         if existing and existing.audio_file:
             return existing
 
-        # question.question_text is always authored in English - previously
-        # this got sent straight to the TTS provider under whatever
-        # language_code was requested, which doesn't translate anything: the
-        # provider just reads the English words using that language's voice/
-        # phoneme model, producing English content in a foreign accent
-        # rather than actual speech in that language. Translate first for
-        # any non-English target.
-        text_to_speak = question.question_text
-        if not language_code.startswith("en"):
-            try:
-                translation = TranslationService.translate(
-                    text=question.question_text,
-                    source_language="en",
-                    target_language=language_code.split("-")[0],
-                )
-                text_to_speak = translation["translated_text"] or question.question_text
-            except AIProcessingError:
-                # Fall back to the original English text rather than failing
-                # the whole request - reading it in English is still more
-                # useful than no audio at all, and the candidate can read
-                # the on-screen text either way.
-                text_to_speak = question.question_text
+        text_to_speak = cls._read_aloud_text(question, language_code)
 
         try:
             synthesis = tts_service.synthesize(text=text_to_speak, language_code=language_code)
@@ -1837,11 +1890,20 @@ class InterviewVoicePipelineService:
                         "provider": tts_service.provider,
                         "error_code": exc.code,
                         "error_message": str(exc),
+                        "status_code": (getattr(exc, "metadata", None) or {}).get("status_code"),
+                        "provider_message": (getattr(exc, "metadata", None) or {}).get("provider_message", ""),
+                        "language_code": language_code,
                     },
                 ),
             )
             raise ValueError(str(exc)) from exc
 
+        with transaction.atomic():
+            artifact = cls._store_question_audio(session=session, question=question, synthesis=synthesis)
+        return cls._log_question_audio_generated(session=session, question=question, artifact=artifact, actor=actor)
+
+    @classmethod
+    def _store_question_audio(cls, *, session, question, synthesis):
         artifact = QuestionAudioArtifact.objects.create(
             session=session,
             question=question,
@@ -1859,7 +1921,10 @@ class InterviewVoicePipelineService:
         artifact.audio_url = stored["storage_url"]
         artifact.file_size_bytes = stored["file_size_bytes"] or len(synthesis["audio_bytes"])
         artifact.save(update_fields=["audio_file", "audio_url", "file_size_bytes", "updated_at"])
+        return artifact
 
+    @classmethod
+    def _log_question_audio_generated(cls, *, session, question, artifact, actor):
         InterviewSessionService._log_voice_or_session_event(
             actor=actor,
             action=AuditLogAction.QUESTION_AUDIO_GENERATED,

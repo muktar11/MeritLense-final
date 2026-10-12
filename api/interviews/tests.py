@@ -636,6 +636,46 @@ class InterviewSessionApiTests(APITestCase):
         self.assertIn("scheduling blocked", mail.outbox[0].subject.lower())
         self.assertEqual(mail.outbox[0].to, [self.user.email])
 
+    @override_settings(FRONTEND_URL="https://meritlense.com", SHORT_LINK_BASE_URL="https://api.meritlense.com")
+    def test_created_session_returns_a_short_link_that_redirects_to_the_interview(self):
+        response = self.client.post(
+            "/api/v1/interviews/",
+            {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        session = InterviewSession.objects.get(public_id=response.data["id"])
+        full = response.data["interview_link"]
+        self.assertTrue(full.startswith("https://meritlense.com/en/interview?"))
+        self.assertIn(f"sessionId={session.public_id}", full)
+        self.assertIn(f"token={session.access_token}", full)
+        self.assertRegex(response.data["short_link"], r"^https://api\.meritlense\.com/s/[A-Za-z0-9_-]{8}$")
+
+        code = response.data["short_link"].rsplit("/", 1)[1]
+        redirect = self.client.get(f"/s/{code}")
+        self.assertEqual(redirect.status_code, 302)
+        self.assertEqual(redirect["Location"], full)
+
+    def test_reservation_failure_emails_once_until_the_account_can_schedule_again(self):
+        payload = {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id)}
+        PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(current_balance=0)
+        mail.outbox = []
+
+        for _ in range(4):
+            self.assertEqual(self.client.post("/api/v1/interviews/", payload, format="json").status_code, 400)
+        self.assertEqual(len([m for m in mail.outbox if "scheduling blocked" in m.subject.lower()]), 1)
+
+        # The account pays for Slots and schedules successfully...
+        PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(current_balance=1)
+        self.assertEqual(self.client.post("/api/v1/interviews/", payload, format="json").status_code, 201)
+
+        # ...so the next shortage notifies once again.
+        mail.outbox = []
+        for _ in range(3):
+            self.assertEqual(self.client.post("/api/v1/interviews/", payload, format="json").status_code, 400)
+        self.assertEqual(len([m for m in mail.outbox if "scheduling blocked" in m.subject.lower()]), 1)
+
     def test_low_balance_warning_fires_once_on_the_crossing_reservation(self):
         # threshold = max(1, round(10 * 0.1)) = 1
         PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(
@@ -3407,6 +3447,26 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Text-to-speech provider timed out", str(response.data["detail"]))
         self.assertFalse(session.question_audio_artifacts.exists())
+
+    def test_question_audio_failure_is_kept_in_the_audit_log_with_the_provider_reason(self):
+        session = self._create_and_start_session()
+
+        class BillingDisabledTts:
+            provider = "GOOGLE"
+
+            def synthesize(self, **kwargs):
+                raise VoiceProviderError(
+                    "Text-to-speech provider request failed", code="tts_request_failed",
+                    metadata={"status_code": 403, "provider_message": "This API method requires billing to be enabled."},
+                )
+
+        with patch("api.sessions.services.InterviewVoicePipelineService.tts_service_class", BillingDisabledTts):
+            response = self.client.post(f"/api/v1/interviews/{session.public_id}/question-audio/", {}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        failure = AuditLog.objects.get(action=AuditLogAction.QUESTION_AUDIO_GENERATED, severity="ERROR")
+        self.assertIn("billing", str(failure.data))
+        self.assertIn("403", str(failure.data))
 
     def test_process_ai_runs_translation_interpretation_and_rule_input_end_to_end(self):
         session = self._create_and_start_session()

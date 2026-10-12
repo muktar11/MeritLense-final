@@ -1986,7 +1986,91 @@ class CandidateScoreSummaryApiTests(TestCase):
         # pipeline) must come before the older, manually-inserted one.
         self.assertGreater(response.data[0]["generated_at"], response.data[1]["generated_at"])
 
+    def _scheduled_interview(self, *, rated_at=None, **ratings):
+        session = InterviewSession.objects.create(
+            candidate=self.candidate,
+            organization=self.candidate.company,
+            config=self.config,
+            role_name=self.config.role_name,
+            role_code=self.config.role_code,
+            ui_language="EN",
+            candidate_language="EN",
+            total_questions=1,
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v2.0",
+            question_set_version="v1.2",
+            scheduled_start_at=timezone.now(),
+            expires_at=InterviewSession.build_expiry(30),
+            created_by=self.user,
+        )
+        evaluation = Evaluation.objects.create(
+            session=session,
+            candidate=self.candidate,
+            evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now(),
+            duration_minutes=45,
+            created_by=self.user,
+        )
+        if ratings:
+            EvaluatorRating.objects.create(
+                evaluation=evaluation, rated_by=self.user,
+                rated_at=rated_at or timezone.now(), **ratings,
+            )
+        return evaluation
+
+    def test_evaluator_rated_scheduled_interview_is_listed_with_its_breakdown(self):
+        # Scheduled interviews are rated by a person and never get an AI
+        # SessionEvaluationSummary - they used to be missing from Scores.
+        evaluation = self._scheduled_interview(
+            safety_awareness=60, hygiene=60, communication=65, task_execution=66, behavior_integrity=70,
+            psych_professional=10,
+        )
+        self.client.force_authenticate(self.user)
+        response = self.client.get("/api/v1/evaluations/candidate-scores")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data), 2)
+        rated = next(e for e in response.data if e["evaluation_id"] == str(evaluation.public_id))
+        self.assertEqual(rated["source"], "EVALUATOR_RATING")
+        self.assertEqual(rated["status"], SessionEvaluationSummary.STATUS_EVALUATED)
+        self.assertEqual(rated["role_code"], "domestic_worker")
+        # Average of the 5 approved dimensions; psych_professional excluded.
+        self.assertEqual(float(rated["overall_percentage"]), 64.2)
+        self.assertEqual(
+            {c["code"]: float(c["percentage"]) for c in rated["competencies"]},
+            {"safety_awareness": 60.0, "hygiene_standards": 60.0, "communication_ability": 65.0,
+             "task_execution": 66.0, "behavior_integrity": 70.0},
+        )
+        ai = next(e for e in response.data if e["evaluation_id"] == str(self.evaluation.public_id))
+        self.assertEqual(ai["source"], "AI_SCORING")
+
+    def test_rating_without_hygiene_and_communication_averages_what_was_rated(self):
+        self._scheduled_interview(safety_awareness=80, task_execution=70, behavior_integrity=60)
+        self.client.force_authenticate(self.user)
+        rated = next(e for e in self.client.get("/api/v1/evaluations/candidate-scores").data
+                     if e["source"] == "EVALUATOR_RATING")
+        self.assertEqual(float(rated["overall_percentage"]), 70.0)
+        self.assertEqual(len(rated["competencies"]), 3)
+
+    def test_rated_and_ai_results_are_ordered_newest_first_per_candidate(self):
+        self._scheduled_interview(rated_at=timezone.now() + timezone.timedelta(days=1),
+                                  safety_awareness=50, task_execution=50, behavior_integrity=50)
+        self._scheduled_interview(rated_at=timezone.now() - timezone.timedelta(days=30),
+                                  safety_awareness=40, task_execution=40, behavior_integrity=40)
+        self.client.force_authenticate(self.user)
+        data = self.client.get("/api/v1/evaluations/candidate-scores").data
+        self.assertEqual([e["source"] for e in data], ["EVALUATOR_RATING", "AI_SCORING", "EVALUATOR_RATING"])
+        dates = [e["generated_at"] for e in data]
+        self.assertEqual(dates, sorted(dates, reverse=True))
+
+    def test_unrated_scheduled_interview_is_not_listed(self):
+        self._scheduled_interview()
+        self.client.force_authenticate(self.user)
+        data = self.client.get("/api/v1/evaluations/candidate-scores").data
+        self.assertEqual([e["source"] for e in data], ["AI_SCORING"])
+
     def test_other_user_does_not_see_this_candidate(self):
+        self._scheduled_interview(safety_awareness=60, task_execution=60, behavior_integrity=60)
         self.client.force_authenticate(self.other_user)
         response = self.client.get("/api/v1/evaluations/candidate-scores")
 

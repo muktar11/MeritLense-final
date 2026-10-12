@@ -48,6 +48,9 @@ class CandidateScoreSummarySerializer(serializers.Serializer):
     evaluation_tier = serializers.CharField(allow_null=True)
     overall_percentage = serializers.FloatField()
     status = serializers.CharField()
+    # AI_SCORING (AI interview, rule engine) or EVALUATOR_RATING (scheduled
+    # interview rated by a person).
+    source = serializers.CharField()
     generated_at = serializers.DateTimeField()
     competencies = CandidateScoreSummaryCompetencySerializer(many=True)
     certificate = CandidateCertificateSummarySerializer(allow_null=True)

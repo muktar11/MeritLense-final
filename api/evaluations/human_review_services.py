@@ -144,7 +144,7 @@ class HumanReviewService:
         from api.evaluations.certificate_services import generate_certificate
         from api.evaluations.models import Evaluation
         from api.evaluations.readiness_record_services import EvaluationReadinessRecordService
-        from api.reports.services import EvaluationReportService
+        from api.reports.services import EvaluationReportError, EvaluationReportService
 
         if not can_see_held_results(reviewer):
             raise HumanReviewError("Only an admin reviewer can approve a held result.")
@@ -183,7 +183,16 @@ class HumanReviewService:
         summary = evaluation.session_summaries.order_by("-generated_at").first()
         report = None
         if summary is not None:
-            report = EvaluationReportService.generate_for_evaluation(evaluation=evaluation, actor=reviewer)
+            # The decision is recorded and the result released even when no
+            # report can be produced - e.g. a staff-started session never
+            # captured the candidate's consent, which reports require. That
+            # used to raise here, roll the release back and leave the
+            # result held forever.
+            try:
+                report = EvaluationReportService.generate_for_evaluation(evaluation=evaluation, actor=reviewer)
+            except EvaluationReportError as exc:
+                evaluation.review_notes = f"{evaluation.review_notes} [Report not generated: {exc}]"
+                evaluation.save(update_fields=["review_notes", "updated_at"])
             if evaluation.certificate_enabled:
                 generate_certificate(evaluation, summary)
         return evaluation, report

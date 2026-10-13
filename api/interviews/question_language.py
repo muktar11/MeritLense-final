@@ -32,6 +32,15 @@ VERBAL_CONFIRMATION_STATEMENT = {
     "AR": "أؤكد أنني أجري هذا التقييم بنفسي، وأن الإجابات التي أقدمها هي إجاباتي الشخصية.",
 }
 
+# The OpenAI fallback is used only for these languages. For low-resource
+# ones (Afaan Oromo, Tigrinya, Afar, Twi, Luganda, Malagasy) the model's
+# output was unreliable in production testing - Afar came back as Somali -
+# so those show "translation unavailable" unless the translation provider
+# itself works, rather than a wrong translation.
+OPENAI_FALLBACK_LANGUAGES = {
+    "EN", "AR", "AM", "FIL", "ZH", "HI", "UR", "BN", "TA", "TE", "ML", "PA", "SI", "ID", "NE", "SW", "VI", "KM", "MY", "SO",
+}
+
 KIND_ORIGINAL = "original"   # the question exactly as asked in this session
 KIND_APPROVED = "approved"   # the approved EN/AR version of the same question
 KIND_MACHINE = "machine"     # automatic translation
@@ -75,7 +84,7 @@ def _openai_translate(text, source_key, target_key):
                     {"role": "user", "content": prompt},
                 ],
             },
-            timeout=20,
+            timeout=25,
         )
         response.raise_for_status()
         content = ((response.json().get("choices") or [{}])[0].get("message") or {}).get("content") or "{}"
@@ -109,6 +118,8 @@ def display_translate(text, source_key, target_key):
         except Exception:  # noqa: BLE001 - provider misconfiguration must not break the interview
             logger.exception("Display translation provider raised unexpectedly; trying OpenAI")
             cache.set(PROVIDER_DOWN_KEY, True, PROVIDER_DOWN_SECONDS)
+    if target_key not in OPENAI_FALLBACK_LANGUAGES:
+        raise TranslationUnavailable(f"No reliable fallback translation for {target_key}")
     return _openai_translate(text, source_key, target_key)
 
 

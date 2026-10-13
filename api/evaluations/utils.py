@@ -1,3 +1,4 @@
+import logging
 from zoneinfo import ZoneInfo
 
 from django.core.mail import send_mail
@@ -13,6 +14,20 @@ from django.utils import timezone
 # a time is in.
 DISPLAY_TZ = ZoneInfo("Asia/Riyadh")
 DISPLAY_TZ_LABEL = "AST"
+
+logger = logging.getLogger(__name__)
+
+
+def _send(subject, message, recipients):
+    """These notifications go out after the evaluation (and its interview
+    session) has already been saved. Letting an SMTP error propagate turned
+    a successful scheduling into a 500 the scheduler saw as "failed", even
+    though the evaluation existed. Log it instead."""
+    try:
+        return send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, recipients, fail_silently=False)
+    except Exception:
+        logger.exception("Evaluation email failed. subject=%s recipients=%s", subject, recipients)
+        return 0
 
 
 def _format_date(value):
@@ -95,13 +110,7 @@ Best regards,
 Meritlense Team
 """
 
-    send_mail(
-        subject,
-        message,
-        settings.DEFAULT_FROM_EMAIL,
-        [evaluation.candidate_email],
-        fail_silently=False,
-    )
+    _send(subject, message, [evaluation.candidate_email])
 
     owner_email = _account_owner_email(evaluation)
     owner_subject = f"Interview scheduled: {evaluation.candidate_first_name} {evaluation.candidate_last_name} - {scheduled_date}"
@@ -126,13 +135,7 @@ Best regards,
 Meritlense Team
 """
 
-    send_mail(
-        owner_subject,
-        owner_message,
-        settings.DEFAULT_FROM_EMAIL,
-        [owner_email],
-        fail_silently=False,
-    )
+    _send(owner_subject, owner_message, [owner_email])
 
 def send_evaluation_rescheduled_email(evaluation, old_date, request=None):
 
@@ -166,13 +169,7 @@ Best regards,
 Meritlense Team
 """
     
-    send_mail(
-        subject,
-        message,
-        settings.DEFAULT_FROM_EMAIL,
-        [evaluation.candidate_email],
-        fail_silently=False,
-    )
+    _send(subject, message, [evaluation.candidate_email])
     
 
 def send_evaluation_cancelled_email(evaluation, request=None):
@@ -201,13 +198,7 @@ Best regards,
 Meritlense Team
 """
     
-    send_mail(
-        subject,
-        message,
-        settings.DEFAULT_FROM_EMAIL,
-        [evaluation.candidate_email],
-        fail_silently=False,
-    )
+    _send(subject, message, [evaluation.candidate_email])
 
 def send_evaluation_completed_email(evaluation, request=None):
 
@@ -248,11 +239,5 @@ Best regards,
 Meritlense Team
 """
     
-    send_mail(
-        subject,
-        message,
-        settings.DEFAULT_FROM_EMAIL,
-        [evaluation.candidate_email],
-        fail_silently=False,
-    )
+    _send(subject, message, [evaluation.candidate_email])
     

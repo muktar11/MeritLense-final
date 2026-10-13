@@ -266,25 +266,25 @@ class EvaluationCreateSerializer(PublicIdModelSerializer):
         return super().create(validated_data)
 
     def _resolve_interview_config(self, candidate):
-        role_name = CandidateJobRoles.INTERVIEW_ROLE_NAME_MAP.get(candidate.job_role)
-        if role_name is None:
+        role_names = CandidateJobRoles.INTERVIEW_ROLE_NAME_MAP.get(candidate.job_role)
+        if not role_names:
             raise serializers.ValidationError(
                 {"candidate": f"AI interview scheduling isn't supported yet for role '{candidate.get_job_role_display()}'."}
             )
         preferred_language = candidate.preferred_language or "EN"
         queryset = InterviewConfiguration.objects.filter(is_active=True)
 
-        config = queryset.filter(
-            role_name__iexact=role_name,
-            language__iexact=preferred_language,
-        ).order_by("evaluation_tier", "id").first()
-        if config is None:
-            config = queryset.filter(role_name__iexact=role_name).order_by("language", "evaluation_tier", "id").first()
-        if config is None:
-            raise serializers.ValidationError(
-                {"candidate": f"No active AI interview configuration found for role '{role_name}'."}
+        for role_name in role_names:
+            matching = queryset.filter(role_name__iexact=role_name)
+            config = (
+                matching.filter(language__iexact=preferred_language).order_by("evaluation_tier", "id").first()
+                or matching.order_by("language", "evaluation_tier", "id").first()
             )
-        return config
+            if config is not None:
+                return config
+        raise serializers.ValidationError(
+            {"candidate": f"No active AI interview configuration found for role '{role_names[0]}'."}
+        )
 
     def _build_interview_link(self, session, request):
         base_url = (settings.FRONTEND_URL or request.build_absolute_uri("/")).rstrip("/")

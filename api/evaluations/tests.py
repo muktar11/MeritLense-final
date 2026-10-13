@@ -1,5 +1,6 @@
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import TestCase, override_settings
 from django.db import DatabaseError
@@ -481,7 +482,7 @@ class EvaluationInterviewSchedulingApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("Nanny", str(response.data["candidate"]))
+        self.assertIn("Child Caregiver", str(response.data["candidate"]))
 
     def test_create_rejects_past_scheduled_date_at_api_layer(self):
         response = self.client.post(
@@ -681,6 +682,67 @@ class InterviewRoleMappingTests(TestCase):
         candidate = self._create_candidate(CandidateJobRoles.MAINTAINANCEWORKER, "MW-001")
         response = self._schedule(candidate)
         self.assertEqual(response.status_code, 201, response.data)
+
+    def _config(self, role_name, role_code):
+        return InterviewConfiguration.objects.create(
+            role_name=role_name,
+            role_code=role_code,
+            language="EN",
+            evaluation_tier=InterviewEvaluationTier.FULL,
+            duration_minutes=30,
+            total_questions=1,
+            rubric_version="v1",
+            question_set_version="v1",
+            is_active=True,
+        )
+
+    def _scheduled_config(self, response):
+        self.assertEqual(response.status_code, 201, response.data)
+        return Evaluation.objects.get(public_id=response.data["id"]).session.config
+
+    def test_nanny_resolves_to_governance_child_caregiver_config(self):
+        # Production only has the 21 governance roles - no "Nanny" config.
+        self._config("Child Caregiver", "child_caregiver")
+        candidate = self._create_candidate(CandidateJobRoles.NANNY, "NA-001")
+        self.assertEqual(self._scheduled_config(self._schedule(candidate)).role_name, "Child Caregiver")
+
+    def test_maintenance_worker_resolves_to_governance_skilled_trades_config(self):
+        self._config("Skilled Trades", "skilled_trades")
+        candidate = self._create_candidate(CandidateJobRoles.MAINTAINANCEWORKER, "MW-002")
+        self.assertEqual(self._scheduled_config(self._schedule(candidate)).role_name, "Skilled Trades")
+
+    def test_governance_role_name_is_preferred_over_legacy_name(self):
+        self._config("Nanny", "nanny")
+        self._config("Child Caregiver", "child_caregiver")
+        candidate = self._create_candidate(CandidateJobRoles.NANNY, "NA-002")
+        self.assertEqual(self._scheduled_config(self._schedule(candidate)).role_name, "Child Caregiver")
+
+    def test_scheduling_creates_session_link_and_sends_invitations(self):
+        from django.core import mail
+
+        self._config("Child Caregiver", "child_caregiver")
+        candidate = self._create_candidate(CandidateJobRoles.NANNY, "NA-004")
+        response = self._schedule(candidate)
+        self.assertEqual(response.status_code, 201, response.data)
+
+        evaluation = Evaluation.objects.get(public_id=response.data["id"])
+        self.assertEqual(evaluation.session.config.role_name, "Child Caregiver")
+        self.assertIn(f"sessionId={evaluation.session.public_id}", evaluation.meeting_link)
+        self.assertIn("token=", evaluation.meeting_link)
+
+        recipients = [message.to for message in mail.outbox]
+        self.assertEqual(recipients, [[candidate.email], [self.user.email]])
+        invitation = mail.outbox[0]
+        self.assertIn(evaluation.meeting_link, invitation.body)
+        self.assertIn("AST", invitation.body)
+
+    def test_email_failure_does_not_fail_scheduling(self):
+        self._config("Child Caregiver", "child_caregiver")
+        candidate = self._create_candidate(CandidateJobRoles.NANNY, "NA-003")
+        with patch("api.evaluations.utils.send_mail", side_effect=OSError("SMTP down")):
+            response = self._schedule(candidate)
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(Evaluation.objects.filter(public_id=response.data["id"]).exists())
 
     def test_other_role_is_blocked_with_clear_message_even_if_a_matching_config_exists(self):
         InterviewConfiguration.objects.create(

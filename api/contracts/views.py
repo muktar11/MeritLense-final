@@ -546,7 +546,10 @@ class CookieConsentView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
-    CHOICES = {"accept_all", "reject_optional", "custom"}
+    # this_session = "Just This Time": optional cookies allowed for the
+    # current visit only; the banner asks again on the next visit.
+    CHOICES = {"accept_all", "this_session", "reject_optional", "custom"}
+    ALLOW_ALL = {"accept_all", "this_session"}
 
     def post(self, request):
         import uuid
@@ -561,8 +564,8 @@ class CookieConsentView(APIView):
         choice = str(data.get("choice", ""))
         if choice not in self.CHOICES:
             return Response({"detail": "Unknown choice."}, status=status.HTTP_400_BAD_REQUEST)
-        analytics = bool(data.get("analytics")) if choice == "custom" else choice == "accept_all"
-        marketing = bool(data.get("marketing")) if choice == "custom" else choice == "accept_all"
+        analytics = bool(data.get("analytics")) if choice == "custom" else choice in self.ALLOW_ALL
+        marketing = bool(data.get("marketing")) if choice == "custom" else choice in self.ALLOW_ALL
         language = "ar" if str(data.get("language", "")).lower().startswith("ar") else "en"
         record = CookieConsent.objects.create(
             consent_id=consent_id,

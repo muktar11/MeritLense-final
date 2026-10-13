@@ -100,8 +100,11 @@ class CookieConsentTests(TestCase):
         self.assertEqual((response.data["analytics"], response.data["marketing"]), (True, False))
         response = client.post(url, {"consent_id": consent_id, "choice": "accept_all"}, format="json")
         self.assertEqual((response.data["analytics"], response.data["marketing"]), (True, True))
+        # "Just This Time": allowed for this visit, recorded like the others.
+        response = client.post(url, {"consent_id": consent_id, "choice": "this_session"}, format="json")
+        self.assertEqual((response.data["analytics"], response.data["marketing"]), (True, True))
         rows = CookieConsent.objects.filter(consent_id=consent_id).order_by("created_at")
-        self.assertEqual([r.choice for r in rows], ["reject_optional", "custom", "accept_all"])
+        self.assertEqual([r.choice for r in rows], ["reject_optional", "custom", "accept_all", "this_session"])
         self.assertEqual(rows[0].language, "ar")
         self.assertTrue(all(r.necessary for r in rows))
         self.assertEqual(rows[0].policy_version, CURRENT_VERSIONS[AgreementType.PRIVACY_TERMS])

@@ -1,3 +1,4 @@
+import logging
 import mimetypes
 
 from django.utils import timezone
@@ -65,6 +66,8 @@ from .serializers import (
     SessionVerbalConfirmationSerializer,
 )
 
+
+logger = logging.getLogger(__name__)
 
 class CanManageInterviewSetupMixin:
     setup_roles = {"ADMIN", "SUPERADMIN", "B2B", "B2C"}
@@ -324,6 +327,43 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         data["interview_link"] = interview_link(session, locale)
         data["short_link"] = interview_short_link(session, locale)
         return Response(data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="send-link")
+    def send_link(self, request, id=None):
+        """Email the candidate their interview link from MeritLense. The
+        "share by email" button used a mailto: link, which does nothing on
+        a computer without a configured mail app."""
+        from api.audit.services import AuditLogService
+        from api.core.constants import AuditLogAction, AuditLogCategory
+        from api.sessions.links import send_interview_link_email
+
+        session = self._get_session()
+        if not request.user.is_authenticated or not session.can_manage(request.user):
+            raise PermissionDenied("Only the assessment's owner can send its link.")
+        self._ensure_access(session, request)
+        if not session.candidate.email:
+            raise ValidationError({"detail": "This candidate has no email address."})
+        if session.status in {InterviewSessionStatus.COMPLETED, InterviewSessionStatus.EXPIRED,
+                              InterviewSessionStatus.CANCELLED, InterviewSessionStatus.FAILED}:
+            raise ValidationError({"detail": "This assessment has already ended; its link can no longer be used."})
+        try:
+            sent_to = send_interview_link_email(session, request.data.get("locale") or request.query_params.get("locale"))
+        except Exception:
+            logger.exception("Interview link email failed for session %s", session.public_id)
+            return Response(
+                {"detail": "The email could not be sent. Copy the link and send it another way."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        AuditLogService.log(
+            user=request.user,
+            action=AuditLogAction.SESSION_CREATED,
+            category=AuditLogCategory.SESSION,
+            description=f"Interview link emailed to {sent_to}",
+            resource=session,
+            data={"session_id": str(session.public_id), "sent_to": sent_to},
+            request=request,
+        )
+        return Response({"sent_to": sent_to})
 
     def retrieve(self, request, *args, **kwargs):
         session = self._get_session()

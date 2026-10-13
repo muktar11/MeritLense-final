@@ -192,6 +192,17 @@ Candidate opens link ──► Prechecks ──► Orientation ──► Questio
 
 **6. Scoring, readiness, review, report and certificate** (§4.4–4.7).
 
+### 4.2a Question bank numbers and retakes (verified in production, 13 Oct 2026)
+
+- **Active bank:** GOV2.0-RC1, with **2,100 questions in English plus the same 2,100 in Arabic**: exactly 100 per role per language, for 21 roles.
+- **Older versions:** GOV1.2-FINAL (441 EN + 441 AR) is still marked active, but sessions only draw from their own version (GOV2.0-RC1), so it isn't used. Older v1.2 rows are inactive.
+- **Per session:** Screening asks 7 questions, Full asks 21, drawn by the approved competency quotas.
+- **Does a candidate get the same question again?** Not until the pool runs out. For the same candidate and role, unseen questions are always picked first; a seen question is reused only in a competency with no unseen ones left. Fully fresh assessments per candidate per role:
+  - **Full:** 3 for most roles; 4 for Nursing Assistant, Home Care Assistant, Elderly Medical Support, Basic Patient Support, Restaurant Staff, Security Guard and Event Security;
+  - **Screening:** about 7–10.
+
+  After that, only the exhausted competencies repeat questions.
+
 ### 4.3 How each answer is processed
 
 | Step | What happens | Technology |
@@ -509,6 +520,7 @@ Several secrets were shared in chat or email during development. **Rotate them b
 
 - [ ] **Profile and candidate screens** still use the older 66-country list; registration has the full list. Switch them to the same full list.
 - [ ] **Low-resource languages** (Afaan Oromo, Tigrinya, Afar, Twi, Luganda, Malagasy): after Google billing is on, test a real interview in at least one of them.
+- [ ] **Upcoming questions are visible to the candidate.** The interview link's data includes the text of all the session's questions from the start, so a candidate with browser developer tools could read ahead. No answer keys are exposed (no must-include points, keywords or scoring). Fix: return only the current question's text to the candidate, and translate upcoming questions on the server instead of in the browser.
 - [ ] **Indicator translation review** (`MeritLense_Indicator_Translation_Review_v1.2.xlsx`, about 1,613 Arabic indicator texts). Import the approved rows when they come back.
 
 ### 10.7 Infrastructure and operations: **R / A**

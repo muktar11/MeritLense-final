@@ -1,4 +1,5 @@
-"""Build the SME review workbook for GOV2.0-RC1: every AI-drafted or
+"""Build the specialist review workbook for GOV2.0-RC1: who must review
+what (by sector), the 1,659 new questions, and every AI-drafted or
 corrected item awaiting specialist / bilingual sign-off, priority sectors
 first, with decision columns for the reviewer.
 
@@ -25,6 +26,22 @@ PRIORITY_SECTORS = {
     "Livestock Support": "Animal health",
 }
 DECISION = ["SME decision (Approve / Amend / Reject)", "SME comment", "Reviewer", "Date"]
+# Specialist profile responsible for each sector's occupational sign-off.
+# Names are assigned by management; this sheet only defines the profile.
+SPECIALISTS = {
+    "Healthcare & Nursing Support": "Registered nurse / clinical nurse educator",
+    "Elderly Care": "Registered nurse / clinical nurse educator (geriatric care)",
+    "Special Needs Care": "Special-needs care specialist (registered nurse or certified disability-support educator)",
+    "Child Care & Development": "Early-childhood / child-safeguarding specialist (with paediatric first aid)",
+    "Hospitality": "Hospitality trainer with food-safety (HACCP) certification",
+    "Domestic & Personal Support": "Hospitality / housekeeping trainer",
+    "Cleaning Services": "Occupational health & safety officer (chemical handling, COSHH)",
+    "Construction": "Occupational health & safety officer (construction, NEBOSH or equivalent)",
+    "Logistics & Transportation": "Fleet-safety driving instructor (Driver); HSE officer with warehouse / MHE experience (Warehouse Staff)",
+    "Security": "Licensed security operations supervisor",
+    "Agriculture": "Agronomist with pesticide-safety certification (Farm Worker); veterinarian or animal-husbandry specialist (Livestock Support)",
+}
+BILINGUAL = "Certified English-Arabic assessment translator / bilingual reviewer (all sectors)"
 HEADER_FILL = PatternFill("solid", fgColor="1D5F78")
 
 
@@ -57,15 +74,57 @@ def main(out):
     readme = wb.active
     readme.title = "README"
     for line in [
-        "MeritLense GOV2.0-RC1 - SME review packet",
-        "Every item here was drafted or corrected by AI editorial review and is NOT approved.",
+        "MeritLense GOV2.0-RC1 - specialist review packet",
+        "Scope: occupational sign-off of the 1,659 new questions and of every AI-drafted or corrected item; bilingual sign-off of all Arabic in new or corrected questions.",
+        "Start with 'Specialist assignment': it lists the specialist profile per sector and each role's workload. Management assigns the named reviewer.",
+        "Every AI-drafted item here was drafted or corrected by AI editorial review and is NOT approved.",
         "Priority sectors first: clinical/care, child safety, food hygiene, industrial/trade hazards, pesticides, animal health.",
         "Severity (D-04): S3 critical safety, S2 major, S1 noncritical. Mandatory (D-02): points required for full marks; other points are scored, not removed.",
         "D-06 questions (CCG-TSK-003, IC-TSK-003, SNC-GEN-009) are kept at the approved v1.2 content; the handoff rewrite is listed for review.",
+        "Approved by management on 13 Oct 2026 and not for re-decision here: the four Criticality changes, Skilled Trades Communication (Non-Critical with S3 safeguards) and the selection matrix.",
         "Record a decision per row. Nothing changes in Production until management approves the closure items.",
     ]:
         readme.append([line])
     readme.column_dimensions["A"].width = 140
+
+    by_role = {}
+    for q in qs:
+        by_role.setdefault((q["sector"], q["role"]), []).append(q)
+    assignment = []
+    for (sector, role), role_qs in sorted(by_role.items(), key=lambda kv: (kv[0][1] not in PRIORITY_SECTORS, kv[0])):
+        new = sum(1 for q in role_qs if q["source"] == "expansion")
+        drafts = sum(1 for q in role_qs if q.get("review_status") == "AI_DRAFT_PENDING_SME")
+        bilingual = sum(1 for q in role_qs if q["source"] == "expansion"
+                        or q.get("review_status") == "EDITORIAL_PENDING_BILINGUAL_REVIEW")
+        s3 = sum(q.get("negative_severity", []).count("S3") for q in role_qs)
+        assignment.append([sector, role, PRIORITY_SECTORS.get(role, ""), SPECIALISTS[sector], new, drafts, s3,
+                           BILINGUAL, bilingual, "", ""])
+    ws = wb.create_sheet("Specialist assignment")
+    ws.append(["Sector", "Role", "Priority", "Occupational specialist profile", "New questions to review",
+               "AI-drafted items (negatives, severities, mandatory points, replacements)", "S3 safety items",
+               "Bilingual reviewer profile", "Questions needing bilingual review",
+               "Assigned occupational specialist (name, credential)", "Assigned bilingual reviewer (name)"])
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = HEADER_FILL
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+    for row in assignment:
+        ws.append(row)
+    for i, width in enumerate([22, 22, 16, 45, 12, 18, 10, 36, 14, 30, 26], start=1):
+        ws.column_dimensions[get_column_letter(i)].width = width
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+    ws.freeze_panes = "C2"
+
+    new_questions = sorted((q for q in qs if q["source"] == "expansion"), key=priority)
+    _sheet(wb, "New questions", ["Question", "Role", "Priority sector", "Competency", "Criticality", "Full / Screening",
+                                 "Question (EN)", "Question (AR)", "Must Include (EN)", "Must Include (AR)",
+                                 "Negative indicators", "Severities"],
+           [[q["question_code"], q["role"], PRIORITY_SECTORS.get(q["role"], ""), q["competency_en"], q["criticality"],
+             "Full + Screening" if q["screening_eligible"] else "Full only", q["question_en"], q["question_ar"],
+             q["must_include_en"], q["must_include_ar"], q["negative_indicators"], ", ".join(q.get("negative_severity", []))]
+            for q in new_questions], [14, 18, 16, 18, 11, 12, 45, 45, 50, 50, 45, 12])
 
     neg = sorted((q for q in qs if "NEGATIVE_INDICATORS" in q.get("corrections_applied", [])), key=priority)
     _sheet(wb, "Negative indicators", ["Question", "Role", "Priority sector", "Competency", "Criticality",
@@ -111,7 +170,7 @@ def main(out):
            [22, 45, 40, 70])
 
     wb.save(out)
-    print(f"Wrote {out}: {len(neg)} negative sets, {len(mand)} mandatory sets, {len(alignment)} Arabic corrections, "
+    print(f"Wrote {out}: {len(assignment)} role assignments, {len(new_questions)} new questions, {len(neg)} negative sets, {len(mand)} mandatory sets, {len(alignment)} Arabic corrections, "
           f"{len(dup)} replacements, {len(prompts)} prompt fixes, {len(d06)} D-06 holds, {len(matrix)} roles")
 
 

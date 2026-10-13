@@ -131,6 +131,7 @@ class B2BDocumentWorkflowTests(TestCase):
                 "last_name": "Company",
                 "password": "Password123!",
                 "confirm_password": "Password123!",
+                "terms_accepted": True,
                 "company_name": "New Workflow Company",
                 "company_registration_number": "WORKFLOW-NEW-001",
                 "company_size": CompanySize.SMALL,

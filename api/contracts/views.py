@@ -537,3 +537,46 @@ def agreement_audit(request, agreement_id):
         resource_id=agreement.pk,
     ).order_by('-created_at')
     return Response(AuditLogSerializer(logs, many=True, context={'request': request}).data)
+
+
+class CookieConsentView(APIView):
+    """POST /agreements/cookie-consent - record a visitor's cookie choice.
+    Public: the banner appears before anyone signs in. Necessary cookies are
+    always on and cannot be refused."""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    CHOICES = {"accept_all", "reject_optional", "custom"}
+
+    def post(self, request):
+        import uuid
+
+        from .models import CookieConsent
+
+        data = request.data
+        try:
+            consent_id = uuid.UUID(str(data.get("consent_id", "")))
+        except ValueError:
+            return Response({"detail": "consent_id must be a UUID."}, status=status.HTTP_400_BAD_REQUEST)
+        choice = str(data.get("choice", ""))
+        if choice not in self.CHOICES:
+            return Response({"detail": "Unknown choice."}, status=status.HTTP_400_BAD_REQUEST)
+        analytics = bool(data.get("analytics")) if choice == "custom" else choice == "accept_all"
+        marketing = bool(data.get("marketing")) if choice == "custom" else choice == "accept_all"
+        language = "ar" if str(data.get("language", "")).lower().startswith("ar") else "en"
+        record = CookieConsent.objects.create(
+            consent_id=consent_id,
+            necessary=True,
+            analytics=analytics,
+            marketing=marketing,
+            choice=choice,
+            language=language,
+            policy_version=CURRENT_VERSIONS[AgreementType.PRIVACY_TERMS],
+            ip_address=_client_ip(request) or None,
+            user_agent=request.META.get("HTTP_USER_AGENT", "")[:500],
+        )
+        return Response(
+            {"consent_id": str(record.consent_id), "necessary": True, "analytics": analytics,
+             "marketing": marketing, "recorded_at": record.created_at},
+            status=status.HTTP_201_CREATED,
+        )

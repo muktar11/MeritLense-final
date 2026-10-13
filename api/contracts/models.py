@@ -67,3 +67,26 @@ class Agreement(TimeStampedModel):
 
     def __str__(self):
         return f"{self.agreement_type} v{self.version} - user {self.user_id} ({self.status})"
+
+
+class CookieConsent(models.Model):
+    """One row per cookie choice a visitor makes (append-only, so a change
+    of mind is kept as history). consent_id is a random id the browser
+    keeps, so visitors are linked across choices without an account."""
+
+    consent_id = models.UUIDField(db_index=True)
+    necessary = models.BooleanField(default=True)
+    analytics = models.BooleanField(default=False)
+    marketing = models.BooleanField(default=False)
+    choice = models.CharField(max_length=20, help_text="accept_all, reject_optional or custom")
+    language = models.CharField(max_length=5, default="en")
+    policy_version = models.CharField(max_length=20)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.consent_id} {self.choice} @ {self.created_at:%Y-%m-%d %H:%M}"

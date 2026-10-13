@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    CookieConsentView,
     AgreementAcceptView,
     AgreementSignInitiateView,
     AgreementSignResendView,
@@ -17,6 +18,7 @@ from .views import (
 
 urlpatterns = [
     path('accept', AgreementAcceptView.as_view(), name='agreement-accept'),
+    path('cookie-consent', CookieConsentView.as_view(), name='cookie-consent'),
     path('sign/initiate', AgreementSignInitiateView.as_view(), name='agreement-sign-initiate'),
     path('sign/resend', AgreementSignResendView.as_view(), name='agreement-sign-resend'),
     path('sign/confirm', AgreementSignConfirmView.as_view(), name='agreement-sign-confirm'),

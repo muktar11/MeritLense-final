@@ -36,7 +36,19 @@ class UserRegistrationSerializer(serializers.Serializer):
     last_name = serializers.CharField(max_length=150)
     password = serializers.CharField(write_only=True, min_length=8)
     confirm_password = serializers.CharField(write_only=True, min_length=8)
-    
+    # The registration checkbox (unchecked by default, required). Recorded
+    # as a PRIVACY_TERMS acceptance of the current version, in the language
+    # the documents were shown in.
+    terms_accepted = serializers.BooleanField(write_only=True)
+    terms_language = serializers.ChoiceField(choices=["en", "ar"], required=False, default="en", write_only=True)
+
+    TERMS_REQUIRED_MESSAGE = "Please accept the Terms and Privacy Policy to create an account."
+
+    def validate_terms_accepted(self, value):
+        if value is not True:
+            raise serializers.ValidationError(self.TERMS_REQUIRED_MESSAGE)
+        return value
+
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
             raise serializers.ValidationError("User with this email already exists.")
@@ -47,6 +59,46 @@ class UserRegistrationSerializer(serializers.Serializer):
             raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
         return data
     
+    def record_terms_acceptance(self, user, *, statement):
+        """Store the registration checkbox as a PRIVACY_TERMS acceptance -
+        the same record the signed-in acceptance flow writes - plus an
+        audit entry with the exact statement the user ticked."""
+        from django.utils import timezone
+
+        from api.audit.services import AuditLogService
+        from api.contracts.constants import CURRENT_VERSIONS
+        from api.contracts.models import Agreement
+        from api.core.constants import (
+            AgreementMethod, AgreementStatus, AgreementType, AuditLogAction, AuditLogCategory,
+        )
+
+        request = self.context.get("request")
+        meta = getattr(request, "META", {}) if request is not None else {}
+        forwarded = meta.get("HTTP_X_FORWARDED_FOR", "")
+        version = CURRENT_VERSIONS[AgreementType.PRIVACY_TERMS]
+        agreement = Agreement.objects.create(
+            user=user,
+            agreement_type=AgreementType.PRIVACY_TERMS,
+            version=version,
+            method=AgreementMethod.CHECKBOX,
+            status=AgreementStatus.SIGNED,
+            language=self.validated_data.get("terms_language") or "en",
+            accepted_at=timezone.now(),
+            ip_address=(forwarded.split(",")[0].strip() if forwarded else meta.get("REMOTE_ADDR")) or None,
+            user_agent=meta.get("HTTP_USER_AGENT", ""),
+        )
+        AuditLogService.log(
+            user=user,
+            action=AuditLogAction.AGREEMENT_ACCEPTED,
+            category=AuditLogCategory.DOCUMENT,
+            description=f"Accepted PRIVACY_TERMS v{version} via registration checkbox",
+            resource=agreement,
+            data={"agreement_type": AgreementType.PRIVACY_TERMS, "version": version,
+                  "statement": statement, "language": agreement.language},
+            request=request,
+        )
+        return agreement
+
     def create_user(self, role, **kwargs):
         verification_code = ''.join([str(random.randint(0, 9)) for _ in range(5)])
         
@@ -64,8 +116,16 @@ class UserRegistrationSerializer(serializers.Serializer):
 
 
 class B2CRegistrationSerializer(UserRegistrationSerializer):
+    TERMS_STATEMENT = (
+        "I confirm that I am 18 years or older and agree to the applicable Terms and Privacy Policy."
+    )
+    TERMS_REQUIRED_MESSAGE = (
+        "Please confirm you are 18 years or older and accept the Terms and Privacy Policy."
+    )
+
     passport_id = serializers.CharField(max_length=50)
-    job_role = serializers.ChoiceField(choices=[])
+    # Job Title is no longer asked at registration (improvement deck, B2C).
+    job_role = serializers.ChoiceField(choices=[], required=False, allow_blank=True)
     nationality = serializers.ChoiceField(choices=[])
     preferred_language = serializers.ChoiceField(choices=[])
     phone_number = serializers.CharField(max_length=20)
@@ -100,7 +160,7 @@ class B2CRegistrationSerializer(UserRegistrationSerializer):
     def create(self, validated_data):
         profile_data = {
             'passport_id': validated_data.pop('passport_id'),
-            'job_role': validated_data.pop('job_role'),
+            'job_role': validated_data.pop('job_role', '') or '',
             'nationality': validated_data.pop('nationality'),
             'preferred_language': validated_data.pop('preferred_language'),
             'phone_number': validated_data.pop('phone_number'),
@@ -113,13 +173,18 @@ class B2CRegistrationSerializer(UserRegistrationSerializer):
             'resume_document': validated_data.pop('resume_document', None),
         }
 
+        validated_data.pop('terms_accepted', None)
+        validated_data.pop('terms_language', None)
         user = self.create_user(Roles.B2C, **validated_data)
+        self.record_terms_acceptance(user, statement=self.TERMS_STATEMENT)
         self.context['profile_data'] = profile_data
         self.context['user'] = user
         return user
 
 
 class B2BRegistrationSerializer(UserRegistrationSerializer):
+    TERMS_STATEMENT = "I have read and agree to the applicable Terms and Privacy Policy."
+
     company_name = serializers.CharField(max_length=255)
     company_registration_number = serializers.CharField(max_length=100)
     company_size = serializers.ChoiceField(choices=[])
@@ -177,7 +242,10 @@ class B2BRegistrationSerializer(UserRegistrationSerializer):
             'tax_id_document': validated_data.pop('tax_id_document', None),
         }
         
+        validated_data.pop('terms_accepted', None)
+        validated_data.pop('terms_language', None)
         user = self.create_user(Roles.B2B, **validated_data)
+        self.record_terms_acceptance(user, statement=self.TERMS_STATEMENT)
         self.context['profile_data'] = profile_data
         self.context['user'] = user
         return user

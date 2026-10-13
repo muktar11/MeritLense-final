@@ -1,0 +1,991 @@
+{
+ "category": "PROMPT",
+ "status": "EDITORIAL",
+ "corrections": {
+  "RS-BEH-009": {
+   "fields": {
+    "question_en": "A guest offers cash for you to remove items from their bill without authorization. What do you do?",
+    "question_ar": "يعرض ضيف مالًا لحذف أصناف من فاتورته دون صلاحية. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "RS-BEH-010": {
+   "fields": {
+    "question_en": "You notice a colleague eating from a guest's returned plate. What do you do?",
+    "question_ar": "تلاحظ زميلًا يأكل من طبق أعاده ضيف. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "RS-BEH-011": {
+   "fields": {
+    "question_en": "You accidentally enter a lower-priced item than the guest received. What do you do?",
+    "question_ar": "تدخل بالخطأ صنفًا أقل سعرًا من الذي حصل عليه الضيف. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "RS-BEH-012": {
+   "fields": {
+    "question_en": "A regular guest asks you to reserve the best table by falsely marking it unavailable. What do you do?",
+    "question_ar": "يطلب ضيف دائم حجز أفضل طاولة له عبر تسجيلها كغير متاحة بشكل غير صحيح. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "RS-BEH-013": {
+   "fields": {
+    "question_en": "You find a guest's wallet under a table. What do you do?",
+    "question_ar": "تجد محفظة ضيف تحت الطاولة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "RS-BEH-014": {
+   "fields": {
+    "question_en": "A colleague asks you to use their staff discount for a guest who is not eligible. What do you do?",
+    "question_ar": "يطلب منك زميل استخدام خصم الموظفين لضيف غير مستحق. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "CC-BEH-006": {
+   "fields": {
+    "question_en": "You find confidential papers left on a desk while cleaning. What do you do?",
+    "question_ar": "تجد أوراقًا سرية على مكتب أثناء التنظيف. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "CC-BEH-007": {
+   "fields": {
+    "question_en": "A client offers you cash to skip an area but mark it as cleaned. What do you do?",
+    "question_ar": "يعرض عليك عميل مالًا لتتجاوز منطقة وتسجيلها كنظيفة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "CC-BEH-008": {
+   "fields": {
+    "question_en": "You accidentally damage a client's item. What do you do?",
+    "question_ar": "تتلف غرضًا للعميل عن طريق الخطأ. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "CC-BEH-009": {
+   "fields": {
+    "question_en": "A colleague suggests using a stronger unapproved chemical to finish faster. What do you do?",
+    "question_ar": "يقترح زميل استخدام مادة أقوى غير معتمدة للانتهاء أسرع. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "CC-BEH-010": {
+   "fields": {
+    "question_en": "You notice a colleague signing off an area they did not clean. What do you do?",
+    "question_ar": "تلاحظ زميلًا يعتمد منطقة لم ينظفها. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "CC-BEH-011": {
+   "fields": {
+    "question_en": "You find money on the floor in an office. What do you do?",
+    "question_ar": "تجد نقودًا على أرضية مكتب. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "CC-BEH-012": {
+   "fields": {
+    "question_en": "A client asks you to open a locked drawer so you can clean inside. What do you do?",
+    "question_ar": "يطلب منك عميل فتح درج مقفل لتنظيف داخله. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "CC-BEH-013": {
+   "fields": {
+    "question_en": "You realize you used the wrong cloth in one area but no one noticed. What do you do?",
+    "question_ar": "تدرك أنك استخدمت قطعة قماش خاطئة في منطقة ولم يلاحظ أحد. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "CC-BEH-014": {
+   "fields": {
+    "question_en": "A supervisor asks you to record a task complete before it is finished. What do you do?",
+    "question_ar": "يطلب منك مشرف تسجيل مهمة مكتملة قبل إنهائها. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "CC-BEH-015": {
+   "fields": {
+    "question_en": "You see personal information on a computer screen while cleaning. What do you do?",
+    "question_ar": "ترى معلومات شخصية على شاشة كمبيوتر أثناء التنظيف. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "CC-BEH-016": {
+   "fields": {
+    "question_en": "A coworker asks to borrow client property for personal use. What do you do?",
+    "question_ar": "يطلب زميل استعارة ممتلكات العميل للاستخدام الشخصي. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "IC-BEH-005": {
+   "fields": {
+    "question_en": "A supervisor asks you to sign a permit/checklist you did not verify. What do you do?",
+    "question_ar": "يطلب منك مشرف توقيع تصريح أو قائمة فحص لم تتحقق منها. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "IC-BEH-006": {
+   "fields": {
+    "question_en": "A coworker suggests bypassing a machine interlock to clean faster. What do you do?",
+    "question_ar": "يقترح زميل تجاوز قفل أمان في آلة للتنظيف أسرع. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "IC-BEH-007": {
+   "fields": {
+    "question_en": "You damage a hose during cleaning but it still appears usable. What do you do?",
+    "question_ar": "تتلف خرطومًا أثناء التنظيف لكنه يبدو قابلًا للاستخدام. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "IC-BEH-008": {
+   "fields": {
+    "question_en": "You find a tool that may belong to the production team. What do you do?",
+    "question_ar": "تجد أداة قد تخص فريق الإنتاج. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "IC-BEH-009": {
+   "fields": {
+    "question_en": "You realize you used the wrong waste container. What do you do?",
+    "question_ar": "تدرك أنك استخدمت حاوية نفايات خاطئة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "IC-BEH-010": {
+   "fields": {
+    "question_en": "A colleague asks you to lend them your PPE that has been assigned personally to you. What do you do?",
+    "question_ar": "يطلب زميل استعارة معدات الوقاية المخصصة لك شخصيًا. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "IC-BEH-011": {
+   "fields": {
+    "question_en": "You are behind schedule and a safety barrier takes time to set up. What do you do?",
+    "question_ar": "أنت متأخر والحاجز الوقائي يحتاج وقتًا للتجهيز. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "IC-BEH-012": {
+   "fields": {
+    "question_en": "You notice a near miss but no one was injured. What do you do?",
+    "question_ar": "تلاحظ حادثًا وشيكًا دون إصابة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "IC-BEH-013": {
+   "fields": {
+    "question_en": "A production employee asks you to clean inside equipment that is not isolated. What do you do?",
+    "question_ar": "يطلب موظف إنتاج تنظيف داخل معدة غير معزولة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "IC-BEH-014": {
+   "fields": {
+    "question_en": "You discover that a completed checklist contains an error you made. What do you do?",
+    "question_ar": "تكتشف خطأ منك في قائمة فحص مكتملة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "IC-BEH-015": {
+   "fields": {
+    "question_en": "A coworker wants to pour leftover chemical into an unmarked bottle. What do you do?",
+    "question_ar": "يريد زميل صب مادة كيميائية متبقية في عبوة غير موسومة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "IC-BEH-016": {
+   "fields": {
+    "question_en": "You feel too fatigued to safely operate powered cleaning equipment. What do you do?",
+    "question_ar": "تشعر بإرهاق يمنعك من تشغيل معدات تنظيف آلية بأمان. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "SG-BEH-002": {
+   "fields": {
+    "question_en": "A colleague asks you to cover up that they left a gate open. What do you do?",
+    "question_ar": "يطلب منك زميل إخفاء أنه ترك بوابة مفتوحة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "SG-BEH-003": {
+   "fields": {
+    "question_en": "You find cash during patrol. What do you do?",
+    "question_ar": "تجد نقودًا أثناء الدورية. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "SG-BEH-004": {
+   "fields": {
+    "question_en": "A manager asks you to change an incident time in the log. What do you do?",
+    "question_ar": "يطلب منك مدير تغيير وقت حادثة في السجل. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "SG-BEH-005": {
+   "fields": {
+    "question_en": "You accidentally fail to record a visitor exit. What do you do?",
+    "question_ar": "تنسى بالخطأ تسجيل خروج زائر. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "SG-BEH-007": {
+   "fields": {
+    "question_en": "You see confidential CCTV footage that is not relevant to your task. What do you do?",
+    "question_ar": "ترى تسجيلًا سريًا من الكاميرات لا يتعلق بمهمتك. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "SG-BEH-008": {
+   "fields": {
+    "question_en": "You are tired and tempted to record a patrol you did not complete. What do you do?",
+    "question_ar": "تشعر بالتعب وتفكر في تسجيل دورية لم تنفذها. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "SG-BEH-009": {
+   "fields": {
+    "question_en": "A coworker uses discriminatory language about a visitor. What do you do?",
+    "question_ar": "يستخدم زميل لغة تمييزية تجاه زائر. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "SG-BEH-010": {
+   "fields": {
+    "question_en": "You damage a radio but it still works. What do you do?",
+    "question_ar": "تتلف جهاز اتصال لكنه ما زال يعمل. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "SG-BEH-011": {
+   "fields": {
+    "question_en": "You are asked to share a visitor's ID photo on a personal messaging app. What do you do?",
+    "question_ar": "يُطلب منك مشاركة صورة هوية زائر عبر تطبيق شخصي. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "SG-BEH-012": {
+   "fields": {
+    "question_en": "A colleague asks you to sign their patrol checkpoint for them. What do you do?",
+    "question_ar": "يطلب منك زميل توقيع نقطة دوريته بدلًا عنه. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "SG-BEH-013": {
+   "fields": {
+    "question_en": "You witness a minor policy breach by a senior employee. What do you do?",
+    "question_ar": "تشهد مخالفة بسيطة للسياسة من موظف كبير. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ES-BEH-001": {
+   "fields": {
+    "question_en": "A friend asks you to let them enter without a ticket. What do you do?",
+    "question_ar": "يطلب منك صديق السماح له بالدخول دون تذكرة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ES-BEH-002": {
+   "fields": {
+    "question_en": "A VIP representative asks you to skip a required screening step. What do you do?",
+    "question_ar": "يطلب ممثل ضيف مهم تجاوز خطوة تفتيش مطلوبة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ES-BEH-004": {
+   "fields": {
+    "question_en": "You find cash after the crowd leaves. What do you do?",
+    "question_ar": "تجد نقودًا بعد مغادرة الحشد. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ES-BEH-005": {
+   "fields": {
+    "question_en": "You entered the wrong attendance count in a log. What do you do?",
+    "question_ar": "أدخلت عدد حضور خاطئًا في السجل. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ES-BEH-006": {
+   "fields": {
+    "question_en": "A promoter offers you a gift for giving guests priority access. What do you do?",
+    "question_ar": "يعرض عليك منظم هدية مقابل منح ضيوف أولوية دخول. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ES-BEH-007": {
+   "fields": {
+    "question_en": "You see a coworker using unnecessary force on an attendee. What do you do?",
+    "question_ar": "ترى زميلًا يستخدم قوة غير لازمة مع أحد الحضور. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ES-BEH-008": {
+   "fields": {
+    "question_en": "A guest asks for a photo of CCTV showing a celebrity. What do you do?",
+    "question_ar": "يطلب ضيف صورة من الكاميرات تظهر شخصية مشهورة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ES-BEH-009": {
+   "fields": {
+    "question_en": "You are tired and consider signing a patrol checkpoint you skipped. What do you do?",
+    "question_ar": "تشعر بالتعب وتفكر في توقيع نقطة دورية لم تمر بها. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ES-BEH-010": {
+   "fields": {
+    "question_en": "A senior organizer asks you to remove a safety barrier for appearance. What do you do?",
+    "question_ar": "يطلب منظم كبير إزالة حاجز سلامة لأسباب شكلية. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ES-BEH-011": {
+   "fields": {
+    "question_en": "A lost phone displays private messages. What do you do?",
+    "question_ar": "يعرض هاتف مفقود رسائل خاصة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ES-BEH-012": {
+   "fields": {
+    "question_en": "A colleague makes a discriminatory assumption about an attendee. What do you do?",
+    "question_ar": "يفترض زميل افتراضًا تمييزيًا عن أحد الحضور. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ES-BEH-013": {
+   "fields": {
+    "question_en": "You accidentally allow someone into the wrong zone. What do you do?",
+    "question_ar": "تسمح بالخطأ لشخص بدخول منطقة غير صحيحة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ES-BEH-014": {
+   "fields": {
+    "question_en": "A vendor asks you to mark equipment as checked when it was not. What do you do?",
+    "question_ar": "يطلب بائع تسجيل معدات على أنها فُحصت دون فحص. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-001": {
+   "fields": {
+    "question_en": "A client asks you to ignore a parking restriction for convenience. What do you do?",
+    "question_ar": "يطلب منك عميل تجاهل منع الوقوف لراحته. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-002": {
+   "fields": {
+    "question_en": "You scrape the vehicle while parking and damage seems minor. What do you do?",
+    "question_ar": "تخدش المركبة أثناء الوقوف ويبدو الضرر بسيطًا. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-003": {
+   "fields": {
+    "question_en": "A passenger leaves cash in the vehicle. What do you do?",
+    "question_ar": "يترك راكب نقودًا في المركبة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-004": {
+   "fields": {
+    "question_en": "A colleague asks you to sign their vehicle inspection. What do you do?",
+    "question_ar": "يطلب منك زميل توقيع فحص مركبته. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-005": {
+   "fields": {
+    "question_en": "You realize you entered the wrong mileage in a trip log. What do you do?",
+    "question_ar": "تدرك أنك سجلت عداد مسافة خاطئًا. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-006": {
+   "fields": {
+    "question_en": "A passenger offers extra money for unsafe speeding. What do you do?",
+    "question_ar": "يعرض راكب مالًا إضافيًا مقابل السرعة غير الآمنة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-007": {
+   "fields": {
+    "question_en": "You see confidential passenger information on a dispatch screen. What do you do?",
+    "question_ar": "ترى معلومات سرية عن راكب في شاشة التوجيه. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-008": {
+   "fields": {
+    "question_en": "You are asked to drive a vehicle type you are not licensed or authorized to operate. What do you do?",
+    "question_ar": "يُطلب منك قيادة نوع مركبة لست مرخصًا أو مخولًا لقيادته. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-009": {
+   "fields": {
+    "question_en": "You notice a coworker concealing a vehicle defect. What do you do?",
+    "question_ar": "تلاحظ زميلًا يخفي عيبًا في مركبة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-010": {
+   "fields": {
+    "question_en": "You are late and consider skipping the pre-trip check. What do you do?",
+    "question_ar": "أنت متأخر وتفكر في تجاوز فحص ما قبل الرحلة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-011": {
+   "fields": {
+    "question_en": "A passenger asks personal questions about a previous client. What do you do?",
+    "question_ar": "يسألك راكب أسئلة شخصية عن عميل سابق. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-012": {
+   "fields": {
+    "question_en": "You receive a traffic fine while driving a company vehicle. What do you do?",
+    "question_ar": "تتلقى مخالفة مرورية أثناء قيادة مركبة الشركة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-013": {
+   "fields": {
+    "question_en": "A colleague suggests using another driver's card or credential. What do you do?",
+    "question_ar": "يقترح زميل استخدام بطاقة أو تصريح سائق آخر. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-014": {
+   "fields": {
+    "question_en": "You find an item in the vehicle that may be illegal or dangerous. What do you do?",
+    "question_ar": "تجد غرضًا في المركبة قد يكون غير قانوني أو خطيرًا. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-015": {
+   "fields": {
+    "question_en": "You are pressured to record a delivery or stop as completed when it was not. What do you do?",
+    "question_ar": "تتعرض لضغط لتسجيل محطة أو تسليم كمكتمل رغم أنه لم يكتمل. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-016": {
+   "fields": {
+    "question_en": "You made a wrong turn that caused delay. What do you do?",
+    "question_ar": "تسلك طريقًا خاطئًا تسبب في تأخير. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-017": {
+   "fields": {
+    "question_en": "A passenger behaves disrespectfully toward you. What do you do?",
+    "question_ar": "يتصرف راكب معك بعدم احترام. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "DRV-BEH-018": {
+   "fields": {
+    "question_en": "You feel unfit to drive because of illness or extreme fatigue. What do you do?",
+    "question_ar": "تشعر بأنك غير قادر على القيادة بسبب المرض أو الإرهاق الشديد. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-001": {
+   "fields": {
+    "question_en": "A coworker asks you to confirm a count you did not perform. What do you do?",
+    "question_ar": "يطلب منك زميل تأكيد جرد لم تقم به. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-002": {
+   "fields": {
+    "question_en": "You find an expensive item with no location label. What do you do?",
+    "question_ar": "تجد غرضًا مرتفع القيمة دون ملصق موقع. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-003": {
+   "fields": {
+    "question_en": "You damage packaging but the product looks fine. What do you do?",
+    "question_ar": "تتلف العبوة لكن المنتج يبدو سليمًا. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-004": {
+   "fields": {
+    "question_en": "A supervisor asks you to change a count to match the system. What do you do?",
+    "question_ar": "يطلب منك مشرف تغيير العدد ليطابق النظام. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-005": {
+   "fields": {
+    "question_en": "A friend asks you to set aside stock for them. What do you do?",
+    "question_ar": "يطلب منك صديق حجز مخزون له. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-006": {
+   "fields": {
+    "question_en": "You notice a coworker taking warehouse goods for personal use. What do you do?",
+    "question_ar": "تلاحظ زميلًا يأخذ بضائع المستودع للاستخدام الشخصي. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-007": {
+   "fields": {
+    "question_en": "You entered the wrong location in the WMS. What do you do?",
+    "question_ar": "أدخلت موقعًا خاطئًا في نظام المستودع. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-008": {
+   "fields": {
+    "question_en": "You are behind target and consider skipping a scan step. What do you do?",
+    "question_ar": "أنت متأخر عن الهدف وتفكر في تجاوز خطوة المسح. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-009": {
+   "fields": {
+    "question_en": "A vendor offers you a gift to accept damaged goods. What do you do?",
+    "question_ar": "يعرض بائع هدية لقبول بضائع تالفة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-010": {
+   "fields": {
+    "question_en": "You find personal information on a shipping label. What do you do?",
+    "question_ar": "تجد معلومات شخصية على ملصق شحن. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-011": {
+   "fields": {
+    "question_en": "A colleague asks to use your scanner login. What do you do?",
+    "question_ar": "يطلب زميل استخدام حسابك على جهاز المسح. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-013": {
+   "fields": {
+    "question_en": "A manager pressures you to mark damaged stock as good. What do you do?",
+    "question_ar": "يضغط عليك مدير لتسجيل مخزون تالف على أنه سليم. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-014": {
+   "fields": {
+    "question_en": "You find cash or a personal item inside returned goods. What do you do?",
+    "question_ar": "تجد نقودًا أو غرضًا شخصيًا داخل بضاعة مرتجعة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-016": {
+   "fields": {
+    "question_en": "You are asked to operate a forklift but are not trained/authorized. What do you do?",
+    "question_ar": "يُطلب منك تشغيل رافعة شوكية وأنت غير مدرب أو مخول. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "WS-BEH-017": {
+   "fields": {
+    "question_en": "A coworker suggests hiding a near miss to avoid paperwork. What do you do?",
+    "question_ar": "يقترح زميل إخفاء حادث وشيك لتجنب الإجراءات. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-001": {
+   "fields": {
+    "question_en": "A coworker asks you to say a task is complete when it is not. What do you do?",
+    "question_ar": "يطلب منك زميل القول إن مهمة اكتملت وهي لم تكتمل. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-002": {
+   "fields": {
+    "question_en": "You accidentally chip a finished surface. What do you do?",
+    "question_ar": "تتسبب بالخطأ في كسر جزء صغير من سطح منجز. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-003": {
+   "fields": {
+    "question_en": "You find a tool that belongs to another team. What do you do?",
+    "question_ar": "تجد أداة تخص فريقًا آخر. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-004": {
+   "fields": {
+    "question_en": "A supervisor pressures you to ignore a safety barrier to save time. What do you do?",
+    "question_ar": "يضغط عليك مشرف لتجاوز حاجز سلامة لتوفير الوقت. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-005": {
+   "fields": {
+    "question_en": "You are asked to sign attendance for an absent coworker. What do you do?",
+    "question_ar": "يُطلب منك توقيع الحضور لزميل غائب. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-006": {
+   "fields": {
+    "question_en": "You see someone taking construction materials home. What do you do?",
+    "question_ar": "ترى شخصًا يأخذ مواد بناء إلى المنزل. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-007": {
+   "fields": {
+    "question_en": "You realize you used the wrong material in a small area. What do you do?",
+    "question_ar": "تدرك أنك استخدمت مادة خاطئة في مساحة صغيرة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-008": {
+   "fields": {
+    "question_en": "A coworker offers money for you to do their assigned task and record it under their name. What do you do?",
+    "question_ar": "يعرض زميل مالًا لتنفذ مهمته وتُسجل باسمه. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-009": {
+   "fields": {
+    "question_en": "You are tired and consider skipping cleanup. What do you do?",
+    "question_ar": "أنت متعب وتفكر في تجاوز التنظيف. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-010": {
+   "fields": {
+    "question_en": "You damage a hand tool but it still works. What do you do?",
+    "question_ar": "تتلف أداة يدوية لكنها ما زالت تعمل. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-011": {
+   "fields": {
+    "question_en": "A colleague asks to borrow your PPE when they have none. What do you do?",
+    "question_ar": "يطلب زميل استعارة معدات الوقاية الخاصة بك لأنه لا يملكها. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-012": {
+   "fields": {
+    "question_en": "You hear a rumor blaming a worker for missing materials. What do you do?",
+    "question_ar": "تسمع إشاعة تلوم عاملًا على مواد مفقودة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-013": {
+   "fields": {
+    "question_en": "You are asked to use a qualification card that belongs to someone else. What do you do?",
+    "question_ar": "يُطلب منك استخدام بطاقة تأهيل تخص شخصًا آخر. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-014": {
+   "fields": {
+    "question_en": "You make a mistake in a simple measurement. What do you do?",
+    "question_ar": "ترتكب خطأ في قياس بسيط. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "GL-BEH-015": {
+   "fields": {
+    "question_en": "A worker asks you to remove a safety sign because it is inconvenient. What do you do?",
+    "question_ar": "يطلب منك عامل إزالة لافتة سلامة لأنها تعيق العمل. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-001": {
+   "fields": {
+    "question_en": "A client asks you to add extra work without an approved change. What do you do?",
+    "question_ar": "يطلب منك عميل إضافة عمل دون تغيير معتمد. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-002": {
+   "fields": {
+    "question_en": "You discover your earlier work has a defect. What do you do?",
+    "question_ar": "تكتشف أن عملك السابق به عيب. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-003": {
+   "fields": {
+    "question_en": "A coworker asks you to sign a test result you did not witness or perform. What do you do?",
+    "question_ar": "يطلب منك زميل توقيع نتيجة اختبار لم تشهدها أو تنفذها. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-004": {
+   "fields": {
+    "question_en": "A supplier offers a gift for accepting a substitute component. What do you do?",
+    "question_ar": "يعرض مورد هدية مقابل قبول مكوّن بديل. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-005": {
+   "fields": {
+    "question_en": "You are asked to use another person's qualification card or permit. What do you do?",
+    "question_ar": "يُطلب منك استخدام بطاقة تأهيل أو تصريح شخص آخر. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-006": {
+   "fields": {
+    "question_en": "You notice a coworker bypassing an interlock or safety device. What do you do?",
+    "question_ar": "تلاحظ زميلًا يتجاوز قفلًا أو جهاز سلامة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-007": {
+   "fields": {
+    "question_en": "A small material shortage could be hidden inside finished work. What do you do?",
+    "question_ar": "يمكن إخفاء نقص بسيط في المواد داخل العمل المنجز. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-008": {
+   "fields": {
+    "question_en": "You damage a client's surface while working. What do you do?",
+    "question_ar": "تتلف سطحًا للعميل أثناء العمل. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-009": {
+   "fields": {
+    "question_en": "You are behind schedule and consider skipping a required test. What do you do?",
+    "question_ar": "أنت متأخر وتفكر في تجاوز اختبار مطلوب. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-010": {
+   "fields": {
+    "question_en": "A colleague asks you to remove their lock/tag because they left site. What do you do?",
+    "question_ar": "يطلب منك زميل إزالة قفله أو علامته لأنه غادر الموقع. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-011": {
+   "fields": {
+    "question_en": "You find a tool or component that belongs to another contractor. What do you do?",
+    "question_ar": "تجد أداة أو مكوّنًا يخص مقاولًا آخر. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-012": {
+   "fields": {
+    "question_en": "A manager pressures you to record a failed test as passed. What do you do?",
+    "question_ar": "يضغط عليك مدير لتسجيل اختبار فاشل على أنه ناجح. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-013": {
+   "fields": {
+    "question_en": "You realize a drawing revision was missed after part of the work is complete. What do you do?",
+    "question_ar": "تدرك أن تعديلًا للمخطط لم يُلاحظ بعد تنفيذ جزء من العمل. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-014": {
+   "fields": {
+    "question_en": "You are asked to perform a different trade's specialist task because 'it is simple'. What do you do?",
+    "question_ar": "يُطلب منك تنفيذ مهمة تخصصية لتخصص آخر لأنها «بسيطة». ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "ST-BEH-015": {
+   "fields": {
+    "question_en": "A customer asks for confidential technical information about another client's site. What do you do?",
+    "question_ar": "يطلب عميل معلومات فنية سرية عن موقع عميل آخر. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "FW-BEH-004": {
+   "fields": {
+    "question_en": "You accidentally damage a crop row. What do you do?"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "FW-BEH-005": {
+   "fields": {
+    "question_en": "A coworker asks you to use their pesticide-applicator authorization. What do you do?",
+    "question_ar": "يطلب منك زميل استخدام تصريح استخدام المبيدات الخاص به. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "FW-BEH-006": {
+   "fields": {
+    "question_en": "You find a phone or wallet in the field. What do you do?",
+    "question_ar": "تجد هاتفًا أو محفظة في الحقل. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "FW-BEH-007": {
+   "fields": {
+    "question_en": "A supervisor asks you to mix a chemical at a rate different from the approved label/instruction without formal authorization. What do you do?",
+    "question_ar": "يطلب منك مشرف خلط مادة بمعدل مختلف عن التعليمات المعتمدة دون تصريح رسمي. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "FW-BEH-008": {
+   "fields": {
+    "question_en": "You break a hand tool but it still seems usable. What do you do?",
+    "question_ar": "تكسر أداة يدوية لكنها تبدو قابلة للاستخدام. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "FW-BEH-009": {
+   "fields": {
+    "question_en": "A coworker suggests mixing rejected produce into a good lot. What do you do?",
+    "question_ar": "يقترح زميل خلط المنتج المرفوض مع دفعة سليمة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "FW-BEH-010": {
+   "fields": {
+    "question_en": "You notice someone taking farm fuel or produce for personal use. What do you do?",
+    "question_ar": "تلاحظ شخصًا يأخذ وقودًا أو محصولًا للاستخدام الشخصي. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "FW-BEH-011": {
+   "fields": {
+    "question_en": "You realize you worked the wrong row for a short distance. What do you do?"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "FW-BEH-012": {
+   "fields": {
+    "question_en": "You are tired and consider skipping tool cleanup. What do you do?",
+    "question_ar": "أنت متعب وتفكر في تجاوز تنظيف الأدوات. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "FW-BEH-013": {
+   "fields": {
+    "question_en": "A buyer asks you for farm records you are not authorized to share. What do you do?",
+    "question_ar": "يطلب منك مشترٍ سجلات مزرعة غير مخول لك مشاركتها. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "FW-BEH-014": {
+   "fields": {
+    "question_en": "A colleague asks you to sign their attendance or production record. What do you do?",
+    "question_ar": "يطلب منك زميل توقيع حضوره أو سجل إنتاجه. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "FW-BEH-015": {
+   "fields": {
+    "question_en": "You see a near miss involving a tractor but no one is hurt. What do you do?",
+    "question_ar": "ترى حادثًا وشيكًا يتعلق بجرار دون إصابة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "FW-BEH-016": {
+   "fields": {
+    "question_en": "You are asked to work while clearly ill in a way that could contaminate produce. What do you do?",
+    "question_ar": "يُطلب منك العمل وأنت مريض بشكل قد يلوث المنتج. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "LS-BEH-003": {
+   "fields": {
+    "question_en": "You are asked to change an animal count to match the record. What do you do?",
+    "question_ar": "يُطلب منك تغيير عدد الحيوانات ليطابق السجل. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "LS-BEH-005": {
+   "fields": {
+    "question_en": "A coworker asks you to give medicine using their authorization. What do you do?",
+    "question_ar": "يطلب منك زميل إعطاء دواء باستخدام تصريحه. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "LS-BEH-007": {
+   "fields": {
+    "question_en": "You damage a feeder but it still works. What do you do?",
+    "question_ar": "تتلف معلفًا لكنه ما زال يعمل. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "LS-BEH-008": {
+   "fields": {
+    "question_en": "A supplier offers you a gift to accept moldy feed. What do you do?",
+    "question_ar": "يعرض مورد هدية لقبول علف متعفن. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "LS-BEH-009": {
+   "fields": {
+    "question_en": "You find farm medicine or a veterinary item unattended. What do you do?",
+    "question_ar": "تجد دواءً بيطريًا أو غرضًا علاجيًا دون مراقبة. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "LS-BEH-010": {
+   "fields": {
+    "question_en": "A coworker asks you to skip disinfection to save time. What do you do?",
+    "question_ar": "يطلب منك زميل تجاوز التطهير لتوفير الوقت. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "LS-BEH-011": {
+   "fields": {
+    "question_en": "You realize you fed the wrong group a small amount. What do you do?",
+    "question_ar": "تدرك أنك قدمت كمية صغيرة من العلف للمجموعة الخطأ. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "LS-BEH-012": {
+   "fields": {
+    "question_en": "You see someone taking feed or supplies for personal use. What do you do?",
+    "question_ar": "ترى شخصًا يأخذ علفًا أو مستلزمات للاستخدام الشخصي. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "LS-BEH-013": {
+   "fields": {
+    "question_en": "A manager pressures you to record a sick animal as normal. What do you do?",
+    "question_ar": "يضغط عليك مدير لتسجيل حيوان مريض على أنه طبيعي. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "LS-BEH-014": {
+   "fields": {
+    "question_en": "You find a personal item in a livestock area. What do you do?",
+    "question_ar": "تجد غرضًا شخصيًا في منطقة الماشية. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "LS-BEH-015": {
+   "fields": {
+    "question_en": "You are asked to work with a high-risk animal beyond your training. What do you do?",
+    "question_ar": "يُطلب منك التعامل مع حيوان عالي الخطورة بما يتجاوز تدريبك. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  },
+  "LS-BEH-016": {
+   "fields": {
+    "question_en": "You notice a biosecurity breach but no animals look sick. What do you do?",
+    "question_ar": "تلاحظ خرقًا للأمن الحيوي لكن لا تظهر أعراض مرض. ماذا تفعل؟"
+   },
+   "note": "Scenario asked the candidate nothing; standard prompt added."
+  }
+ }
+}

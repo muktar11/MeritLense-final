@@ -1,0 +1,873 @@
+{
+ "category": "MANDATORY_INDICATORS",
+ "status": "AI_DRAFT_PENDING_SME",
+ "corrections": {
+  "HK-TSK-002": {
+   "fields": {
+    "mandatory_indicators": [
+     "Use gloves/PPE as required",
+     "clean then disinfect high-touch sink/faucet areas with correct product/contact time",
+     "avoid cross-contamination"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "NA-HYG-002": {
+   "fields": {
+    "mandatory_indicators": [
+     "Use PPE",
+     "contain in designated bag",
+     "clean/disinfect with approved method and contact time",
+     "perform hand hygiene"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "NA-TSK-003": {
+   "fields": {
+    "mandatory_indicators": [
+     "Check identity, diet/allergy/texture/swallowing plan and positioning",
+     "observe coughing/choking/fatigue",
+     "stop and escalate concern"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "NA-HYG-011": {
+   "fields": {
+    "mandatory_indicators": [
+     "use appropriate PPE",
+     "avoid contaminating outlet/container",
+     "dispose/clean equipment and perform hand hygiene"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "NA-TSK-008": {
+   "fields": {
+    "mandatory_indicators": [
+     "Check care instructions and swallowing/aspiration precautions",
+     "position safely"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "NA-TSK-009": {
+   "fields": {
+    "mandatory_indicators": [
+     "Explain and obtain consent according to procedure",
+     "check safe water temperature",
+     "expose only the area being washed"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "NA-TSK-012": {
+   "fields": {
+    "mandatory_indicators": [
+     "Confirm the task is within your training and assigned duties",
+     "verify patient and specimen instructions",
+     "label and handle promptly according to procedure"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "NA-TSK-013": {
+   "fields": {
+    "mandatory_indicators": [
+     "ensure required help",
+     "maintain privacy and patient safety",
+     "turn/reposition using safe technique"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "HCA-COM-004": {
+   "fields": {
+    "mandatory_indicators": [
+     "use clear simple language/visual or approved communication aid",
+     "confirm understanding"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "HCA-TSK-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "Explain and obtain consent according to the care arrangement",
+     "provide privacy",
+     "encourage the client to do what they can"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "HCA-TSK-003": {
+   "fields": {
+    "mandatory_indicators": [
+     "do not use a damaged aid",
+     "keep the client safely seated or supported",
+     "do not improvise a repair or change the prescribed aid yourself"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "HCA-SAF-011": {
+   "fields": {
+    "mandatory_indicators": [
+     "Confirm transfer instructions and assistance level",
+     "lock brakes",
+     "ask for help if required."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "EMS-BEH-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "Respect refusal",
+     "report/document to nurse",
+     "follow consent/capacity process rather than forcing."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "EMS-COM-003": {
+   "fields": {
+    "mandatory_indicators": [
+     "Use preferred aid/method",
+     "verify understanding"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "EMS-HYG-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "Hand hygiene",
+     "PPE by exposure risk",
+     "follow isolation precautions when directed."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "EMS-HYG-002": {
+   "fields": {
+    "mandatory_indicators": [
+     "use PPE",
+     "remove spill with approved body-fluid procedure/product",
+     "disinfect with required contact time",
+     "hand hygiene"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "EMS-TSK-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "Confirm delegation/training",
+     "record actual result/time",
+     "promptly report abnormal change"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "EMS-TSK-003": {
+   "fields": {
+    "mandatory_indicators": [
+     "Check diet/allergy/texture/fluid/swallow plan and positioning",
+     "observe coughing/wet voice/fatigue",
+     "stop and escalate concern"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "EMS-TSK-012": {
+   "fields": {
+    "mandatory_indicators": [
+     "Confirm plan and second helper",
+     "protect tubes/skin",
+     "avoid dragging"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "EMS-TSK-016": {
+   "fields": {
+    "mandatory_indicators": [
+     "Check oral-care/swallow precautions",
+     "position safely",
+     "observe/report sores, bleeding, pain or swallowing concern"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "EMS-TSK-021": {
+   "fields": {
+    "mandatory_indicators": [
+     "use required helper/equipment",
+     "turn/reposition per plan",
+     "keep patient secure"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "BPS-TSK-003": {
+   "fields": {
+    "mandatory_indicators": [
+     "make call method accessible",
+     "hand hygiene/PPE."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "BPS-TSK-004": {
+   "fields": {
+    "mandatory_indicators": [
+     "Check diet/allergy/texture/swallowing instructions and positioning",
+     "observe choking signs",
+     "stop/escalate concern"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "BPS-TSK-006": {
+   "fields": {
+    "mandatory_indicators": [
+     "Explain and obtain consent",
+     "prepare supplies and check safe water temperature",
+     "perform hand hygiene and use PPE according to exposure risk"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "BPS-TSK-010": {
+   "fields": {
+    "mandatory_indicators": [
+     "use required helper",
+     "keep patient secure"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "BPS-TSK-013": {
+   "fields": {
+    "mandatory_indicators": [
+     "Confirm plan and second helper",
+     "protect skin and lines",
+     "avoid dragging"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "SNC-GEN-004": {
+   "fields": {
+    "mandatory_indicators": [
+     "Explain each step and obtain consent through the person's communication method and care plan",
+     "protect privacy",
+     "maintain hygiene and infection control"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "SNC-SAF-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "Protect from injury",
+     "do not restrain or put objects in the mouth",
+     "call emergency help according to plan/urgent criteria"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CCG-COM-005": {
+   "fields": {
+    "mandatory_indicators": [
+     "do not promise secrecy or investigate",
+     "ensure immediate safety",
+     "report promptly through child-safeguarding route"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CCG-HYG-004": {
+   "fields": {
+    "mandatory_indicators": [
+     "Move children away",
+     "clean/disinfect according to body-fluid procedure and contact time",
+     "hand hygiene"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CCG-HYG-008": {
+   "fields": {
+    "mandatory_indicators": [
+     "Use appropriate PPE",
+     "place directly in designated bag/container",
+     "hand hygiene"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CCG-SAF-011": {
+   "fields": {
+    "mandatory_indicators": [
+     "Protect from injury",
+     "do not restrain or put objects in mouth",
+     "call emergency help according to plan/urgent criteria"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CCG-TSK-004": {
+   "fields": {
+    "mandatory_indicators": [
+     "never leave child unattended on raised surface",
+     "use hygienic sequence",
+     "hand hygiene"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CCG-TSK-014": {
+   "fields": {
+    "mandatory_indicators": [
+     "Choose age-appropriate book",
+     "allow child responses"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CCG-TSK-016": {
+   "fields": {
+    "mandatory_indicators": [
+     "Follow family/care routine",
+     "respond neutrally to accidents"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "ECG-PRO-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "do not argue or retaliate",
+     "seek support/escalate if risk increases"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "ECG-HYG-002": {
+   "fields": {
+    "mandatory_indicators": [
+     "use PPE as indicated",
+     "contain waste without contaminating clean supplies",
+     "hand hygiene"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "ECG-HYG-004": {
+   "fields": {
+    "mandatory_indicators": [
+     "avoid shaking",
+     "bag soiled linen",
+     "hand hygiene."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "ECG-HYG-007": {
+   "fields": {
+    "mandatory_indicators": [
+     "Use hand hygiene/PPE as indicated",
+     "person-specific clean equipment",
+     "never share items"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "ECG-TSK-006": {
+   "fields": {
+    "mandatory_indicators": [
+     "Confirm diet/texture/position",
+     "observe swallowing/intake",
+     "stop/report concern."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "ECG-TSK-009": {
+   "fields": {
+    "mandatory_indicators": [
+     "Follow timing/assistance level",
+     "prepare safe route/equipment",
+     "preserve privacy"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "ECG-TSK-010": {
+   "fields": {
+    "mandatory_indicators": [
+     "keep call/items accessible",
+     "clear route",
+     "no improvised restraint."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "ECG-TSK-011": {
+   "fields": {
+    "mandatory_indicators": [
+     "assist only as needed",
+     "maintain safety"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "ECG-TSK-021": {
+   "fields": {
+    "mandatory_indicators": [
+     "avoid rushing",
+     "watch fatigue/pain"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "HH-SHK-002": {
+   "fields": {
+    "mandatory_indicators": [
+     "Follow property sequence that separates clean and dirty work",
+     "use bathroom-dedicated tools",
+     "disinfect high-touch points"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "HH-TSK-002": {
+   "fields": {
+    "mandatory_indicators": [
+     "Use PPE and bathroom-dedicated tools",
+     "clean then disinfect toilet, sink, shower/bath and high-touch points using approved products/contact times",
+     "prevent cross-contamination"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "HH-TSK-009": {
+   "fields": {
+    "mandatory_indicators": [
+     "knock/announce",
+     "obtain guest permission",
+     "do not open personal items"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "HH-TSK-019": {
+   "fields": {
+    "mandatory_indicators": [
+     "Remove waste/soiled items",
+     "secure chemicals/keys"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "FDA-BAD-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "manage queue/order fairly",
+     "maintain accuracy/privacy despite pressure."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "FDA-COM-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "explain verified information",
+     "correct/escalate according to authority"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "FDA-COM-008": {
+   "fields": {
+    "mandatory_indicators": [
+     "avoid arguing",
+     "request support if escalation/safety concern."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "RS-SHK-002": {
+   "fields": {
+    "mandatory_indicators": [
+     "apply soap",
+     "rub all surfaces including backs/between fingers/thumbs/nails for required duration",
+     "wash at required food-service moments."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "RS-TSK-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "record items, modifications, allergies/dietary needs",
+     "repeat back critical details",
+     "send order accurately"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CC-TEK-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "Assess hazards and place warning signs where needed",
+     "clean from higher to lower surfaces and from cleaner to dirtier areas"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CC-TEK-003": {
+   "fields": {
+    "mandatory_indicators": [
+     "Restrict access and wear appropriate PPE",
+     "apply approved bathroom cleaning products to toilets, sinks and touch points without mixing chemicals",
+     "respect specified contact time"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CC-TSK-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "Control the area with visible warnings",
+     "when disinfection is required, apply the correct concentration and contact time and rinse if instructed",
+     "keep wet areas controlled until safe and dry"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CC-TSK-010": {
+   "fields": {
+    "mandatory_indicators": [
+     "Confirm access and privacy rules",
+     "use correct products on surfaces/electronics"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CC-TSK-014": {
+   "fields": {
+    "mandatory_indicators": [
+     "Confirm room vacant/authorized",
+     "protect documents/property"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CC-TSK-015": {
+   "fields": {
+    "mandatory_indicators": [
+     "control wet-floor/trip hazards",
+     "keep routes open"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CC-TSK-018": {
+   "fields": {
+    "mandatory_indicators": [
+     "Use PPE as required",
+     "visually check without reaching into waste",
+     "hand hygiene."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CC-TSK-019": {
+   "fields": {
+    "mandatory_indicators": [
+     "Separate food-contact from general cleaning tools",
+     "use approved food-area products",
+     "clean/sanitize required surfaces"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CC-TSK-020": {
+   "fields": {
+    "mandatory_indicators": [
+     "Confirm training and assignment",
+     "prepare and sign the area",
+     "operate at a safe pace while protecting people and edges"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "CC-TSK-021": {
+   "fields": {
+    "mandatory_indicators": [
+     "isolate area",
+     "inspect hazards"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "IC-TSK-012": {
+   "fields": {
+    "mandatory_indicators": [
+     "establish exclusion zone",
+     "use required PPE",
+     "maintain safe direction/distance",
+     "depressurize after use"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "IC-TSK-013": {
+   "fields": {
+    "mandatory_indicators": [
+     "Inspect authorized machine",
+     "sign/barrier zone",
+     "leave floor dry/safe."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "SG-SJ-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "maintain safe distance/position",
+     "do not provoke",
+     "use force only if law/policy/training authorizes and requires it."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "ES-ER-005": {
+   "fields": {
+    "mandatory_indicators": [
+     "keep exits/routes clear",
+     "direct people calmly to designated exits/assembly areas",
+     "do not create panic."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "DRV-TSK-014": {
+   "fields": {
+    "mandatory_indicators": [
+     "Stop engine",
+     "no smoking/ignition",
+     "use correct fuel"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "WS-IR-005": {
+   "fields": {
+    "mandatory_indicators": [
+     "Match item/SKU, quantity and location to pick instruction",
+     "final verification before dispatch."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "WS-RLS-003": {
+   "fields": {
+    "mandatory_indicators": [
+     "Assess load before lifting",
+     "avoid twisting",
+     "use team/mechanical aid when load exceeds safe capability."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "WS-TSK-002": {
+   "fields": {
+    "mandatory_indicators": [
+     "verify location/SKU/quantity",
+     "pick safely",
+     "final match to order before dispatch."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "WS-TSK-014": {
+   "fields": {
+    "mandatory_indicators": [
+     "keep within capacity",
+     "control slopes/feet"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "GL-TSK-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "use team/mechanical aid if needed",
+     "lift/carry without twisting",
+     "place material on stable prepared surface without trapping hands/feet."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "GL-TSK-012": {
+   "fields": {
+    "mandatory_indicators": [
+     "avoid twisting/overreaching",
+     "keep people clear of swing"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "GL-TSK-013": {
+   "fields": {
+    "mandatory_indicators": [
+     "wear eye/hand PPE",
+     "control chips/bystanders",
+     "stop if tool mushrooms/cracks."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "GL-TSK-014": {
+   "fields": {
+    "mandatory_indicators": [
+     "Read approved ratio/instruction",
+     "use PPE",
+     "do not improvise chemicals"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "ST-TK-002": {
+   "fields": {
+    "mandatory_indicators": [
+     "obtain required authorization and isolate/depressurize the water supply",
+     "repair or replace using the approved compatible parts and method",
+     "restore water under control and check for leaks"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "ST-TSK-002": {
+   "fields": {
+    "mandatory_indicators": [
+     "Use only tools trained/authorized for",
+     "inspect tool, guard/accessory/cable/battery",
+     "disconnect/isolate before adjustment"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "FW-TSK-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "use mechanical aid if trained or team lift",
+     "avoid twisting",
+     "do not exceed personal/site limits."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "FW-TSK-002": {
+   "fields": {
+    "mandatory_indicators": [
+     "inspect handle/head/blade/fastening",
+     "remove damaged tool from service"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "FW-TSK-004": {
+   "fields": {
+    "mandatory_indicators": [
+     "Inspect ladder",
+     "maintain three points of contact",
+     "do not overreach"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "FW-TSK-006": {
+   "fields": {
+    "mandatory_indicators": [
+     "secure sharp tools",
+     "return chemicals/materials to designated storage",
+     "leave routes safe"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "FW-TSK-022": {
+   "fields": {
+    "mandatory_indicators": [
+     "wash/sanitize where required",
+     "protect blades"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "LS-COM-003": {
+   "fields": {
+    "mandatory_indicators": [
+     "Animal/group counts",
+     "health/welfare observations",
+     "quarantine/biosecurity status"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "LS-HYG-002": {
+   "fields": {
+    "mandatory_indicators": [
+     "Use required PPE",
+     "avoid contaminating feed/water/clean areas",
+     "hand hygiene"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "LS-HYG-003": {
+   "fields": {
+    "mandatory_indicators": [
+     "Remove organic matter first",
+     "apply approved disinfectant at correct dilution/contact time",
+     "protect feed/water"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "LS-HYG-005": {
+   "fields": {
+    "mandatory_indicators": [
+     "separate chemicals/medicated feed as required",
+     "segregate/report suspect feed."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "LS-SAF-005": {
+   "fields": {
+    "mandatory_indicators": [
+     "secure people/traffic and other animals",
+     "do not chase into unsafe area"
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  },
+  "LS-TSK-001": {
+   "fields": {
+    "mandatory_indicators": [
+     "Confirm group and ration/instructions",
+     "inspect feed/water for contamination",
+     "record/report shortage or refusal."
+    ]
+   },
+   "note": "D-02: mandatory evidence marked; remaining Must Include points are scored, not removed."
+  }
+ }
+}

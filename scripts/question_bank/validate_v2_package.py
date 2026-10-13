@@ -18,7 +18,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
-DEFAULT_PACKAGE = REPO / "api/interviews/fixtures/question_bank/governance_v2_0_draft.json"
+DEFAULT_PACKAGE = REPO / "api/interviews/fixtures/question_bank/governance_v2_0.json"
 
 ARABIC = re.compile(r"[؀-ۿ]")
 LATIN_WORD = re.compile(r"\b[A-Za-z]{3,}\b")
@@ -35,7 +35,7 @@ BOUNDARY = re.compile(
 )
 
 
-PROMPT_VERB = re.compile(r"^(describe|explain|list|tell|outline|walk|show|give|state|identify|demonstrate)\b|\b(describe|explain) (how|what|the)\b", re.I)
+PROMPT_VERB = re.compile(r"^(describe|explain|list|tell|outline|walk|show|give|state|identify|demonstrate|name)\b|\b(describe|explain) (how|what|the)\b", re.I)
 PROMPT_VERB_AR = re.compile(r"(صف|اشرح|اذكر|وضح|وضّح|بيّن|بين|حدد|كيف|ماذا|ما الذي|ما هي|متى|لماذا)")
 
 
@@ -113,7 +113,7 @@ def validate(package):
 
         # -- structural / governance -----------------------------------
         profile_level = profiles[q["role"]]["criticality"].get(q["competency_code"])
-        if profile_level and profile_level != q["criticality"] and "proposed_criticality" not in q:
+        if profile_level and profile_level != q["criticality"]:
             flag(q, "criticality_differs_from_role_profile", f"{q['criticality']} vs profile {profile_level}")
 
         # -- professional (safety-boundary heuristics) -----------------

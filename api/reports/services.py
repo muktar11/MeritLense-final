@@ -1215,11 +1215,13 @@ class EvaluationReportService:
             risk_indicators=risk_indicators,
             language=language,
             role_code=session.role_code,
+            session=session,
         )
         required_competency_coverage = cls._build_required_competency_coverage(
             role_code=session.role_code,
             critical_competency_status=critical_competency_status,
             language=language,
+            session=session,
         )
         competency_coverage = cls._derive_competency_coverage(critical_competency_status)
         overall_score_available = (
@@ -1993,7 +1995,7 @@ class EvaluationReportService:
     }
 
     @classmethod
-    def _build_critical_competency_status(cls, *, competency_breakdown, risk_indicators, language="en", role_code=None):
+    def _build_critical_competency_status(cls, *, competency_breakdown, risk_indicators, language="en", role_code=None, session=None):
         # Labels come from CANONICAL_COMPETENCY_DIMENSIONS - not hardcoded
         # short names - so this section can't drift out of sync with the
         # full names Assessment Methodology and Full Competency Breakdown
@@ -2012,7 +2014,9 @@ class EvaluationReportService:
         ]
         from api.evaluations.certificate_services import role_competency_config
 
-        role_config = role_competency_config(role_code)
+        role_config = role_competency_config(
+            role_code, getattr(session, "question_set_version", ""), getattr(session, "evaluation_tier", "")
+        )
         items = []
         for label, tokens, risk_key in categories:
             # A dimension this role's Required/Critical config doesn't list
@@ -2098,7 +2102,7 @@ class EvaluationReportService:
         return items
 
     @classmethod
-    def _build_required_competency_coverage(cls, *, role_code, critical_competency_status, language="en"):
+    def _build_required_competency_coverage(cls, *, role_code, critical_competency_status, language="en", session=None):
         """Required Competency Coverage for a role migrated onto the
         Required/Critical model (certificate_services.ROLE_COMPETENCY_CONFIG)
         - e.g. "3 of 4 (75%)" for driver with Communication Ability
@@ -2110,7 +2114,9 @@ class EvaluationReportService:
         competencies_assessed_count fields in that case, unchanged."""
         from api.evaluations.certificate_services import role_competency_config
 
-        if role_competency_config(role_code) is None:
+        if role_competency_config(
+            role_code, getattr(session, "question_set_version", ""), getattr(session, "evaluation_tier", "")
+        ) is None:
             return None
         applicable = [item for item in critical_competency_status if not item.get("not_applicable")]
         required = len(applicable)

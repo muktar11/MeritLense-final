@@ -1,0 +1,36 @@
+{
+ "category": "DUPLICATE_REPLACEMENT",
+ "status": "AI_DRAFT_PENDING_SME",
+ "corrections": {
+  "FW-BEH-004": {
+   "replaces": "You accidentally damage a crop row. (duplicate of FW-BEH-002)",
+   "fields": {
+    "question_en": "A coworker harvested produce from a row that is still within the posted pesticide pre-harvest interval and asks you not to tell anyone. What do you do?",
+    "question_ar": "قطف زميل محصولًا من صف لا يزال ضمن فترة ما قبل الحصاد المعلنة بعد رش المبيد، وطلب منك ألا تخبر أحدًا. ماذا تفعل؟",
+    "must_include_en": "Do not agree to conceal it; keep the affected produce separate from the clean lot; report promptly to the supervisor with the row and lot details; follow the farm's disposition instruction.",
+    "must_include_ar": "عدم الموافقة على الإخفاء؛ فصل المنتج المتأثر عن الدفعة السليمة؛ الإبلاغ سريعًا للمشرف مع تحديد الصف والدفعة؛ اتباع تعليمات المزرعة بشأن التصرف بالمنتج.",
+    "ideal_keywords": "no concealment; segregate produce; pre-harvest interval; report row and lot; follow disposition",
+    "negative_indicators": "Agrees to hide the harvest; mixes the affected produce into a clean lot; delays or omits reporting",
+    "negative_severity": ["S3", "S3", "S2"],
+    "en_points": 4,
+    "ar_points": 4
+   },
+   "note": "Same competency (Behavioral Indicators), criticality (Non-Critical) and Screening eligibility; distinct integrity scenario with food-safety consequence."
+  },
+  "RS-TSK-008": {
+   "replaces": "Describe how you would process a bill payment correctly during restaurant service. (duplicate of RS-TSK-003)",
+   "fields": {
+    "question_en": "Describe how you would deliver a dish prepared for a guest with a declared food allergy, from the kitchen pass to the table.",
+    "question_ar": "اشرح كيف تقدم طبقًا أُعد لضيف أبلغ عن حساسية غذائية، من نقطة استلام الأطباق في المطبخ حتى الطاولة.",
+    "must_include_en": "Confirm with the kitchen that the dish is the allergy-labelled order; keep it separate from other dishes and avoid cross-contact while carrying; deliver it directly to the correct guest; confirm the allergy with the guest before serving; stop and return it to the kitchen if there is any doubt.",
+    "must_include_ar": "التأكد مع المطبخ من أن الطبق هو الطلب المعلَّم بالحساسية؛ إبقاؤه منفصلًا عن الأطباق الأخرى وتجنب التلامس المتبادل أثناء الحمل؛ تقديمه مباشرة للضيف الصحيح؛ تأكيد الحساسية مع الضيف قبل التقديم؛ التوقف وإعادته إلى المطبخ عند أي شك.",
+    "ideal_keywords": "allergy-labelled order; separate; cross-contact; correct guest; confirm allergy; return if in doubt",
+    "negative_indicators": "Serves the dish without confirming it is the allergy order; carries it with other dishes in a way that allows cross-contact; guesses ingredients or reassures the guest without kitchen confirmation",
+    "negative_severity": ["S3", "S3", "S3"],
+    "en_points": 5,
+    "ar_points": 5
+   },
+   "note": "Same competency (Practical Task Execution), criticality (Critical) and Screening eligibility; the role's allergy questions cover communication, not delivery."
+  }
+ }
+}

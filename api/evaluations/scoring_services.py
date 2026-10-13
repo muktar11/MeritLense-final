@@ -111,6 +111,27 @@ class Week6ScoringService:
         return summary
 
     @classmethod
+    def _resolve_versioned_rule_set(cls, evaluation, session):
+        """The rule set built for the session's own question-set version.
+
+        Not filtered on is_active: a session created while its version was
+        live is scored by that version's rules even after a rollback
+        deactivates them. Company-specific first, as in legacy resolution."""
+        version = session.question_set_version
+        if not version:
+            return None
+        queryset = ScoringRuleSet.objects.filter(
+            question_set_version=version,
+            evaluation_tier=evaluation.evaluation_tier,
+            role_code=session.role_code,
+        ).order_by("-created_at")
+        if evaluation.company_id:
+            company_rule_set = queryset.filter(company=evaluation.company).first()
+            if company_rule_set is not None:
+                return company_rule_set
+        return queryset.filter(company__isnull=True).first()
+
+    @classmethod
     def _resolve_rule_set(cls, evaluation):
         # Authoritative-snapshot fix: once an evaluation has been scored
         # against a rule set, that rule set is pinned on the evaluation and
@@ -123,9 +144,20 @@ class Week6ScoringService:
             return evaluation.scoring_rule_set
 
         session = evaluation.session
+        resolved = cls._resolve_versioned_rule_set(evaluation, session)
+        if resolved is not None:
+            evaluation.scoring_rule_set = resolved
+            evaluation.save(update_fields=["scoring_rule_set"])
+            return resolved
+
+        # Legacy resolution for sessions whose question-set version has no
+        # dedicated rule set. Versioned rule sets are excluded so an
+        # assessment never picks up another version's scoring rules - e.g. a
+        # GOV1.2 interview still in progress when GOV2.0 is activated.
         queryset = ScoringRuleSet.objects.filter(
             evaluation_tier=evaluation.evaluation_tier,
             is_active=True,
+            question_set_version="",
         ).order_by("-created_at")
         resolved = None
         if evaluation.company_id:
@@ -429,6 +461,14 @@ class Week6ScoringService:
         max_score = sum((Decimal(str(result.max_score)) for result in response_results), cls.DECIMAL_ZERO)
         layer_breakdown, weighted_percentage = cls._compute_layer_breakdown(competency_results)
         overall_percentage = weighted_percentage if weighted_percentage is not None else cls._percentage(total_score, max_score)
+        if rule_set.aggregation_method == ScoringRuleSet.AGGREGATION_EQUAL_COMPETENCY:
+            # Each scored competency counts equally, however many questions
+            # it had - question counts must not set competency weight.
+            scored = [result for result in competency_results if result.completed_response_count]
+            if scored:
+                overall_percentage = cls._quantize(
+                    sum((Decimal(str(result.percentage)) for result in scored), cls.DECIMAL_ZERO) / Decimal(len(scored))
+                )
         incomplete_response_count = max(len(responses) - len(response_results), 0)
         critical_failures = [
             {

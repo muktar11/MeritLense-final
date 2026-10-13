@@ -551,6 +551,7 @@ class EvaluationReportApiTests(TestCase):
             {},
             format="json",
         )
+        self._release_human_review()
         report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status=EvaluationReport.STATUS_ACTIVE)
 
         response = self.client.get(

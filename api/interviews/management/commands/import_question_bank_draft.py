@@ -1,4 +1,4 @@
-"""Load a DRAFT question bank package (e.g. GOV2.0-DRAFT) side by side with
+"""Load a DRAFT question bank package (e.g. GOV2.0-RC1) side by side with
 the live bank, without making any of it reachable by live assessments.
 
 Everything this command writes is inert until a separate Production
@@ -9,9 +9,15 @@ approval and cutover:
   resolves active rule sets.
 - No InterviewConfiguration changes - live configs keep pointing at the
   current version.
-- No InterviewRubric rows - the AI interpretation prompt looks rubrics up
-  by role + skill only (no version or active filter), so a draft rubric
-  would leak into live interpretation.
+- InterviewRubric rows: is_active=False under the package's own
+  rubric_version. Safe only because the interpretation prompt now looks
+  rubrics up by the session's rubric_version (api/translation/services.py).
+- IndicatorDefinition rows (bank_version = package version, IDs prefixed
+  "V2-" so they never collide with the immutable GOV1.2 IDs): English source
+  text only, per D-01 - Arabic answers are matched to the English
+  indicators by meaning. Pooled versions are always scored by indicator ID.
+- A QuestionBankVersion row (status DRAFT) holding the role profiles and
+  allocation matrix that pooled selection and activation read.
 - Nothing of any other version is touched (no archiving, no updates).
 """
 import json
@@ -31,15 +37,17 @@ from api.core.constants import (
     QuestionLifecycleStatus,
 )
 from api.evaluations.models import ScoringRule, ScoringRuleSet
+from api.interviews.models import InterviewRubric, QuestionBankVersion
 from api.interviews.management.commands.import_governance_question_bank import (
     VERSION_TAG as LIVE_VERSION_TAG,
     _scoring_shape,
     _weighted_indicators,
 )
 from api.interviews.question_allocation import FULL, SCREENING, critical_competencies, validate_allocation
-from api.questions.models import QuestionTemplate
+from api.questions.models import IndicatorDefinition, QuestionTemplate
+from api.questions.skill_tags import normalize_skill_tag
 
-DEFAULT_FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "question_bank" / "governance_v2_0_draft.json"
+DEFAULT_FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "question_bank" / "governance_v2_0.json"
 LANGUAGES = ("EN", "AR")
 QUESTIONS_PER_ROLE = 100
 
@@ -77,7 +85,9 @@ class Command(BaseCommand):
             counts = self.load(package)
         self.stdout.write(self.style.SUCCESS(
             f"Loaded {package['version']} as an inactive draft: {counts['templates']} templates, "
-            f"{counts['rule_sets']} rule sets, {counts['rules']} rules. Live bank untouched."
+            f"{counts['rule_sets']} rule sets, {counts['rules']} rules, {counts['rubrics']} rubrics, "
+            f"{counts['indicators']} indicators. "
+            "Live bank untouched."
         ))
 
     # -- validation -------------------------------------------------------
@@ -85,8 +95,15 @@ class Command(BaseCommand):
     @staticmethod
     def validate(package):
         version = package.get("version", "")
-        if "DRAFT" not in version.upper() or not str(package.get("status", "")).upper().startswith("DRAFT"):
-            raise CommandError("This command only loads packages whose version and status are DRAFT.")
+        status = str(package.get("status", "")).upper()
+        # Everything this command loads is inactive until
+        # activate_question_bank_version switches it on; what it must never
+        # do is take a finished/live package.
+        if not status.startswith(("DRAFT", "RELEASE CANDIDATE")) or version.upper().endswith("FINAL"):
+            raise CommandError("This command only loads DRAFT or RELEASE CANDIDATE packages.")
+        aggregation = (package.get("scoring") or {}).get("aggregation")
+        if aggregation not in dict(ScoringRuleSet.AGGREGATION_CHOICES):
+            raise CommandError(f"Unknown scoring aggregation {aggregation!r}.")
         if version == LIVE_VERSION_TAG or package.get("rule_set_version") == "governance-v1.2-corrected":
             raise CommandError("Refusing to load over the live version.")
 
@@ -130,6 +147,19 @@ class Command(BaseCommand):
         version = package["version"]
         rule_set_version = package["rule_set_version"]
         role_map = package["role_code_map"]
+        existing = QuestionBankVersion.objects.filter(version=version).first()
+        if existing and existing.status != QuestionBankVersion.STATUS_DRAFT:
+            raise CommandError(f"{version} is {existing.status}; only a DRAFT version can be reloaded.")
+        QuestionBankVersion.objects.update_or_create(
+            version=version,
+            defaults={
+                "rule_set_version": rule_set_version,
+                "status": QuestionBankVersion.STATUS_DRAFT,
+                "role_profiles": [
+                    {**profile, "role_code": role_map[profile["role"]]} for profile in package["role_profiles"]
+                ],
+            },
+        )
         templates = {}
         for q in package["questions"]:
             role_code = role_map[q["role"]]
@@ -190,6 +220,8 @@ class Command(BaseCommand):
                         "name": f"{role} ({tier.title()}) - {version}",
                         "role_name": role,
                         "description": package["status"],
+                        "question_set_version": version,
+                        "aggregation_method": package["scoring"]["aggregation"],
                         "is_active": False,
                     },
                 )
@@ -199,6 +231,15 @@ class Command(BaseCommand):
                     # Scored against the English Must Include list in every
                     # language, as in v1.2.
                     must_include = split_points(q["must_include_en"])
+                    # D-02: where classified, only mandatory points gate full
+                    # marks; every point still counts toward the score.
+                    required = q.get("mandatory_indicators") or must_include
+                    negatives = split_points(q["negative_indicators"])
+                    metadata = {
+                        "review_status": q.get("review_status", "UNCHANGED"),
+                        "negative_severity": dict(zip(negatives, q.get("negative_severity", []))),
+                        "mandatory_classified": bool(q.get("mandatory_indicators")),
+                    }
                     for lang in LANGUAGES:
                         ScoringRule.objects.update_or_create(
                             rule_set=rule_set,
@@ -208,9 +249,10 @@ class Command(BaseCommand):
                                 "competency_name": q["competency_en"],
                                 "question_code": q["question_code"],
                                 "expected_indicators": must_include,
-                                "required_indicators": must_include,
+                                "required_indicators": required,
                                 "weighted_indicators": _weighted_indicators(must_include, shape["max_score"]),
-                                "critical_failure_indicators": split_points(q["negative_indicators"]),
+                                "critical_failure_indicators": negatives,
+                                "metadata": metadata,
                                 "max_score": shape["max_score"],
                                 "pass_threshold": shape["pass_threshold"],
                                 "weight": 1,
@@ -219,4 +261,71 @@ class Command(BaseCommand):
                             },
                         )
                         rules += 1
-        return {"templates": len(templates), "rule_sets": rule_sets, "rules": rules}
+        rubrics = self.load_rubrics(package, role_map, version)
+        indicators = self.load_indicator_registry(package, version)
+        return {"templates": len(templates), "rule_sets": rule_sets, "rules": rules, "rubrics": rubrics,
+                "indicators": indicators}
+
+    @staticmethod
+    def load_indicator_registry(package, version):
+        count = 0
+        # severity (D-04) and mandatory (D-02) stay empty: the package's
+        # drafts are proposals, and these fields are reserved for SME-assigned
+        # values. The drafts travel in ScoringRule.metadata instead.
+        for q in package["questions"]:
+            for kind, source, prefix in (
+                (IndicatorDefinition.TYPE_MUST_INCLUDE, q["must_include_en"], "MI"),
+                (IndicatorDefinition.TYPE_NEGATIVE, q["negative_indicators"], "NI"),
+            ):
+                for ordinal, text in enumerate(split_points(source), start=1):
+                    IndicatorDefinition.objects.update_or_create(
+                        indicator_id=f"V2-{q['question_code']}-{prefix}-{ordinal:02d}",
+                        defaults={
+                            "question_code": q["question_code"],
+                            "bank_version": version,
+                            "indicator_type": kind,
+                            "ordinal": ordinal,
+                            "text_en": text,
+                            "text_ar": "",
+                        },
+                    )
+                    count += 1
+        return count
+
+    @staticmethod
+    def load_rubrics(package, role_map, version):
+        count = 0
+        by_role_skill = {}
+        for q in package["questions"]:
+            key = (q["role"], normalize_skill_tag(q["competency_en"]))
+            by_role_skill.setdefault(key, []).append(q)
+        for (role, skill_tag), questions in by_role_skill.items():
+            shapes = [_scoring_shape(q["score_note"]) for q in questions]
+            InterviewRubric.objects.update_or_create(
+                role_code=role_map[role],
+                skill_tag=skill_tag,
+                rubric_version=version,
+                defaults={
+                    "role_name": role,
+                    "scoring_category": skill_tag,
+                    "weight": 1,
+                    "max_score": sum(s["max_score"] for s in shapes) or 1,
+                    "scoring_type": shapes[0]["scoring_type"],
+                    "domain": skill_tag,
+                    "notes": "",
+                    "question_set_version": version,
+                    "evaluation_criteria": [
+                        {
+                            "question_ref": q["question_code"],
+                            "must_include_points": q["must_include_en"],
+                            "ideal_keywords": q["ideal_keywords"],
+                            "negative_indicators": q["negative_indicators"],
+                            "score_note": q["score_note"],
+                        }
+                        for q in questions
+                    ],
+                    "is_active": False,
+                },
+            )
+            count += 1
+        return count

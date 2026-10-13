@@ -17,7 +17,7 @@ from api.interviews.question_allocation import (
     critical_competencies, select_questions,
 )
 
-DEFAULT_FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "question_bank" / "governance_v2_0_draft.json"
+DEFAULT_FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "question_bank" / "governance_v2_0.json"
 LANGUAGES = ("EN", "AR")
 
 

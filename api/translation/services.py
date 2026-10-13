@@ -488,11 +488,28 @@ class ResponseInterpretationService:
 
     @classmethod
     def indicator_registry(cls, template):
-        if not settings.INDICATOR_ID_EXTRACTION_ENABLED or template is None or not template.question_code:
+        if template is None or not template.question_code:
             return []
+        from api.interviews.models import QuestionBankVersion
         from api.questions.models import IndicatorDefinition
 
-        return list(IndicatorDefinition.objects.filter(question_code=template.question_code))
+        pooled_versions = set(QuestionBankVersion.objects.values_list("version", flat=True))
+        if template.question_set_version in pooled_versions:
+            # Pooled bank versions are always scored by canonical indicator
+            # ID against their own registry: their Arabic Must Include text is
+            # not segmented 1:1 with the English (and has no phrase-cache
+            # entries), so free-text step matching would score Arabic answers
+            # as zero. Independent of the global flag.
+            return list(IndicatorDefinition.objects.filter(
+                question_code=template.question_code, bank_version=template.question_set_version,
+            ))
+        if not settings.INDICATOR_ID_EXTRACTION_ENABLED:
+            return []
+        # Never let a pooled version's indicators (which reuse question codes
+        # with edited content) answer for a pre-pooled template.
+        return list(IndicatorDefinition.objects.filter(question_code=template.question_code).exclude(
+            bank_version__in=pooled_versions,
+        ))
 
     @classmethod
     def _indicator_prompt_items(cls, indicators):
@@ -604,14 +621,21 @@ class ResponseInterpretationService:
         rubric = None
         normalized_skill_tag = normalize_skill_tag(getattr(template, "skill_tag", ""))
         if template and normalized_skill_tag:
-            rubric = (
-                InterviewRubric.objects.filter(
-                    role_code__iexact=response.session.role_code,
-                    skill_tag__iexact=normalized_skill_tag,
-                )
-                .order_by("-created_at")
-                .first()
-            )
+            candidates = InterviewRubric.objects.filter(
+                role_code__iexact=response.session.role_code,
+                skill_tag__iexact=normalized_skill_tag,
+            ).order_by("-created_at")
+            # An assessment uses its own rubric version. Sessions from before
+            # versioned rubrics (no rubric for their version) keep the
+            # previous newest-rubric behaviour, but never pick up a rubric
+            # belonging to a pooled bank version they are not on.
+            session_version = response.session.rubric_version
+            rubric = candidates.filter(rubric_version=session_version).first() if session_version else None
+            if rubric is None:
+                from api.interviews.models import QuestionBankVersion
+
+                pooled_versions = QuestionBankVersion.objects.values_list("version", flat=True)
+                rubric = candidates.exclude(rubric_version__in=pooled_versions).first()
 
         expected_steps = template.expected_steps if template else []
         keywords = template.keywords if template else []

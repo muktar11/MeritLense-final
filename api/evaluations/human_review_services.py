@@ -50,12 +50,40 @@ class HumanReviewService:
                     reasons.append("An answer has no AI interpretation yet.")
         if summary is not None and summary.critical_failures:
             reasons.append("Critical safety indicator detected.")
+        reasons.extend(cls._critical_question_reasons(evaluation))
         from django.conf import settings
 
         if summary is not None and getattr(settings, "REVIEW_ALL_RESULTS", False):
             reasons.append("Initial launch period: every result is reviewed before release.")
         # Deduplicate, keep order.
         return list(dict.fromkeys(reasons))
+
+    @classmethod
+    def _critical_question_reasons(cls, evaluation):
+        """Pooled question banks (GOV2.0+): a Critical question that scored
+        0 is a gate of its own. It never turns a result into an automatic
+        Not Ready (D-04), but a Ready or Partially Ready result cannot be
+        released on the strength of the other answers - a person checks it
+        first. Results that are already Not Ready / Incomplete are normal,
+        evidenced outcomes and are not held."""
+        from api.interviews.models import QuestionBankVersion
+
+        session = getattr(evaluation, "session", None)
+        version = getattr(session, "question_set_version", "")
+        if not version or not QuestionBankVersion.objects.filter(version=version).exists():
+            return []
+        if evaluation.readiness_status not in (ReadinessStatus.READY, ReadinessStatus.PARTIALLY_READY):
+            return []
+        failed = sorted(
+            result.question.question_template.question_code
+            for result in evaluation.response_results.select_related("question__question_template")
+            if result.question.question_template_id
+            and result.question.question_template.critical_question
+            and result.score == 0
+        )
+        if not failed:
+            return []
+        return [f"Critical question scored 0 ({', '.join(failed)}); not released on the overall result alone."]
 
     @classmethod
     def flag_after_scoring(cls, evaluation, summary):

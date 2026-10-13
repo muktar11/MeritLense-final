@@ -421,6 +421,10 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
     latest_report = serializers.SerializerMethodField()
     observed_tasks = serializers.SerializerMethodField()
     task_results = serializers.SerializerMethodField()
+    # The candidate's own language (any supported one), the interview
+    # page's default answer language. Questions stay in the session's
+    # approved EN/AR source language; others are shown as translations.
+    preferred_language = serializers.SerializerMethodField()
 
     class Meta:
         model = InterviewSession
@@ -438,6 +442,7 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
             "role_code",
             "ui_language",
             "candidate_language",
+            "preferred_language",
             "tts_language_code",
             "stt_language_code",
             "translation_target",
@@ -484,6 +489,10 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
 
     def get_candidate_name(self, obj):
         return obj.candidate.get_full_name()
+
+    def get_preferred_language(self, obj):
+        candidate = getattr(obj, "candidate", None)
+        return (getattr(candidate, "preferred_language", "") or obj.candidate_language or "EN").upper()
 
     def get_progress_percent(self, obj):
         if not obj.total_questions:

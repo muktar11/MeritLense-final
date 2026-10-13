@@ -286,6 +286,10 @@ class SessionQuestion(TimeStampedModel):
     is_mandatory = models.BooleanField(default=True)
     asked_at = models.DateTimeField(null=True, blank=True)
     answered_at = models.DateTimeField(null=True, blank=True)
+    # What the candidate was shown in other languages, keyed by language
+    # (e.g. "AM"): {"text", "kind": approved|machine, "provider"} - see
+    # api/interviews/question_language.py. Never used for scoring.
+    translations = models.JSONField(default=dict, blank=True)
 
     class Meta:
         verbose_name = "Session Question"

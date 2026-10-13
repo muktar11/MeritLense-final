@@ -1872,48 +1872,17 @@ class InterviewVoicePipelineService:
 
     @classmethod
     def _read_aloud_text(cls, question, language_code):
-        """The text the voice should read, in the read-aloud language.
-
-        A session's questions are in the candidate's language (an Arabic
-        session asks the approved Arabic templates), so:
-        1. If the question is already in the read-aloud language, read it
-           exactly as shown on screen - never machine-translate approved text.
-        2. Otherwise read the approved version of the same question
-           (same question code and question-set version) in that language.
-        3. Only if there is none, machine-translate from the question's own
-           language. If that fails, return the original text; the voice
-           then reads the on-screen wording rather than nothing.
-        """
-        target = language_code.split("-")[0].lower()
-        template = question.question_template
-        source = ((template.language if template else "") or "EN").split("-")[0].lower()
-        if source == target:
-            return question.question_text
-
-        if template and template.question_code:
-            sibling = (
-                QuestionTemplate.objects.filter(
-                    question_code=template.question_code,
-                    question_set_version=template.question_set_version,
-                    language__iexact=target,
-                    is_active=True,
-                )
-                .exclude(question_text="")
-                .order_by("-id")
-                .first()
-            )
-            if sibling is not None:
-                return sibling.question_text
+        """The text the voice should read, in the read-aloud language - the
+        same text the candidate sees for that language (question_text_in):
+        the question as asked, its approved EN/AR version, or its stored
+        translation. If no translation can be made, refuse: reading the
+        original wording with another language's voice garbles it."""
+        from api.interviews.question_language import TranslationUnavailable, question_text_in
 
         try:
-            translation = TranslationService.translate(
-                text=question.question_text,
-                source_language=source,
-                target_language=target,
-            )
-            return translation["translated_text"] or question.question_text
-        except AIProcessingError:
-            return question.question_text
+            return question_text_in(question, language_code)["text"]
+        except TranslationUnavailable as exc:
+            raise ValueError(f"No translation available for {language_code}") from exc
 
     @classmethod
     def get_or_generate_question_audio(cls, *, session, actor=None, language_code=None):

@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
@@ -21,7 +21,7 @@ from api.interviews.models import (
     RolePackageCoverage,
 )
 from api.questions.models import QuestionTemplate
-from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionObservedTask, TaskObservationResult
+from api.sessions.models import CandidateResponse, InterviewSession, ObservedTaskDefinition, SessionObservedTask, SessionQuestion, TaskObservationResult
 from api.sessions.identity_services import IdentityVerificationError, InterviewSessionPrecheckService
 from api.sessions.services import InterviewSessionService, InterviewVoicePipelineService, TaskObservationService
 from api.translation.services import AIProcessingError, AIProcessingOrchestrationService
@@ -462,6 +462,49 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             raise ValidationError({"detail": str(exc)}) from exc
         output = QuestionAudioArtifactSerializer(artifact)
         return Response(output.data)
+
+    @extend_schema(request=None, responses={200: dict})
+    @action(detail=True, methods=["get"], url_path="question-text")
+    def question_text(self, request, id=None):
+        """One of this session's questions in another language: its
+        approved EN/AR version, or a translation - shown alongside the
+        original, never instead of it. 503 when no translation is
+        available, so the page can say so rather than show nothing."""
+        from api.interviews.question_language import TranslationUnavailable, question_text_in
+
+        session = self._get_session()
+        self._ensure_access(session, request)
+        language = (request.query_params.get("language") or "").strip()
+        question_id = (request.query_params.get("question_id") or "").strip()
+        if not language or not question_id:
+            raise ValidationError({"detail": "language and question_id are required"})
+        try:
+            question = session.questions.select_related("question_template", "session").get(
+                **build_object_identifier_filter(question_id)
+            )
+        except (SessionQuestion.DoesNotExist, ValueError) as exc:
+            raise NotFound("Question not found in this session") from exc
+        try:
+            return Response(question_text_in(question, language))
+        except TranslationUnavailable:
+            return Response({"language": language.upper(), "detail": "translation_unavailable"}, status=503)
+
+    @extend_schema(request=None, responses={200: dict})
+    @action(detail=True, methods=["get"], url_path="prechecks/statement")
+    def verbal_statement(self, request, id=None):
+        """The verbal-confirmation statement in a language (approved EN/AR,
+        or a translation of the English)."""
+        from api.interviews.question_language import TranslationUnavailable, statement_in
+
+        session = self._get_session()
+        self._ensure_access(session, request)
+        language = (request.query_params.get("language") or "").strip()
+        if not language:
+            raise ValidationError({"detail": "language is required"})
+        try:
+            return Response(statement_in(language))
+        except TranslationUnavailable:
+            return Response({"language": language.upper(), "detail": "translation_unavailable"}, status=503)
 
     @extend_schema(request=SessionAudioUploadSerializer, responses={200: CandidateResponseSerializer})
     @action(detail=True, methods=["post"], url_path="upload-response-audio")

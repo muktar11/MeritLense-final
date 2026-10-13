@@ -315,6 +315,9 @@ class B2CRegistrationView(APIView):
                         country_of_residence=profile_data.get('country_of_residence'),
                         target_market=profile_data.get('target_market'),
                         timezone=profile_data.get('timezone'),
+                        nationality_other=profile_data.get('nationality_other', ''),
+                        country_of_residence_other=profile_data.get('country_of_residence_other', ''),
+                        target_city=profile_data.get('target_city', ''),
                         id_document=profile_data.get('id_document'),
                         resume_document=profile_data.get('resume_document')
                     )
@@ -516,7 +519,7 @@ class AdminCreateB2CEmployerView(APIView):
         },
     )
     def post(self, request):
-        serializer = B2CRegistrationSerializer(data=request.data, context={'request': request})
+        serializer = B2CRegistrationSerializer(data=request.data, context={'request': request, 'created_by_admin': True})
 
         if serializer.is_valid():
             try:
@@ -536,6 +539,9 @@ class AdminCreateB2CEmployerView(APIView):
                         country_of_residence=profile_data.get('country_of_residence'),
                         target_market=profile_data.get('target_market'),
                         timezone=profile_data.get('timezone'),
+                        nationality_other=profile_data.get('nationality_other', ''),
+                        country_of_residence_other=profile_data.get('country_of_residence_other', ''),
+                        target_city=profile_data.get('target_city', ''),
                         id_document=profile_data.get('id_document'),
                         resume_document=profile_data.get('resume_document')
                     )
@@ -592,7 +598,7 @@ class AdminCreateB2BEmployerView(APIView):
         },
     )
     def post(self, request):
-        serializer = B2BRegistrationSerializer(data=request.data, context={'request': request})
+        serializer = B2BRegistrationSerializer(data=request.data, context={'request': request, 'created_by_admin': True})
 
         if serializer.is_valid():
             try:

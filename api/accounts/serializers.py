@@ -44,8 +44,15 @@ class UserRegistrationSerializer(serializers.Serializer):
 
     TERMS_REQUIRED_MESSAGE = "Please accept the Terms and Privacy Policy to create an account."
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # An admin creating an account on someone's behalf can't tick the
+        # box for them: no checkbox is required and none is recorded.
+        if self.context.get("created_by_admin"):
+            self.fields["terms_accepted"].required = False
+
     def validate_terms_accepted(self, value):
-        if value is not True:
+        if value is not True and not self.context.get("created_by_admin"):
             raise serializers.ValidationError(self.TERMS_REQUIRED_MESSAGE)
         return value
 
@@ -137,6 +144,10 @@ class B2CRegistrationSerializer(UserRegistrationSerializer):
     country_of_residence = serializers.ChoiceField(choices=[], required=False, allow_null=True, allow_blank=True)
     target_market = serializers.ChoiceField(choices=[], required=False, allow_null=True, allow_blank=True)
     timezone = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=64)
+    # Required when the matching list value is "OT" (Other).
+    nationality_other = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    country_of_residence_other = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    target_city = serializers.CharField(required=False, allow_blank=True, max_length=100)
 
     # No longer collected at registration - the upload UI is hidden on the
     # frontend's candidate/page.tsx; can be uploaded later from the profile.
@@ -151,6 +162,17 @@ class B2CRegistrationSerializer(UserRegistrationSerializer):
         self.fields['preferred_language'].choices = Languages.CHOICES
         self.fields['country_of_residence'].choices = Countries.CHOICES
         self.fields['target_market'].choices = Countries.CHOICES
+
+    def validate(self, data):
+        data = super().validate(data)
+        errors = {}
+        if data.get("nationality") == "OT" and not (data.get("nationality_other") or "").strip():
+            errors["nationality_other"] = "Please enter your nationality."
+        if data.get("country_of_residence") == "OT" and not (data.get("country_of_residence_other") or "").strip():
+            errors["country_of_residence_other"] = "Please enter your country of residence."
+        if errors:
+            raise serializers.ValidationError(errors)
+        return data
 
     def validate_passport_id(self, value):
         if IndividualEmployerProfile.objects.filter(passport_id=value).exists():
@@ -169,14 +191,18 @@ class B2CRegistrationSerializer(UserRegistrationSerializer):
             'country_of_residence': validated_data.pop('country_of_residence', None) or None,
             'target_market': validated_data.pop('target_market', None) or None,
             'timezone': validated_data.pop('timezone', None) or None,
+            'nationality_other': (validated_data.pop('nationality_other', '') or '').strip(),
+            'country_of_residence_other': (validated_data.pop('country_of_residence_other', '') or '').strip(),
+            'target_city': (validated_data.pop('target_city', '') or '').strip(),
             'id_document': validated_data.pop('id_document', None),
             'resume_document': validated_data.pop('resume_document', None),
         }
 
-        validated_data.pop('terms_accepted', None)
+        validated_data_terms = validated_data.pop('terms_accepted', False) and not self.context.get("created_by_admin")
         validated_data.pop('terms_language', None)
         user = self.create_user(Roles.B2C, **validated_data)
-        self.record_terms_acceptance(user, statement=self.TERMS_STATEMENT)
+        if validated_data_terms:
+            self.record_terms_acceptance(user, statement=self.TERMS_STATEMENT)
         self.context['profile_data'] = profile_data
         self.context['user'] = user
         return user
@@ -242,10 +268,11 @@ class B2BRegistrationSerializer(UserRegistrationSerializer):
             'tax_id_document': validated_data.pop('tax_id_document', None),
         }
         
-        validated_data.pop('terms_accepted', None)
+        validated_data_terms = validated_data.pop('terms_accepted', False) and not self.context.get("created_by_admin")
         validated_data.pop('terms_language', None)
         user = self.create_user(Roles.B2B, **validated_data)
-        self.record_terms_acceptance(user, statement=self.TERMS_STATEMENT)
+        if validated_data_terms:
+            self.record_terms_acceptance(user, statement=self.TERMS_STATEMENT)
         self.context['profile_data'] = profile_data
         self.context['user'] = user
         return user

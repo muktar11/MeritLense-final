@@ -54,6 +54,26 @@ class RegistrationConsentTests(TestCase):
         log = AuditLog.objects.filter(description__contains="registration checkbox").latest("created_at")
         self.assertIn("18 years or older", log.data["statement"])
 
+    def test_other_nationality_and_country_need_the_typed_value(self, _notify):
+        base = {**B2C, "terms_accepted": True, "nationality": "OT", "country_of_residence": "OT"}
+        response = self.client.post("/api/v1/auth/register/b2c", base, format="multipart")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("nationality_other", response.data)
+        self.assertIn("country_of_residence_other", response.data)
+        response = self.client.post("/api/v1/auth/register/b2c", {
+            **base, "nationality_other": "Stateless", "country_of_residence_other": "Somaliland",
+            "target_market": "AE", "target_city": "Dubai"}, format="multipart")
+        self.assertEqual(response.status_code, 201, response.data)
+        profile = IndividualEmployerProfile.objects.get(user__email=B2C["email"])
+        self.assertEqual((profile.nationality, profile.nationality_other), ("OT", "Stateless"))
+        self.assertEqual(profile.country_of_residence_other, "Somaliland")
+        self.assertEqual((profile.target_market, profile.target_city), ("AE", "Dubai"))
+
+    def test_every_country_is_a_valid_nationality(self, _notify):
+        response = self.client.post("/api/v1/auth/register/b2c",
+                                    {**B2C, "terms_accepted": True, "nationality": "ET"}, format="multipart")
+        self.assertEqual(response.status_code, 201, response.data)
+
     def test_b2b_requires_the_checkbox_and_records_it(self, _notify):
         self.assertEqual(self.client.post("/api/v1/auth/register/b2b", B2B, format="multipart").status_code, 400)
         response = self.client.post("/api/v1/auth/register/b2b", {**B2B, "terms_accepted": True}, format="multipart")
@@ -92,3 +112,30 @@ class CookieConsentTests(TestCase):
         self.assertEqual(client.post(url, {"consent_id": "nope", "choice": "accept_all"}, format="json").status_code, 400)
         self.assertEqual(client.post(url, {"consent_id": str(uuid.uuid4()), "choice": "maybe"}, format="json").status_code, 400)
         self.assertFalse(CookieConsent.objects.exists())
+
+
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+@mock.patch("api.accounts.views.notify_superadmins")
+class AdminCreatedAccountTests(TestCase):
+    """An admin creating an employer on someone's behalf can't tick the
+    Terms box for them: not required, and no acceptance is recorded."""
+
+    def setUp(self):
+        from api.core.constants import Roles
+
+        self.admin = User.objects.create_user(email="creator@example.com", password="x", first_name="A",
+                                              last_name="D", role=Roles.SUPERADMIN, is_verified=True,
+                                              is_staff=True, is_superuser=True)
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    def test_admin_creates_b2c_and_b2b_without_the_checkbox(self, _notify):
+        for url, payload in (("/api/v1/auth/admin/employers/create/b2c", {**B2C, "email": "admin-b2c@example.com",
+                                                                            "passport_id": "ADMIN-B2C-1"}),
+                             ("/api/v1/auth/admin/employers/create/b2b", {**B2B, "email": "admin-b2b@example.com",
+                                                                            "company_registration_number": "ADMIN-B2B-1"})):
+            with self.subTest(url=url):
+                response = self.client.post(url, payload, format="multipart")
+                self.assertIn(response.status_code, (200, 201), response.data)
+                user = User.objects.get(email=payload["email"])
+                self.assertFalse(Agreement.objects.filter(user=user, agreement_type=AgreementType.PRIVACY_TERMS).exists())

@@ -602,7 +602,15 @@ class Countries:
         ("GB", "United Kingdom"), ("US", "United States"), ("UY", "Uruguay"), ("UZ", "Uzbekistan"),
         ("VU", "Vanuatu"), ("VA", "Vatican City"), ("VE", "Venezuela"), ("VN", "Vietnam"),
         ("YE", "Yemen"), ("ZM", "Zambia"), ("ZW", "Zimbabwe"),
+        # Not in the list: the user types the country (country_of_residence_other).
+        ("OT", "Other"),
     ]
+
+
+# Citizenship uses the same full country list (improvement deck: "all
+# countries and nationalities, searchable"); the short 17-entry list it had
+# before is a strict subset, so every stored value stays valid.
+Nationalities.CHOICES = list(Countries.CHOICES)
 
 
 class CompanySize:

@@ -148,6 +148,8 @@ class IndividualEmployerProfile(TimeStampedModel, SoftDeleteModel):
     
     job_role = models.CharField(max_length=2, choices=JobRoles.CHOICES)
     nationality = models.CharField(max_length=2, choices=Nationalities.CHOICES)
+    # Free text when nationality / country_of_residence is "OT" (Other).
+    nationality_other = models.CharField(max_length=100, blank=True, default="")
     preferred_language = models.CharField(max_length=3, choices=Languages.CHOICES, default=Languages.ENGLISH)
 
     # Location & Localization - kept distinct from `nationality` above
@@ -155,10 +157,13 @@ class IndividualEmployerProfile(TimeStampedModel, SoftDeleteModel):
     # not where they're a citizen of. Detected client-side as a suggestion
     # only, never forced - see MeritLense-ui/src/lib/location-detection.ts.
     country_of_residence = models.CharField(max_length=2, choices=Countries.CHOICES, null=True, blank=True)
+    country_of_residence_other = models.CharField(max_length=100, blank=True, default="")
     # Which country's job market this account is evaluating/hiring for -
     # distinct from country_of_residence (e.g. an expat hiring domestic
     # help back home).
     target_market = models.CharField(max_length=2, choices=Countries.CHOICES, null=True, blank=True)
+    # Optional city within the target market (defaults to the whole country).
+    target_city = models.CharField(max_length=100, blank=True, default="")
     # IANA name (e.g. "Asia/Dubai"), detected via the browser's Intl API.
     timezone = models.CharField(max_length=64, null=True, blank=True)
 

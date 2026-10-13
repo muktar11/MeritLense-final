@@ -2,6 +2,8 @@
 
 **Status as of 13 October 2026.** This is the reference for what MeritLense does, how the AI assessment works end to end, what is working today, and what still needs attention. Keep it updated as items are resolved.
 
+> **Before going live, work through the [Production checklist](#10-production-checklist-do-not-forget).** The most important item: **Google Cloud billing must be enabled** for production. Without it, question audio and translation don't work, and every interview answered in a language other than English or Arabic waits for human review.
+
 ---
 
 ## Contents
@@ -15,6 +17,7 @@
 7. [Operations reference](#7-operations-reference)
 8. [Recent changes (13 October 2026)](#8-recent-changes-13-october-2026)
 9. [Glossary](#9-glossary)
+10. [Production checklist (do not forget)](#10-production-checklist-do-not-forget)
 
 ---
 
@@ -84,7 +87,7 @@ There is **no staging environment**. Merging to `main` in either repo deploys st
 
 ### Decisions pending
 
-See §6 for each item, with the action and who decides.
+See §6 for each item, and the full to-do list in the **[Production checklist](#10-production-checklist-do-not-forget)**.
 
 1. Enable Google Cloud billing, or approve the OpenAI fallback for answer translation.
 2. Policy for off-topic answers (D-04), which currently cause low-confidence holds.
@@ -439,3 +442,82 @@ An interview configuration `verify_role` (named "Nursing Assistant", 1 question,
 | **Readiness correction** | An admin's audited review decision; the original decision is kept |
 | **D-01 … D-07** | Approved scoring-policy decisions (for example D-04: how negative indicators are handled) |
 | **SME** | Subject-matter expert who signs off question content |
+
+---
+
+## 10. Production checklist (do not forget)
+
+Everything that still has to be done for production, in one place. Tick items off here (`[x]`) as they are completed, with the date and who did it. **B** = blocks launch, **R** = recommended before launch, **A** = after launch / ongoing.
+
+### 10.1 Google Cloud billing: **B**
+
+Google Cloud billing must be **enabled** for production. Two Google services stop working without it:
+
+| Service | Setting (server `.env`) | What breaks while billing is off |
+|---|---|---|
+| Google Text-to-Speech | `GOOGLE_TTS_API_KEY` | Question read-aloud. Candidates only hear their device's voice, or see "audio not available" |
+| Google Translate | `GOOGLE_TRANSLATE_API_KEY` (+ `GOOGLE_TRANSLATE_PROJECT_ID` if used) | (1) Answer translation fails, so **every interview answered in a language other than English or Arabic is held for human review**. (2) No on-screen translation for Afaan Oromo, Tigrinya, Afar, Twi, Luganda, Malagasy. (3) Other languages fall back to OpenAI: slower, and costs OpenAI credit |
+
+- [ ] **Enable billing** on the Google Cloud project that owns these keys (Google Cloud Console → Billing → link a billing account). Both keys may belong to the same project; check each.
+- [ ] Make sure the **Cloud Text-to-Speech API** and **Cloud Translation API** are both *enabled* in that project (APIs & Services → Library).
+- [ ] Set a **budget alert** in Google Cloud Billing, so costs are visible.
+- [ ] **Check after enabling** (no code change or redeploy needed):
+  - [ ] Open an interview and press **Listen in English**. Audio comes from the server; there's no "audio not available" notice. In the audit log, new `QUESTION_AUDIO_GENERATED` entries appear without errors.
+  - [ ] Choose **Afar** or **Tigrinya** as the answer language. A translated question appears instead of "translation unavailable".
+  - [ ] Complete one short Screening with typed **Amharic** answers. In the admin Review Queue it should **not** be held with "Translation failed".
+  - [ ] Note: the platform skips Google for 10 minutes after a failure, so allow up to 10 minutes after enabling before testing.
+
+### 10.2 Decisions needed from management: **B**
+
+- [ ] **Answer translation fallback.** If Google billing can't be enabled soon: approve, or decline, letting answer translation fall back to OpenAI (like on-screen translation already does). Not done, because it touches the scoring pipeline's input.
+- [ ] **D-04, off-topic answers.** An off-topic or "I don't know" answer currently holds the whole result for review. Decide: score it as a normal 0 without a hold, or keep holding.
+- [ ] **D-02, AI-drafted mandatory points.** Switch off the AI-drafted mandatory-point classifications until the SME signs off. They caused a false 0 on RS-SAF-013 and CCG-COM-005.
+- [ ] **SME sign-off** of the GOV2.0 question bank (`MeritLense_Question_Bank_v2_SME_Review_Packet.xlsx`).
+- [ ] **Launch review policy.** Decide whether to switch on `REVIEW_ALL_RESULTS` (every result reviewed before release) for the first weeks.
+- [ ] **Reviewer staffing.** Name who works the admin **Review Queue**, and how quickly held results must be released.
+- [ ] **Certificate strictness.** Decide whether a missed required point on an otherwise Ready result should block the certificate.
+
+### 10.3 Production data clean-up: **B**
+
+- [ ] **Take and verify a database backup** first (restore check plus row counts).
+- [ ] Run `trial_data_inventory` (read-only) and keep the output.
+- [ ] Run `clear_trial_data` **as a dry run**, review it, then run it for real. This removes test registrations, candidates and validation sessions; accounts, companies, packages and configuration are kept. Known test data:
+  - `ejtiazportal+reg-*` registrations (4);
+  - `ejtiazportal+test1/test2` candidates;
+  - validation sessions on the internal test accounts (company and individual);
+  - the 13 Oct interview-language test session.
+- [ ] **Deactivate the stray test configuration** `verify_role`, which shows as "Nursing Assistant" with 1 question (version v1). Use `deactivate_test_artifacts`, or switch it off in the admin.
+- [ ] Re-check that only the 21 GOV2.0-RC1 roles (Full and Screening, EN and AR) are active.
+
+### 10.4 Security: **B**
+
+Several secrets were shared in chat or email during development. **Rotate them before launch:**
+- [ ] **OpenAI API key** (it was pasted in chat during testing). Create a new key, update `.env` on the server, restart, and delete the old key.
+- [ ] **Stripe secret key** and **webhook secret** (shared during development). Roll them in the Stripe dashboard and update `.env`.
+- [ ] **VM / SSH credentials** and the **admin and superadmin passwords** used for testing.
+- [ ] **Test-account passwords** that remain after clean-up.
+- [ ] Confirm Stripe runs with **live** keys (`sk_live_…`) and the live webhook endpoint is registered and receiving events.
+- [ ] Confirm `DEBUG` is off and only the production domains are allowed (CORS / allowed hosts).
+
+### 10.5 Legal and content: **R**
+
+- [ ] **Privacy Policy v1.6 needs a cookie section** describing necessary, analytics and marketing cookies and the banner choices (Accept All / Just This Time / Reject). Publish it as a new version, so new acceptances record it.
+- [ ] Have the **Terms and Privacy Arabic text** reviewed.
+- [ ] Confirm the candidate consent and data-processing text with whoever is responsible for data protection.
+
+### 10.6 Product gaps: **R**
+
+- [ ] **Profile and candidate screens** still use the older 66-country list; registration has the full list. Switch them to the same full list.
+- [ ] **Low-resource languages** (Afaan Oromo, Tigrinya, Afar, Twi, Luganda, Malagasy): after Google billing is on, test a real interview in at least one of them.
+- [ ] **Indicator translation review** (`MeritLense_Indicator_Translation_Review_v1.2.xlsx`, about 1,613 Arabic indicator texts). Import the approved rows when they come back.
+
+### 10.7 Infrastructure and operations: **R / A**
+
+- [ ] **Staging environment** (R). Today every merge to `main` goes straight to production. A staging copy would allow testing first.
+- [ ] **Automatic daily database backups**, with a periodic restore test (R).
+- [ ] **Monitoring and alerts** for server errors, failed deploys and API downtime (R).
+- [ ] **Email sending:** check that invitations, interview links and OTP emails arrive, and aren't marked as spam (R).
+- [ ] **Cost watch** (A): monthly OpenAI usage (interpretation, transcription, translation fallback), Google Cloud usage, Stripe fees.
+- [ ] **Review Queue** (A): check daily that no result is waiting too long.
+- [ ] **Audit log** (A): look regularly for `ERROR` entries on question audio, translation and scoring.
+- [ ] **Keep this guide updated** (A) whenever an item above is resolved or something new comes up.

@@ -243,6 +243,22 @@ class LaunchSafeguardTests(TestCase):
         self.assertEqual(employer.get(f"/api/v1/evaluations/evaluations/{evaluation.public_id}/report").status_code, 200)
         self.assertEqual(evaluation.certificate_status, "NOT_ISSUED")
 
+    def test_release_works_when_no_report_can_be_generated(self):
+        # A staff-started session never captured the candidate's consent,
+        # which report generation requires; the release must still go
+        # through (production returned 500 and the result stayed held).
+        evaluation, _, _ = self._assess("child_caregiver", "EN", mode="free_text_risk")
+        InterviewSession.objects.filter(pk=evaluation.session_id).update(candidate_consent_agreement=None)
+        reviewer = APIClient()
+        reviewer.force_authenticate(self.admin)
+        response = reviewer.post(f"/api/v1/evaluations/evaluations/{evaluation.public_id}/human-review",
+                                 {"decision": "NOT_READY", "notes": "Unsafe act confirmed."}, format="json")
+        self.assertEqual(response.status_code, 200, response.content)
+        evaluation.refresh_from_db()
+        self.assertEqual(evaluation.review_status, Evaluation.REVIEW_APPROVED)
+        self.assertEqual(evaluation.readiness_status, ReadinessStatus.NOT_READY)
+        self.assertIn("Report not generated", evaluation.review_notes)
+
     def test_reviewer_approval_cannot_override_the_scores_for_a_certificate(self):
         from api.evaluations.human_review_services import HumanReviewService
 

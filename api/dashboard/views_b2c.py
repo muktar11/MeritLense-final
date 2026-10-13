@@ -20,7 +20,8 @@ from .comparison_services import (
     get_eligible_candidates,
 )
 from .comparison_pdf_services import render_comparison_pdf
-from .readiness_services import readiness_distribution
+from .dashboard_layout import B2C_DEFAULT_WIDGETS, B2C_WIDGET_IDS, resolve_layout, validate_widgets
+from .readiness_services import parse_attention_limit, readiness_distribution, requires_attention
 from .serializers import (
     DashboardStatsSerializer, RecentCandidateSerializer, RecentEvaluationSerializer,
     CandidateComparisonSerializer, EvaluationStatusDistributionSerializer,
@@ -203,6 +204,58 @@ class B2CReadinessDistributionView(APIView):
     def get(self, request):
         candidates = Candidate.objects.filter(created_by=request.user)
         return Response(readiness_distribution(Evaluation.objects.filter(candidate__in=candidates)))
+
+
+class B2CRequiresAttentionView(APIView):
+    """Decision-oriented queue for an individual employer - same rules as
+    the B2B dashboard's (see readiness_services.requires_attention)."""
+    permission_classes = [IsAuthenticated, IsB2CUser]
+
+    def get(self, request):
+        candidates = Candidate.objects.filter(created_by=request.user)
+        return Response(requires_attention(
+            Evaluation.objects.filter(candidate__in=candidates), parse_attention_limit(request),
+        ))
+
+
+class B2CDashboardLayoutView(APIView):
+    """Overview dashboard customization for an individual employer (which
+    widgets are visible, in what order). Personal to the account - there is
+    no team to share it with - so the owner can always edit it."""
+    permission_classes = [IsAuthenticated, IsB2CUser]
+
+    def _profile(self, request):
+        return getattr(request.user, 'individual_profile', None)
+
+    def _payload(self, profile):
+        return {
+            **resolve_layout(profile, B2C_WIDGET_IDS, B2C_DEFAULT_WIDGETS),
+            'available_widgets': list(B2C_WIDGET_IDS),
+            'default_widgets': list(B2C_DEFAULT_WIDGETS),
+            'can_edit': True,
+        }
+
+    def get(self, request):
+        profile = self._profile(request)
+        if not profile:
+            return Response({'error': 'Profile not found'}, status=400)
+        return Response(self._payload(profile))
+
+    def put(self, request):
+        profile = self._profile(request)
+        if not profile:
+            return Response({'error': 'Profile not found'}, status=400)
+
+        if request.data.get('reset'):
+            profile.dashboard_layout = {}
+        else:
+            try:
+                widgets = validate_widgets(request.data.get('widgets'), B2C_WIDGET_IDS)
+            except ValueError as exc:
+                return Response({'error': str(exc)}, status=400)
+            profile.dashboard_layout = {'widgets': widgets}
+        profile.save(update_fields=['dashboard_layout', 'updated_at'])
+        return Response(self._payload(profile))
 
 
 class B2CEvaluationStatusDistributionView(APIView):

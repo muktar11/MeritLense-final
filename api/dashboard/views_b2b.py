@@ -22,7 +22,10 @@ from .comparison_services import (
     get_eligible_candidates,
 )
 from .comparison_pdf_services import render_comparison_pdf
-from .readiness_services import completed_with_current_readiness, readiness_distribution
+from .readiness_services import (
+    REASON_HUMAN_REVIEW, REASON_INSUFFICIENT_EVIDENCE, parse_attention_limit,
+    readiness_distribution, requires_attention,
+)
 from .dashboard_layout import DEFAULT_WIDGETS, WIDGET_IDS, resolve_layout, validate_widgets
 from .serializers import (
     DashboardStatsSerializer, RecentCandidateSerializer, RecentEvaluationSerializer,
@@ -713,57 +716,13 @@ class B2BRequiresAttentionView(APIView):
     enough evidence to reach any readiness decision."""
     permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
 
-    REASON_HUMAN_REVIEW = 'HUMAN_REVIEW'
-    REASON_INSUFFICIENT_EVIDENCE = 'INSUFFICIENT_EVIDENCE'
+    REASON_HUMAN_REVIEW = REASON_HUMAN_REVIEW
+    REASON_INSUFFICIENT_EVIDENCE = REASON_INSUFFICIENT_EVIDENCE
 
     def get(self, request):
         company = _resolve_b2b_company(request.user)
         if not company:
             return Response({'error': 'Company not found'}, status=400)
-        try:
-            limit = max(1, min(int(request.query_params.get('limit', 5)), 50))
-        except ValueError:
-            limit = 5
-
-        flagged_report = EvaluationReport.objects.filter(
-            evaluation=OuterRef('pk'),
-            report_status=EvaluationReport.STATUS_ACTIVE,
-            requires_human_review=True,
-        )
-        needs_review = Q(Exists(flagged_report)) & Q(readiness_correction__isnull=True)
-        insufficient = Q(current_readiness=ReadinessStatus.INCOMPLETE)
-        queryset = (
-            completed_with_current_readiness(Evaluation.objects.filter(company=company))
-            .filter(needs_review | insufficient)
-            .annotate(
-                needs_review=ExpressionWrapper(needs_review, output_field=BooleanField()),
-                activity_at=Coalesce('last_evaluation_date', 'updated_at'),
-            )
-        )
-        counts = queryset.aggregate(
-            total=Count('id'),
-            human_review=Count('id', filter=needs_review),
-            insufficient_evidence=Count('id', filter=insufficient),
-        )
-
-        role_dict = dict(CandidateJobRoles.CHOICES)
-        items = []
-        for evaluation in queryset.select_related('candidate').order_by('-activity_at')[:limit]:
-            reasons = []
-            if evaluation.needs_review:
-                reasons.append(self.REASON_HUMAN_REVIEW)
-            if evaluation.current_readiness == ReadinessStatus.INCOMPLETE:
-                reasons.append(self.REASON_INSUFFICIENT_EVIDENCE)
-            name = f"{evaluation.candidate_first_name} {evaluation.candidate_last_name}".strip()
-            items.append({
-                'evaluation_id': str(evaluation.public_id),
-                'candidate_name': name or (evaluation.candidate.get_full_name() if evaluation.candidate else ''),
-                'job_role': evaluation.candidate_job_role,
-                'job_role_display': role_dict.get(evaluation.candidate_job_role, evaluation.candidate_job_role),
-                'readiness_status': evaluation.current_readiness,
-                # Withheld while awaiting human review (release safeguard).
-                'score': float(evaluation.score) if evaluation.score is not None and not evaluation.is_held_for_review else None,
-                'reasons': reasons,
-                'activity_at': evaluation.activity_at,
-            })
-        return Response({**counts, 'items': items})
+        return Response(requires_attention(
+            Evaluation.objects.filter(company=company), parse_attention_limit(request),
+        ))

@@ -167,6 +167,14 @@ class IndividualEmployerProfile(TimeStampedModel, SoftDeleteModel):
     # IANA name (e.g. "Asia/Dubai"), detected via the browser's Intl API.
     timezone = models.CharField(max_length=64, null=True, blank=True)
 
+    dashboard_layout = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Overview dashboard customization for this individual employer: "
+                  "{'widgets': [ordered visible widget ids]}. Empty means the "
+                  "default layout (see api/dashboard/dashboard_layout.py).",
+    )
+
     # No longer collected at registration - the upload UI is hidden there
     # (see the frontend's candidate/page.tsx) - so these can be blank until
     # the candidate/employer uploads them later from their profile.

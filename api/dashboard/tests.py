@@ -4,10 +4,10 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.accounts.models import Company, CompanyEmployerProfile, TeamMemberProfile, User
+from api.accounts.models import Company, CompanyEmployerProfile, IndividualEmployerProfile, TeamMemberProfile, User
 from api.candidates.models import Candidate
 from api.core.constants import CompanyTeamPermissions, EvaluationType, InterviewEvaluationTier, Roles
-from api.dashboard.dashboard_layout import DEFAULT_WIDGETS
+from api.dashboard.dashboard_layout import B2C_DEFAULT_WIDGETS, B2C_WIDGET_IDS, DEFAULT_WIDGETS
 from api.dashboard.comparison_services import (
     build_full_comparison,
     compute_key_differences,
@@ -1658,3 +1658,74 @@ class B2BDashboardCustomizationApiTests(TestCase):
             "/api/v1/dashboard/b2b/requires-attention",
         ):
             self.assertEqual(self.client.get(url).status_code, 403, url)
+
+
+class B2CDashboardCustomizationApiTests(TestCase):
+    """Per-user B2C dashboard layout and the B2C Requires Attention queue.
+    Reuses the B2B fixtures (company + evaluation factory) so the scoping
+    tests can prove company data never leaks into a B2C dashboard."""
+
+    def setUp(self):
+        B2BDashboardCustomizationApiTests.setUp(self)
+        self.b2c_user = User.objects.create_user(
+            email="dash-b2c-layout@example.com", password="testpass123", first_name="Solo", last_name="Hirer",
+            role=Roles.B2C, is_verified=True,
+        )
+        self.profile = IndividualEmployerProfile.objects.create(
+            user=self.b2c_user, passport_id="B2C-LAYOUT-1", phone_number="+971500000001",
+            job_role="NA", nationality="AE",
+        )
+
+    _make_evaluation = B2BDashboardCustomizationApiTests._make_evaluation
+
+    def test_layout_defaults_then_persists_per_user(self):
+        url = "/api/v1/dashboard/b2c/dashboard-layout"
+        self.client.force_authenticate(self.b2c_user)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["is_default"])
+        self.assertEqual(response.data["widgets"], list(B2C_DEFAULT_WIDGETS))
+        self.assertEqual(response.data["available_widgets"], list(B2C_WIDGET_IDS))
+        self.assertTrue(response.data["can_edit"])
+
+        response = self.client.put(url, {"widgets": ["recent_candidates", "time_of_day"]}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["widgets"], ["recent_candidates", "time_of_day"])
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.dashboard_layout, {"widgets": ["recent_candidates", "time_of_day"]})
+
+        response = self.client.put(url, {"reset": True}, format="json")
+        self.assertTrue(response.data["is_default"])
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.dashboard_layout, {})
+
+    def test_layout_rejects_b2b_only_and_unknown_widgets(self):
+        url = "/api/v1/dashboard/b2c/dashboard-layout"
+        self.client.force_authenticate(self.b2c_user)
+        self.assertEqual(self.client.put(url, {"widgets": ["score_by_role"]}, format="json").status_code, 400)
+        self.assertEqual(self.client.put(url, {"widgets": ["nope"]}, format="json").status_code, 400)
+        self.assertEqual(
+            self.client.put(url, {"widgets": ["time_of_day", "time_of_day"]}, format="json").status_code, 400,
+        )
+
+    def test_layout_and_attention_are_b2c_only(self):
+        self.client.force_authenticate(self.owner)
+        for url in ("/api/v1/dashboard/b2c/dashboard-layout", "/api/v1/dashboard/b2c/requires-attention"):
+            self.assertEqual(self.client.get(url).status_code, 403, url)
+
+    def test_requires_attention_scoped_to_own_candidates(self):
+        mine = self._make_evaluation(readiness="INCOMPLETE", company=None, owner=self.b2c_user)
+        flagged = self._make_evaluation(readiness="READY", human_review=True, company=None, owner=self.b2c_user)
+        self._make_evaluation(readiness="READY", human_review=False, company=None, owner=self.b2c_user)
+        # A company's flagged evaluation never reaches a B2C user's queue.
+        self._make_evaluation(readiness="INCOMPLETE", human_review=True)
+
+        self.client.force_authenticate(self.b2c_user)
+        response = self.client.get("/api/v1/dashboard/b2c/requires-attention")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["total"], 2)
+        reasons = {item["evaluation_id"]: item["reasons"] for item in response.data["items"]}
+        self.assertEqual(reasons, {
+            str(mine.public_id): ["INSUFFICIENT_EVIDENCE"],
+            str(flagged.public_id): ["HUMAN_REVIEW"],
+        })

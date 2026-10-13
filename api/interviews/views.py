@@ -626,7 +626,11 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
                 recording_file=serializer.validated_data.get("recording_file"),
                 recording_text=serializer.validated_data.get("recording_path", ""),
                 actor=request.user if request.user.is_authenticated else None,
-                metadata=serializer.validated_data.get("metadata", {}),
+                metadata={
+                    **serializer.validated_data.get("metadata", {}),
+                    **{key: serializer.validated_data[key] for key in ("statement", "statement_language")
+                       if serializer.validated_data.get(key)},
+                },
             )
         except IdentityVerificationError as exc:
             raise ValidationError({"detail": str(exc)}) from exc

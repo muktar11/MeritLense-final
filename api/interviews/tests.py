@@ -934,16 +934,23 @@ class InterviewSessionApiTests(APITestCase):
         )
         self.assertEqual(device.status_code, 200, device.data)
 
+        # Sent as multipart, the way the candidate page uploads the recording.
         verbal = token_client.post(
             f"/api/v1/interviews/{session_id}/prechecks/verbal-confirmation/",
             {
                 "token": access_token,
                 "recording_path": "candidate/verbal-confirmation.webm",
+                "statement": "I confirm that I am completing this assessment myself and that these are my own answers.",
+                "statement_language": "en",
             },
-            format="json",
+            format="multipart",
             HTTP_X_SESSION_TOKEN=access_token,
         )
         self.assertEqual(verbal.status_code, 200, verbal.data)
+        from api.audit.models import AuditLog
+        captured = AuditLog.objects.filter(description__startswith="Candidate verbal confirmation").latest("created_at")
+        self.assertEqual(captured.data["metadata"]["statement_language"], "en")
+        self.assertIn("completing this assessment myself", captured.data["metadata"]["statement"])
 
         identity = token_client.post(
             f"/api/v1/interviews/{session_id}/prechecks/identity-verify/",

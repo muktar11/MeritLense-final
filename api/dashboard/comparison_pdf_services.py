@@ -9,6 +9,9 @@ from django.utils import timezone
 CANDIDATE_COLORS = ["#6366F1", "#10B981", "#F59E0B", "#EF4444"]
 
 
+LABEL_BOX_WIDTH = 120
+
+
 def _wrap_label(label, max_chars=16):
     """Splits a long competency label onto up to 2 lines at a word
     boundary near max_chars, so radar-axis labels don't need enough
@@ -36,6 +39,10 @@ def _radar_chart_svg(entries, radius=110, label_margin=92):
     polygon per candidate, 0-100% scale. Returns None when there are fewer
     than 3 applicable competencies, since a 1-2-axis "polygon" isn't a
     meaningful radar shape.
+
+    Axis labels are returned separately (position + anchor), to be laid
+    out as HTML over the SVG: WeasyPrint draws SVG <text> without Arabic
+    shaping or bidi, so Arabic labels came out reversed and disconnected.
 
     The viewBox is sized as radius + a fixed label_margin on every side
     (not a percentage of a single "size"), so a long axis label always has
@@ -78,14 +85,17 @@ def _radar_chart_svg(entries, radius=110, label_margin=92):
             anchor = "end"
         elif lx > cx + 8:
             anchor = "start"
-        safe_label = (label or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        wrapped = _wrap_label(safe_label)
-        line_offset = -((len(wrapped) - 1) * 6)
-        for line_idx, line_text in enumerate(wrapped):
-            label_texts.append(
-                f'<text x="{lx:.1f}" y="{ly + line_offset + line_idx * 12:.1f}" font-size="10.5" '
-                f'fill="#4b5563" text-anchor="{anchor}">{line_text}</text>'
-            )
+        # Box the label is centred / start- / end-aligned in, so it sits
+        # where the SVG <text> with that text-anchor used to.
+        box = LABEL_BOX_WIDTH
+        left = {"middle": lx - box / 2, "end": lx - box, "start": lx}[anchor]
+        lines = _wrap_label(label)
+        label_texts.append({
+            "lines": lines,
+            "left": round(left, 1),
+            "top": round(ly - 7 - (len(lines) - 1) * 6, 1),
+            "align": {"middle": "center", "end": "right", "start": "left"}[anchor],
+        })
 
     polygons = []
     for idx, entry in enumerate(entries):
@@ -95,14 +105,14 @@ def _radar_chart_svg(entries, radius=110, label_margin=92):
         path = "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in pts) + " Z"
         polygons.append(f'<path d="{path}" fill="{color}" fill-opacity="0.18" stroke="{color}" stroke-width="2"/>')
 
-    return (
+    svg = (
         f'<svg viewBox="0 0 {size} {size}" width="{size}" height="{size}" xmlns="http://www.w3.org/2000/svg">'
         + "".join(rings)
         + "".join(axis_lines)
         + "".join(polygons)
-        + "".join(label_texts)
         + "</svg>"
     )
+    return {"svg": svg, "size": round(size), "labels": label_texts, "label_width": LABEL_BOX_WIDTH}
 
 
 def _legend_items(entries):
@@ -136,19 +146,20 @@ def _competency_table_rows(entries):
     return rows
 
 
-def render_comparison_pdf(*, role_name, entries, key_differences, language="en"):
+def render_comparison_pdf(*, role_name, entries, key_differences, limitations=(), language="en"):
     from weasyprint import HTML
     from api.core.pdf_fonts import arabic_font_context
     from api.evaluations.certificate_services import _icon_data_uri
 
-    radar_svg = _radar_chart_svg(entries)
+    radar = _radar_chart_svg(entries)
     context = {
         "role_name": role_name,
         "entries": entries,
         "legend": _legend_items(entries),
         "competency_rows": _competency_table_rows(entries),
         "key_differences": key_differences,
-        "radar_svg": radar_svg,
+        "limitations": list(limitations),
+        "radar": radar,
         "logo_icon_data_uri": _icon_data_uri(),
         "generated_at": timezone.now().strftime("%Y-%m-%d %H:%M UTC"),
     }

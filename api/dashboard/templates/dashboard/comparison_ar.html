@@ -69,11 +69,20 @@
   .diff-list li { font-size: 8.3pt; color: #374151; line-height: 1.7; margin-bottom: 1mm; }
 
   .radar-wrap { text-align: center; margin-top: 3mm; break-inside: avoid-page; page-break-inside: avoid; }
-  .radar-wrap svg { max-width: 100%; height: auto; }
+  .radar-block { break-inside: avoid-page; page-break-inside: avoid; }
+  .radar-box { position: relative; margin: 0 auto; }
+  .radar-box svg { display: block; }
+  .radar-label { position: absolute; font-size: 7.8pt; line-height: 12px; color: #4b5563; }
+  .radar-label { direction: rtl; }
   .legend-row { display: table; width: 100%; margin-top: 3mm; direction: rtl; }
   .legend-item { display: inline-block; font-size: 7.6pt; color: #4b5563; margin: 0 0 0 4mm; }
   .legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 1.5mm; vertical-align: middle; }
 
+  .meta-line { font-size: 7pt; color: #6b7280; margin-bottom: 1.5mm; }
+  .score-big { font-size: 13pt; font-weight: 700; color: #111827; margin: 1mm 0 1.5mm; }
+  .critical-ok { font-size: 7pt; color: #047857; }
+  .critical-fail { font-size: 7pt; color: #b91c1c; }
+  .limitations { margin: 2mm 0 0; padding-inline-start: 5mm; font-size: 7.5pt; color: #374151; line-height: 1.6; }
   .disclaimer { margin-top: 8mm; border: 1px solid #eef1f8; background: #f8faff; border-radius: 8px; padding: 3mm 4mm; font-size: 7pt; color: #6b7280; line-height: 1.7; }
 </style>
 </head>
@@ -98,11 +107,20 @@
       {% for entry in entries %}
       <div class="summary-card">
         <div class="summary-name">{{ entry.candidate_name }}</div>
+        <div class="meta-line">{{ entry.evaluation_tier_display }} &middot; <span class="ltr-isolate">{{ entry.assessment_date }}</span></div>
+        <div class="summary-line">الدرجة الإجمالية</div>
+        <div class="score-big">{% if entry.overall_score is not None %}<span class="ltr-isolate">{{ entry.overall_score|floatformat:0 }}%</span>{% elif entry.score_withheld %}<span class="meta-line">محجوبة حتى اكتمال المراجعة البشرية</span>{% else %}&mdash;{% endif %}</div>
         <div class="summary-line">مستوى الجاهزية</div>
         <span class="badge {% if entry.readiness_status == 'READY' %}ready{% elif entry.readiness_status == 'PARTIALLY_READY' %}partial{% elif entry.readiness_status == 'NOT_READY' %}notready{% else %}pending{% endif %}">{{ entry.readiness_display }}</span>
         <div class="summary-line" style="margin-top:2mm;">تغطية التقييم &mdash; <b class="ltr-isolate">{{ entry.assessment_coverage }}%</b></div>
+        <div class="summary-line" style="margin-top:1.5mm;">المؤشرات الحرجة</div>
+        {% if entry.critical_indicators.failed_count %}
+        <div class="critical-fail">غير مستوفاة (<span class="ltr-isolate">{{ entry.critical_indicators.failed_count }}</span>): {{ entry.critical_indicators.failed_topics|join:"، " }}</div>
+        {% else %}
+        <div class="critical-ok">جميعها مستوفاة</div>
+        {% endif %}
         {% if entry.requires_human_review %}
-        <div style="margin-top:1.5mm;"><span class="badge review">بانتظار المراجعة البشرية</span></div>
+        <div style="margin-top:1.5mm;"><span class="badge review">تتطلب مراجعة بشرية</span></div>
         {% endif %}
       </div>
       {% endfor %}
@@ -145,16 +163,32 @@
     </ul>
     {% endif %}
 
-    {% if radar_svg %}
+    {% if radar %}
+    <div class="radar-block">
     <div class="section-title">مقارنة الأداء (مخطط الرادار)</div>
     <div class="radar-wrap">
-      {{ radar_svg|safe }}
+      <div class="radar-box" style="width:{{ radar.size }}px; height:{{ radar.size }}px;">
+        {{ radar.svg|safe }}
+        {% for label in radar.labels %}
+        <div class="radar-label" style="left:{{ label.left }}px; top:{{ label.top }}px; width:{{ radar.label_width }}px; text-align:{{ label.align }};">{% for line in label.lines %}{{ line }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</div>
+        {% endfor %}
+      </div>
       <div class="legend-row">
         {% for item in legend %}
         <span class="legend-item"><span class="legend-dot" style="background:{{ item.color }};"></span>{{ item.name }}</span>
         {% endfor %}
       </div>
     </div>
+    </div>
+    {% endif %}
+
+    {% if limitations %}
+    <div class="section-title">حدود المقارنة</div>
+    <ul class="limitations">
+      {% for item in limitations %}
+      <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
     {% endif %}
 
     <div class="disclaimer">

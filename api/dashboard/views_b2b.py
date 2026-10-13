@@ -1,27 +1,24 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Avg, BooleanField, Count, Exists, ExpressionWrapper, Max, OuterRef, Q
-from django.db.models.functions import Coalesce, TruncDate, TruncMonth
+from django.db.models import Avg, Count, Max, Q
+from django.db.models.functions import TruncDate, TruncMonth
 from django.utils import timezone
 from datetime import timedelta
 
-from api.core.constants import CandidateJobRoles, EvaluationStatus, Languages, ReadinessStatus, Roles
+from api.core.constants import CandidateJobRoles, EvaluationStatus, Languages, Roles
 from api.candidates.models import Candidate
 from api.core.permisssions import IsB2BTeamMember, IsB2BUser, RequireFullTeamAccess
 from api.evaluations.models import Evaluation
 from api.accounts.models import User
 from api.payments.entitlement_services import EntitlementService
 from api.payments.models import PackageBalance
-from api.reports.models import EvaluationReport
 from .comparison_services import (
     build_candidate_comparison_entry,
-    build_full_comparison,
-    compute_key_differences,
     get_comparable_roles,
     get_eligible_candidates,
 )
-from .comparison_pdf_services import render_comparison_pdf
+from .comparison_api import assessments_response, comparison_response
 from .readiness_services import (
     REASON_HUMAN_REVIEW, REASON_INSUFFICIENT_EVIDENCE, parse_attention_limit,
     readiness_distribution, requires_attention,
@@ -595,65 +592,40 @@ class B2BComparisonEligibleCandidatesView(APIView):
 
 class B2BComparisonFullView(APIView):
     """Steps 3+4: the real Candidate Summary + Competency Comparison data
-    for 2-4 selected, role-eligible candidates."""
+    for 2-4 selected, role-eligible assessments."""
     permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
 
-    def get(self, request):
+    def get(self, request, pdf=False):
         company = _resolve_b2b_company(request.user)
         if not company:
             return Response({'error': 'Company not found'}, status=400)
-
-        role_code = request.query_params.get('role_code', '').strip()
-        raw_ids = request.query_params.get('candidate_ids', '')
-        candidate_ids = [v.strip() for v in raw_ids.split(',') if v.strip()]
-        if not role_code or not (2 <= len(candidate_ids) <= 4):
-            return Response({'error': 'role_code and 2-4 candidate_ids are required'}, status=400)
-
-        language = "ar" if request.query_params.get('lang') == "ar" else "en"
-        entries = build_full_comparison(
-            owner_type="COMPANY", owner=company, role_code=role_code,
-            candidate_ids=candidate_ids, language=language, actor=request.user,
+        role_names = dict((r['role_code'], r['role_name']) for r in get_comparable_roles(owner_type="COMPANY", owner=company))
+        return comparison_response(
+            request, owner_type="COMPANY", owner=company,
+            role_name_for=lambda code: role_names.get(code, code), pdf=pdf,
         )
-        return Response({
-            'role_code': role_code,
-            'role_name': dict((r['role_code'], r['role_name']) for r in get_comparable_roles(owner_type="COMPANY", owner=company)).get(role_code, role_code),
-            'candidates': entries,
-            'key_differences': compute_key_differences(entries, language=language),
-        })
 
 
-class B2BComparisonPdfView(APIView):
+class B2BComparisonPdfView(B2BComparisonFullView):
     """Spec item 8: backend-rendered bilingual Comparison PDF, same
     structure as the on-screen page - Candidate Summary, Competency
-    Comparison, Key Differences, Radar Chart."""
+    Comparison, Key Differences, Radar Chart, Limitations."""
+
+    def get(self, request):
+        return super().get(request, pdf=True)
+
+
+class B2BComparisonAssessmentsView(APIView):
+    """Step 2: the role's comparable assessments - one row per assessment,
+    so a candidate assessed more than once can be compared on a specific
+    attempt. Filters: evaluation_tier, date_from, date_to."""
     permission_classes = [IsAuthenticated, (IsB2BUser | IsB2BTeamMember), RequireFullTeamAccess]
 
     def get(self, request):
         company = _resolve_b2b_company(request.user)
         if not company:
             return Response({'error': 'Company not found'}, status=400)
-
-        role_code = request.query_params.get('role_code', '').strip()
-        raw_ids = request.query_params.get('candidate_ids', '')
-        candidate_ids = [v.strip() for v in raw_ids.split(',') if v.strip()]
-        if not role_code or not (2 <= len(candidate_ids) <= 4):
-            return Response({'error': 'role_code and 2-4 candidate_ids are required'}, status=400)
-
-        language = "ar" if request.query_params.get('lang') == "ar" else "en"
-        role_name = dict((r['role_code'], r['role_name']) for r in get_comparable_roles(owner_type="COMPANY", owner=company)).get(role_code, role_code)
-        entries = build_full_comparison(
-            owner_type="COMPANY", owner=company, role_code=role_code,
-            candidate_ids=candidate_ids, language=language, actor=request.user,
-        )
-        if len(entries) < 2:
-            return Response({'error': 'At least 2 comparable candidates are required.'}, status=400)
-
-        key_differences = compute_key_differences(entries, language=language)
-        pdf_bytes = render_comparison_pdf(role_name=role_name, entries=entries, key_differences=key_differences, language=language)
-        from django.http import HttpResponse
-        response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = 'attachment; filename="candidate-comparison.pdf"'
-        return response
+        return assessments_response(request, owner_type="COMPANY", owner=company)
 
 
 class B2BDashboardLayoutView(APIView):

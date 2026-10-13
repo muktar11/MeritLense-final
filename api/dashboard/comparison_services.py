@@ -297,55 +297,233 @@ def _ensure_active_report(evaluation, actor):
         return None
 
 
-def build_full_comparison(*, owner_type, owner, role_code, candidate_ids, language, actor):
-    """Steps 3+4 of Candidate Comparison: Candidate Summary + role-scoped
-    Competency Comparison, for 2-4 already-eligible candidates - built
-    entirely from each candidate's existing (or on-demand-formatted, never
-    recalculated) authoritative EvaluationReport. See this module's other
-    docstrings for the "never recalculate" guardrail this serves.
+class ComparisonError(ValueError):
+    """The selection can't be compared as asked (e.g. it mixes Screening
+    and Full Assessment results). The message is shown to the user."""
 
-    Re-checks the same current-ScoringRuleSet requirement
-    get_eligible_candidates already applies (rather than trusting the
-    candidate_ids the caller selected) - this is the actual comparison
-    output, so it's the last line of defense against ever placing two
-    candidates scored under incompatible rule versions in one table,
-    even if eligibility shifted between selection and this call."""
+
+TIER_LABELS = {
+    "FULL": ("Full Assessment", "تقييم كامل"),
+    "SCREENING": ("Screening", "فحص أولي"),
+}
+
+
+def _tier_display(tier, language):
+    return TIER_LABELS.get(tier, (tier, tier))[1 if language == "ar" else 0]
+
+
+def _summary_tier(summary):
+    return summary.rule_set.evaluation_tier if summary.rule_set_id else ""
+
+
+def _assessment_date(summary):
+    session = summary.session
+    moment = (session.ended_at if session is not None else None) or summary.created_at
+    return moment.date().isoformat()
+
+
+def _current_readiness(evaluation):
+    correction = getattr(evaluation, "readiness_correction", None)
+    if correction is not None:
+        return correction.corrected_readiness_status
+    return evaluation.readiness_status
+
+
+def get_comparable_assessments(*, owner_type, owner, role_code, evaluation_tier=None, date_from=None, date_to=None):
+    """Step 2 of Candidate Comparison, assessment by assessment: every
+    scored assessment under this exact role and that role's CURRENT rule
+    set (see _current_rule_set_ids), so a candidate assessed more than once
+    can be compared on a specific attempt. Optional filters: assessment
+    type (FULL / SCREENING) and an inclusive assessment-date range
+    (date objects). Newest first.
+
+    The overall score is withheld while the evaluation is held for human
+    review (release safeguard), exactly as on the other dashboards."""
+    from django.db.models.functions import Coalesce, TruncDate
+
+    current_rule_set_ids = _current_rule_set_ids(owner_type, owner, role_code)
+    summaries = (
+        _scored_summaries_for_owner(owner_type, owner)
+        .filter(session__role_code=role_code, rule_set_id__in=current_rule_set_ids)
+        .select_related("rule_set", "evaluation__readiness_correction")
+        .annotate(assessed_on=TruncDate(Coalesce("session__ended_at", "created_at")))
+    )
+    if evaluation_tier:
+        summaries = summaries.filter(rule_set__evaluation_tier=evaluation_tier)
+    if date_from:
+        summaries = summaries.filter(assessed_on__gte=date_from)
+    if date_to:
+        summaries = summaries.filter(assessed_on__lte=date_to)
+
+    rows = []
+    for summary in summaries.order_by("-assessed_on", "-created_at"):
+        evaluation = summary.evaluation
+        if evaluation is None:
+            continue
+        held = evaluation.is_held_for_review
+        needs_review = held or summary.status == summary.STATUS_REQUIRES_HUMAN_REVIEW
+        rows.append({
+            "evaluation_id": str(evaluation.public_id),
+            "candidate_id": str(summary.candidate.public_id),
+            "candidate_name": summary.candidate.get_full_name(),
+            "assessment_date": _assessment_date(summary),
+            "evaluation_tier": _summary_tier(summary),
+            "review_status": "HUMAN_REVIEW" if needs_review else "COMPLETE",
+            "readiness_status": _current_readiness(evaluation),
+            "overall_score": (
+                float(summary.overall_percentage)
+                if summary.overall_percentage is not None and not held else None
+            ),
+        })
+    return rows
+
+
+def _select_summaries_by_evaluation(owner_type, owner, role_code, evaluation_ids):
+    """The exact assessments the user picked, re-checked against the same
+    rules get_comparable_assessments applies - never trusting the ids."""
+    current_rule_set_ids = _current_rule_set_ids(owner_type, owner, role_code)
+    summaries = (
+        _scored_summaries_for_owner(owner_type, owner)
+        .filter(
+            session__role_code=role_code,
+            rule_set_id__in=current_rule_set_ids,
+            evaluation__public_id__in=evaluation_ids,
+        )
+        .select_related("rule_set")
+    )
+    by_id = {str(s.evaluation.public_id): s for s in summaries if s.evaluation is not None}
+    selected = [by_id[e] for e in evaluation_ids if e in by_id]
+    candidate_ids = [s.candidate_id for s in selected]
+    if len(set(candidate_ids)) != len(candidate_ids):
+        raise ComparisonError("Select one assessment per candidate.")
+    return selected
+
+
+def _select_summaries_by_candidate(owner_type, owner, role_code, candidate_ids):
+    """Candidate-level selection (older callers, e.g. the dashboard
+    widget): each candidate's latest assessment of ONE shared type - Full
+    Assessment if every candidate has one, otherwise Screening if every
+    candidate has one. Never mixes the two."""
+    from api.core.constants import InterviewEvaluationTier
+
     current_rule_set_ids = _current_rule_set_ids(owner_type, owner, role_code)
     candidates = _candidate_queryset_for_owner(owner_type, owner).filter(public_id__in=candidate_ids)
     by_id = {str(c.public_id): c for c in candidates}
-
-    entries = []
+    per_candidate = []
     for candidate_id in candidate_ids:
         candidate = by_id.get(candidate_id)
         if candidate is None:
             continue
-        summary = _latest_current_summary(
+        summaries = (
             _scored_summaries_for_owner(owner_type, owner)
             .filter(candidate=candidate, session__role_code=role_code, rule_set_id__in=current_rule_set_ids)
+            .select_related("rule_set")
         )
-        if summary is None:
-            continue
-        report = _ensure_active_report(summary.evaluation, actor)
+        if summaries.exists():
+            per_candidate.append(summaries)
+    if len(per_candidate) < 2:
+        return [_latest_current_summary(s) for s in per_candidate]
+
+    for tier in (InterviewEvaluationTier.FULL, InterviewEvaluationTier.SCREENING):
+        if all(s.filter(rule_set__evaluation_tier=tier).exists() for s in per_candidate):
+            return [s.filter(rule_set__evaluation_tier=tier).order_by("-created_at").first() for s in per_candidate]
+    raise ComparisonError(
+        "These candidates have no assessment type in common. "
+        "Screening and Full Assessment results can't be compared."
+    )
+
+
+def build_full_comparison(*, owner_type, owner, role_code, language, actor, candidate_ids=None, evaluation_ids=None):
+    """Steps 3+4 of Candidate Comparison: Candidate Summary + role-scoped
+    Competency Comparison, for 2-4 already-eligible assessments - built
+    entirely from each assessment's existing (or on-demand-formatted, never
+    recalculated) authoritative EvaluationReport. See this module's other
+    docstrings for the "never recalculate" guardrail this serves.
+
+    Pass `evaluation_ids` (the specific assessments the user picked) or
+    `candidate_ids` (each candidate's latest assessment of a shared type).
+    Either way the selection is re-checked against the role's current
+    ScoringRuleSet here - this is the actual comparison output, so it's
+    the last line of defense against ever placing two results scored under
+    incompatible rule versions, or a Screening next to a Full Assessment,
+    in one table. Raises ComparisonError for a selection that mixes
+    assessment types or repeats a candidate."""
+    if evaluation_ids:
+        summaries = _select_summaries_by_evaluation(owner_type, owner, role_code, evaluation_ids)
+    else:
+        summaries = _select_summaries_by_candidate(owner_type, owner, role_code, candidate_ids or [])
+    if len({_summary_tier(s) for s in summaries}) > 1:
+        raise ComparisonError("Screening and Full Assessment results can't be compared. Select one assessment type.")
+
+    entries = []
+    for summary in summaries:
+        candidate = summary.candidate
+        evaluation = summary.evaluation
+        report = _ensure_active_report(evaluation, actor)
         if report is None:
             continue
 
-        assessment_context = (report.report_payload or {}).get("assessment_context") or {}
+        payload = report.report_payload or {}
+        assessment_context = payload.get("assessment_context") or {}
+        executive = payload.get("executive_summary") or {}
         assessed = assessment_context.get("competencies_assessed_count") or 0
         required = assessment_context.get("competencies_required_count") or 0
         coverage_pct = round((assessed / required) * 100) if required else 0
 
+        # Withheld while awaiting human review (release safeguard).
+        held = evaluation.is_held_for_review
+        score = executive.get("overall_score") if executive.get("overall_score_available", True) else None
+        critical_failures = payload.get("critical_failures") or []
+        failed_topics = []
+        for failure in critical_failures:
+            topic = failure.get("topic") or failure.get("competency_code") or ""
+            if topic and topic not in failed_topics:
+                failed_topics.append(topic)
+        tier = _summary_tier(summary)
+
         entries.append({
             "candidate_id": str(candidate.public_id),
             "candidate_name": candidate.get_full_name(),
-            "evaluation_id": str(summary.evaluation.public_id),
-            "evaluation_tier": summary.rule_set.evaluation_tier if summary.rule_set_id else "",
+            "evaluation_id": str(evaluation.public_id),
+            "evaluation_tier": tier,
+            "evaluation_tier_display": _tier_display(tier, language),
+            "assessment_date": _assessment_date(summary),
+            "overall_score": float(score) if score is not None and not held else None,
+            "score_withheld": held,
             "readiness_status": report.readiness_status,
             "readiness_display": _readiness_display(report.readiness_status, language),
             "assessment_coverage": coverage_pct,
             "requires_human_review": bool(report.requires_human_review),
+            "critical_indicators": {
+                "failed_count": len(critical_failures),
+                "failed_topics": failed_topics,
+                "override_triggered": bool(executive.get("override_triggered")),
+            },
             "competencies": _competency_rows(report, role_code),
         })
     return entries
+
+
+def comparison_limitations(entries, language="en"):
+    """Plain statements of what the comparison does and doesn't show -
+    displayed on screen and printed in the PDF."""
+    ar = language == "ar"
+    tier = entries[0]["evaluation_tier_display"] if entries else ""
+    items = [
+        (f"تُقارَن نتائج «{tier}» المسجلة وفق نسخة التقييم الحالية لهذه الوظيفة فقط." if ar else
+         f"Only {tier} results scored under this role's current assessment version are compared."),
+        ("تعرض هذه المقارنة نتائج التقييم المسجلة كما هي، ولا تُصدر قرار جاهزية جديدًا ولا تُرتّب المرشحين." if ar else
+         "This comparison restates recorded assessment results. It does not make a new readiness decision or rank candidates."),
+    ]
+    if any(e["score_withheld"] for e in entries):
+        items.append("تُحجب الدرجة الإجمالية للنتائج التي تنتظر المراجعة البشرية حتى تكتمل المراجعة." if ar else
+                     "Overall scores awaiting human review are withheld until the review is completed.")
+    if any(e["requires_human_review"] for e in entries):
+        items.append("بعض النتائج تتطلب مراجعة بشرية؛ راجع التقرير الكامل قبل اتخاذ أي قرار." if ar else
+                     "Some results require human review. Read the full report before making any decision.")
+    items.append("الكفاءات غير المقيّمة لمرشح ما تظهر بالرمز «—»." if ar else
+                 "Competencies not assessed for a candidate are shown as —.")
+    return items
 
 
 def compute_key_differences(entries, language="en", max_items=3):

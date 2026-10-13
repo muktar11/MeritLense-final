@@ -1729,3 +1729,204 @@ class B2CDashboardCustomizationApiTests(TestCase):
             str(mine.public_id): ["INSUFFICIENT_EVIDENCE"],
             str(flagged.public_id): ["HUMAN_REVIEW"],
         })
+
+
+class CompareCandidatesByAssessmentApiTests(TestCase):
+    """Compare Candidates page (improvement deck item #8): assessment-level
+    selection, no mixing of Screening and Full Assessment results, the
+    release safeguard on scores, critical indicators and limitations."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="cmp-page@example.com", password="testpass123",
+            first_name="Page", last_name="Owner", role=Roles.B2C, is_verified=True,
+        )
+        self.full_rules = self._rule_set(InterviewEvaluationTier.FULL)
+        self.screening_rules = self._rule_set(InterviewEvaluationTier.SCREENING)
+        self._seq = 0
+
+    def _rule_set(self, tier):
+        return ScoringRuleSet.objects.create(
+            name=f"Page Rules {tier}", version="v1", role_code="driver", role_name="Driver",
+            evaluation_tier=tier, is_active=True, created_by=self.user,
+        )
+
+    def _candidate(self, name):
+        self._seq += 1
+        return Candidate.objects.create(
+            first_name=name, last_name="Test", email=f"cmp-page-{self._seq}@example.com",
+            passport_id=f"CMPP-{self._seq}", job_role="DR", core_skills="driving", preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf", created_by=self.user,
+        )
+
+    def _assessment(self, candidate, *, tier=InterviewEvaluationTier.FULL, ended_days_ago=1, score=80,
+                    held=False, critical_failures=None, owner=None):
+        self._seq += 1
+        owner = owner or self.user
+        rule_set = self.full_rules if tier == InterviewEvaluationTier.FULL else self.screening_rules
+        config = InterviewConfiguration.objects.create(
+            role_name="Driver", role_code="driver", language="EN", evaluation_tier=tier,
+            duration_minutes=45, total_questions=1, allow_retries=True, max_retries=1,
+            rubric_version="v2.0", question_set_version="v1.2",
+        )
+        session = InterviewSession.objects.create(
+            candidate=candidate, config=config, role_name="Driver", role_code="driver", ui_language="EN",
+            candidate_language="EN", tts_language_code="en-US", stt_language_code="en-US", total_questions=1,
+            evaluation_tier=tier, rubric_version="v2.0", question_set_version="v1.2",
+            expires_at=InterviewSession.build_expiry(30), created_by=owner,
+            ended_at=timezone.now() - timezone.timedelta(days=ended_days_ago),
+        )
+        evaluation = Evaluation.objects.create(
+            session=session, candidate=candidate, evaluation_type=EvaluationType.INTERVIEW,
+            scheduled_date=timezone.now(), duration_minutes=45, created_by=owner, readiness_status="READY",
+            review_status=Evaluation.REVIEW_REQUIRED if held else Evaluation.REVIEW_NOT_REQUIRED,
+        )
+        SessionEvaluationSummary.objects.create(
+            evaluation=evaluation, session=session, candidate=candidate, rule_set=rule_set,
+            total_score=Decimal(score), max_score=Decimal("100"), overall_percentage=Decimal(score),
+            competencies_summary=[], status=SessionEvaluationSummary.STATUS_EVALUATED,
+        )
+        EvaluationReport.objects.create(
+            evaluation=evaluation, session=session, candidate=candidate,
+            report_number=f"RPT-PAGE-{self._seq}", report_status=EvaluationReport.STATUS_ACTIVE,
+            readiness_status="READY", requires_human_review=held,
+            report_payload={
+                "assessment_context": {"competencies_assessed_count": 3, "competencies_required_count": 3},
+                "executive_summary": {"overall_score": score, "overall_score_available": True,
+                                      "override_triggered": bool(critical_failures)},
+                "critical_failures": critical_failures or [],
+                "critical_competency_status": [
+                    {"label": DIMENSION_LABELS[dim], "status_label": "Evaluated", "tone": "positive",
+                     "not_applicable": False, "percentage": score}
+                    for dim in DIMENSION_ORDER
+                ],
+            },
+        )
+        return evaluation
+
+    def _get(self, path, **params):
+        self.client.force_authenticate(self.user)
+        return self.client.get(f"/api/v1/dashboard/b2c/candidate-comparison/{path}", params)
+
+    def test_assessments_lists_every_attempt_with_type_date_and_filters(self):
+        amal = self._candidate("Amal")
+        older = self._assessment(amal, ended_days_ago=20, score=60)
+        newer = self._assessment(amal, ended_days_ago=2, score=85)
+        screening = self._assessment(self._candidate("Badr"), tier=InterviewEvaluationTier.SCREENING, ended_days_ago=5)
+
+        rows = self._get("assessments", role_code="driver").data
+        self.assertEqual([r["evaluation_id"] for r in rows],
+                         [str(newer.public_id), str(screening.public_id), str(older.public_id)])
+        self.assertEqual(rows[0]["evaluation_tier"], "FULL")
+        self.assertEqual(rows[0]["overall_score"], 85.0)
+        self.assertEqual(rows[0]["review_status"], "COMPLETE")
+
+        full_only = self._get("assessments", role_code="driver", evaluation_tier="FULL").data
+        self.assertEqual({r["evaluation_id"] for r in full_only}, {str(newer.public_id), str(older.public_id)})
+
+        since = (timezone.now() - timezone.timedelta(days=10)).date().isoformat()
+        recent = self._get("assessments", role_code="driver", date_from=since).data
+        self.assertEqual({r["evaluation_id"] for r in recent}, {str(newer.public_id), str(screening.public_id)})
+
+        self.assertEqual(self._get("assessments", role_code="driver", evaluation_tier="BOTH").status_code, 400)
+        self.assertEqual(self._get("assessments").status_code, 400)
+
+    def test_compares_the_specific_assessment_picked_not_the_latest(self):
+        amal = self._candidate("Amal")
+        older = self._assessment(amal, ended_days_ago=20, score=60)
+        self._assessment(amal, ended_days_ago=2, score=85)
+        badr = self._assessment(self._candidate("Badr"), score=70)
+
+        response = self._get("full", role_code="driver", evaluation_ids=f"{older.public_id},{badr.public_id}")
+        self.assertEqual(response.status_code, 200)
+        entries = response.data["candidates"]
+        self.assertEqual(entries[0]["evaluation_id"], str(older.public_id))
+        self.assertEqual(entries[0]["overall_score"], 60.0)
+        self.assertEqual(entries[0]["evaluation_tier"], "FULL")
+        self.assertEqual(response.data["evaluation_tier"], "FULL")
+        self.assertTrue(response.data["limitations"])
+
+    def test_rejects_mixing_screening_and_full_or_two_attempts_of_one_candidate(self):
+        amal = self._candidate("Amal")
+        full = self._assessment(amal)
+        second = self._assessment(amal, ended_days_ago=3)
+        screening = self._assessment(self._candidate("Badr"), tier=InterviewEvaluationTier.SCREENING)
+
+        mixed = self._get("full", role_code="driver", evaluation_ids=f"{full.public_id},{screening.public_id}")
+        self.assertEqual(mixed.status_code, 400)
+        self.assertEqual(mixed.data["code"], "INCOMPATIBLE_SELECTION")
+
+        same_candidate = self._get("full", role_code="driver", evaluation_ids=f"{full.public_id},{second.public_id}")
+        self.assertEqual(same_candidate.status_code, 400)
+
+        pdf = self._get("pdf", role_code="driver", evaluation_ids=f"{full.public_id},{screening.public_id}")
+        self.assertEqual(pdf.status_code, 400)
+
+    def test_candidate_level_selection_uses_a_shared_type_or_refuses(self):
+        amal, badr, chen = self._candidate("Amal"), self._candidate("Badr"), self._candidate("Chen")
+        self._assessment(amal)
+        amal_screening = self._assessment(amal, tier=InterviewEvaluationTier.SCREENING)
+        badr_screening = self._assessment(badr, tier=InterviewEvaluationTier.SCREENING)
+        self._assessment(chen)
+
+        # Amal has both, Badr only Screening: compared on Screening.
+        response = self._get("full", role_code="driver", candidate_ids=f"{amal.public_id},{badr.public_id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([e["evaluation_id"] for e in response.data["candidates"]],
+                         [str(amal_screening.public_id), str(badr_screening.public_id)])
+
+        # Badr only Screening, Chen only Full: nothing in common.
+        response = self._get("full", role_code="driver", candidate_ids=f"{badr.public_id},{chen.public_id}")
+        self.assertEqual(response.status_code, 400)
+
+    def test_held_score_is_withheld_and_critical_indicators_reported(self):
+        held = self._assessment(self._candidate("Amal"), held=True, score=90, critical_failures=[
+            {"topic": "Road Safety", "competency_code": "SAFETY"},
+            {"topic": "Road Safety", "competency_code": "SAFETY"},
+        ])
+        clean = self._assessment(self._candidate("Badr"), score=75)
+
+        rows = {r["evaluation_id"]: r for r in self._get("assessments", role_code="driver").data}
+        self.assertIsNone(rows[str(held.public_id)]["overall_score"])
+        self.assertEqual(rows[str(held.public_id)]["review_status"], "HUMAN_REVIEW")
+
+        response = self._get("full", role_code="driver", evaluation_ids=f"{held.public_id},{clean.public_id}")
+        held_entry, clean_entry = response.data["candidates"]
+        self.assertIsNone(held_entry["overall_score"])
+        self.assertTrue(held_entry["score_withheld"])
+        self.assertTrue(held_entry["requires_human_review"])
+        self.assertEqual(held_entry["critical_indicators"],
+                         {"failed_count": 2, "failed_topics": ["Road Safety"], "override_triggered": True})
+        self.assertEqual(clean_entry["overall_score"], 75.0)
+        self.assertEqual(clean_entry["critical_indicators"]["failed_count"], 0)
+        self.assertEqual(len(response.data["limitations"]), 5)
+
+        pdf = self._get("pdf", role_code="driver", evaluation_ids=f"{held.public_id},{clean.public_id}", lang="ar")
+        self.assertEqual(pdf.status_code, 200)
+        self.assertEqual(pdf["Content-Type"], "application/pdf")
+
+    def test_other_accounts_assessments_are_never_listed_or_compared(self):
+        mine = self._assessment(self._candidate("Amal"))
+        other = User.objects.create_user(
+            email="cmp-page-other@example.com", password="testpass123",
+            first_name="O", last_name="O", role=Roles.B2C, is_verified=True,
+        )
+        theirs_candidate = Candidate.objects.create(
+            first_name="Zed", last_name="Test", email="cmp-page-zed@example.com", passport_id="CMPP-ZED",
+            job_role="DR", core_skills="driving", preferred_language="EN",
+            passport_document="candidates/documents/passport/test.pdf", created_by=other,
+        )
+        theirs = self._assessment(theirs_candidate, owner=other)
+
+        listed = {r["evaluation_id"] for r in self._get("assessments", role_code="driver").data}
+        self.assertEqual(listed, {str(mine.public_id)})
+        response = self._get("full", role_code="driver", evaluation_ids=f"{mine.public_id},{theirs.public_id}")
+        self.assertEqual(len(response.data["candidates"]), 1)
+
+    def test_b2b_and_admin_assessments_endpoints_are_permission_checked(self):
+        self.client.force_authenticate(self.user)
+        self.assertEqual(self.client.get("/api/v1/dashboard/b2b/candidate-comparison/assessments",
+                                         {"role_code": "driver"}).status_code, 403)
+        self.assertEqual(self.client.get("/api/v1/dashboard/admin/candidate-comparison/assessments",
+                                         {"role_code": "driver"}).status_code, 403)

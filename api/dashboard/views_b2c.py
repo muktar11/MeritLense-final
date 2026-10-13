@@ -14,12 +14,10 @@ from api.payments.entitlement_services import EntitlementService
 from api.payments.models import PackageBalance
 from .comparison_services import (
     build_candidate_comparison_entry,
-    build_full_comparison,
-    compute_key_differences,
     get_comparable_roles,
     get_eligible_candidates,
 )
-from .comparison_pdf_services import render_comparison_pdf
+from .comparison_api import assessments_response, comparison_response
 from .dashboard_layout import B2C_DEFAULT_WIDGETS, B2C_WIDGET_IDS, resolve_layout, validate_widgets
 from .readiness_services import parse_attention_limit, readiness_distribution, requires_attention
 from .serializers import (
@@ -505,53 +503,29 @@ class B2CComparisonEligibleCandidatesView(APIView):
 
 class B2CComparisonFullView(APIView):
     """Steps 3+4: the real Candidate Summary + Competency Comparison data
-    for 2-4 selected, role-eligible candidates."""
+    for 2-4 selected, role-eligible assessments."""
     permission_classes = [IsAuthenticated, IsB2CUser]
 
-    def get(self, request):
-        role_code = request.query_params.get('role_code', '').strip()
-        raw_ids = request.query_params.get('candidate_ids', '')
-        candidate_ids = [v.strip() for v in raw_ids.split(',') if v.strip()]
-        if not role_code or not (2 <= len(candidate_ids) <= 4):
-            return Response({'error': 'role_code and 2-4 candidate_ids are required'}, status=400)
-
-        language = "ar" if request.query_params.get('lang') == "ar" else "en"
-        entries = build_full_comparison(
-            owner_type="USER", owner=request.user, role_code=role_code,
-            candidate_ids=candidate_ids, language=language, actor=request.user,
+    def get(self, request, pdf=False):
+        role_names = dict((r['role_code'], r['role_name']) for r in get_comparable_roles(owner_type="USER", owner=request.user))
+        return comparison_response(
+            request, owner_type="USER", owner=request.user,
+            role_name_for=lambda code: role_names.get(code, code), pdf=pdf,
         )
-        return Response({
-            'role_code': role_code,
-            'role_name': dict((r['role_code'], r['role_name']) for r in get_comparable_roles(owner_type="USER", owner=request.user)).get(role_code, role_code),
-            'candidates': entries,
-            'key_differences': compute_key_differences(entries, language=language),
-        })
 
 
-class B2CComparisonPdfView(APIView):
+class B2CComparisonPdfView(B2CComparisonFullView):
     """Spec item 8: backend-rendered bilingual Comparison PDF, same
     structure as the on-screen page."""
+
+    def get(self, request):
+        return super().get(request, pdf=True)
+
+
+class B2CComparisonAssessmentsView(APIView):
+    """Step 2: the role's comparable assessments - one row per assessment.
+    Filters: evaluation_tier, date_from, date_to."""
     permission_classes = [IsAuthenticated, IsB2CUser]
 
     def get(self, request):
-        role_code = request.query_params.get('role_code', '').strip()
-        raw_ids = request.query_params.get('candidate_ids', '')
-        candidate_ids = [v.strip() for v in raw_ids.split(',') if v.strip()]
-        if not role_code or not (2 <= len(candidate_ids) <= 4):
-            return Response({'error': 'role_code and 2-4 candidate_ids are required'}, status=400)
-
-        language = "ar" if request.query_params.get('lang') == "ar" else "en"
-        role_name = dict((r['role_code'], r['role_name']) for r in get_comparable_roles(owner_type="USER", owner=request.user)).get(role_code, role_code)
-        entries = build_full_comparison(
-            owner_type="USER", owner=request.user, role_code=role_code,
-            candidate_ids=candidate_ids, language=language, actor=request.user,
-        )
-        if len(entries) < 2:
-            return Response({'error': 'At least 2 comparable candidates are required.'}, status=400)
-
-        key_differences = compute_key_differences(entries, language=language)
-        pdf_bytes = render_comparison_pdf(role_name=role_name, entries=entries, key_differences=key_differences, language=language)
-        from django.http import HttpResponse
-        response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = 'attachment; filename="candidate-comparison.pdf"'
-        return response
+        return assessments_response(request, owner_type="USER", owner=request.user)

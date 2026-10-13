@@ -78,7 +78,7 @@ class CookieConsent(models.Model):
     necessary = models.BooleanField(default=True)
     analytics = models.BooleanField(default=False)
     marketing = models.BooleanField(default=False)
-    choice = models.CharField(max_length=20, help_text="accept_all, reject_optional or custom")
+    choice = models.CharField(max_length=20, help_text="accept_all, this_session (Just This Time), reject_optional or custom")
     language = models.CharField(max_length=5, default="en")
     policy_version = models.CharField(max_length=20)
     ip_address = models.GenericIPAddressField(null=True, blank=True)

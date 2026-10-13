@@ -153,6 +153,17 @@ class QuestionGenerationService:
         # so a SCREENING-tier session never targets a FULL-sized question count.
         target_count = session.total_questions or session.config.total_questions
         tier = session.evaluation_tier or InterviewEvaluationTier.FULL
+
+        from api.interviews.models import QuestionBankVersion
+
+        bank = (
+            QuestionBankVersion.objects.filter(version=session.question_set_version).first()
+            if session.question_set_version else None
+        )
+        if bank is not None:
+            selected_templates = cls._select_pooled_templates(session, bank, tier)
+            return cls._create_session_questions(session, selected_templates)
+
         queryset = QuestionTemplate.objects.filter(
             is_active=True,
             question_status=QuestionLifecycleStatus.ACTIVE,
@@ -162,6 +173,11 @@ class QuestionGenerationService:
             queryset = queryset.filter(role_code__iexact=session.role_code)
         else:
             queryset = queryset.filter(role_name__iexact=session.role_name)
+        # An assessment uses its own question-set version whenever that
+        # version's templates exist - so once another version is live, a
+        # GOV1.2 session still draws only GOV1.2 questions.
+        if session.question_set_version and queryset.filter(question_set_version=session.question_set_version).exists():
+            queryset = queryset.filter(question_set_version=session.question_set_version)
         localized = cls._question_pool(queryset.filter(language=session.candidate_language))
         if len(localized) < target_count:
             localized = cls._question_pool(queryset)
@@ -169,6 +185,67 @@ class QuestionGenerationService:
             localized = cls._question_pool(QuestionTemplate.objects.filter(is_active=True))
 
         selected_templates = cls._select_templates(session, localized, target_count)
+        return cls._create_session_questions(session, selected_templates)
+
+    @classmethod
+    def _select_pooled_templates(cls, session, bank, tier):
+        """Competency-allocation selection for a pooled bank version: the
+        session's own version, role and language only - no cross-role or
+        cross-language fallback. A pool that cannot meet the approved
+        allocation or Critical coverage is flagged (audit log) and the
+        session is not started on a non-compliant question set."""
+        from api.interviews.question_allocation import (
+            FULL, SCREENING, AllocationGap, QuestionCandidate, critical_competencies, select_questions,
+        )
+
+        tier_key = SCREENING if tier == InterviewEvaluationTier.SCREENING else FULL
+        profile = bank.profile_for(session.role_code)
+        templates = list(
+            QuestionTemplate.objects.filter(
+                question_set_version=bank.version,
+                role_code=session.role_code,
+                language=session.candidate_language,
+                is_active=True,
+            )
+        )
+        by_code = {template.question_code: template for template in templates}
+        previous_codes = list(
+            SessionQuestion.objects.filter(
+                session__candidate=session.candidate,
+                session__role_code=session.role_code,
+                session__question_set_version=bank.version,
+            )
+            .exclude(session=session)
+            .values_list("question_template__question_code", flat=True)
+        )
+        try:
+            if profile is None:
+                raise AllocationGap([f"{bank.version}: no role profile for {session.role_code}"])
+            result = select_questions(
+                pool=[QuestionCandidate.from_template(template) for template in templates],
+                allocation=profile["allocation"][tier_key],
+                critical=critical_competencies(profile),
+                tier=tier_key,
+                role_code=session.role_code,
+                language=session.candidate_language,
+                candidate_skills=session.candidate.get_skills_list(),
+                previous_codes=previous_codes,
+            )
+        except AllocationGap as gap:
+            AuditLogService.log(
+                user=session.created_by,
+                action=AuditLogAction.SESSION_FAILED,
+                category=AuditLogCategory.QUESTION,
+                description="Question selection gap flagged for review; session not started on a non-compliant set.",
+                resource=session,
+                severity=AuditLogSeverity.ERROR,
+                data={"question_set_version": bank.version, "tier": tier_key, "gaps": gap.gaps},
+            )
+            raise
+        return [by_code[candidate.code] for candidate in result.questions]
+
+    @classmethod
+    def _create_session_questions(cls, session, selected_templates):
         questions = []
         for order, template in enumerate(selected_templates, start=1):
             normalized = normalize_skill_fields(
@@ -459,8 +536,11 @@ class InterviewSessionService:
         # unlike B2B, where only Full (or a package explicitly configured
         # for it below) qualifies.
         is_b2c = getattr(created_by, "role", None) == Roles.B2C
-        readiness_indicator_enabled = is_b2c or config.evaluation_tier == InterviewEvaluationTier.FULL
-        certificate_enabled = is_b2c or config.evaluation_tier == InterviewEvaluationTier.FULL
+        is_full = config.evaluation_tier == InterviewEvaluationTier.FULL
+        readiness_indicator_enabled = is_b2c or is_full
+        # Governance: certificates only for Full Assessments, for every
+        # account type and package (Screening never issues one).
+        certificate_enabled = is_full
         expiry_duration = config.duration_minutes
 
         if package_context is not None:
@@ -486,7 +566,7 @@ class InterviewSessionService:
             coverage_level = coverage.coverage_level
             task_observation_enabled = package_context["task_observation_enabled"]
             readiness_indicator_enabled = package_context["readiness_indicator_enabled"]
-            certificate_enabled = package_context["certificate_enabled"]
+            certificate_enabled = package_context["certificate_enabled"] and is_full
             expiry_duration = package_session_config.duration_minutes or config.duration_minutes
             # The package's coverage can be lower than what this
             # InterviewConfiguration was explicitly built/selected for (e.g.

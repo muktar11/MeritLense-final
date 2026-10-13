@@ -235,7 +235,31 @@ class Evaluation(TimeStampedModel, SoftDeleteModel):
         blank=True,
         help_text="Reason for cancellation"
     )
-    
+
+    # Human-review release safeguard. While REQUIRED, the result, report and
+    # certificate are withheld from the employer; only an admin reviewer's
+    # recorded decision (HumanReviewService.approve) releases them.
+    REVIEW_NOT_REQUIRED = "NOT_REQUIRED"
+    REVIEW_REQUIRED = "REQUIRED"
+    REVIEW_APPROVED = "APPROVED"
+    REVIEW_STATUS_CHOICES = [
+        (REVIEW_NOT_REQUIRED, "Not required"),
+        (REVIEW_REQUIRED, "Awaiting human review"),
+        (REVIEW_APPROVED, "Reviewed and released"),
+    ]
+    review_status = models.CharField(max_length=20, choices=REVIEW_STATUS_CHOICES, default=REVIEW_NOT_REQUIRED,
+                                     db_index=True)
+    review_reasons = models.JSONField(default=list, blank=True)
+    reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name="reviewed_evaluations")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_decision = models.CharField(max_length=20, blank=True, help_text="Readiness decided by the reviewer.")
+    review_notes = models.TextField(blank=True)
+
+    @property
+    def is_held_for_review(self):
+        return self.review_status == self.REVIEW_REQUIRED
+
     class Meta:
         verbose_name = "Evaluation"
         verbose_name_plural = "Evaluations"
@@ -396,9 +420,27 @@ class EvaluationReadinessCorrection(TimeStampedModel):
 
 
 class ScoringRuleSet(TimeStampedModel):
+    # RESPONSE_SUM: overall = total score / total max across responses, so a
+    # competency with more questions weighs more (all pre-GOV2.0 rule sets).
+    # EQUAL_COMPETENCY: overall = mean of competency percentages, so question
+    # counts never set competency weight (GOV2.0 onwards).
+    AGGREGATION_RESPONSE_SUM = "RESPONSE_SUM"
+    AGGREGATION_EQUAL_COMPETENCY = "EQUAL_COMPETENCY"
+    AGGREGATION_CHOICES = [
+        (AGGREGATION_RESPONSE_SUM, "Sum of response scores"),
+        (AGGREGATION_EQUAL_COMPETENCY, "Equal weight per competency"),
+    ]
+
     name = models.CharField(max_length=150)
     version = models.CharField(max_length=40)
     description = models.TextField(blank=True)
+    # The question-set version this rule set scores. Blank on rule sets
+    # created before versioned resolution; those are only ever resolved for
+    # sessions whose own version has no dedicated rule set.
+    question_set_version = models.CharField(max_length=50, blank=True, db_index=True)
+    aggregation_method = models.CharField(
+        max_length=30, choices=AGGREGATION_CHOICES, default=AGGREGATION_RESPONSE_SUM,
+    )
     role_code = models.CharField(max_length=100, blank=True)
     role_name = models.CharField(max_length=100, blank=True)
     evaluation_tier = models.CharField(
@@ -502,6 +544,10 @@ class ScoringRule(TimeStampedModel):
         default=SCORING_METHOD_WEIGHTED_MATCH,
     )
     is_active = models.BooleanField(default=True)
+    # Governance data carried with the rule (e.g. D-04 negative severities,
+    # D-02 mandatory classification, review status). Informational: scoring
+    # logic does not read it.
+    metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
         verbose_name = "Scoring Rule"

@@ -245,7 +245,10 @@ def _competency_rows(report, role_code):
     roles role_config doesn't cover yet."""
     from api.evaluations.certificate_services import required_dimensions_for_role, role_competency_config
 
-    role_config = role_competency_config(role_code)
+    session = getattr(report, "session", None)
+    role_config = role_competency_config(
+        role_code, getattr(session, "question_set_version", ""), getattr(session, "evaluation_tier", "")
+    )
     required = set(required_dimensions_for_role(role_code))
     items = ((report.report_payload or {}).get("critical_competency_status")) or []
 

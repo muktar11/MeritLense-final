@@ -1,0 +1,1993 @@
+{
+ "method": "Each EN/AR Must Include pair whose item counts differ was read side by side. SEG = boundaries differ, every EN requirement present in AR and nothing added; no change. GAP = AR omits or alters a requirement; AR corrected. FORMAT = meaning complete but AR unsegmented or contains a wording error; AR corrected.",
+ "verdicts": {
+  "CC-BEH-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "CC-BR-001": {
+   "class": "GAP",
+   "detail": "Arabic omitted 'request available help'"
+  },
+  "CC-CES-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "CC-COM-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "CC-HYG-003": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "CC-HYG-004": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "CC-HYG-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "CC-HYG-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "CC-HYG-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "CC-HYG-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "CC-SAF-012": {
+   "class": "GAP",
+   "detail": "Arabic omitted the SDS reference"
+  },
+  "DRV-BEH-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-003": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-004": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-BEH-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-COM-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-COM-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-COM-004": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-COM-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-COM-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-COM-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-COM-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-COM-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-COM-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-COM-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-COM-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-COM-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-IR-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-RLS-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-001": {
+   "class": "GAP",
+   "detail": "Arabic omitted 'proceed only when clear' and narrowed stopping to pedestrians"
+  },
+  "DRV-SAF-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-020": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-SAF-023": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-TK-004": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-TSK-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-TSK-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-TSK-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-TSK-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-TSK-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-TSK-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "DRV-TSK-024": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ECG-HYG-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ECG-PRO-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ECG-SAF-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ECG-SAF-022": {
+   "class": "FORMAT",
+   "detail": "Arabic was a single unsegmented item"
+  },
+  "ECG-TSK-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "EMS-COM-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "EMS-COM-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-BEH-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-BEH-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-BEH-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-COM-001": {
+   "class": "GAP",
+   "detail": "Arabic omitted 'avoid arguing or false promises'"
+  },
+  "ES-COM-002": {
+   "class": "GAP",
+   "detail": "Arabic omitted the action needed"
+  },
+  "ES-COM-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-COM-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-COM-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-COM-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-COM-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-COM-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-COM-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-COM-020": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-COM-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-ER-003": {
+   "class": "GAP",
+   "detail": "Arabic omitted planned relief routes, avoiding counterflow and coordinating team support"
+  },
+  "ES-ID-003": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-004": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-020": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ES-SAF-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-BAD-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-BEH-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-COM-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-COM-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-COM-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-COM-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-COM-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-COM-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-COM-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-SAF-001": {
+   "class": "GAP",
+   "detail": "Arabic omitted 'guide responders'"
+  },
+  "FDA-SAF-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-SAF-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-SAF-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-SAF-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-SAF-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-TSK-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-TSK-025": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-TSK-026": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FDA-TSK-027": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-BEH-003": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-BEH-004": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-BEH-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-BEH-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-BEH-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-BEH-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-BEH-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-BEH-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-BEH-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-BEH-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-BEH-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-COM-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-COM-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-COM-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-COM-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-COM-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-COM-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-COM-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-COM-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-HYG-023": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-SAF-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-SAF-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-SAF-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-SAF-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-SAF-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-SAF-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-SAF-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-SAF-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-SAF-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-SAF-015": {
+   "class": "FORMAT",
+   "detail": "Arabic said 'request the urgent' (missing 'help') and merged the final points"
+  },
+  "FW-SAF-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-SAF-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-SAF-020": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-SAF-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-SAF-023": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-TSK-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-TSK-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-TSK-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-TSK-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-TSK-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-TSK-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-TSK-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-TSK-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-TSK-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-TSK-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-TSK-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-TSK-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-TSK-020": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "FW-TSK-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-BEH-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-BEH-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-BEH-003": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-BEH-004": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-BEH-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-BEH-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-BEH-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-BEH-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-BEH-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-BI-003": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-BI-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-003": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-004": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-016": {
+   "class": "GAP",
+   "detail": "Arabic dropped 'site' from the site emergency procedure"
+  },
+  "GL-COM-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-COM-020": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-017": {
+   "class": "GAP",
+   "detail": "Arabic omitted 'do not continue while impaired'"
+  },
+  "GL-SAF-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-020": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SAF-023": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SS-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SS-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-SS-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-020": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "GL-TSK-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "HCA-COM-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "HK-PRO-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "IC-BEH-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "IC-BEH-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "IC-BR-001": {
+   "class": "GAP",
+   "detail": "Arabic omitted 'document when required'"
+  },
+  "IC-CES-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "IC-COM-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "IC-HYG-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "IC-HYG-004": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "IC-HYG-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "IC-HYG-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "IC-HYG-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "IC-HYG-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "IC-SAF-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "IC-SAF-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "IC-TSK-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-BEH-003": {
+   "class": "GAP",
+   "detail": "Arabic dropped 'through the approved route'"
+  },
+  "LS-BEH-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-BEH-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-BEH-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-BEH-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-BEH-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-BEH-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-BEH-011": {
+   "class": "GAP",
+   "detail": "Arabic dropped 'veterinary' from the instruction to follow"
+  },
+  "LS-BEH-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-BEH-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-BEH-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-BEH-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-COM-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-COM-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-COM-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-COM-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-COM-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-COM-010": {
+   "class": "FORMAT",
+   "detail": "Arabic was a single unsegmented item"
+  },
+  "LS-COM-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-COM-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-COM-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-COM-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-020": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-HYG-023": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-015": {
+   "class": "FORMAT",
+   "detail": "Arabic said 'request the urgent' (missing 'help') and merged the final points"
+  },
+  "LS-SAF-016": {
+   "class": "GAP",
+   "detail": "Arabic narrowed 'site/personal limits' to 'safe limits'"
+  },
+  "LS-SAF-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-020": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-SAF-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-020": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "LS-TSK-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "RS-BEH-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "RS-COM-003": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "RS-COM-006": {
+   "class": "GAP",
+   "detail": "Arabic omitted allergen information and 'update order accurately'"
+  },
+  "RS-COM-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "RS-COM-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "RS-COM-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "RS-COM-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "RS-SAF-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "RS-SAF-003": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "RS-SAF-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "RS-TSK-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "RS-TSK-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "RS-TSK-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-BEH-003": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-BEH-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-COM-003": {
+   "class": "GAP",
+   "detail": "Arabic omitted 'record'"
+  },
+  "SG-COM-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-COM-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-COM-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-COM-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-COM-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-COM-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-COM-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-COM-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-COM-023": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-ER-001": {
+   "class": "GAP",
+   "detail": "Arabic omitted keeping clear of smoke, reporting/access control and the clear-escape-route condition"
+  },
+  "SG-ID-003": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-020": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SAF-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-SJ-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-TSK-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-TSK-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-TSK-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-TSK-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-TSK-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-TSK-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-TSK-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-TSK-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-TSK-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-TSK-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-TSK-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-TSK-023": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-TSK-024": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "SG-TSK-025": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-BEH-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-BEH-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-BEH-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-BEH-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-BEH-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-BEH-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-BEH-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-BEH-012": {
+   "class": "GAP",
+   "detail": "Arabic dropped 'through the approved route'"
+  },
+  "ST-BEH-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-BEH-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-BEH-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-BI-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-COM-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-COM-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-COM-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-COM-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-COM-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-COM-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-COM-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-COM-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-020": {
+   "class": "FORMAT",
+   "detail": "Typo in the Arabic ('بأأمن')"
+  },
+  "ST-SAF-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-023": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SAF-024": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SS-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-SS-004": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TK-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-020": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-023": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-024": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "ST-TSK-025": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-BEH-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-BEH-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-BEH-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-BEH-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-BEH-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-COM-001": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-COM-003": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-COM-004": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-COM-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-COM-006": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-COM-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-COM-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-COM-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-COM-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-COM-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-COM-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-IR-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-002": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-007": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-008": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-020": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-022": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-SAF-023": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-005": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-009": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-010": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-011": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-012": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-013": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-014": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-015": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-016": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-017": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-018": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-019": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-021": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-023": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-024": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-025": {
+   "class": "SEG",
+   "detail": ""
+  },
+  "WS-TSK-026": {
+   "class": "SEG",
+   "detail": ""
+  }
+ }
+}

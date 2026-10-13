@@ -1,0 +1,51 @@
+{
+ "category": "D06_LOCK",
+ "status": "GOVERNANCE",
+ "corrections": {
+  "CCG-TSK-003": {
+   "fields": {
+    "must_include_en": "Confirm the task and required standard; prepare the area/tools; follow the approved sequence within assigned authority; check the result; correct or report defects; leave the area safe and record/handover as required.",
+    "must_include_ar": "تأكيد المهمة والمعيار المطلوب؛ تجهيز المنطقة والأدوات؛ اتباع التسلسل المعتمد ضمن الصلاحيات المكلف بها؛ فحص النتيجة؛ تصحيح العيوب أو الإبلاغ عنها؛ ترك المنطقة آمنة والتوثيق أو التسليم عند الحاجة.",
+    "ideal_keywords": "prepare; procedure; sequence; check; defect; handover",
+    "negative_indicators": "Skips a material safety/quality step; performs specialist/unauthorized work; falsifies completion."
+   },
+   "proposed_for_sme": {
+    "must_include_en": "Prepare safe water and supplies; never leave the child unattended in the bath; wash gently using age-appropriate products; dry and dress the child safely; follow the bedtime routine agreed with the family.",
+    "must_include_ar": "تجهيز الماء والأدوات والتأكد من سلامة حرارته؛ عدم ترك الطفل وحده في الحمام مطلقًا؛ تنظيفه بلطف بمنتجات مناسبة لعمره؛ تجفيفه وإلباسه بأمان؛ اتباع روتين النوم المتفق عليه مع الأسرة.",
+    "ideal_keywords": "safe water temperature; supplies; continuous bath supervision; gentle washing; dry; dress; bedtime routine",
+    "negative_indicators": "Leaves the child alone in the bath; uses unsafe water temperature; leaves the child wet or cold"
+   },
+   "note": "D-06: kept unchanged pending role-specific SME criteria; handoff rewrite recorded as a proposal."
+  },
+  "IC-TSK-003": {
+   "fields": {
+    "must_include_en": "Confirm the task and required standard; prepare the area/tools; follow the approved sequence within assigned authority; check the result; correct or report defects; leave the area safe and record/handover as required.",
+    "must_include_ar": "تأكيد المهمة والمعيار المطلوب؛ تجهيز المنطقة والأدوات؛ اتباع التسلسل المعتمد ضمن الصلاحيات المكلف بها؛ فحص النتيجة؛ تصحيح العيوب أو الإبلاغ عنها؛ ترك المنطقة آمنة والتوثيق أو التسليم عند الحاجة.",
+    "ideal_keywords": "prepare; procedure; sequence; check; defect; handover",
+    "negative_indicators": "Skips a material safety/quality step; performs specialist/unauthorized work; falsifies completion."
+   },
+   "proposed_for_sme": {
+    "must_include_en": "Identify the chemical and its hazards and check the approved spill response procedure; do not begin without authorization, training and appropriate PPE; isolate the area; decontaminate using the approved method for that chemical and surface; dispose of waste correctly; confirm the area is safe before reopening.",
+    "must_include_ar": "تحديد المادة الكيميائية ومخاطرها ومراجعة إجراء الاستجابة المعتمد؛ عدم البدء دون تصريح وتدريب ومعدات وقاية مناسبة؛ عزل المنطقة؛ إزالة التلوث بالطريقة المعتمدة للمادة والسطح؛ التخلص الصحيح من النفايات؛ التأكد من أمان المنطقة قبل إتاحتها.",
+    "ideal_keywords": "chemical identification; spill procedure; authorization; training; PPE; isolate; specific decontamination; waste; verify",
+    "negative_indicators": "Attempts spill response without required training; uses incompatible materials; releases before checks"
+   },
+   "note": "D-06: kept unchanged pending role-specific SME criteria; handoff rewrite recorded as a proposal."
+  },
+  "SNC-GEN-009": {
+   "fields": {
+    "must_include_en": "Confirm the task and required standard; prepare the area/tools; follow the approved sequence within assigned authority; check the result; correct or report defects; leave the area safe and record/handover as required.",
+    "must_include_ar": "تأكيد المهمة والمعيار المطلوب؛ تجهيز المنطقة والأدوات؛ اتباع التسلسل المعتمد ضمن الصلاحيات المكلف بها؛ فحص النتيجة؛ تصحيح العيوب أو الإبلاغ عنها؛ ترك المنطقة آمنة والتوثيق أو التسليم عند الحاجة.",
+    "ideal_keywords": "prepare; procedure; sequence; check; defect; handover",
+    "negative_indicators": "Skips a material safety/quality step; performs specialist/unauthorized work; falsifies completion."
+   },
+   "proposed_for_sme": {
+    "must_include_en": "Check the person’s care plan, allergies, swallowing needs and prescribed diet; wash hands and clean the preparation area; prepare suitable food and texture; supervise or assist as required; check safe temperature and report concerns.",
+    "must_include_ar": "مراجعة خطة الرعاية والحساسية وصعوبات البلع والنظام الغذائي المحدد؛ غسل اليدين وتنظيف مكان التحضير؛ إعداد طعام مناسب بالقوام المطلوب؛ تقديم المساعدة أو الإشراف حسب الحاجة؛ التحقق من درجة الحرارة الآمنة والإبلاغ عن أي مشكلة.",
+    "ideal_keywords": "care plan; allergies; swallowing; diet; food hygiene; texture; temperature; assistance",
+    "negative_indicators": "Ignores an allergy or prescribed texture; prepares food on a contaminated surface; leaves a person without required eating support"
+   },
+   "note": "D-06: kept unchanged pending role-specific SME criteria; handoff rewrite recorded as a proposal."
+  }
+ }
+}

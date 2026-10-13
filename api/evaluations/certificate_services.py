@@ -276,8 +276,45 @@ ROLE_COMPETENCY_CONFIG = {
 }
 
 
-def role_competency_config(role_code):
-    return ROLE_COMPETENCY_CONFIG.get(role_code)
+COMPETENCY_DIMENSIONS = {
+    "safety_awareness": "SAFETY",
+    "task_execution": "PRACTICAL_TASKS",
+    "hygiene_standards": "HYGIENE",
+    "communication_ability": "COMMUNICATION",
+    "behavior_integrity": "BEHAVIORAL",
+}
+
+
+def _bank_version_config(role_code, question_set_version, evaluation_tier):
+    """A pooled question bank (GOV2.0+) carries the approved role profile -
+    Critical / Non-Critical / N/A per competency - with the version itself,
+    so readiness for its sessions follows that profile for every role, not
+    just the roles hard-coded above. A tier only requires the competencies
+    its allocation actually asks about (Screening's 7 questions don't cover
+    every Non-Critical competency by design). Sessions on an unpooled
+    version (GOV1.2 and history) never reach this."""
+    if not question_set_version:
+        return None
+    from api.interviews.models import QuestionBankVersion
+
+    bank = QuestionBankVersion.objects.filter(version=question_set_version).first()
+    profile = bank.profile_for(role_code) if bank else None
+    if not profile:
+        return None
+    allocation = (profile.get("allocation") or {}).get(str(evaluation_tier or "").upper()) or {}
+    return {
+        COMPETENCY_DIMENSIONS[code]: "CRITICAL" if level == "Critical" else "NON_CRITICAL"
+        for code, level in profile["criticality"].items()
+        if level in ("Critical", "Non-Critical") and code in COMPETENCY_DIMENSIONS
+        and (not allocation or allocation.get(code, 0) > 0)
+    }
+
+
+def role_competency_config(role_code, question_set_version="", evaluation_tier=""):
+    return (
+        _bank_version_config(role_code, question_set_version, evaluation_tier)
+        or ROLE_COMPETENCY_CONFIG.get(role_code)
+    )
 
 
 def evaluate_role_competency_readiness(summary, role_code):
@@ -295,7 +332,12 @@ def evaluate_role_competency_readiness(summary, role_code):
       passing) -> PARTIALLY_READY.
     - Everything passing -> READY.
     """
-    config = role_competency_config(role_code)
+    session = getattr(summary, "session", None)
+    config = role_competency_config(
+        role_code,
+        getattr(session, "question_set_version", ""),
+        getattr(session, "evaluation_tier", ""),
+    )
     if config is None:
         return None
 
@@ -507,7 +549,18 @@ def certificate_eligibility(evaluation, summary):
     "PARTIALLY_READY" (both eligible), or "NOT_READY", "INCOMPLETE",
     "VERIFICATION_FAILED" (not eligible), for audit logging.
     """
+    from api.core.constants import InterviewEvaluationTier
     from api.reports.services import EvaluationReportService
+
+    # Governance: certificates are restricted to Full Assessments (21
+    # questions). A Screening (7 questions) never issues one, whatever the
+    # account type or package - checked here so no caller can bypass it.
+    if evaluation.evaluation_tier != InterviewEvaluationTier.FULL:
+        return False, "SCREENING_NO_CERTIFICATE"
+    # Release safeguard: nothing is certified while awaiting human review.
+    if evaluation.is_held_for_review:
+        return False, "HUMAN_REVIEW_PENDING"
+    review_approved = evaluation.review_status == evaluation.REVIEW_APPROVED
 
     readiness_record = EvaluationReadinessRecordService.get_existing(evaluation)
     indicator = EvaluationReportService._resolve_readiness_indicator(evaluation, readiness_record)
@@ -576,7 +629,9 @@ def certificate_eligibility(evaluation, summary):
         failed_required_dimensions = below_threshold_dimensions(summary) & set(required_dimensions_for_role(role_code))
         if failed_required_dimensions:
             return False, "REQUIRED_COMPETENCY_BELOW_THRESHOLD"
-    if human_review_flags or _human_review_pending(summary):
+    # A reviewer's recorded approval resolves the review flags; the
+    # threshold and coverage checks above still apply to the actual scores.
+    if not review_approved and (human_review_flags or _human_review_pending(summary)):
         return False, "HUMAN_REVIEW_PENDING"
     if session and session.is_scheduled_interview and getattr(evaluation, "evaluator_rating", None) is None:
         return False, "EVALUATOR_RATING_PENDING"

@@ -143,3 +143,41 @@ class InterviewRubric(TimeStampedModel):
         if update_fields is not None:
             kwargs["update_fields"] = set(update_fields) | {"skill_tag", "scoring_category"}
         super().save(*args, **kwargs)
+
+
+class QuestionBankVersion(TimeStampedModel):
+    """A pooled, versioned question bank (GOV2.0 onwards).
+
+    Holds what live selection and cutover need at runtime: each role's
+    criticality profile and competency allocation matrix, and the
+    assessment-configuration state captured at activation so a rollback can
+    restore it. Sessions created under a version keep using that version's
+    questions, rubrics and scoring rules, whatever its later status."""
+
+    STATUS_DRAFT = "DRAFT"
+    STATUS_ACTIVE = "ACTIVE"
+    STATUS_ROLLED_BACK = "ROLLED_BACK"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_ROLLED_BACK, "Rolled back"),
+    ]
+
+    version = models.CharField(max_length=50, unique=True)
+    rule_set_version = models.CharField(max_length=40)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+    role_profiles = models.JSONField(default=list, blank=True)
+    previous_configuration_state = models.JSONField(default=list, blank=True)
+    activated_at = models.DateTimeField(null=True, blank=True)
+    rolled_back_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Question Bank Version"
+        verbose_name_plural = "Question Bank Versions"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.version} ({self.status})"
+
+    def profile_for(self, role_code):
+        return next((p for p in self.role_profiles if p.get("role_code") == role_code), None)

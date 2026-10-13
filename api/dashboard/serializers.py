@@ -2,6 +2,7 @@ from rest_framework import serializers
 from api.candidates.models import Candidate
 from api.core.serializers import PublicIdModelSerializer
 from api.evaluations.models import Evaluation
+from api.evaluations.serializers import ReviewHoldMaskMixin
 
 class DashboardStatsSerializer(serializers.Serializer):
     total_candidates = serializers.IntegerField()
@@ -41,7 +42,7 @@ class RecentCandidateSerializer(PublicIdModelSerializer):
         return obj.get_full_name()
 
 
-class RecentEvaluationSerializer(PublicIdModelSerializer):
+class RecentEvaluationSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):
     candidate_name = serializers.SerializerMethodField()
     evaluation_type_display = serializers.CharField(source='get_evaluation_type_display')
     status_display = serializers.CharField(source='get_status_display')

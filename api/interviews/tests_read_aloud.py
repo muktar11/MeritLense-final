@@ -179,3 +179,10 @@ class QuestionTextEndpointTests(ReadAloudLanguageTests.__base__):
             self._get(q1, "question-text", question_id=str(q1.public_id), language="SW")
             self._get(q2, "question-text", question_id=str(q2.public_id), language="SW")
         google.assert_called_once()
+
+    def test_low_resource_languages_never_use_the_unreliable_fallback(self):
+        q = self._questions("EN")[0]
+        with patch("api.interviews.question_language.TranslationService.translate", side_effect=AIProcessingError("down")),                 patch("api.interviews.question_language._openai_translate",
+                      side_effect=AssertionError("Afar must not use the fallback")):
+            response = self._get(q, "question-text", question_id=str(q.public_id), language="AA")
+        self.assertEqual(response.status_code, 503)

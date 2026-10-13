@@ -5,6 +5,7 @@ approved text in the chosen language - not a machine translation of it, and
 never Arabic text through an English voice (or the reverse)."""
 from unittest.mock import patch
 
+from django.core.cache import cache
 from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
@@ -30,6 +31,9 @@ class ReadAloudLanguageTests(TestCase):
                                              role=Roles.B2B, is_verified=True)
         cls.company = Company.objects.create(name="RA Co", registration_number="RA-1", company_size="11-50",
                                              phone_number="+1", country="X", city="Y", admin_user=cls.owner)
+
+    def setUp(self):
+        cache.clear()  # the display-translation "provider down" flag
 
     def _questions(self, lang):
         config = InterviewConfiguration.objects.get(role_code="nursing_assistant", language=lang,
@@ -98,6 +102,7 @@ class QuestionTextEndpointTests(ReadAloudLanguageTests.__base__):
     candidate sees in another language, beside the original question."""
 
     setUpTestData = ReadAloudLanguageTests.__dict__["setUpTestData"]
+    setUp = ReadAloudLanguageTests.setUp
     _questions = ReadAloudLanguageTests._questions
     _sibling = ReadAloudLanguageTests._sibling
 
@@ -166,3 +171,11 @@ class QuestionTextEndpointTests(ReadAloudLanguageTests.__base__):
         q.session.candidate.save()
         response = self.client.get(f"/api/v1/interviews/{q.session.public_id}/", {"token": q.session.access_token})
         self.assertEqual(response.data["preferred_language"], "AM")
+
+    def test_failing_provider_is_skipped_for_a_while_after_it_fails(self):
+        q1, q2 = self._questions("EN")[:2]
+        with patch("api.interviews.question_language.TranslationService.translate",
+                   side_effect=AIProcessingError("billing disabled")) as google,                 patch("api.interviews.question_language._openai_translate", return_value=("Habari", "OPENAI:test")):
+            self._get(q1, "question-text", question_id=str(q1.public_id), language="SW")
+            self._get(q2, "question-text", question_id=str(q2.public_id), language="SW")
+        google.assert_called_once()

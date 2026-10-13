@@ -323,6 +323,9 @@ OPENAI_INTERPRETATION_API_URL = os.getenv(
     "https://api.openai.com/v1/chat/completions",
 )
 OPENAI_INTERPRETATION_MODEL = os.getenv("OPENAI_INTERPRETATION_MODEL", "gpt-4o-mini")
+# On-screen question/statement translations during the interview (never
+# used for scoring) - see api/interviews/question_language.py.
+OPENAI_DISPLAY_TRANSLATION_MODEL = os.getenv("OPENAI_DISPLAY_TRANSLATION_MODEL", "gpt-4o")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_INTERPRETATION_API_URL = os.getenv(
     "GEMINI_INTERPRETATION_API_URL",

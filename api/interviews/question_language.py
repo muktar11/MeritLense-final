@@ -50,7 +50,9 @@ def language_key(value):
 def _openai_translate(text, source_key, target_key):
     api_key = getattr(settings, "OPENAI_API_KEY", "")
     url = getattr(settings, "OPENAI_INTERPRETATION_API_URL", "")
-    model = getattr(settings, "OPENAI_INTERPRETATION_MODEL", "")
+    # A stronger model than interpretation's default: short texts, stored
+    # once per question, and gpt-4o-mini's Amharic/Tigrinya were unreadable.
+    model = getattr(settings, "OPENAI_DISPLAY_TRANSLATION_MODEL", "") or getattr(settings, "OPENAI_INTERPRETATION_MODEL", "")
     if not (api_key and url and model):
         raise TranslationUnavailable("OpenAI is not configured")
     prompt = (
@@ -73,7 +75,7 @@ def _openai_translate(text, source_key, target_key):
                     {"role": "user", "content": prompt},
                 ],
             },
-            timeout=getattr(settings, "AI_INTERPRETATION_TIMEOUT_SECONDS", 30),
+            timeout=20,
         )
         response.raise_for_status()
         content = ((response.json().get("choices") or [{}])[0].get("message") or {}).get("content") or "{}"
@@ -85,19 +87,28 @@ def _openai_translate(text, source_key, target_key):
     return translated, f"OPENAI:{model}"
 
 
+PROVIDER_DOWN_KEY = "display-translation:provider-down"
+PROVIDER_DOWN_SECONDS = 600
+
+
 def display_translate(text, source_key, target_key):
     """(translated_text, provider) - configured provider first, then
-    OpenAI. Raises TranslationUnavailable when neither works."""
-    try:
-        result = TranslationService.translate(
-            text=text, source_language=source_key.lower(), target_language=target_key.lower(),
-        )
-        if result.get("translated_text"):
-            return result["translated_text"], result.get("provider") or settings.TRANSLATION_PROVIDER
-    except AIProcessingError as exc:
-        logger.info("Display translation provider failed (%s); trying OpenAI", getattr(exc, "code", exc))
-    except Exception:  # noqa: BLE001 - provider misconfiguration must not break the interview
-        logger.exception("Display translation provider raised unexpectedly; trying OpenAI")
+    OpenAI. Raises TranslationUnavailable when neither works. After the
+    provider fails it is skipped for 10 minutes, so candidates don't wait
+    on a provider that is down (e.g. billing disabled) for every question."""
+    if not cache.get(PROVIDER_DOWN_KEY):
+        try:
+            result = TranslationService.translate(
+                text=text, source_language=source_key.lower(), target_language=target_key.lower(),
+            )
+            if result.get("translated_text"):
+                return result["translated_text"], result.get("provider") or settings.TRANSLATION_PROVIDER
+        except AIProcessingError as exc:
+            logger.info("Display translation provider failed (%s); trying OpenAI", getattr(exc, "code", exc))
+            cache.set(PROVIDER_DOWN_KEY, True, PROVIDER_DOWN_SECONDS)
+        except Exception:  # noqa: BLE001 - provider misconfiguration must not break the interview
+            logger.exception("Display translation provider raised unexpectedly; trying OpenAI")
+            cache.set(PROVIDER_DOWN_KEY, True, PROVIDER_DOWN_SECONDS)
     return _openai_translate(text, source_key, target_key)
 
 

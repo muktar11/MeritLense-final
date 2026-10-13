@@ -481,13 +481,20 @@ class CandidateJobRoles:
     # 2026-09-08 (EC -> Elderly Caregiver; KA -> Restaurant Staff as a
     # temporary stand-in pending dedicated Kitchen Assistant content; OT ->
     # blocked, "Other" can't be meaningfully assessed by a fixed rubric).
+    #
+    # Each value lists role names in order of preference. The governance
+    # question bank (v1.2, 21 roles) replaced the "Nanny" and "Skilled Trades
+    # & Maintenance" configurations with "Child Caregiver" and "Skilled
+    # Trades", so scheduling NA/MW candidates failed in production with "No
+    # active AI interview configuration found". The older names stay as
+    # fallbacks for environments that still have them.
     INTERVIEW_ROLE_NAME_MAP = {
-        NANNY: 'Nanny',
-        DRIVER: 'Driver',
-        HOUSEKEEPER: 'Housekeeper',
-        ELDERCOMPANION: 'Elderly Caregiver',
-        KITCHENASSISTANT: 'Restaurant Staff',
-        MAINTAINANCEWORKER: 'Skilled Trades & Maintenance',
+        NANNY: ('Child Caregiver', 'Nanny'),
+        DRIVER: ('Driver',),
+        HOUSEKEEPER: ('Housekeeper',),
+        ELDERCOMPANION: ('Elderly Caregiver',),
+        KITCHENASSISTANT: ('Restaurant Staff',),
+        MAINTAINANCEWORKER: ('Skilled Trades', 'Skilled Trades & Maintenance'),
         OTHER: None,
     }
 

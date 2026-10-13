@@ -122,6 +122,27 @@ class LaunchSafeguardTests(TestCase):
 
     # -- 1. Arabic across the approved bank -----------------------------------
 
+    def test_arabic_answers_reach_the_model_as_arabic_text(self):
+        # The prompt used to be built with ensure_ascii=True, so the model got
+        # Arabic answers as backslash-u escape codes and missed an unsafe
+        # Arabic sentence in live testing.
+        prompts = []
+
+        class Recording(Extractor):
+            def interpret(self, *, prompt):
+                prompts.append(prompt)
+                return super().interpret(prompt=prompt)
+
+        with mock.patch(f"{__name__}.Extractor", Recording):
+            self._assess("driver", "AR", tier=InterviewEvaluationTier.SCREENING)
+        self.assertTrue(prompts)
+        for prompt in prompts:
+            payload = json.loads(prompt)
+            # Arabic arrives as Arabic, not as backslash-u06xx escapes.
+            self.assertNotIn(r"\u06", prompt)
+            self.assertRegex(payload["question"]["text"], "[؀-ۿ]")
+            self.assertIn(payload["question"]["text"], prompt)
+
     def test_registry_covers_the_whole_approved_bank(self):
         from api.questions.models import IndicatorDefinition
 

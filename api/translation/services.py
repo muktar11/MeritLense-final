@@ -547,8 +547,10 @@ class ResponseInterpretationService:
         "must also appear in observations with its quote - never return an empty observations list for an answer "
         "that addresses any indicator. Separately, list in safety_risks any unsafe, prohibited or "
         "out-of-scope action the candidate says they would take themselves - even if it is not on the indicator "
-        "list and even if the rest of the answer is correct - and nothing the candidate refuses, warns against or "
-        "attributes to someone else."
+        "list, even if the rest of the answer is correct, and even if it comes after the main answer or concerns "
+        "a different situation - and nothing the candidate refuses, warns against or attributes to someone else. "
+        "Read the whole transcript, in whatever language it is written, before deciding: an unsafe statement in "
+        "Arabic counts exactly as the same statement in English. Write each safety_risks entry in English."
     )
 
     @classmethod
@@ -691,7 +693,10 @@ class ResponseInterpretationService:
             prompt_payload["question"]["expected_steps"] = [
                 i.text_en for i in indicators if i.indicator_type == IndicatorDefinition.TYPE_MUST_INCLUDE
             ]
-        return json.dumps(prompt_payload, ensure_ascii=True)
+        # Real UTF-8, not escape codes: with ensure_ascii=True the model got
+        # every Arabic answer as \uXXXX sequences, and in live testing it
+        # missed an unsafe sentence in Arabic that it caught in English.
+        return json.dumps(prompt_payload, ensure_ascii=False)
 
     @classmethod
     def build_prompt_hash(cls, prompt):

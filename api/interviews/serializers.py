@@ -698,6 +698,11 @@ class SessionVerbalConfirmationSerializer(serializers.Serializer):
     recording_file = serializers.FileField(required=False, allow_null=True)
     recording_path = serializers.CharField(required=False, allow_blank=True, default="")
     metadata = serializers.DictField(required=False, default=dict)
+    # The exact statement shown to the candidate, kept with the recording as
+    # evidence. Plain fields because a DictField isn't parsed from the
+    # multipart upload the recording arrives in.
+    statement = serializers.CharField(required=False, allow_blank=True, max_length=500)
+    statement_language = serializers.CharField(required=False, allow_blank=True, max_length=10)
 
     def validate(self, attrs):
         if not attrs.get("recording_file") and not attrs.get("recording_path", "").strip():

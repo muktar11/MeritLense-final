@@ -1,6 +1,7 @@
 import ipaddress
 
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.db.models import Count, Max, Min
 from rest_framework import viewsets
@@ -17,7 +18,30 @@ from api.accounts.models import Company, User
 from api.core.public_ids import PublicIdLookupMixin, get_by_identifier
 from .models import AuditLog
 from .serializers import AuditLogSerializer, AuditLogFilterSerializer
+from .trail import candidate_entries_filter, candidate_trail
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
+
+
+TRAIL_KEYS = ('candidate_id', 'passport_id', 'session_id', 'evaluation_id')
+
+
+def _resolve_candidate(params):
+    from api.candidates.models import Candidate
+    from api.evaluations.models import Evaluation
+    from api.sessions.models import InterviewSession
+
+    try:
+        if params.get('candidate_id'):
+            return get_by_identifier(Candidate.objects.all(), params['candidate_id'])
+        if params.get('passport_id'):
+            return Candidate.objects.get(passport_id__iexact=params['passport_id'].strip())
+        if params.get('session_id'):
+            return get_by_identifier(InterviewSession.objects.all(), params['session_id']).candidate
+        if params.get('evaluation_id'):
+            return get_by_identifier(Evaluation.objects.all(), params['evaluation_id']).candidate
+    except (ObjectDoesNotExist, ValueError):
+        return None
+    return None
 
 
 class AuditLogPagination(PageNumberPagination):
@@ -32,7 +56,7 @@ class AuditLogViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
     pagination_class = AuditLogPagination
 
     def get_queryset(self):
-        queryset = AuditLog.objects.all()
+        queryset = AuditLog.objects.prefetch_related('resource')
         
         filters = AuditLogFilterSerializer(data=self.request.query_params)
         filters.is_valid(raise_exception=True)
@@ -52,6 +76,12 @@ class AuditLogViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
 
         if data.get('ip_address'):
             queryset = queryset.filter(ip_address=data['ip_address'])
+
+        if data.get('candidate_id'):
+            candidate = _resolve_candidate({'candidate_id': data['candidate_id']})
+            if candidate is None:
+                return queryset.none()
+            queryset = queryset.filter(candidate_entries_filter(candidate))
 
         if data.get('category'):
             queryset = queryset.filter(category=data['category'])
@@ -147,6 +177,21 @@ class AuditLogViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
             ]
         })
     
+    @action(detail=False, methods=['get'])
+    def trail(self, request):
+        """Provenance of one candidate: who registered it and from which IP,
+        who created each assessment and from where, and the IPs the
+        candidate used on the interview link. Identify the candidate by
+        ?candidate_id=, ?passport_id=, ?session_id= or ?evaluation_id=.
+        The events themselves: GET logs?candidate_id=<id>[&ip_address=]."""
+        if not any(request.query_params.get(k) for k in TRAIL_KEYS):
+            return Response({'detail': "Give candidate_id, passport_id, session_id or evaluation_id.",
+                             'code': 'invalid_query'}, status=400)
+        candidate = _resolve_candidate(request.query_params)
+        if candidate is None:
+            return Response({'detail': "No candidate found.", 'code': 'candidate_not_found'}, status=404)
+        return Response(candidate_trail(candidate))
+
     IP_TRACE_LIMIT = 100
 
     @action(detail=False, methods=['get'], url_path='ip-activity')

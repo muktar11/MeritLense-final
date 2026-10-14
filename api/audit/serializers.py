@@ -9,7 +9,20 @@ class AuditLogSerializer(PublicIdModelSerializer):
     action_display = serializers.CharField(source='get_action_display', read_only=True)
     category_display = serializers.CharField(source='get_category_display', read_only=True)
     severity_display = serializers.CharField(source='get_severity_display', read_only=True)
-    
+    # The candidate this entry belongs to (the candidate itself, or one of
+    # its sessions, answers, evaluations, reports or certificates), so the
+    # admin UI can open that candidate's activity trail.
+    trail_candidate_id = serializers.SerializerMethodField()
+
+    def get_trail_candidate_id(self, obj):
+        from .trail import candidate_for_resource
+
+        try:
+            candidate = candidate_for_resource(obj.resource) if obj.resource_type_id else None
+        except Exception:
+            return None
+        return str(candidate.public_id) if candidate is not None else None
+
     class Meta:
         model = AuditLog
         fields = [
@@ -21,7 +34,7 @@ class AuditLogSerializer(PublicIdModelSerializer):
             'description', 'data',
             'ip_address', 'user_agent',
             'request_method', 'request_path',
-            'created_at'
+            'created_at', 'trail_candidate_id'
         ]
         read_only_fields = fields
 
@@ -69,6 +82,7 @@ class AuditLogCreateSerializer(serializers.Serializer):
 class AuditLogFilterSerializer(serializers.Serializer):
     user_id = serializers.CharField(required=False)
     ip_address = serializers.IPAddressField(required=False)
+    candidate_id = serializers.CharField(required=False)
     company_id = serializers.CharField(required=False)
     category = serializers.CharField(required=False)
     action = serializers.CharField(required=False)

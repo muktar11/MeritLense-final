@@ -496,10 +496,12 @@ class SlotUnavailableError(ValueError):
 
 class InterviewSessionService:
     @classmethod
-    def create_session(cls, *, candidate, config, created_by, package_code="", scheduled_start_at=None):
+    def create_session(cls, *, candidate, config, created_by, package_code="", scheduled_start_at=None,
+                       answer_language=""):
         try:
             return cls._create_session(candidate=candidate, config=config, created_by=created_by,
-                                       package_code=package_code, scheduled_start_at=scheduled_start_at)
+                                       package_code=package_code, scheduled_start_at=scheduled_start_at,
+                                       answer_language=answer_language)
         except SlotUnavailableError as exc:
             # Outside the rolled-back transaction, so the "sent once" marker
             # persists and repeated attempts don't email again.
@@ -511,7 +513,8 @@ class InterviewSessionService:
 
     @classmethod
     @transaction.atomic
-    def _create_session(cls, *, candidate, config, created_by, package_code="", scheduled_start_at=None):
+    def _create_session(cls, *, candidate, config, created_by, package_code="", scheduled_start_at=None,
+                        answer_language=""):
         # The InterviewConfiguration chosen for THIS interview wins over the
         # candidate's general profile-level preferred_language - the latter
         # is a separate, unrelated form field that defaults to "EN" and is
@@ -598,8 +601,10 @@ class InterviewSessionService:
             role_code=config.role_code,
             ui_language=language,
             candidate_language=language,
+            answer_language=(answer_language or "").upper(),
             tts_language_code=LANGUAGE_CODE_MAP.get(language, "en-US"),
-            stt_language_code=LANGUAGE_CODE_MAP.get(language, "en-US"),
+            # Speech-to-text defaults to the language the candidate answers in.
+            stt_language_code=LANGUAGE_CODE_MAP.get((answer_language or language).upper(), "en-US"),
             translation_target=config.language if config.enable_translation else "",
             total_questions=session_total_questions,
             evaluation_tier=session_evaluation_tier,

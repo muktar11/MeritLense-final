@@ -314,6 +314,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
                 created_by=request.user,
                 package_code=serializer.validated_data.get("package_code", ""),
                 scheduled_start_at=serializer.validated_data.get("scheduled_start_at"),
+                answer_language=serializer.validated_data.get("answer_language", ""),
             )
         except ValueError as exc:
             raise ValidationError({"detail": str(exc)}) from exc

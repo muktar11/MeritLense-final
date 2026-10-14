@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.utils import timezone
 
 from api.candidates.models import Candidate
+from api.core.constants import Languages
 from api.core.public_ids import get_by_identifier
 from api.core.serializers import PublicIdModelSerializer
 from api.interviews.models import (
@@ -492,7 +493,10 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
 
     def get_preferred_language(self, obj):
         candidate = getattr(obj, "candidate", None)
-        return (getattr(candidate, "preferred_language", "") or obj.candidate_language or "EN").upper()
+        # The language chosen for this assessment wins over the candidate's
+        # profile language.
+        return (obj.answer_language or getattr(candidate, "preferred_language", "")
+                or obj.candidate_language or "EN").upper()
 
     def get_progress_percent(self, obj):
         if not obj.total_questions:
@@ -558,6 +562,9 @@ class InterviewSessionCreateSerializer(serializers.Serializer):
     config_id = serializers.CharField()
     package_code = serializers.CharField(required=False, allow_blank=True)
     scheduled_start_at = serializers.DateTimeField(required=False, allow_null=True)
+    # Any supported language for the candidate; the config still decides
+    # the question-set language (EN/AR).
+    answer_language = serializers.ChoiceField(choices=Languages.CHOICES, required=False, allow_blank=True)
 
     def validate(self, attrs):
         try:

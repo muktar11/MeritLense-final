@@ -1,6 +1,7 @@
 from django.contrib.contenttypes.models import ContentType
 from .models import AuditLog
-from api.core.constants import AuditLogSeverity
+from .request_context import request_audit_fields
+from api.core.constants import AuditLogAction, AuditLogCategory, AuditLogSeverity
 
 
 class AuditLogService:
@@ -34,22 +35,6 @@ class AuditLogService:
         elif hasattr(user, 'managed_company'):
             company = user.managed_company
         
-        ip_address = None
-        user_agent = ''
-        request_method = ''
-        request_path = ''
-        
-        if request:
-            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-            if x_forwarded_for:
-                ip_address = x_forwarded_for.split(',')[0]
-            else:
-                ip_address = request.META.get('REMOTE_ADDR')
-            
-            user_agent = request.META.get('HTTP_USER_AGENT', '')
-            request_method = request.method
-            request_path = request.path
-        
         log_entry = AuditLog.objects.create(
             user=user,
             user_email=user.email,
@@ -64,17 +49,54 @@ class AuditLogService:
             resource_name=resource_name,
             description=description,
             data=data or {},
-            ip_address=ip_address,
-            user_agent=user_agent,
-            request_method=request_method,
-            request_path=request_path,
+            **request_audit_fields(request),
         )
-        
+
         return log_entry
+
+    @classmethod
+    def log_login(cls, user, request, method):
+        return cls.log(
+            user=user,
+            action=AuditLogAction.LOGIN_SUCCESS,
+            category=AuditLogCategory.SECURITY,
+            description=f"Signed in ({method}): {user.email}",
+            resource=user,
+            data={'login_method': method},
+            request=request,
+        )
+
+    @classmethod
+    def log_login_failed(cls, email, request, reason):
+        """A failed sign-in is recorded against the account when one exists
+        for that email, so the tracer shows attempts on an account even
+        when they don't come from its owner."""
+        from api.accounts.models import User
+
+        email = (email or '').strip()[:254]
+        user = User.objects.filter(email__iexact=email).first() if email else None
+        if user is not None:
+            return cls.log(
+                user=user,
+                action=AuditLogAction.LOGIN_FAILED,
+                category=AuditLogCategory.SECURITY,
+                description=f"Failed sign-in for {user.email}: {reason}",
+                severity=AuditLogSeverity.WARNING,
+                data={'email': email, 'reason': reason},
+                request=request,
+            )
+        return cls.log_system(
+            action=AuditLogAction.LOGIN_FAILED,
+            category=AuditLogCategory.SECURITY,
+            description=f"Failed sign-in for unknown email {email or '(blank)'}",
+            severity=AuditLogSeverity.WARNING,
+            data={'email': email, 'reason': reason},
+            request=request,
+        )
     
     @classmethod
-    def log_system(cls, action, category, description, resource=None, 
-                   severity=AuditLogSeverity.INFO, data=None):
+    def log_system(cls, action, category, description, resource=None,
+                   severity=AuditLogSeverity.INFO, data=None, request=None):
         
         resource_type = None
         resource_id = None
@@ -107,6 +129,9 @@ class AuditLogService:
             resource_name=resource_name,
             description=description,
             data=data or {},
+            # Inside a request (e.g. a candidate on their interview link)
+            # this is where it came from; blank for background work.
+            **request_audit_fields(request),
         )
-        
+
         return log_entry

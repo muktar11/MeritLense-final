@@ -104,4 +104,5 @@ class GoogleLoginView(APIView):
                 request=request,
             )
 
+        AuditLogService.log_login(user, request, "google")
         return Response(build_oauth_login_response(user), status=status.HTTP_200_OK)

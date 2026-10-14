@@ -79,9 +79,10 @@ class UserRegistrationSerializer(serializers.Serializer):
             AgreementMethod, AgreementStatus, AgreementType, AuditLogAction, AuditLogCategory,
         )
 
+        from api.audit.request_context import get_client_ip
+
         request = self.context.get("request")
         meta = getattr(request, "META", {}) if request is not None else {}
-        forwarded = meta.get("HTTP_X_FORWARDED_FOR", "")
         version = CURRENT_VERSIONS[AgreementType.PRIVACY_TERMS]
         agreement = Agreement.objects.create(
             user=user,
@@ -91,7 +92,7 @@ class UserRegistrationSerializer(serializers.Serializer):
             status=AgreementStatus.SIGNED,
             language=self.validated_data.get("terms_language") or "en",
             accepted_at=timezone.now(),
-            ip_address=(forwarded.split(",")[0].strip() if forwarded else meta.get("REMOTE_ADDR")) or None,
+            ip_address=get_client_ip(request),
             user_agent=meta.get("HTTP_USER_AGENT", ""),
         )
         AuditLogService.log(

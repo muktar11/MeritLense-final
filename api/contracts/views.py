@@ -38,10 +38,9 @@ COMPANY_SCOPED_TYPES = {AgreementType.B2B_AGREEMENT, AgreementType.DPA}
 
 
 def _client_ip(request):
-    forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
-    if forwarded:
-        return forwarded.split(',')[0].strip()
-    return request.META.get('REMOTE_ADDR')
+    from api.audit.request_context import get_client_ip
+
+    return get_client_ip(request)
 
 
 def _user_company(user):

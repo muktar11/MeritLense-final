@@ -754,6 +754,7 @@ class EmailVerificationView(APIView):
                     'role': user.role
                 }
                 if user.role == Roles.B2C:
+                    AuditLogService.log_login(user, request, "email_verification")
                     refresh = CustomTokenObtainPairSerializer.get_token(user)
                     response_data.update({
                         'refresh': str(refresh),

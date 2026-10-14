@@ -93,6 +93,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "api.audit.request_context.AuditRequestContextMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -103,6 +104,11 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# Proxies in front of Django that append to X-Forwarded-For (nginx on the
+# VM). The client IP is read this many entries from the right; see
+# api/audit/request_context.py.
+AUDIT_TRUSTED_PROXY_COUNT = int(os.getenv("AUDIT_TRUSTED_PROXY_COUNT", "1"))
 
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS")

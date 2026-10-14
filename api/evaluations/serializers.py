@@ -19,6 +19,7 @@ from api.core.constants import EvaluationType, CandidateJobRoles
 from api.interviews.models import InterviewConfiguration
 from api.sessions.models import InterviewSession
 from api.sessions.services import InterviewSessionService
+from api.payments.short_links import meeting_short_link
 
 
 class CandidateScoreSummaryCompetencySerializer(serializers.Serializer):
@@ -100,6 +101,9 @@ class EvaluationSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):
     latest_report = serializers.SerializerMethodField()
     evaluator_rating = serializers.SerializerMethodField()
     assessment_mode = serializers.SerializerMethodField()
+    # Short link to share instead of meeting_link (null when it can't be
+    # shortened - a meeting on another site).
+    meeting_short_link = serializers.SerializerMethodField()
 
     class Meta:
         model = Evaluation
@@ -122,7 +126,7 @@ class EvaluationSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):
             'evaluator_rating',
             'assessment_mode',
             'readiness_status', 'readiness_override_applied', 'readiness_override_reason',
-            'meeting_link', 'meeting_id', 'meeting_password', 'session_id',
+            'meeting_link', 'meeting_short_link', 'meeting_id', 'meeting_password', 'session_id',
             'location',
             'created_by', 'created_by_name',
             'company',
@@ -140,6 +144,9 @@ class EvaluationSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):
             'created_at', 'updated_at'
         ]
     
+    def get_meeting_short_link(self, obj):
+        return meeting_short_link(obj.meeting_link)
+
     def get_created_by_name(self, obj):
         return obj.created_by.get_full_name()
 
@@ -398,6 +405,7 @@ class EvaluationListSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):
     session_id = serializers.SerializerMethodField()
     evaluator_rating = serializers.SerializerMethodField()
     assessment_mode = serializers.SerializerMethodField()
+    meeting_short_link = serializers.SerializerMethodField()
 
     class Meta:
         model = Evaluation
@@ -406,12 +414,15 @@ class EvaluationListSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):
             'status', 'status_display', 'scheduled_date', 'duration_minutes',
             'score', 'latest_session_summary', 'is_scored', 'readiness_legal_record', 'latest_report',
             'readiness_status', 'readiness_override_applied', 'created_by', 'created_at',
-            'meeting_link', 'session_id',
+            'meeting_link', 'meeting_short_link', 'session_id',
             'evaluator_rating', 'assessment_mode',
         ]
 
     def get_candidate_name(self, obj):
         return f"{obj.candidate_first_name} {obj.candidate_last_name}"
+
+    def get_meeting_short_link(self, obj):
+        return meeting_short_link(obj.meeting_link)
 
     def get_session_id(self, obj):
         return str(obj.session.public_id) if obj.session_id else None

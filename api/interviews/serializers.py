@@ -696,6 +696,9 @@ class SessionConsentCaptureSerializer(serializers.Serializer):
     # server-side from the candidate's own record (see
     # InterviewSessionPrecheckService.record_candidate_consent).
     signatory_name = serializers.CharField(required=False, allow_blank=True)
+    # The language the consent text was shown in (the candidate page is
+    # translated into the candidate's language); recorded with the consent.
+    display_language = serializers.ChoiceField(choices=Languages.CHOICES, required=False, allow_blank=True)
 
 
 class SessionPrivacyAcknowledgementSerializer(serializers.Serializer):

@@ -391,7 +391,7 @@ class InterviewSessionPrecheckService:
     ARTIFACT_VERBAL_CONFIRMATION = "VERBAL_CONFIRMATION"
 
     @classmethod
-    def record_candidate_consent(cls, session, *, ip_address=None, user_agent="", actor=None):
+    def record_candidate_consent(cls, session, *, ip_address=None, user_agent="", actor=None, display_language=""):
         # signatory_name is always the candidate's own record, never a
         # client-supplied value - a free-text name here would let anyone
         # signing the link (including a proxying employer) put down a
@@ -421,6 +421,8 @@ class InterviewSessionPrecheckService:
                 "candidate_id": str(session.candidate.public_id),
                 "agreement_id": str(agreement.public_id),
                 "agreement_type": AgreementType.CANDIDATE_CONSENT,
+                # Language the consent text was shown in.
+                "display_language": (display_language or "").upper() or None,
             },
         )
         cls._mark_ready_if_complete(session, actor=actor)

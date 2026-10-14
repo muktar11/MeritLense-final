@@ -96,6 +96,43 @@ class ClearTrialDataTests(TestCase):
             with transaction.atomic():
                 EvaluationReadinessDecisionRecord.objects.filter(evaluation=real_eval).delete()
 
+    def test_candidate_scope_clears_only_the_listed_qa_candidates_of_the_account(self):
+        # QA fixtures loaded into an account that also has a real customer
+        # candidate: only the fixtures go, the real candidate stays whole.
+        qa_eval = self._scored_with_report(self.__class__.owner, self.__class__.company)
+        real_eval = self._scored_with_report(self.__class__.owner, self.__class__.company)
+        qa_passport, real_passport = qa_eval.candidate.passport_id, real_eval.candidate.passport_id
+        accounts = self._accounts_file([self.__class__.owner.email])
+        passports = self.tmp / "passports.json"
+        passports.write_text(json.dumps([qa_passport]), encoding="utf-8")
+
+        out = StringIO()
+        call_command("clear_trial_data", "--accounts", accounts, "--candidates", str(passports), stdout=out)
+        self.assertIn("Evaluations to clear: 1", out.getvalue())
+        self.assertIn(qa_passport, out.getvalue())
+        self.assertNotIn(real_passport, out.getvalue())
+
+        call_command("clear_trial_data", "--accounts", accounts, "--candidates", str(passports), "--execute",
+                     "--backup-file", self._backup(), "--confirm-evaluations", "1", stdout=StringIO())
+
+        self.assertFalse(Candidate.objects.filter(passport_id=qa_passport).exists())
+        self.assertFalse(Evaluation.objects.filter(pk=qa_eval.pk).exists())
+        self.assertFalse(InterviewSession.objects.filter(pk=qa_eval.session_id).exists())
+        self.assertTrue(Candidate.objects.filter(passport_id=real_passport).exists())
+        self.assertTrue(Evaluation.objects.filter(pk=real_eval.pk).exists())
+        self.assertTrue(InterviewSession.objects.filter(pk=real_eval.session_id).exists())
+        self.assertTrue(EvaluationReport.objects.filter(evaluation=real_eval).exists())
+        self.assertTrue(AuditLog.objects.filter(
+            description__startswith="Trial assessment data cleared for 1 test candidates").exists())
+
+    def test_candidate_scope_refuses_a_passport_id_the_accounts_do_not_own(self):
+        foreign = self._scored_with_report(self.real_owner, self.real_company)
+        passports = self.tmp / "passports.json"
+        passports.write_text(json.dumps([foreign.candidate.passport_id]), encoding="utf-8")
+        with self.assertRaises(CommandError):
+            call_command("clear_trial_data", "--accounts", self._accounts_file([self.__class__.owner.email]),
+                         "--candidates", str(passports), stdout=StringIO())
+
     def test_refuses_when_an_unlisted_account_assessed_a_test_candidate(self):
         test_eval = self._scored_with_report(self.__class__.owner, self.__class__.company)
         Evaluation.objects.filter(pk=test_eval.pk).update(created_by=self.real_owner)

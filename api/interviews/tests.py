@@ -910,6 +910,25 @@ class InterviewSessionApiTests(APITestCase):
         self.assertFalse(session.single_face_detected)
         self.assertFalse(session.integrity_logs.filter(event_type="MANUAL_VERIFICATION_OVERRIDE").exists())
 
+    def test_consent_records_the_language_it_was_shown_in(self):
+        from api.audit.models import AuditLog
+
+        created = self.client.post(
+            "/api/v1/interviews/",
+            {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id),
+             "answer_language": "AM"},
+            format="json",
+        )
+        token = created.data["access_token"]
+        consent = APIClient().post(
+            f"/api/v1/interviews/{created.data['id']}/prechecks/consent/",
+            {"token": token, "display_language": "AM"}, format="json", HTTP_X_SESSION_TOKEN=token,
+        )
+        self.assertEqual(consent.status_code, 200, consent.data)
+        agreement = InterviewSession.objects.get(public_id=created.data["id"]).candidate_consent_agreement
+        entry = AuditLog.objects.filter(action="AGREEMENT_ACCEPTED", data__agreement_id=str(agreement.public_id)).get()
+        self.assertEqual(entry.data["display_language"], "AM")
+
     def test_candidate_precheck_flow_supports_token_start(self):
         create_response = self.client.post(
             "/api/v1/interviews/",

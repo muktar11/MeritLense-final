@@ -617,6 +617,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             ip_address=self._client_ip(request),
             user_agent=request.META.get("HTTP_USER_AGENT", ""),
             actor=request.user if request.user.is_authenticated else None,
+            display_language=serializer.validated_data.get("display_language", ""),
         )
         payload = InterviewSessionPrecheckService.get_precheck_status_payload(session)
         payload["agreement_id"] = str(agreement.public_id)

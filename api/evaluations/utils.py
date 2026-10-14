@@ -52,6 +52,17 @@ def _account_owner_email(evaluation):
     return evaluation.created_by.email
 
 
+def _join_link(evaluation):
+    """The link candidates are sent: the same short link the dashboard
+    shows (meeting_short_link), or the full meeting link when it can't be
+    shortened."""
+    from api.payments.short_links import meeting_short_link
+
+    if not evaluation.meeting_link:
+        return ""
+    return meeting_short_link(evaluation.meeting_link) or evaluation.meeting_link
+
+
 def send_evaluation_scheduled_email(evaluation, request=None):
 
     scheduled_date = _format_date(evaluation.scheduled_date)
@@ -65,7 +76,7 @@ def send_evaluation_scheduled_email(evaluation, request=None):
     location_details = ""
     if evaluation.meeting_link:
         location_details = f"""
-Meeting Link: {evaluation.meeting_link}"""
+Meeting Link: {_join_link(evaluation)}"""
         if evaluation.meeting_id:
             location_details += f"""
 Meeting ID: {evaluation.meeting_id}"""
@@ -143,7 +154,11 @@ def send_evaluation_rescheduled_email(evaluation, old_date, request=None):
     new_date_str = _format_datetime(evaluation.scheduled_date)
     
     evaluation_type_display = evaluation.get_evaluation_type_display()
-    
+    # The reschedule email had no link, so candidates had to find the
+    # original invitation. The link itself doesn't change on reschedule.
+    join_link = _join_link(evaluation)
+    link_line = f"\n- Meeting Link: {join_link}" if join_link else ""
+
     subject = f"Evaluation Rescheduled: {evaluation_type_display}"
     
     message = f"""
@@ -159,7 +174,7 @@ New Schedule:
 
 Evaluation Details:
 - Type: {evaluation_type_display}
-- Duration: {evaluation.duration_minutes} minutes
+- Duration: {evaluation.duration_minutes} minutes{link_line}
 
 Please update your calendar accordingly.
 

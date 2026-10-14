@@ -13,8 +13,11 @@ from django.conf import settings
 from django.db import IntegrityError
 
 # Only these hosts can be shortened, so /p/<code> can never be used as an
-# open redirect to an arbitrary site.
-ALLOWED_TARGET_HOSTS = ("stripe.com", "meritlense.com")
+# open redirect to an arbitrary site. Meeting providers are included for the
+# meeting links customers enter on live / in-person assessments.
+MEETING_HOSTS = ("zoom.us", "zoom.com", "meet.google.com", "teams.microsoft.com", "teams.live.com",
+                 "webex.com", "whereby.com", "meet.jit.si", "gotomeeting.com", "meet.goto.com")
+ALLOWED_TARGET_HOSTS = ("stripe.com", "meritlense.com") + MEETING_HOSTS
 
 
 def _host_allowed(url):
@@ -47,6 +50,16 @@ def short_url(target_url, *, purpose="", prefix="p"):
         except IntegrityError:  # code collision - try another
             link = None
     return f"{base}/{prefix}/{link.code}"
+
+
+def meeting_short_link(meeting_link):
+    """Short link for an assessment's meeting link (our AI interview page or
+    the customer's Zoom/Meet/Teams link), or None when it can't be
+    shortened (another site, or empty)."""
+    if not meeting_link:
+        return None
+    short = short_url(meeting_link, purpose="meeting", prefix="s")
+    return short if short != meeting_link else None
 
 
 def email_button_html(*, greeting, paragraphs, button_label, button_url, icon="💳", footer_lines=()):

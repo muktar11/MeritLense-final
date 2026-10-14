@@ -736,6 +736,40 @@ class InterviewRoleMappingTests(TestCase):
         self.assertIn(evaluation.meeting_link, invitation.body)
         self.assertIn("AST", invitation.body)
 
+    @override_settings(FRONTEND_URL="https://meritlense.com", SHORT_LINK_BASE_URL="https://api.meritlense.com")
+    def test_assessment_meeting_link_has_a_short_link_to_share(self):
+        self._config("Child Caregiver", "child_caregiver")
+        candidate = self._create_candidate(CandidateJobRoles.NANNY, "NA-005")
+        response = self._schedule(candidate)
+        self.assertEqual(response.status_code, 201, response.data)
+        evaluation = Evaluation.objects.get(public_id=response.data["id"])
+
+        listed = next(row for row in self.client.get("/api/v1/evaluations/evaluations").data
+                      if row["id"] == str(evaluation.public_id))
+        self.assertRegex(listed["meeting_short_link"], r"^https://api\.meritlense\.com/s/[A-Za-z0-9_-]{8}$")
+        redirect = self.client.get(listed["meeting_short_link"].replace("https://api.meritlense.com", ""))
+        self.assertEqual(redirect["Location"], evaluation.meeting_link)
+        detail = self.client.get(f"/api/v1/evaluations/evaluations/{evaluation.public_id}").data
+        self.assertEqual(detail["meeting_short_link"], listed["meeting_short_link"])
+
+        # The scheduling email carries the same short link, and so does the
+        # reschedule email, which used to have no link at all.
+        from django.core import mail
+        self.assertIn(listed["meeting_short_link"], mail.outbox[0].body)
+        self.assertNotIn(evaluation.meeting_link, mail.outbox[0].body)
+        mail.outbox.clear()
+        new_date = (timezone.now() + timezone.timedelta(days=3)).isoformat()
+        moved = self.client.post(f"/api/v1/evaluations/evaluations/{evaluation.public_id}/reschedule",
+                                 {"new_date": new_date}, format="json")
+        self.assertEqual(moved.status_code, 200, moved.data)
+        self.assertIn(listed["meeting_short_link"], mail.outbox[0].body)
+
+        # A customer's own Zoom / Meet link is shortened too; another site isn't.
+        from api.payments.short_links import meeting_short_link
+        self.assertRegex(meeting_short_link("https://us02web.zoom.us/j/81234567890?pwd=abcDEF123"),
+                         r"^https://api\.meritlense\.com/s/")
+        self.assertIsNone(meeting_short_link("https://evil.example.com/j/81234567890?pwd=abcDEF123"))
+
     def test_email_failure_does_not_fail_scheduling(self):
         self._config("Child Caregiver", "child_caregiver")
         candidate = self._create_candidate(CandidateJobRoles.NANNY, "NA-003")

@@ -752,6 +752,18 @@ class InterviewRoleMappingTests(TestCase):
         detail = self.client.get(f"/api/v1/evaluations/evaluations/{evaluation.public_id}").data
         self.assertEqual(detail["meeting_short_link"], listed["meeting_short_link"])
 
+        # The scheduling email carries the same short link, and so does the
+        # reschedule email, which used to have no link at all.
+        from django.core import mail
+        self.assertIn(listed["meeting_short_link"], mail.outbox[0].body)
+        self.assertNotIn(evaluation.meeting_link, mail.outbox[0].body)
+        mail.outbox.clear()
+        new_date = (timezone.now() + timezone.timedelta(days=3)).isoformat()
+        moved = self.client.post(f"/api/v1/evaluations/evaluations/{evaluation.public_id}/reschedule",
+                                 {"new_date": new_date}, format="json")
+        self.assertEqual(moved.status_code, 200, moved.data)
+        self.assertIn(listed["meeting_short_link"], mail.outbox[0].body)
+
         # A customer's own Zoom / Meet link is shortened too; another site isn't.
         from api.payments.short_links import meeting_short_link
         self.assertRegex(meeting_short_link("https://us02web.zoom.us/j/81234567890?pwd=abcDEF123"),

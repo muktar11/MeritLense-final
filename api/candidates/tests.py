@@ -453,7 +453,7 @@ class CandidatesWeek2Tests(APITestCase):
         delete_response = self.client.delete(f"/api/v1/scores/sets/{score_set_id}")
         self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
 
-    def test_share_and_unshare_control_team_member_access_and_edit_rights(self):
+    def test_candidate_sharing_was_removed(self):
         company_admin, company = self.create_b2b_company(
             "sharing-admin@example.com", "ShareCo", "SHARE-1"
         )
@@ -465,71 +465,47 @@ class CandidatesWeek2Tests(APITestCase):
         )
 
         self.authenticate(company_admin)
-        share_response = self.client.post(
-            f"/api/v1/candidates/candidates/{candidate.public_id}/share",
-            {"user_ids": [teammate_profile.id]},
-            format="json",
-        )
-        self.assertEqual(share_response.status_code, status.HTTP_200_OK, share_response.data)
+        for action in ("share", "unshare"):
+            response = self.client.post(
+                f"/api/v1/candidates/candidates/{candidate.public_id}/{action}",
+                {"user_ids": [teammate_profile.id]},
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND, action)
+        detail = self.client.get(f"/api/v1/candidates/candidates/{candidate.public_id}")
+        self.assertNotIn("shared_with", detail.data)
+        self.assertFalse(candidate.shared_with.exists())
 
+        # The team member still sees the company's candidate list entry.
         self.client.credentials()
         self.authenticate(teammate)
-        retrieve_response = self.client.get(
-            f"/api/v1/candidates/candidates/{candidate.public_id}"
-        )
-        self.assertEqual(retrieve_response.status_code, status.HTTP_200_OK, retrieve_response.data)
-
-        update_response = self.client.patch(
-            f"/api/v1/candidates/candidates/{candidate.public_id}",
-            {"first_name": "UpdatedByCandidatePermission"},
-            format="json",
-        )
-        self.assertEqual(update_response.status_code, status.HTTP_200_OK, update_response.data)
-        candidate.refresh_from_db()
-        self.assertEqual(candidate.first_name, "UpdatedByCandidatePermission")
-
-        self.client.credentials()
-        self.authenticate(company_admin)
-        unshare_response = self.client.post(
-            f"/api/v1/candidates/candidates/{candidate.public_id}/unshare",
-            {"user_ids": [teammate_profile.id]},
-            format="json",
-        )
-        self.assertEqual(unshare_response.status_code, status.HTTP_200_OK, unshare_response.data)
-
-        self.client.credentials()
-        self.authenticate(teammate)
-        company_candidate_after_unshare = self.client.get(
-            f"/api/v1/candidates/candidates/{candidate.public_id}"
+        self.assertEqual(
+            self.client.get(f"/api/v1/candidates/candidates/{candidate.public_id}").status_code,
+            status.HTTP_200_OK,
         )
         self.assertEqual(
-            company_candidate_after_unshare.status_code,
-            status.HTTP_200_OK,
-            company_candidate_after_unshare.data,
+            self.client.get("/api/v1/candidates/candidates/shared_with_me").status_code,
+            status.HTTP_404_NOT_FOUND,
         )
 
-    def test_share_rejects_team_members_from_other_companies(self):
+    def test_migration_clears_manual_shares_but_keeps_a_team_members_own_candidates(self):
+        import importlib
+        from django.apps import apps as django_apps
+
+        migration = importlib.import_module("api.candidates.migrations.0009_clear_manual_candidate_shares")
         company_admin, company = self.create_b2b_company(
-            "owner-admin@example.com", "OwnerCo", "OWNER-CO"
+            "migration-admin@example.com", "MigCo", "MIG-1"
         )
-        _, other_company = self.create_b2b_company(
-            "outside-admin@example.com", "OutsideCo", "OUTSIDE-CO"
-        )
-        _, outside_profile = self.create_team_member(other_company, "outside-member@example.com")
-        candidate = self.create_candidate(
-            company_admin,
-            email="cross-company@example.com",
-            passport_id="CROSS-100",
-        )
+        teammate, _ = self.create_team_member(company, "migration-member@example.com")
+        shared = self.create_candidate(company_admin, email="mig-shared@example.com", passport_id="MIG-100")
+        own = self.create_candidate(teammate, email="mig-own@example.com", passport_id="MIG-200")
+        shared.shared_with.add(teammate)   # granted through the old Share button
+        own.shared_with.add(teammate)      # the automatic link on a team member's own candidate
 
-        self.authenticate(company_admin)
-        share_response = self.client.post(
-            f"/api/v1/candidates/candidates/{candidate.public_id}/share",
-            {"user_ids": [outside_profile.id]},
-            format="json",
-        )
-        self.assertEqual(share_response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("user_ids", share_response.data)
+        migration.clear_manual_shares(django_apps, None)
+
+        self.assertFalse(shared.shared_with.exists())
+        self.assertEqual(list(own.shared_with.all()), [teammate])
 
     def test_team_member_created_candidate_is_attached_to_company_and_visible_to_creator(self):
         company_admin, company = self.create_b2b_company(

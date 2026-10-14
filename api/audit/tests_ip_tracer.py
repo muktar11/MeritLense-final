@@ -8,7 +8,10 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from api.accounts.models import User
-from api.core.constants import AuditLogAction, AuditLogCategory, Roles
+from api.candidates.models import Candidate
+from api.core.constants import AuditLogAction, AuditLogCategory, InterviewEvaluationTier, Roles
+from api.interviews.models import InterviewConfiguration
+from api.sessions.models import InterviewSession
 from .models import AuditLog
 from .request_context import AuditRequestContextMiddleware, get_client_ip
 from .services import AuditLogService
@@ -120,6 +123,72 @@ class IpActivityTests(APITestCase):
         self.assertEqual({row["email"] for row in response.data["accounts"]},
                          {self.customer.email, self.other.email})
         self.assertEqual(self.client.get("/api/v1/audit/logs", {"ip_address": "102.213.68.133"}).data["count"], 2)
+
+    def _candidate_with_assessment(self, passport):
+        candidate = Candidate.objects.create(
+            first_name="Sara", last_name="Ali", email=f"{passport}@example.com", passport_id=passport, job_role="NA",
+            core_skills="care", preferred_language="EN", passport_document="candidates/documents/passport/t.pdf",
+            created_by=self.customer)
+        config, _ = InterviewConfiguration.objects.get_or_create(
+            role_code="child_caregiver", language="EN", evaluation_tier=InterviewEvaluationTier.FULL,
+            defaults=dict(role_name="Child Caregiver", duration_minutes=30, total_questions=1, rubric_version="v1",
+                          question_set_version="v1", is_active=True))
+        session = InterviewSession.objects.create(
+            candidate=candidate, config=config, role_name="Child Caregiver", role_code="child_caregiver",
+            ui_language="en", candidate_language="EN", evaluation_tier=InterviewEvaluationTier.FULL,
+            rubric_version="v1", question_set_version="v1", expires_at=InterviewSession.build_expiry(30),
+            created_by=self.customer)
+        return candidate, session
+
+    def test_trail_shows_who_registered_and_assessed_a_candidate_and_from_where(self):
+        candidate, session = self._candidate_with_assessment("TRAIL-1")
+        factory = RequestFactory()
+        office = factory.post("/api/v1/candidates/candidates", HTTP_X_FORWARDED_FOR="41.1.1.1")
+        AuditLogService.log(user=self.customer, action=AuditLogAction.CANDIDATE_CREATED,
+                            category=AuditLogCategory.CANDIDATE, description="created", resource=candidate,
+                            request=office)
+        AuditLogService.log(user=self.customer, action=AuditLogAction.SESSION_CREATED,
+                            category=AuditLogCategory.SESSION, description="session", resource=session,
+                            request=office)
+        AuditLogService.log_system(action=AuditLogAction.ANSWER_SUBMITTED, category=AuditLogCategory.SESSION,
+                                   description="answer", resource=session,
+                                   request=factory.post("/api/v1/interviews/x/submit-response/",
+                                                        HTTP_X_FORWARDED_FOR="102.2.2.2"))
+        # Another candidate's activity stays out of this trail.
+        other, _ = self._candidate_with_assessment("TRAIL-2")
+        AuditLogService.log(user=self.customer, action=AuditLogAction.CANDIDATE_CREATED,
+                            category=AuditLogCategory.CANDIDATE, description="other", resource=other, request=office)
+
+        self._as(self.admin)
+        trail = self.client.get("/api/v1/audit/logs/trail", {"passport_id": "TRAIL-1"})
+        self.assertEqual(trail.status_code, 200, trail.data)
+        self.assertEqual(trail.data["registration"]["ip_address"], "41.1.1.1")
+        self.assertEqual(trail.data["registration"]["by_email"], self.customer.email)
+        assessment = trail.data["assessments"][0]
+        self.assertEqual(assessment["created_origin"]["ip_address"], "41.1.1.1")
+        self.assertEqual(assessment["candidate_ips"], ["102.2.2.2"])
+        self.assertEqual(trail.data["event_count"], 3)
+        same = self.client.get("/api/v1/audit/logs/trail", {"session_id": str(session.public_id)})
+        self.assertEqual(same.data["candidate"]["id"], str(candidate.public_id))
+
+        events = self.client.get("/api/v1/audit/logs", {"candidate_id": str(candidate.public_id)}).data
+        self.assertEqual(events["count"], 3)
+        self.assertTrue(all(row["trail_candidate_id"] == str(candidate.public_id) for row in events["results"]))
+        self.assertIn("Candidate", {row["resource_type_name"] for row in events["results"]})
+        by_ip = self.client.get("/api/v1/audit/logs", {"candidate_id": str(candidate.public_id),
+                                                       "ip_address": "102.2.2.2"}).data
+        self.assertEqual([row["action"] for row in by_ip["results"]], [AuditLogAction.ANSWER_SUBMITTED])
+
+    def test_trail_flags_a_candidate_not_added_through_the_app(self):
+        self._candidate_with_assessment("SEEDED-1")  # no CANDIDATE_CREATED entry, like the 29 Sep QA fixtures
+        self._as(self.admin)
+        trail = self.client.get("/api/v1/audit/logs/trail", {"passport_id": "SEEDED-1"})
+        self.assertIsNone(trail.data["registration"])
+        missing = self.client.get("/api/v1/audit/logs/trail", {"passport_id": "NOPE"})
+        self.assertEqual((missing.status_code, missing.data["code"]), (404, "candidate_not_found"))
+        self._as(self.customer)
+        self.assertEqual(self.client.get("/api/v1/audit/logs/trail", {"passport_id": "SEEDED-1"}).status_code,
+                         status.HTTP_403_FORBIDDEN)
 
     def test_bad_input_and_non_admins_are_refused(self):
         self._as(self.admin)

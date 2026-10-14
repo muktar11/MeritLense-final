@@ -11,12 +11,14 @@ class AuditLogService:
             severity=AuditLogSeverity.INFO, data=None, request=None):
         resource_type = None
         resource_id = None
+        resource_type_name = ''
         resource_name = ''
         
         if resource:
             content_type = ContentType.objects.get_for_model(resource)
             resource_type = content_type
             resource_id = resource.id
+            resource_type_name = str(resource._meta.verbose_name).title()
             
             if hasattr(resource, 'name'):
                 resource_name = str(resource.name)
@@ -47,6 +49,7 @@ class AuditLogService:
             resource_type=resource_type,
             resource_id=resource_id,
             resource_name=resource_name,
+            resource_type_name=resource_type_name,
             description=description,
             data=data or {},
             **request_audit_fields(request),
@@ -100,12 +103,14 @@ class AuditLogService:
         
         resource_type = None
         resource_id = None
+        resource_type_name = ''
         resource_name = ''
         
         if resource:
             content_type = ContentType.objects.get_for_model(resource)
             resource_type = content_type
             resource_id = resource.id
+            resource_type_name = str(resource._meta.verbose_name).title()
             
             if hasattr(resource, 'name'):
                 resource_name = str(resource.name)
@@ -127,6 +132,7 @@ class AuditLogService:
             resource_type=resource_type,
             resource_id=resource_id,
             resource_name=resource_name,
+            resource_type_name=resource_type_name,
             description=description,
             data=data or {},
             # Inside a request (e.g. a candidate on their interview link)

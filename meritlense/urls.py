@@ -52,6 +52,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('p/<str:code>', payment_short_link_redirect, name='payment-short-link'),
     path('s/<str:code>', payment_short_link_redirect, name='interview-short-link'),
+    # Links in every other email (api/core/email_links.py).
+    path('l/<str:code>', payment_short_link_redirect, name='email-short-link'),
     path('api/v1/', include(api_v1_patterns)),
 ]
 

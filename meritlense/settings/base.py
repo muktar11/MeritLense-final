@@ -233,10 +233,14 @@ _email_backend_map = {
     "console": "django.core.mail.backends.console.EmailBackend",
     "smtp": "django.core.mail.backends.smtp.EmailBackend",
 }
-EMAIL_BACKEND = _email_backend_map.get(
+# Every email goes through ShortLinkEmailBackend, which replaces long
+# MeritLense/Stripe URLs with short links and then sends with the real
+# backend below (api/core/email_links.py).
+EMAIL_INNER_BACKEND = _email_backend_map.get(
     os.getenv("EMAIL_BACKEND", "smtp"),
     "django.core.mail.backends.smtp.EmailBackend",
 )
+EMAIL_BACKEND = "api.core.email_links.ShortLinkEmailBackend"
 EMAIL_HOST = os.getenv("EMAIL_HOST")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
 EMAIL_USE_TLS = os.getenv("EMAIL_PORT") != "465"

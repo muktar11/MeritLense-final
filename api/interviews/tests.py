@@ -657,6 +657,30 @@ class InterviewSessionApiTests(APITestCase):
         self.assertEqual(redirect.status_code, 302)
         self.assertEqual(redirect["Location"], full)
 
+    def test_any_supported_language_can_be_chosen_for_the_candidate(self):
+        # Amharic: the questions still come from this (EN) config's bank,
+        # the candidate is assessed in Amharic.
+        response = self.client.post(
+            "/api/v1/interviews/",
+            {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id),
+             "answer_language": "AM"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        session = InterviewSession.objects.get(public_id=response.data["id"])
+        self.assertEqual(session.candidate_language, self.config.language)
+        self.assertEqual(session.answer_language, "AM")
+        self.assertEqual(session.stt_language_code, "am-ET")
+        self.assertEqual(response.data["preferred_language"], "AM")
+
+        refused = self.client.post(
+            "/api/v1/interviews/",
+            {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id),
+             "answer_language": "XX"},
+            format="json",
+        )
+        self.assertEqual(refused.status_code, 400)
+
     def test_reservation_failure_emails_once_until_the_account_can_schedule_again(self):
         payload = {"candidate_id": str(self.candidate.public_id), "config_id": str(self.config.public_id)}
         PackageBalance.objects.filter(owner_user=self.user, balance_type=PackageBalance.SLOTS).update(current_balance=0)

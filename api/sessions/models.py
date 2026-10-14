@@ -71,6 +71,12 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
     role_code = models.CharField(max_length=100, blank=True)
     ui_language = models.CharField(max_length=20, default="EN")
     candidate_language = models.CharField(max_length=20, default="EN")
+    # The language the employer chose for the candidate when creating the
+    # assessment (any supported language). candidate_language stays the
+    # question-set language (EN/AR, the bank questions are drawn and scored
+    # in); the interview page shows the questions translated into this one
+    # and takes answers in it by default. Blank on older sessions.
+    answer_language = models.CharField(max_length=3, blank=True, default="")
     tts_language_code = models.CharField(max_length=20, default="en-US")
     stt_language_code = models.CharField(max_length=20, default="en-US")
     translation_target = models.CharField(max_length=20, blank=True)

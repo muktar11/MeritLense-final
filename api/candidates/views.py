@@ -18,7 +18,6 @@ from .serializers import (
     CandidateSerializer,
     CandidateCreateSerializer,
     CandidateUpdateSerializer,
-    CandidateShareSerializer
 )
 from .permissions import CanManageCandidate, CanViewCandidate
 from api.core.permisssions import IsCompanyApproved, RequireAddCandidates, RequireCandidateAccess
@@ -104,8 +103,6 @@ class CandidateViewSet(SubscriptionUsageMixin, viewsets.ModelViewSet):
             self.permission_classes = [IsAuthenticated, CanManageCandidate, IsCompanyApproved]
         elif self.action in ['list', 'retrieve']:
             self.permission_classes = [IsAuthenticated, CanViewCandidate]
-        elif self.action == 'share':
-            self.permission_classes = [IsAuthenticated]
 
         required_permission = (
             RequireCandidateAccess if self.action in ['list', 'retrieve']
@@ -119,24 +116,8 @@ class CandidateViewSet(SubscriptionUsageMixin, viewsets.ModelViewSet):
             return CandidateCreateSerializer
         elif self.action in ['update', 'partial_update']:
             return CandidateUpdateSerializer
-        elif self.action in ['share', 'unshare']:
-            return CandidateShareSerializer
         return CandidateSerializer
 
-    def _can_manage_sharing(self, user, candidate):
-        if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
-            return True
-        if candidate.created_by == user:
-            return True
-        if hasattr(user, 'managed_company') and candidate.company == user.managed_company:
-            return True
-        if hasattr(user, 'company_profile') and candidate.company == user.company_profile.company:
-            return True
-        if user.role == Roles.B2B_TEAM_MEMBER:
-            profile = getattr(user, 'team_member_profile', None)
-            return bool(profile and candidate.company == profile.company)
-        return False
-    
     def create(self, request, *args, **kwargs):
         # Checked here, before serializer validation/file uploads run, both
         # to avoid wasted work on a request we already know will be
@@ -363,153 +344,6 @@ class CandidateViewSet(SubscriptionUsageMixin, viewsets.ModelViewSet):
         instance.delete()
         self.decrement_subscription_usage(self.request.user, 'candidate_limit')
 
-    @action(detail=True, methods=['post'])
-    def share(self, request, id=None):
-        candidate = self.get_object()
-        
-        user = request.user
-        if not self._can_manage_sharing(user, candidate):
-            return Response(
-                {'error': 'You do not have permission to share this candidate.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        raw_user_ids = request.data.get('user_ids', [])
-        if isinstance(raw_user_ids, (int, str)):
-            raw_user_ids = [raw_user_ids]
-        serializer = self.get_serializer(
-            data={'user_ids': raw_user_ids},
-            context={'request': request, 'candidate': candidate}
-        )
-        serializer.is_valid(raise_exception=True)
-        serializer.validated_data['user_ids']
-        
-        company = candidate.company
-        if not company:
-            return Response(
-                {'error': 'Could not determine company'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        valid_team_profiles = serializer.context.get('team_profiles', [])
-        
-        users_to_share = [profile.user for profile in valid_team_profiles]
-
-        if not users_to_share:
-            return Response({
-                'error': 'No valid team members found to share with'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        candidate.shared_with.add(*users_to_share)
-        
-        AuditLogService.log(
-            user=request.user,
-            action=AuditLogAction.CANDIDATE_SHARED,
-            category=AuditLogCategory.CANDIDATE,
-            description=f"Candidate shared: {candidate.get_full_name()} with {len(users_to_share)} team member(s)",
-            resource=candidate,
-            data={
-                'shared_with': [
-                    {
-                        'team_member_profile_id': profile.id,
-                        'user_id': profile.user.id,
-                        'name': profile.user.get_full_name(), 
-                        'email': profile.user.email
-                    } for profile in valid_team_profiles
-                ],
-                'shared_by': request.user.email
-            },
-            request=request
-        )
-        
-        response_data = {
-            'message': f'Candidate shared with {len(users_to_share)} team member(s).',
-            'shared_with': [
-                {
-                    'team_member_profile_id': profile.id,
-                    'user_id': profile.user.id,
-                    'name': profile.user.get_full_name(),
-                    'email': profile.user.email
-                } for profile in valid_team_profiles
-            ]
-        }
-
-        return Response(response_data)
-
-
-    @action(detail=True, methods=['post'])
-    def unshare(self, request, id=None):
-        candidate = self.get_object()
-        
-        user = request.user
-        if not self._can_manage_sharing(user, candidate):
-            return Response(
-                {'error': 'You do not have permission to modify sharing for this candidate.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        raw_user_ids = request.data.get('user_ids', [])
-        if isinstance(raw_user_ids, (int, str)):
-            raw_user_ids = [raw_user_ids]
-        serializer = self.get_serializer(
-            data={'user_ids': raw_user_ids},
-            context={'request': request, 'candidate': candidate}
-        )
-        serializer.is_valid(raise_exception=True)
-        serializer.validated_data['user_ids']
-        
-        company = candidate.company
-        if not company:
-            return Response(
-                {'error': 'Could not determine company'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        valid_team_profiles = serializer.context.get('team_profiles', [])
-        
-        users_to_remove = [profile.user for profile in valid_team_profiles]
-
-        if not users_to_remove:
-            return Response({
-                'error': 'No valid team members found to unshare'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        candidate.shared_with.remove(*users_to_remove)
-        
-        AuditLogService.log(
-            user=request.user,
-            action=AuditLogAction.CANDIDATE_SHARED,
-            category=AuditLogCategory.CANDIDATE,
-            description=f"Candidate sharing removed: {candidate.get_full_name()} from {len(users_to_remove)} team member(s)",
-            resource=candidate,
-            data={
-                'removed_from': [
-                    {
-                        'team_member_profile_id': profile.id,
-                        'user_id': profile.user.id,
-                        'name': profile.user.get_full_name(),
-                        'email': profile.user.email
-                    } for profile in valid_team_profiles
-                ],
-                'unshared_by': request.user.email
-            },
-            request=request
-        )
-        
-        response_data = {
-            'message': f'Sharing removed from {len(users_to_remove)} team member(s).',
-            'removed_from': [
-                {
-                    'team_member_profile_id': profile.id,
-                    'user_id': profile.user.id,
-                    'name': profile.user.get_full_name(),
-                    'email': profile.user.email
-                } for profile in valid_team_profiles
-            ]
-        }
-
-        return Response(response_data)
-    
     @action(detail=False, methods=['get'])
     def my_candidates(self, request):
         candidates = Candidate.objects.filter(created_by=request.user)
@@ -520,28 +354,6 @@ class CandidateViewSet(SubscriptionUsageMixin, viewsets.ModelViewSet):
             action='VIEW_MY_CANDIDATES',
             category=AuditLogCategory.CANDIDATE,
             description=f"User viewed their candidates list",
-            data={'count': candidates.count()},
-            request=request
-        )
-        
-        return Response(serializer.data)
-    
-    @action(detail=False, methods=['get'])
-    def shared_with_me(self, request):
-        if request.user.role != Roles.B2B_TEAM_MEMBER:
-            return Response(
-                {'error': 'Only team members can access shared candidates.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        candidates = Candidate.objects.filter(shared_with=request.user)
-        serializer = self.get_serializer(candidates, many=True)
-        
-        AuditLogService.log(
-            user=request.user,
-            action='VIEW_SHARED_CANDIDATES',
-            category=AuditLogCategory.CANDIDATE,
-            description=f"Team member viewed shared candidates",
             data={'count': candidates.count()},
             request=request
         )

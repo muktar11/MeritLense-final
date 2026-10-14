@@ -17,7 +17,7 @@ class CandidateSerializer(PublicIdModelSerializer):
             'preferred_language', 'country_of_residence', 'target_market', 'timezone',
             'status', 'passport_document',
             'profile_photo', 'verification_photo', 'created_by', 'created_by_name',
-            'company', 'company_name', 'shared_with',
+            'company', 'company_name',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
@@ -140,6 +140,9 @@ class CandidateCreateSerializer(serializers.ModelSerializer):
         
         candidate = super().create(validated_data)
         
+        # A team member sees assessments only for candidates they added
+        # themselves; this link is what grants it. (Sharing candidates with
+        # other team members was removed, 14 Oct 2026.)
         if user.role == Roles.B2B_TEAM_MEMBER:
             candidate.shared_with.add(user)
         
@@ -224,54 +227,3 @@ class CandidateUpdateSerializer(serializers.ModelSerializer):
             instance.verification_photo = None
         return super().update(instance, validated_data)
 
-
-class CandidateShareSerializer(serializers.Serializer):
-    user_ids = serializers.ListField(
-        child=serializers.IntegerField(),
-        help_text="List of user IDs to share with"
-    )
-    
-    def validate_user_ids(self, value):
-        from api.accounts.models import TeamMemberProfile
-        request = self.context.get('request')
-        if not request:
-            raise serializers.ValidationError("Request context required")
-        
-        candidate = self.context.get('candidate')
-        
-        company = None
-        if hasattr(request.user, 'company_profile'):
-            company = request.user.company_profile.company
-        elif candidate and candidate.company:
-            company = candidate.company
-        
-        if not company:
-            raise serializers.ValidationError("Could not determine company for sharing")
-        
-        team_profiles = TeamMemberProfile.objects.filter(
-            company=company
-        ).select_related('user')
-        valid_profile_map = {}
-        for profile in team_profiles:
-            valid_profile_map[profile.id] = profile
-            valid_profile_map[profile.user.id] = profile
-
-        valid_profiles = []
-        invalid_ids = []
-        
-        for identifier in value:
-            profile = valid_profile_map.get(identifier)
-            if profile:
-                valid_profiles.append(profile)
-            else:
-                invalid_ids.append(identifier)
-        
-        if invalid_ids:
-            raise serializers.ValidationError(
-                f"User IDs {invalid_ids} are not team members of your company"
-            )
-        
-        deduped_profiles = list({profile.id: profile for profile in valid_profiles}.values())
-        self.context['team_profiles'] = deduped_profiles
-        self.context['users'] = [profile.user for profile in deduped_profiles]
-        return value

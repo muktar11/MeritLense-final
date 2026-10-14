@@ -1,4 +1,8 @@
+import ipaddress
+
+from django.contrib.contenttypes.models import ContentType
 from django.db import models
+from django.db.models import Count, Max, Min
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
@@ -45,6 +49,9 @@ class AuditLogViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
                 queryset = queryset.filter(company=get_by_identifier(Company.objects.all(), data['company_id']))
             except Company.DoesNotExist:
                 return queryset.none()
+
+        if data.get('ip_address'):
+            queryset = queryset.filter(ip_address=data['ip_address'])
 
         if data.get('category'):
             queryset = queryset.filter(category=data['category'])
@@ -140,6 +147,103 @@ class AuditLogViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet):
             ]
         })
     
+    IP_TRACE_LIMIT = 100
+
+    @action(detail=False, methods=['get'], url_path='ip-activity')
+    def ip_activity(self, request):
+        """IP tracer. ?email= (or ?user_id=) lists every IP an account
+        acted from, plus the IPs its candidates used on their interview
+        links; ?ip= lists every account seen on that IP. ?days= (default 90)."""
+        try:
+            days = min(max(int(request.query_params.get('days', 90)), 1), 3650)
+        except ValueError:
+            return Response({'detail': "days must be a number.", 'code': 'invalid_query'}, status=400)
+        since = timezone.now() - timedelta(days=days)
+        recent = AuditLog.objects.filter(created_at__gte=since, ip_address__isnull=False)
+
+        ip = (request.query_params.get('ip') or '').strip()
+        if ip:
+            try:
+                ip = str(ipaddress.ip_address(ip))
+            except ValueError:
+                return Response({'detail': "Not a valid IP address.", 'code': 'invalid_query'}, status=400)
+            on_ip = recent.filter(ip_address=ip)
+            accounts = (
+                on_ip.filter(user__isnull=False)
+                .values('user__public_id', 'user_email', 'user_name', 'user_role')
+                .annotate(first_seen=Min('created_at'), last_seen=Max('created_at'), events=Count('id'),
+                          logins=Count('id', filter=Q(action=AuditLogAction.LOGIN_SUCCESS)),
+                          failed_logins=Count('id', filter=Q(action=AuditLogAction.LOGIN_FAILED)))
+                .order_by('-last_seen')[:self.IP_TRACE_LIMIT]
+            )
+            return Response({
+                'mode': 'ip',
+                'ip': ip,
+                'days': days,
+                'accounts': [
+                    {'user_id': str(row['user__public_id']), 'email': row['user_email'], 'name': row['user_name'],
+                     'role': row['user_role'], 'first_seen': row['first_seen'], 'last_seen': row['last_seen'],
+                     'events': row['events'], 'logins': row['logins'], 'failed_logins': row['failed_logins']}
+                    for row in accounts
+                ],
+                # Candidates on interview links, unknown sign-in emails and
+                # other activity not tied to an account.
+                'unattributed_events': on_ip.filter(user__isnull=True).count(),
+            })
+
+        identifier = (request.query_params.get('user_id') or '').strip()
+        email = (request.query_params.get('email') or '').strip()
+        try:
+            if identifier:
+                user = get_by_identifier(User.objects.all(), identifier)
+            elif email:
+                user = User.objects.get(email__iexact=email)
+            else:
+                return Response({'detail': "Give an email, user_id or ip.", 'code': 'invalid_query'}, status=400)
+        except (User.DoesNotExist, ValueError):
+            return Response({'detail': "No account found.", 'code': 'account_not_found'}, status=404)
+
+        rows = list(
+            recent.filter(user=user)
+            .values('ip_address')
+            .annotate(first_seen=Min('created_at'), last_seen=Max('created_at'), events=Count('id'),
+                      logins=Count('id', filter=Q(action=AuditLogAction.LOGIN_SUCCESS)),
+                      failed_logins=Count('id', filter=Q(action=AuditLogAction.LOGIN_FAILED)))
+            .order_by('-last_seen')[:self.IP_TRACE_LIMIT]
+        )
+        ips = [row['ip_address'] for row in rows]
+        agents, others = {}, {}
+        for entry in (recent.filter(user=user, ip_address__in=ips).exclude(user_agent='')
+                      .order_by().values('ip_address', 'user_agent').distinct()):
+            agents.setdefault(entry['ip_address'], []).append(entry['user_agent'])
+        for entry in (recent.filter(ip_address__in=ips, user__isnull=False).exclude(user=user)
+                      .order_by().values('ip_address').annotate(n=Count('user', distinct=True))):
+            others[entry['ip_address']] = entry['n']
+
+        from api.sessions.models import InterviewSession
+
+        session_ids = InterviewSession.objects.filter(created_by=user).values('id')
+        candidate_rows = (
+            recent.filter(user__isnull=True, resource_type=ContentType.objects.get_for_model(InterviewSession),
+                          resource_id__in=session_ids)
+            .values('ip_address')
+            .annotate(first_seen=Min('created_at'), last_seen=Max('created_at'), events=Count('id'),
+                      sessions=Count('resource_id', distinct=True))
+            .order_by('-last_seen')[:self.IP_TRACE_LIMIT]
+        )
+        return Response({
+            'mode': 'account',
+            'days': days,
+            'account': {'user_id': str(user.public_id), 'email': user.email, 'name': user.get_full_name(),
+                        'role': user.role},
+            'ips': [
+                {**row, 'user_agents': agents.get(row['ip_address'], [])[:5],
+                 'other_accounts': others.get(row['ip_address'], 0)}
+                for row in rows
+            ],
+            'candidate_ips': list(candidate_rows),
+        })
+
     @action(detail=False, methods=['get'])
     def user_activity(self, request):
         days = int(request.query_params.get('days', 30))

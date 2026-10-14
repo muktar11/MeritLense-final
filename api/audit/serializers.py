@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import AuditLog
+from .request_context import get_client_ip
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.serializers import PublicIdModelSerializer
 
@@ -62,19 +63,12 @@ class AuditLogCreateSerializer(serializers.Serializer):
         return log_entry
     
     def get_client_ip(self, request):
-        if not request:
-            return None
-        
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            ip = x_forwarded_for.split(',')[0]
-        else:
-            ip = request.META.get('REMOTE_ADDR')
-        return ip
+        return get_client_ip(request)
 
 
 class AuditLogFilterSerializer(serializers.Serializer):
     user_id = serializers.CharField(required=False)
+    ip_address = serializers.IPAddressField(required=False)
     company_id = serializers.CharField(required=False)
     category = serializers.CharField(required=False)
     action = serializers.CharField(required=False)

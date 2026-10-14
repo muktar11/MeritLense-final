@@ -1117,6 +1117,7 @@ class AuditLogAction:
     
     TWO_FACTOR_ENABLED = "TWO_FACTOR_ENABLED"
     TWO_FACTOR_DISABLED = "TWO_FACTOR_DISABLED"
+    LOGIN_SUCCESS = "LOGIN_SUCCESS"
     LOGIN_FAILED = "LOGIN_FAILED"
     ACCOUNT_LOCKED = "ACCOUNT_LOCKED"
     
@@ -1310,6 +1311,7 @@ class AuditLogAction:
         
         (TWO_FACTOR_ENABLED, "2FA Enabled"),
         (TWO_FACTOR_DISABLED, "2FA Disabled"),
+        (LOGIN_SUCCESS, "Signed In"),
         (LOGIN_FAILED, "Login Failed"),
         (ACCOUNT_LOCKED, "Account Locked"),
         

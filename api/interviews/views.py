@@ -935,10 +935,9 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         )
 
     def _client_ip(self, request):
-        forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.META.get("REMOTE_ADDR")
+        from api.audit.request_context import get_client_ip
+
+        return get_client_ip(request)
 
 
 class ResponseAIProcessingViewSet(viewsets.GenericViewSet):

@@ -2,7 +2,10 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import path, include
+from rest_framework.exceptions import APIException
 from rest_framework_simplejwt.views import TokenRefreshView
+from api.accounts.models import User
+from api.audit.services import AuditLogService
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from api.accounts.serializers import CustomTokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
@@ -11,6 +14,20 @@ from api.payments.views import payment_short_link_redirect
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
+
+    def post(self, request, *args, **kwargs):
+        # Every sign-in attempt goes in the audit trail with its IP, so an
+        # account's access history can be traced (admin IP tracer).
+        try:
+            response = super().post(request, *args, **kwargs)
+        except APIException as exc:
+            data = request.data if isinstance(request.data, dict) else {}
+            AuditLogService.log_login_failed(data.get("email"), request, str(getattr(exc, "detail", exc))[:200])
+            raise
+        user = User.objects.filter(public_id=response.data.get("user_id")).first()
+        if user is not None:
+            AuditLogService.log_login(user, request, "password")
+        return response
 
 api_v1_patterns = [
     path('health', health_check, name='api-v1-health'),

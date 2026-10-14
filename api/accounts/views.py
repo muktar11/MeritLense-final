@@ -5,6 +5,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import status
+from rest_framework.exceptions import NotFound
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser, JSONParser
 from rest_framework.response import Response
@@ -18,8 +19,9 @@ from api.audit.services import AuditLogService
 from api.core.constants import AdminPermissions, AuditLogAction, AuditLogCategory, AuditLogSeverity, CompanyTeamPermissions, DocumentStatus, Roles
 from api.core.permisssions import CanVerifyDocuments, IsAdminOrSuperAdmin, IsB2BTeamMember, IsB2BUser, IsB2BUserOrTeamMember, IsEmployer, IsOwnerOrAdmin, IsSuperAdmin, get_user_company
 from api.core.public_ids import get_by_identifier
-from .models import Company, CompanyDocumentRequest, TeamInvitation, TeamMemberProfile, User, IndividualEmployerProfile, CompanyEmployerProfile, AdminProfile
+from .models import BusinessAddress, Company, CompanyDocumentRequest, TeamInvitation, TeamMemberProfile, User, IndividualEmployerProfile, CompanyEmployerProfile, AdminProfile
 from .serializers import (
+    BusinessAddressSerializer,
     AcceptInvitationSerializer,
     AdminProfileSerializer,
     AdminUserSerializer,
@@ -2446,6 +2448,13 @@ class CompanyProfileView(APIView):
                     if 'industry' in request.data:
                         profile.industry = request.data['industry']
                     profile.save()
+
+                # An address edited here (older clients) moves the Main Office entry too.
+                if any(key in request.data for key in ('address', 'city', 'country')):
+                    company.refresh_from_db()
+                    company.business_addresses.filter(address_type=BusinessAddress.TYPE_MAIN).update(
+                        street=company.address, city=company.city, country=company.country,
+                    )
                 
                 return Response(serializer.data)
             
@@ -2456,6 +2465,85 @@ class CompanyProfileView(APIView):
                 {'error': str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+def _owned_company(user):
+    if hasattr(user, 'managed_company'):
+        return user.managed_company
+    profile = getattr(user, 'company_profile', None)
+    return profile.company if profile else None
+
+
+def _sync_main_address(company):
+    """The rest of the app (agreements, invoices, admin) reads the single
+    Company.address/city/country, so keep it equal to the MAIN entry."""
+    main = company.business_addresses.filter(address_type=BusinessAddress.TYPE_MAIN).first()
+    if main is None:
+        return
+    company.address, company.city, company.country = main.street, main.city, main.country
+    company.save(update_fields=['address', 'city', 'country', 'updated_at'])
+    profile = getattr(company.admin_user, 'company_profile', None)
+    if profile is not None:
+        profile.address, profile.city, profile.country = main.street, main.city, main.country
+        profile.save(update_fields=['address', 'city', 'country', 'updated_at'])
+
+
+class BusinessAddressListView(APIView):
+    """GET/POST /companies/profile/addresses - the company owner's list of
+    business addresses (Company Profile page)."""
+    permission_classes = [IsAuthenticated, IsB2BUser]
+
+    def get(self, request):
+        company = _owned_company(request.user)
+        if company is None:
+            return Response({'error': 'No company found for this user'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(BusinessAddressSerializer(company.business_addresses.all(), many=True).data)
+
+    def post(self, request):
+        company = _owned_company(request.user)
+        if company is None:
+            return Response({'error': 'No company found for this user'}, status=status.HTTP_404_NOT_FOUND)
+        if company.business_addresses.count() >= 20:
+            return Response({'detail': 'A company can have at most 20 addresses.'}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = BusinessAddressSerializer(data=request.data, context={'company': company})
+        serializer.is_valid(raise_exception=True)
+        address = serializer.save(company=company)
+        _sync_main_address(company)
+        return Response(BusinessAddressSerializer(address).data, status=status.HTTP_201_CREATED)
+
+
+class BusinessAddressDetailView(APIView):
+    """PATCH/DELETE /companies/profile/addresses/<id>."""
+    permission_classes = [IsAuthenticated, IsB2BUser]
+
+    def _get(self, request, address_id):
+        company = _owned_company(request.user)
+        if company is None:
+            raise NotFound('No company found for this user')
+        try:
+            return company, get_by_identifier(company.business_addresses.all(), address_id)
+        except BusinessAddress.DoesNotExist:
+            raise NotFound('Address not found')
+
+    def patch(self, request, address_id):
+        company, address = self._get(request, address_id)
+        serializer = BusinessAddressSerializer(
+            address, data=request.data, partial=True, context={'company': company},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        _sync_main_address(company)
+        return Response(serializer.data)
+
+    def delete(self, request, address_id):
+        company, address = self._get(request, address_id)
+        if address.address_type == BusinessAddress.TYPE_MAIN:
+            return Response(
+                {'detail': 'The Main Office cannot be removed. Edit it, or make another address the Main Office first.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        address.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class MyCompanyInfoView(APIView):
     permission_classes = [IsAuthenticated, IsB2BTeamMember]

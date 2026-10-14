@@ -194,6 +194,16 @@ class InterviewSession(TimeStampedModel, SoftDeleteModel):
             return True
         return False
 
+    def can_view(self, request):
+        """Read-only access: whoever can manage the session, plus a company
+        team member with view_results (Reviewer) on a read-only request."""
+        from api.core.permisssions import results_viewer_company
+
+        if self.can_manage(request.user):
+            return True
+        viewer_company = results_viewer_company(request)
+        return viewer_company is not None and self.organization_id == viewer_company.id
+
     def token_is_valid(self, token):
         if not token:
             return False

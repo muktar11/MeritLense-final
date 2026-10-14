@@ -7,7 +7,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
-from api.core.permisssions import RequireSetEvaluation
+from api.core.permisssions import RequireSetEvaluation, results_viewer_company
 from rest_framework.response import Response
 
 from api.audit.services import AuditLogService
@@ -41,6 +41,9 @@ class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet
                 return queryset.filter(evaluation__company=user.company_profile.company)
             return queryset.none()
         if user.role == Roles.B2B_TEAM_MEMBER:
+            viewer_company = results_viewer_company(self.request)
+            if viewer_company is not None:
+                return queryset.filter(evaluation__company=viewer_company)
             return queryset.filter(
                 Q(evaluation__created_by=user) | Q(candidate__shared_with=user)
             ).distinct()

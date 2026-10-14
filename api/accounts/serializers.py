@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from .models import Company, TeamInvitation, TeamMemberProfile, User, IndividualEmployerProfile, CompanyEmployerProfile, AdminProfile
+from .models import BusinessAddress, Company, TeamInvitation, TeamMemberProfile, User, IndividualEmployerProfile, CompanyEmployerProfile, AdminProfile
 from api.core.constants import AdminPermissions, CompanyTeamPermissions, Roles
 from api.core.serializers import PublicIdModelSerializer
 import random
@@ -798,6 +798,32 @@ class DocumentVerificationSerializer(serializers.Serializer):
             )
         return data
 
+class BusinessAddressSerializer(PublicIdModelSerializer):
+    class Meta:
+        model = BusinessAddress
+        fields = ['id', 'label', 'address_type', 'country', 'city', 'street', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate_country(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError("Country is required.")
+        return value
+
+    def validate(self, attrs):
+        company = self.context['company']
+        address_type = attrs.get('address_type', getattr(self.instance, 'address_type', None))
+        if address_type == BusinessAddress.TYPE_MAIN:
+            others = company.business_addresses.filter(address_type=BusinessAddress.TYPE_MAIN)
+            if self.instance is not None:
+                others = others.exclude(pk=self.instance.pk)
+            if others.exists():
+                raise serializers.ValidationError(
+                    {'address_type': "A company has one Main Office. Change the current one first."}
+                )
+        return attrs
+
+
 class CompanySerializer(PublicIdModelSerializer):
     admin_name = serializers.SerializerMethodField()
     team_member_count = serializers.SerializerMethodField()
@@ -812,12 +838,18 @@ class CompanySerializer(PublicIdModelSerializer):
             'industry', 'phone_number', 'country', 'city',
             'address', 'website', 'admin_user', 'admin_user_email', 'admin_name',
             'is_verified', 'verified_at', 'trade_license_uploaded', 'business_license_verified',
-            'team_member_count', 'stamp_image', 'logo', 'roles', 'created_at', 'updated_at'
+            'team_member_count', 'stamp_image', 'logo', 'roles', 'created_at', 'updated_at',
+            'legal_name', 'company_type', 'description', 'business_addresses',
         ]
         read_only_fields = [
             'id', 'admin_user', 'is_verified', 'business_license_verified',
-            'verified_at', 'created_at', 'updated_at',
+            'verified_at', 'created_at', 'updated_at', 'business_addresses',
         ]
+
+    business_addresses = serializers.SerializerMethodField()
+
+    def get_business_addresses(self, obj):
+        return BusinessAddressSerializer(obj.business_addresses.all(), many=True).data
 
     def get_admin_name(self, obj):
         if obj.admin_user:

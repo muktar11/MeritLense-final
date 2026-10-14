@@ -354,14 +354,21 @@ class CompanyTeamPermissions:
     SET_EVALUATION = "set_evaluation"
     SET_SCORES = "set_scores"
     SET_PAYMENT = "set_payment"
+    # Read-only: every assessment, report and certificate in the company,
+    # not just the member's own candidates. It never grants a write - the
+    # four above still decide what a member may change (Reviewer role).
+    VIEW_RESULTS = "view_results"
 
     CHOICES = [
         (ADD_CANDIDATES, "Add Candidates"),
         (SET_EVALUATION, "Set Evaluation"),
         (SET_SCORES, "Set Scores"),
         (SET_PAYMENT, "Set Payment"),
+        (VIEW_RESULTS, "View Company Results"),
     ]
 
+    # The four write permissions. VIEW_RESULTS is deliberately not in here:
+    # RequireFullTeamAccess checks ALL, and read access alone is not "full".
     ALL = [ADD_CANDIDATES, SET_EVALUATION, SET_SCORES, SET_PAYMENT]
 
 class Languages:

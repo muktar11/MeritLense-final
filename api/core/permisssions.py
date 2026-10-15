@@ -14,6 +14,27 @@ def get_user_company(user):
     return None
 
 
+def results_viewer_company(request):
+    """The Company whose results this request may read in full, or None.
+
+    A B2B team member normally sees only the candidates they added. One
+    holding CompanyTeamPermissions.VIEW_RESULTS (the Reviewer role) may read
+    every assessment, report and certificate in their company - on a
+    read-only request only, so the wider scope never reaches a write."""
+    user = getattr(request, 'user', None)
+    if (
+        getattr(request, "method", None) not in SAFE_METHODS
+        or not user
+        or not user.is_authenticated
+        or user.role != Roles.B2B_TEAM_MEMBER
+    ):
+        return None
+    profile = getattr(user, 'team_member_profile', None)
+    if profile and profile.has_permission(CompanyTeamPermissions.VIEW_RESULTS):
+        return profile.company
+    return None
+
+
 class IsSuperAdmin(BasePermission):
     def has_permission(self, request, view):
         return bool(
@@ -95,12 +116,17 @@ class HasTeamMemberPermission(BasePermission):
     Usage: permission_classes = [IsAuthenticated, IsCompanyApproved, RequireSetEvaluation]
     """
     permission_code = None
+    # Whether CompanyTeamPermissions.VIEW_RESULTS also opens this view's
+    # read-only requests (results pages a Reviewer needs to see).
+    allows_results_viewer = False
 
     def has_permission(self, request, view):
         user = request.user
         if not user or not user.is_authenticated:
             return False
         if user.role != Roles.B2B_TEAM_MEMBER:
+            return True
+        if self.allows_results_viewer and results_viewer_company(request) is not None:
             return True
         profile = getattr(user, 'team_member_profile', None)
         return bool(profile and profile.has_permission(self.permission_code))
@@ -116,6 +142,8 @@ class RequireCandidateAccess(HasTeamMemberPermission):
         if not user or not user.is_authenticated:
             return False
         if user.role != Roles.B2B_TEAM_MEMBER:
+            return True
+        if results_viewer_company(request) is not None:
             return True
         profile = getattr(user, 'team_member_profile', None)
         return bool(
@@ -133,10 +161,12 @@ class RequireCandidateAccess(HasTeamMemberPermission):
 
 class RequireSetEvaluation(HasTeamMemberPermission):
     permission_code = CompanyTeamPermissions.SET_EVALUATION
+    allows_results_viewer = True
 
 
 class RequireSetScores(HasTeamMemberPermission):
     permission_code = CompanyTeamPermissions.SET_SCORES
+    allows_results_viewer = True
 
 
 class RequireSetPayment(HasTeamMemberPermission):

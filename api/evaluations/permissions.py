@@ -1,5 +1,6 @@
 from rest_framework.permissions import BasePermission
 from api.core.constants import Roles
+from api.core.permisssions import results_viewer_company
 
 
 class CanManageEvaluation(BasePermission):
@@ -66,6 +67,10 @@ class CanViewEvaluation(BasePermission):
         # B2B team members can view evaluations for candidates they can access
         if user.role == Roles.B2B_TEAM_MEMBER:
             if user in obj.candidate.shared_with.all():
+                return True
+            # ...or every one in the company with view_results (Reviewer)
+            viewer_company = results_viewer_company(request)
+            if viewer_company is not None and obj.company_id == viewer_company.id:
                 return True
         
         return False

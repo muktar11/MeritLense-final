@@ -312,6 +312,22 @@ class Company(TimeStampedModel):
     address = models.CharField(max_length=255, blank=True)
     website = models.URLField(blank=True)
 
+    # Company Profile page (14 Oct 2026). `name` is the brand name shown
+    # across the app; legal_name is the name on the trade license.
+    COMPANY_TYPE_CHOICES = [
+        ('LLC', 'Limited Liability Company (LLC)'),
+        ('FREE_ZONE', 'Free Zone Company'),
+        ('SOLE_ESTABLISHMENT', 'Sole Establishment'),
+        ('CIVIL', 'Civil Company'),
+        ('BRANCH', 'Branch of a Foreign Company'),
+        ('PJSC', 'Public Joint Stock Company'),
+        ('PRIVATE_JSC', 'Private Joint Stock Company'),
+        ('OTHER', 'Other'),
+    ]
+    legal_name = models.CharField(max_length=255, blank=True)
+    company_type = models.CharField(max_length=30, choices=COMPANY_TYPE_CHOICES, blank=True)
+    description = models.TextField(max_length=2000, blank=True)
+
     admin_user = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
@@ -379,6 +395,40 @@ class Company(TimeStampedModel):
     
     def get_team_member_count(self):
         return self.get_team_members().count()
+
+
+class BusinessAddress(TimeStampedModel):
+    """One of a company's addresses on the Company Profile page. The MAIN
+    one is mirrored onto Company.address/city/country (and the owner's
+    CompanyEmployerProfile), which the rest of the app still reads."""
+    TYPE_MAIN = 'MAIN'
+    TYPE_TRADING = 'TRADING'
+    TYPE_BRANCH = 'BRANCH'
+    TYPE_CHOICES = [
+        (TYPE_MAIN, 'Main Office'),
+        (TYPE_TRADING, 'Trading Address'),
+        (TYPE_BRANCH, 'Branch Address'),
+    ]
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='business_addresses')
+    label = models.CharField(max_length=100, blank=True)
+    address_type = models.CharField(max_length=10, choices=TYPE_CHOICES, default=TYPE_BRANCH)
+    country = models.CharField(max_length=100)
+    city = models.CharField(max_length=100, blank=True)
+    street = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ['created_at', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['company'],
+                condition=models.Q(address_type='MAIN'),
+                name='one_main_business_address_per_company',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.company.name} - {self.label or self.get_address_type_display()}"
 
 
 class CompanyDocumentRequest(TimeStampedModel):
@@ -496,3 +546,21 @@ def create_user_profile(sender, instance, created, **kwargs):
                     'phone_number': ''
                 }
             )
+
+@receiver(post_save, sender=Company)
+def create_main_business_address(sender, instance, created, **kwargs):
+    """A new company's registration address becomes its Main Office on the
+    Company Profile page (companies that existed before the address list
+    were seeded by migration 0026)."""
+    if not created or not (instance.country or instance.city or instance.address):
+        return
+    if instance.business_addresses.filter(address_type=BusinessAddress.TYPE_MAIN).exists():
+        return
+    BusinessAddress.objects.create(
+        company=instance,
+        label="",
+        address_type=BusinessAddress.TYPE_MAIN,
+        country=instance.country or "",
+        city=instance.city or "",
+        street=instance.address or "",
+    )

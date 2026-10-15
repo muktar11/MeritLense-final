@@ -35,7 +35,7 @@ from .serializers import (
     EvaluatorRatingWriteSerializer,
 )
 from .permissions import CanManageEvaluation, CanViewEvaluation
-from api.core.permisssions import IsCompanyApproved, RequireSetEvaluation
+from api.core.permisssions import IsCompanyApproved, RequireSetEvaluation, results_viewer_company
 from api.core.constants import CertificateStatus, Roles, EvaluationStatus, EvaluationType
 from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverity
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
@@ -50,7 +50,7 @@ from api.sessions.models import InterviewSession
 from api.sessions.services import InterviewSessionService
 
 
-def _accessible_evaluations_queryset(user):
+def _accessible_evaluations_queryset(user, request=None):
     queryset = Evaluation.objects.select_related("session", "evaluator_rating")
 
     if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
@@ -65,6 +65,9 @@ def _accessible_evaluations_queryset(user):
         return queryset.none()
 
     if user.role == Roles.B2B_TEAM_MEMBER:
+        viewer_company = results_viewer_company(request) if request is not None else None
+        if viewer_company is not None:
+            return queryset.filter(company=viewer_company)
         return queryset.filter(
             Q(created_by=user) |
             Q(candidate__shared_with=user)
@@ -111,6 +114,8 @@ class CandidateScoreSummaryView(APIView):
                 summaries = summaries.filter(evaluation__company=user.company_profile.company)
             else:
                 summaries = summaries.none()
+        elif user.role == Roles.B2B_TEAM_MEMBER and results_viewer_company(request) is not None:
+            summaries = summaries.filter(evaluation__company=results_viewer_company(request))
         elif user.role == Roles.B2B_TEAM_MEMBER:
             summaries = summaries.filter(
                 Q(evaluation__created_by=user) | Q(evaluation__candidate__shared_with=user)
@@ -199,7 +204,7 @@ class CandidateScoreSummaryView(APIView):
         Scores page. The overall score is the average of the rated
         dimensions - the same figure the Evaluations table shows."""
         evaluations = (
-            _accessible_evaluations_queryset(user)
+            _accessible_evaluations_queryset(user, request)
             .filter(evaluator_rating__isnull=False, session__scheduled_start_at__isnull=False)
             .select_related("candidate", "certificate")
             .prefetch_related(
@@ -248,7 +253,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         if getattr(self, "swagger_fake_view", False):
             return Evaluation.objects.none()
 
-        queryset = _accessible_evaluations_queryset(self.request.user)
+        queryset = _accessible_evaluations_queryset(self.request.user, self.request)
         
         status = self.request.query_params.get('status')
         if status:

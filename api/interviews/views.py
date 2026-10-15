@@ -13,7 +13,7 @@ from rest_framework.response import Response
 
 from api.core.public_ids import PUBLIC_ID_OR_PK_REGEX, build_object_identifier_filter
 from api.core.constants import InterviewSessionStatus
-from api.core.permisssions import IsCompanyApproved, RequireSetEvaluation
+from api.core.permisssions import IsCompanyApproved, RequireSetEvaluation, results_viewer_company
 from api.interviews.models import (
     InterviewConfiguration,
     InterviewRubric,
@@ -187,6 +187,9 @@ class TaskObservationResultViewSet(viewsets.ReadOnlyModelViewSet):
             return queryset
         if hasattr(user, "managed_company"):
             return queryset.filter(session__organization=user.managed_company)
+        viewer_company = results_viewer_company(self.request)
+        if viewer_company is not None:
+            return queryset.filter(session__organization=viewer_company)
         if user.role == "B2B_TEAM_MEMBER":
             return queryset.filter(candidate__shared_with=user).distinct()
         return queryset.filter(session__created_by=user)
@@ -257,6 +260,9 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             return queryset
         if hasattr(user, "managed_company"):
             return queryset.filter(organization=user.managed_company)
+        viewer_company = results_viewer_company(self.request)
+        if viewer_company is not None:
+            return queryset.filter(organization=viewer_company)
         if user.role == "B2B_TEAM_MEMBER":
             return queryset.filter(candidate__shared_with=user).distinct()
         return queryset.filter(created_by=user)
@@ -368,7 +374,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         session = self._get_session()
-        self._ensure_access(session, request)
+        self._ensure_access(session, request, read_only=True)
         serializer = InterviewSessionSerializer(session, context={"request": request})
         return Response(serializer.data)
 
@@ -592,7 +598,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=["get"], url_path="ai-processing-summary")
     def ai_processing_summary(self, request, id=None):
         session = self._get_session()
-        self._ensure_access(session, request)
+        self._ensure_access(session, request, read_only=True)
         payload = AIProcessingOrchestrationService.get_session_summary_payload(session)
         serializer = SessionAIProcessingSummarySerializer(payload)
         return Response(serializer.data)
@@ -800,7 +806,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=["get"], url_path="scoring-summary")
     def scoring_summary(self, request, id=None):
         session = self._get_session()
-        self._ensure_access(session, request)
+        self._ensure_access(session, request, read_only=True)
         summary = session.evaluation_summaries.select_related("rule_set").first()
         if summary is None:
             return Response({"detail": "No scoring summary has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
@@ -876,7 +882,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             and not RequireSetEvaluation().has_permission(request, self)
         ):
             raise PermissionDenied("Your team permissions do not allow evaluation access")
-        if not request.user.is_authenticated or not session.can_manage(request.user):
+        if not request.user.is_authenticated or not session.can_view(request):
             raise PermissionDenied("You do not have access to these task observation results")
         try:
             results = TaskObservationService.list_results(session=session)
@@ -894,7 +900,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             and not RequireSetEvaluation().has_permission(request, self)
         ):
             raise PermissionDenied("Your team permissions do not allow evaluation access")
-        if not request.user.is_authenticated or not session.can_manage(request.user):
+        if not request.user.is_authenticated or not session.can_view(request):
             raise PermissionDenied("You do not have access to this interview report")
         evaluation = InterviewSessionService._ensure_linked_evaluation(session)
         report = evaluation.reports.filter(report_status="ACTIVE").select_related("generated_by").first()
@@ -915,7 +921,11 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             raise ValidationError({"id": str(exc)}) from exc
         return get_object_or_404(queryset, **lookup)
 
-    def _ensure_access(self, session, request):
+    def _ensure_access(self, session, request, read_only=False):
+        """read_only=True is for endpoints that only show the session or its
+        results; there a Reviewer (view_results) may see any company session.
+        Others (next-question and the like) can move the interview along, so
+        they keep the manager/candidate-token check."""
         if (
             request.user.is_authenticated
             and request.user.role == "B2B_TEAM_MEMBER"
@@ -923,6 +933,8 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         ):
             raise PermissionDenied("Your team permissions do not allow evaluation access")
         if request.user.is_authenticated and session.can_manage(request.user):
+            return
+        if read_only and request.user.is_authenticated and session.can_view(request):
             return
         token = self._get_token(request)
         if session.token_is_valid(token):

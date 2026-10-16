@@ -50,4 +50,13 @@ class PaymentCheckTests(TestCase):
         self.subscription("sub_missing")
         response = self.client.get(reverse("debug-payment"))
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()[0]["check_failed"])
+        row = response.json()[0]
+        self.assertTrue(row["from_records"])
+        self.assertEqual(row["stripe_status"], "active")
+
+    @patch("api.payments.views.stripe.Subscription.retrieve")
+    def test_package_request_purchase_reported_from_records(self, sub_retrieve):
+        self.subscription("package_request_abc")
+        row = self.client.get(reverse("debug-payment")).json()[0]
+        self.assertTrue(row["from_records"])
+        sub_retrieve.assert_not_called()

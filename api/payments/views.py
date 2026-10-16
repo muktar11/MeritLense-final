@@ -2095,6 +2095,20 @@ def debug_subscription_payment(request):
         if not sub.stripe_subscription_id:
             continue
         stripe.api_key = settings.STRIPE_SECRET_KEY
+        records_only = {
+            'subscription_id': str(sub.public_id),
+            'stripe_status': (sub.status or '').lower() or None,
+            'invoice_status': None,
+            'payment_intent_status': None,
+            'payment_intent_last_error': None,
+            'hosted_invoice_url': None,
+            'from_records': True,
+        }
+        # Packages bought through an approved package request are not
+        # Stripe subscriptions; our own record is the status.
+        if sub.stripe_subscription_id.startswith("package_request_"):
+            results.append(records_only)
+            continue
         # A one-time package purchase is stored as "one_time_<payment intent>":
         # there is no Stripe subscription, so report its payment instead.
         if sub.stripe_subscription_id.startswith("one_time_"):
@@ -2129,16 +2143,10 @@ def debug_subscription_payment(request):
                 expand=['latest_invoice.payment_intent', 'latest_invoice.payments.data.payment']
             )
         except Exception:
+            # Stripe has no such subscription (e.g. an older or test-mode
+            # record): report what our own record says, marked as such.
             logger.exception("Payment check: could not retrieve subscription %s", sub.public_id)
-            results.append({
-                'subscription_id': str(sub.public_id),
-                'stripe_status': None,
-                'invoice_status': None,
-                'payment_intent_status': None,
-                'payment_intent_last_error': None,
-                'hosted_invoice_url': None,
-                'check_failed': True,
-            })
+            results.append(records_only)
             continue
 
         invoice = stripe_sub.latest_invoice if hasattr(stripe_sub, 'latest_invoice') else None

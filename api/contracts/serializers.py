@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from .constants import CURRENT_VERSIONS
+
 from api.core.serializers import PublicIdModelSerializer
 from api.core.constants import AgreementType, AgreementMethod
 
@@ -17,8 +19,19 @@ class AgreementSerializer(PublicIdModelSerializer):
             'id', 'agreement_type', 'agreement_type_display', 'version', 'method',
             'status', 'status_display', 'signatory_name', 'language', 'accepted_at',
             'contract_id', 'signed_pdf_url', 'pdf_hash', 'created_at',
+            'current_version', 'is_current',
         ]
         read_only_fields = fields
+
+    current_version = serializers.SerializerMethodField()
+    is_current = serializers.SerializerMethodField()
+
+    def get_current_version(self, obj):
+        return CURRENT_VERSIONS.get(obj.agreement_type)
+
+    def get_is_current(self, obj):
+        """False when a newer version of this agreement exists to sign."""
+        return obj.version == CURRENT_VERSIONS.get(obj.agreement_type)
 
     def get_signed_pdf_url(self, obj):
         if not obj.signed_pdf:

@@ -139,12 +139,9 @@ class AgreementSignInitiateView(APIView):
         agreements = []
         for agreement_type in data['agreement_types']:
             version = CURRENT_VERSIONS[agreement_type]
-            Agreement.objects.filter(
-                user=request.user,
-                agreement_type=agreement_type,
-                status=AgreementStatus.SIGNED,
-            ).exclude(version=version).update(status=AgreementStatus.SUPERSEDED)
-
+            # The previously signed version stays SIGNED until this one is
+            # confirmed (see AgreementSignConfirmView): starting a re-sign
+            # and not finishing it must not leave the account unsigned.
             agreement, _created = Agreement.objects.update_or_create(
                 user=request.user,
                 agreement_type=agreement_type,
@@ -347,6 +344,13 @@ class AgreementSignConfirmView(APIView):
                 )
 
             agreement.save()
+            # Only now is the earlier signed version replaced; it stays as
+            # the historical record of what was signed then.
+            Agreement.objects.filter(
+                user=request.user,
+                agreement_type=agreement.agreement_type,
+                status=AgreementStatus.SIGNED,
+            ).exclude(pk=agreement.pk).update(status=AgreementStatus.SUPERSEDED)
             signed.append(agreement)
 
             AuditLogService.log(
@@ -385,7 +389,11 @@ def agreement_status(request):
     )
     latest_by_type = {}
     for agreement in agreements:
-        latest_by_type.setdefault(agreement.agreement_type, agreement)
+        current = latest_by_type.get(agreement.agreement_type)
+        # A signed agreement wins over a newer pending one: an unfinished
+        # re-sign must not make the account look unsigned.
+        if current is None or (current.status != AgreementStatus.SIGNED and agreement.status == AgreementStatus.SIGNED):
+            latest_by_type[agreement.agreement_type] = agreement
 
     return Response(
         AgreementSerializer(list(latest_by_type.values()), many=True, context={'request': request}).data

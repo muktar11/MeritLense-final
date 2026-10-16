@@ -2092,10 +2092,37 @@ def debug_subscription_payment(request):
     
     results = []
     for sub in subscriptions:
-        # One-time package purchases have no Stripe subscription to check.
         if not sub.stripe_subscription_id:
             continue
         stripe.api_key = settings.STRIPE_SECRET_KEY
+        # A one-time package purchase is stored as "one_time_<payment intent>":
+        # there is no Stripe subscription, so report its payment instead.
+        if sub.stripe_subscription_id.startswith("one_time_"):
+            intent_id = sub.stripe_subscription_id[len("one_time_"):]
+            try:
+                intent = stripe.PaymentIntent.retrieve(intent_id)
+            except Exception:
+                logger.exception("Payment check: could not retrieve payment %s", intent_id)
+                results.append({
+                    'subscription_id': str(sub.public_id),
+                    'stripe_status': None,
+                    'invoice_status': None,
+                    'payment_intent_status': None,
+                    'payment_intent_last_error': None,
+                    'hosted_invoice_url': None,
+                    'check_failed': True,
+                })
+                continue
+            results.append({
+                'subscription_id': str(sub.public_id),
+                'stripe_status': (sub.status or '').lower() or None,
+                'invoice_status': 'paid' if intent.status == 'succeeded' else None,
+                'payment_intent_status': intent.status,
+                'payment_intent_last_error': intent.last_payment_error,
+                'hosted_invoice_url': None,
+                'one_time': True,
+            })
+            continue
         try:
             stripe_sub = stripe.Subscription.retrieve(
                 sub.stripe_subscription_id,

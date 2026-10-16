@@ -2092,11 +2092,27 @@ def debug_subscription_payment(request):
     
     results = []
     for sub in subscriptions:
+        # One-time package purchases have no Stripe subscription to check.
+        if not sub.stripe_subscription_id:
+            continue
         stripe.api_key = settings.STRIPE_SECRET_KEY
-        stripe_sub = stripe.Subscription.retrieve(
-            sub.stripe_subscription_id,
-            expand=['latest_invoice.payment_intent', 'latest_invoice.payments.data.payment']
-        )
+        try:
+            stripe_sub = stripe.Subscription.retrieve(
+                sub.stripe_subscription_id,
+                expand=['latest_invoice.payment_intent', 'latest_invoice.payments.data.payment']
+            )
+        except Exception:
+            logger.exception("Payment check: could not retrieve subscription %s", sub.public_id)
+            results.append({
+                'subscription_id': str(sub.public_id),
+                'stripe_status': None,
+                'invoice_status': None,
+                'payment_intent_status': None,
+                'payment_intent_last_error': None,
+                'hosted_invoice_url': None,
+                'check_failed': True,
+            })
+            continue
 
         invoice = stripe_sub.latest_invoice if hasattr(stripe_sub, 'latest_invoice') else None
         payment_intent = None

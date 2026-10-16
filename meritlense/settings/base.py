@@ -97,6 +97,11 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    # Arabic API messages for requests from the Arabic site
+    # (api/core/error_i18n.py). Deliberately not Django's LocaleMiddleware:
+    # that would also switch number/date formatting for PDFs rendered
+    # during the request.
+    "api.core.error_i18n.ArabicApiMessagesMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",

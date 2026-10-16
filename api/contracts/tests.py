@@ -395,3 +395,64 @@ class CompanyStampRequiredForSigningTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 200, response.data)
+
+
+class ResignOutdatedAgreementTests(APITestCase):
+    """A company that signed an older version (e.g. one that still carried
+    the placeholder notice) can sign the current version without ever
+    being left unsigned in between (16 Oct 2026)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="resign-owner@example.com", password="Password123!",
+            first_name="Resign", last_name="Owner", role=Roles.B2B, is_verified=True,
+        )
+        make_company(
+            self.user, name="Resign Co", registration_number="REG-RESIGN-1",
+            stamp_image=SimpleUploadedFile("stamp.png", b"fake-png-bytes", content_type="image/png"),
+        )
+        self.old = Agreement.objects.create(
+            user=self.user, agreement_type=AgreementType.B2B_AGREEMENT, version="Legal",
+            method=AgreementMethod.OTP_SIGNATURE, status=AgreementStatus.SIGNED,
+            signatory_name="Resign Owner", accepted_at=timezone.now(), contract_id="MLB2B-OLD-1",
+            signed_pdf=SimpleUploadedFile("old.pdf", b"%PDF-1.4 old", content_type="application/pdf"),
+        )
+        login = self.client.post("/api/v1/auth/login", {"email": self.user.email, "password": "Password123!"}, format="json")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+    def _status(self):
+        rows = self.client.get("/api/v1/agreements/status").data
+        return next(r for r in rows if r["agreement_type"] == AgreementType.B2B_AGREEMENT)
+
+    def test_outdated_signed_version_is_reported(self):
+        row = self._status()
+        self.assertEqual(row["status"], AgreementStatus.SIGNED)
+        self.assertFalse(row["is_current"])
+        self.assertEqual(row["current_version"], CURRENT_VERSIONS[AgreementType.B2B_AGREEMENT])
+
+    def test_resign_keeps_old_version_until_confirmed(self):
+        mail.outbox = []
+        initiate = self.client.post(
+            "/api/v1/agreements/sign/initiate",
+            {"agreement_types": [AgreementType.B2B_AGREEMENT], "signatory_name": "Resign Owner",
+             "authorized_signatory_confirmed": True},
+            format="json",
+        )
+        self.assertEqual(initiate.status_code, 200, initiate.data)
+        # Not finished yet: still signed (the old version), not "pending".
+        self.old.refresh_from_db()
+        self.assertEqual(self.old.status, AgreementStatus.SIGNED)
+        self.assertEqual(self._status()["contract_id"], "MLB2B-OLD-1")
+
+        code = re.search(r"is:\s*(\d+)", next(m for m in mail.outbox if "signing code" in m.subject.lower()).body).group(1)
+        confirm = self.client.post(
+            "/api/v1/agreements/sign/confirm",
+            {"otp_reference": initiate.data["otp_reference"], "code": code},
+            format="json",
+        )
+        self.assertEqual(confirm.status_code, 200, confirm.data)
+        self.old.refresh_from_db()
+        self.assertEqual(self.old.status, AgreementStatus.SUPERSEDED)
+        row = self._status()
+        self.assertTrue(row["is_current"])
+        self.assertNotEqual(row["contract_id"], "MLB2B-OLD-1")

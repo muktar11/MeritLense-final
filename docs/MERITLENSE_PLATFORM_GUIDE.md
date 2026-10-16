@@ -460,7 +460,7 @@ An interview configuration `verify_role` (named "Nursing Assistant", 1 question,
 
 Everything that still has to be done for production, in one place. Tick items off here (`[x]`) as they are completed, with the date and who did it. **B** = blocks launch, **R** = recommended before launch, **A** = after launch / ongoing.
 
-### 10.1 Google Cloud billing: **B**
+### 10.1 Google Cloud billing: **done 16 Oct 2026**
 
 Google Cloud billing must be **enabled** for production. Two Google services stop working without it:
 
@@ -469,10 +469,10 @@ Google Cloud billing must be **enabled** for production. Two Google services sto
 | Google Text-to-Speech | `GOOGLE_TTS_API_KEY` | Question read-aloud. Candidates only hear their device's voice, or see "audio not available" |
 | Google Translate | `GOOGLE_TRANSLATE_API_KEY` (+ `GOOGLE_TRANSLATE_PROJECT_ID` if used) | (1) Answer translation fails, so **every interview answered in a language other than English or Arabic is held for human review**. (2) No on-screen translation for Afaan Oromo, Tigrinya, Afar, Twi, Luganda, Malagasy. (3) Other languages fall back to OpenAI: slower, and costs OpenAI credit |
 
-- [ ] **Enable billing** on the Google Cloud project that owns these keys (Google Cloud Console → Billing → link a billing account). Both keys may belong to the same project; check each.
-- [ ] Make sure the **Cloud Text-to-Speech API** and **Cloud Translation API** are both *enabled* in that project (APIs & Services → Library).
-- [ ] Set a **budget alert** in Google Cloud Billing, so costs are visible.
-- [ ] **Check after enabling** (no code change or redeploy needed):
+- [x] (16 Oct 2026, manager) **Enable billing** on the Google Cloud project that owns these keys (Google Cloud Console → Billing → link a billing account). Both keys may belong to the same project; check each.
+- [x] (16 Oct 2026, manager) Make sure the **Cloud Text-to-Speech API** and **Cloud Translation API** are both *enabled* in that project (APIs & Services → Library).
+- [x] (16 Oct 2026, manager; $50/month) Set a **budget alert** in Google Cloud Billing, so costs are visible.
+- [x] (16 Oct 2026) **Check after enabling**: read-aloud verified live in EN, AR, Swahili and Amharic; on-screen translation from Google for Amharic, Afaan Oromo, Swahili, Tigrinya and Afar. Still to confirm on the next real interview: a typed Amharic Screening is not held with "Translation failed". Translations saved during the outage (provider OpenAI) stay on those questions (no code change or redeploy needed):
   - [ ] Open an interview and press **Listen in English**. Audio comes from the server; there's no "audio not available" notice. In the audit log, new `QUESTION_AUDIO_GENERATED` entries appear without errors.
   - [ ] Choose **Afar** or **Tigrinya** as the answer language. A translated question appears instead of "translation unavailable".
   - [ ] Complete one short Screening with typed **Amharic** answers. In the admin Review Queue it should **not** be held with "Translation failed".

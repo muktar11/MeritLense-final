@@ -2116,16 +2116,10 @@ def debug_subscription_payment(request):
             try:
                 intent = stripe.PaymentIntent.retrieve(intent_id)
             except Exception:
+                # Same as below: Stripe has no such payment (older or
+                # test-mode record), so report our own record.
                 logger.exception("Payment check: could not retrieve payment %s", intent_id)
-                results.append({
-                    'subscription_id': str(sub.public_id),
-                    'stripe_status': None,
-                    'invoice_status': None,
-                    'payment_intent_status': None,
-                    'payment_intent_last_error': None,
-                    'hosted_invoice_url': None,
-                    'check_failed': True,
-                })
+                results.append(records_only)
                 continue
             results.append({
                 'subscription_id': str(sub.public_id),

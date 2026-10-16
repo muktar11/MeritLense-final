@@ -54,6 +54,13 @@ class PaymentCheckTests(TestCase):
         self.assertTrue(row["from_records"])
         self.assertEqual(row["stripe_status"], "active")
 
+    @patch("api.payments.views.stripe.PaymentIntent.retrieve", side_effect=Exception("No such payment_intent"))
+    def test_one_time_purchase_unknown_to_stripe_reported_from_records(self, _):
+        self.subscription("one_time_pi_gone")
+        row = self.client.get(reverse("debug-payment")).json()[0]
+        self.assertTrue(row["from_records"])
+        self.assertNotIn("check_failed", row)
+
     @patch("api.payments.views.stripe.Subscription.retrieve")
     def test_package_request_purchase_reported_from_records(self, sub_retrieve):
         self.subscription("package_request_abc")

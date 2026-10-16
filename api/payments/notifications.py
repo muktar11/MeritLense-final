@@ -1,6 +1,8 @@
 from django.core.mail import send_mail
 from django.conf import settings
 
+from api.core.email_i18n import ARABIC, SIGNATURE, user_language
+
 # Mirrors api/evaluations/utils.py's email pattern (plain send_mail, no
 # queue/async - this codebase has no Celery or other background-job
 # infrastructure) for the two "material events" the Slot Reservation
@@ -19,6 +21,14 @@ def _owner_email_and_name(*, created_by, company):
     return created_by.email, created_by.get_full_name()
 
 
+def _languages(*, created_by, company):
+    """Each recipient's email language (owner and scheduler may differ)."""
+    owner = company.admin_user if company and company.admin_user_id else created_by
+    languages = {owner.email: user_language(owner)}
+    languages.setdefault(created_by.email, user_language(created_by))
+    return languages
+
+
 def _recipients(*, created_by, company):
     owner_email, owner_name = _owner_email_and_name(created_by=created_by, company=company)
     recipients = {owner_email: owner_name}
@@ -33,9 +43,25 @@ def send_reservation_failed_email(*, candidate, created_by, company, role_name, 
     fix it (buy more Slots) and may not otherwise ever hear that someone
     on their team hit this wall."""
     recipients = _recipients(created_by=created_by, company=company)
+    languages = _languages(created_by=created_by, company=company)
     subject = f"Interview scheduling blocked: no Assessment Slots available"
 
     for email, name in recipients.items():
+        if languages.get(email) == ARABIC:
+            send_mail("تعذّر تحديد موعد المقابلة: لا توجد خانات تقييم متاحة", f"""مرحبًا {name}،
+
+تعذّر إكمال محاولة لتحديد موعد مقابلة على MeritLense:
+
+- المرشح: {candidate.get_full_name()}
+- الدور: {role_name}
+- المحاولة من: {created_by.get_full_name()} ({created_by.email})
+- السبب: {reason}
+
+لم يُحدَّد أي موعد ولم تُستخدم أي خانة. لحل ذلك، أضف خانات تقييم إلى حسابك من صفحة الباقات والاشتراك.
+
+{SIGNATURE[ARABIC]}
+""", settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+            continue
         message = f"""
 Hello {name},
 
@@ -96,9 +122,24 @@ def send_reservation_invalidated_email(*, candidate, created_by, company):
     account/billing owner - not the candidate, who has no visibility into
     the employer's billing and doesn't need to."""
     recipients = _recipients(created_by=created_by, company=company)
+    languages = _languages(created_by=created_by, company=company)
     subject = f"Interview cancelled: underlying purchase was refunded"
 
     for email, name in recipients.items():
+        if languages.get(email) == ARABIC:
+            send_mail("أُلغيت المقابلة: تم استرداد قيمة الشراء", f"""مرحبًا {name}،
+
+أُلغيت تلقائيًا مقابلة مجدولة على MeritLense:
+
+- المرشح: {candidate.get_full_name()}
+
+حدث ذلك لأن عملية شراء الباقة التي حُجزت منها خانة التقييم قد استُردّت أو أُلغيت، فلم يعد بالإمكان الإبقاء على الحجز. لم تُحتسب أي خانة لهذه المقابلة الملغاة.
+
+إذا كان ذلك غير متوقع، يرجى التواصل مع دعم MeritLense.
+
+{SIGNATURE[ARABIC]}
+""", settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+            continue
         message = f"""
 Hello {name},
 
@@ -143,9 +184,23 @@ def send_certificate_reused_email(*, candidate, requested_by, company, remaining
     who notices the Slot count and should know why it moved without a new
     interview being scheduled."""
     recipients = _recipients(created_by=requested_by, company=company)
+    languages = _languages(created_by=requested_by, company=company)
     subject = "Assessment Slot used: existing certificate reused"
 
     for email, name in recipients.items():
+        if languages.get(email) == ARABIC:
+            send_mail("استُخدمت خانة تقييم: إعادة استخدام شهادة قائمة", f"""مرحبًا {name}،
+
+أُعيد استخدام شهادة قائمة بدلًا من إجراء مقابلة جديدة على MeritLense:
+
+- المرشح: {candidate.get_full_name()}
+- بطلب من: {requested_by.get_full_name()} ({requested_by.email})
+
+خُصمت خانة تقييم واحدة من باقتك لذلك (المتبقي: {remaining})، كما هو الحال في المقابلة الجديدة.
+
+{SIGNATURE[ARABIC]}
+""", settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+            continue
         message = f"""
 Hello {name},
 
@@ -175,9 +230,22 @@ def maybe_send_low_balance_warning(*, created_by, company, remaining, limit, rol
         return
 
     recipients = _recipients(created_by=created_by, company=company)
+    languages = _languages(created_by=created_by, company=company)
     subject = "Low Assessment Slot balance on your MeritLense account"
 
     for email, name in recipients.items():
+        if languages.get(email) == ARABIC:
+            send_mail("رصيد خانات التقييم منخفض في حسابك على MeritLense", f"""مرحبًا {name}،
+
+أوشكت خانات التقييم في حسابك على MeritLense على النفاد:
+
+- المتاح: {remaining} من {limit}
+
+عندما يصل المتاح إلى 0، سيتوقف تحديد مواعيد مقابلات جديدة حتى تُضاف خانات أخرى. تفضّل بزيارة صفحة الباقات والاشتراك لإعادة الشحن.
+
+{SIGNATURE[ARABIC]}
+""", settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+            continue
         message = f"""
 Hello {name},
 

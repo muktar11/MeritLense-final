@@ -5,6 +5,16 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
 
+from api.core.email_i18n import (
+    ARABIC,
+    EVALUATION_TYPES_AR,
+    SIGNATURE,
+    candidate_language,
+    format_date,
+    format_time,
+    user_language,
+)
+
 # All scheduled_date/completed_at values are stored as UTC instants
 # (TIME_ZONE="UTC" in settings) - emails were previously formatting them
 # with raw strftime(), which silently printed UTC as if it were the
@@ -40,6 +50,36 @@ def _format_time(value):
 
 def _format_datetime(value):
     return f"{timezone.localtime(value, DISPLAY_TZ).strftime('%A, %B %d, %Y at %I:%M %p')} {DISPLAY_TZ_LABEL}"
+
+
+def _local(value):
+    return timezone.localtime(value, DISPLAY_TZ)
+
+
+def _date_ar(value):
+    return format_date(_local(value), ARABIC)
+
+
+def _time_ar(value):
+    return f"{format_time(_local(value), ARABIC)} بتوقيت السعودية"
+
+
+def _datetime_ar(value):
+    return f"{_date_ar(value)}، الساعة {_time_ar(value)}"
+
+
+def _type_ar(evaluation):
+    return EVALUATION_TYPES_AR.get(evaluation.evaluation_type, evaluation.get_evaluation_type_display())
+
+
+def _candidate_lang(evaluation):
+    return candidate_language(getattr(evaluation, "candidate", None))
+
+
+def _account_owner(evaluation):
+    if evaluation.company_id and evaluation.company.admin_user_id:
+        return evaluation.company.admin_user
+    return evaluation.created_by
 
 
 def _account_owner_email(evaluation):
@@ -89,6 +129,45 @@ Location: {evaluation.location}"""
     else:
         location_details = "\nLocation: To be announced"
     
+    if _candidate_lang(evaluation) == ARABIC:
+        if evaluation.meeting_link:
+            where = f"رابط الاجتماع: {_join_link(evaluation)}"
+            if evaluation.meeting_id:
+                where += f"\nمعرّف الاجتماع: {evaluation.meeting_id}"
+            if evaluation.meeting_password:
+                where += f"\nكلمة مرور الاجتماع: {evaluation.meeting_password}"
+        elif evaluation.location:
+            where = f"الموقع: {evaluation.location}"
+        else:
+            where = "الموقع: سيُعلن لاحقًا"
+        ar_subject = f"تم تحديد موعد التقييم: {_type_ar(evaluation)} - {_date_ar(evaluation.scheduled_date)}"
+        ar_message = f"""مرحبًا {evaluation.candidate_first_name} {evaluation.candidate_last_name}،
+
+تم تحديد موعد تقييم لك على MeritLense.
+
+تفاصيل التقييم:
+- النوع: {_type_ar(evaluation)}
+- التاريخ: {_date_ar(evaluation.scheduled_date)}
+- الوقت: {_time_ar(evaluation.scheduled_date)}
+- المدة: {duration} دقيقة
+- حدّد الموعد: {creator_name}
+{where}
+
+بياناتك:
+- الاسم: {evaluation.candidate_first_name} {evaluation.candidate_last_name}
+- البريد الإلكتروني: {evaluation.candidate_email}
+- رقم جواز السفر / الهوية: {evaluation.candidate_passport_id}
+
+يرجى التأكد من:
+1. أن تكون متاحًا في الموعد المحدد
+2. تجهيز وثيقة الهوية
+3. اختبار الصوت والفيديو إذا كان الاجتماع عبر الإنترنت
+4. الانضمام قبل الموعد بخمس دقائق
+
+إذا احتجت إلى تغيير الموعد أو كانت لديك أسئلة، يرجى التواصل مع المقيّم.
+
+{SIGNATURE[ARABIC]}
+"""
     subject = f"Evaluation Scheduled: {evaluation_type_display} - {scheduled_date}"
     
     message = f"""
@@ -121,9 +200,35 @@ Best regards,
 Meritlense Team
 """
 
-    _send(subject, message, [evaluation.candidate_email])
+    if _candidate_lang(evaluation) == ARABIC:
+        _send(ar_subject, ar_message, [evaluation.candidate_email])
+    else:
+        _send(subject, message, [evaluation.candidate_email])
 
     owner_email = _account_owner_email(evaluation)
+    if user_language(_account_owner(evaluation)) == ARABIC:
+        _send(
+            f"تم تحديد موعد مقابلة: {evaluation.candidate_first_name} {evaluation.candidate_last_name} - {_date_ar(evaluation.scheduled_date)}",
+            f"""مرحبًا {evaluation.created_by.get_full_name()}،
+
+تم تحديد موعد مقابلة في حسابك على MeritLense.
+
+تفاصيل التقييم:
+- المرشح: {evaluation.candidate_first_name} {evaluation.candidate_last_name}
+- البريد الإلكتروني للمرشح: {evaluation.candidate_email}
+- النوع: {_type_ar(evaluation)}
+- التاريخ: {_date_ar(evaluation.scheduled_date)}
+- الوقت: {_time_ar(evaluation.scheduled_date)}
+- المدة: {duration} دقيقة
+- حدّد الموعد: {creator_name}
+
+أُرسل إلى المرشح رابطه الخاص للانضمام في الموعد المحدد، ويمكنك الانضمام من لوحة التحكم في MeritLense عند بدء المقابلة.
+
+{SIGNATURE[ARABIC]}
+""",
+            [owner_email],
+        )
+        return
     owner_subject = f"Interview scheduled: {evaluation.candidate_first_name} {evaluation.candidate_last_name} - {scheduled_date}"
     owner_message = f"""
 Hello {evaluation.created_by.get_full_name()},
@@ -158,6 +263,30 @@ def send_evaluation_rescheduled_email(evaluation, old_date, request=None):
     # original invitation. The link itself doesn't change on reschedule.
     join_link = _join_link(evaluation)
     link_line = f"\n- Meeting Link: {join_link}" if join_link else ""
+
+    if _candidate_lang(evaluation) == ARABIC:
+        ar_link = f"\n- رابط الاجتماع: {join_link}" if join_link else ""
+        _send(f"تم تغيير موعد التقييم: {_type_ar(evaluation)}", f"""مرحبًا {evaluation.candidate_first_name} {evaluation.candidate_last_name}،
+
+تم تغيير موعد تقييمك.
+
+الموعد السابق:
+{_datetime_ar(old_date)}
+
+الموعد الجديد:
+{_datetime_ar(evaluation.scheduled_date)}
+
+تفاصيل التقييم:
+- النوع: {_type_ar(evaluation)}
+- المدة: {evaluation.duration_minutes} دقيقة{ar_link}
+
+يرجى تحديث تقويمك.
+
+إذا لم تطلب هذا التغيير أو كانت لديك أسئلة، يرجى التواصل مع المقيّم.
+
+{SIGNATURE[ARABIC]}
+""", [evaluation.candidate_email])
+        return
 
     subject = f"Evaluation Rescheduled: {evaluation_type_display}"
     
@@ -196,6 +325,22 @@ def send_evaluation_cancelled_email(evaluation, request=None):
     if evaluation.cancellation_reason:
         reason_text = f"\nReason: {evaluation.cancellation_reason}"
     
+    if _candidate_lang(evaluation) == ARABIC:
+        ar_reason = f"\nالسبب: {evaluation.cancellation_reason}" if evaluation.cancellation_reason else ""
+        _send(f"تم إلغاء التقييم: {_type_ar(evaluation)}", f"""مرحبًا {evaluation.candidate_first_name} {evaluation.candidate_last_name}،
+
+تم إلغاء التقييم المحدد لك.
+
+التقييم الملغى:
+- النوع: {_type_ar(evaluation)}
+- الموعد الأصلي: {_datetime_ar(evaluation.scheduled_date)}{ar_reason}
+
+إذا كانت لديك أسئلة، يرجى التواصل مع المقيّم.
+
+{SIGNATURE[ARABIC]}
+""", [evaluation.candidate_email])
+        return
+
     subject = f"Evaluation Cancelled: {evaluation_type_display}"
     
     message = f"""
@@ -235,6 +380,30 @@ Certificate Status: Pending - Your certificate will be available soon.
     if evaluation.score:
         score_info = f"\nScore: {evaluation.score}"
     
+    if _candidate_lang(evaluation) == ARABIC:
+        done = _datetime_ar(evaluation.completed_at) if evaluation.completed_at else "مؤخرًا"
+        cert = ""
+        if evaluation.certificate_status == "ISSUED" and evaluation.certificate_url:
+            cert = f"\nحالة الشهادة: صادرة\nيمكنك تنزيل شهادتك من هنا: {evaluation.certificate_url}\n"
+        elif evaluation.certificate_status == "PENDING":
+            cert = "\nحالة الشهادة: قيد الإعداد، وستكون متاحة قريبًا.\n"
+        score = f"\nالدرجة: {evaluation.score}" if evaluation.score else ""
+        _send(f"اكتمل التقييم: {_type_ar(evaluation)}", f"""مرحبًا {evaluation.candidate_first_name} {evaluation.candidate_last_name}،
+
+اكتمل تقييمك.
+
+تفاصيل التقييم:
+- النوع: {_type_ar(evaluation)}
+- تاريخ الإكمال: {done}{score}
+{cert}
+ستصلك قريبًا معلومات عن الخطوات التالية.
+
+شكرًا لمشاركتك.
+
+{SIGNATURE[ARABIC]}
+""", [evaluation.candidate_email])
+        return
+
     subject = f"Evaluation Completed: {evaluation_type_display}"
     
     message = f"""

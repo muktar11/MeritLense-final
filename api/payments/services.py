@@ -13,6 +13,7 @@ from .models import (
 )
 from .refund_services import RefundService
 from .short_links import email_button_html, short_url
+from api.core.email_i18n import ARABIC, SIGNATURE, plan_name, user_language
 
 import logging
 logger = logging.getLogger(__name__)
@@ -25,6 +26,14 @@ class PaymentIntentInitializationError(Exception):
 def _notify_package_activated(user, package_name):
     try:
         from api.accounts.utils import safe_send_mail
+        if user_language(user) == ARABIC:
+            safe_send_mail("أصبحت باقتك في MeritLense مفعّلة", f"""مرحبًا {user.get_full_name()}،
+
+أصبحت باقتك ({plan_name(package_name, ARABIC)}) مفعّلة الآن وجاهزة للاستخدام.
+
+{SIGNATURE[ARABIC]}
+""", [user.email])
+            return
         safe_send_mail(
             "Your Meritlense Package Is Active",
             f"""Hello {user.get_full_name()},
@@ -82,6 +91,9 @@ def _notify_one_time_payment_confirmed(payment, price, invoice):
         pdf_link = f"{settings.FRONTEND_URL}/{_invoice_language(invoice)}/dashboard/indivisual/profile?tab=billing"
     attachments = invoice_pdf_email_attachments(invoice)
     pdf_link = short_url(pdf_link, purpose="invoice_view") if pdf_link else pdf_link
+    if user_language(payment.user) == ARABIC:
+        _notify_one_time_payment_confirmed_ar(payment, price, pdf_link, attachments)
+        return
     invoice_message = (
         "A PDF copy of your invoice is attached.\n"
         f"Invoice: {pdf_link or 'available in your Billing settings'}"
@@ -126,6 +138,49 @@ Meritlense Team
         logger.exception("Failed to send payment-confirmed email for payment %s", payment.stripe_payment_intent_id)
 
 
+def _notify_one_time_payment_confirmed_ar(payment, price, pdf_link, attachments):
+    name = payment.user.get_full_name()
+    package = plan_name(price.name, ARABIC)
+    amount = f"{payment.amount} {payment.currency.upper()}"
+    invoice_line = f"الفاتورة: {pdf_link or 'متاحة في إعدادات الفوترة'}"
+    html_message = email_button_html(
+        greeting=f"مرحبًا {name}،",
+        paragraphs=[
+            "استلمنا دفعتك، شكرًا لك!",
+            f"الباقة: {package} · المبلغ المدفوع: {amount}",
+            "مرفق نسخة PDF من فاتورتك." if attachments else "",
+            "أصبحت باقتك مفعّلة الآن وجاهزة للاستخدام.",
+        ],
+        button_label="عرض الفاتورة",
+        button_url=pdf_link,
+        icon="📄",
+        footer_lines=SIGNATURE[ARABIC].split("\n"),
+        language=ARABIC,
+    ) if pdf_link else None
+    try:
+        from api.accounts.utils import safe_send_mail
+        safe_send_mail(
+            "تأكيد الدفع: عملية الشراء في MeritLense",
+            f"""مرحبًا {name}،
+
+استلمنا دفعتك، شكرًا لك!
+
+الباقة: {package}
+المبلغ المدفوع: {amount}
+{"مرفق نسخة PDF من فاتورتك." + chr(10) if attachments else ""}{invoice_line}
+
+أصبحت باقتك مفعّلة الآن وجاهزة للاستخدام.
+
+{SIGNATURE[ARABIC]}
+""",
+            [payment.user.email],
+            attachments=attachments,
+            html_message=html_message,
+        )
+    except Exception:
+        logger.exception("Failed to send payment-confirmed email for payment %s", payment.stripe_payment_intent_id)
+
+
 def _notify_invoice_generated(invoice):
     pdf_link = invoice.invoice_pdf or invoice.hosted_invoice_url
     if not pdf_link and invoice.local_pdf_file:
@@ -141,6 +196,42 @@ def _notify_invoice_generated(invoice):
         return
     attachments = invoice_pdf_email_attachments(invoice)
     pdf_link = short_url(pdf_link, purpose="invoice_view")
+    if user_language(invoice.user) == ARABIC:
+        name = invoice.user.get_full_name()
+        amount = f"{invoice.amount_paid} {invoice.currency.upper()}"
+        html_message = email_button_html(
+            greeting=f"مرحبًا {name}،",
+            paragraphs=[
+                "صدرت فاتورة جديدة لاشتراكك في MeritLense.",
+                f"المبلغ: {amount}",
+                "مرفق نسخة PDF من فاتورتك." if attachments else "",
+            ],
+            button_label="عرض الفاتورة",
+            button_url=pdf_link,
+            icon="📄",
+            footer_lines=SIGNATURE[ARABIC].split("\n"),
+            language=ARABIC,
+        )
+        try:
+            from api.accounts.utils import safe_send_mail
+            safe_send_mail(
+                f"فاتورتك من MeritLense رقم {invoice.number or invoice.stripe_invoice_id}",
+                f"""مرحبًا {name}،
+
+صدرت فاتورة جديدة لاشتراكك في MeritLense.
+
+المبلغ: {amount}
+{"مرفق نسخة PDF من فاتورتك." + chr(10) + chr(10) if attachments else ""}الفاتورة: {pdf_link}
+
+{SIGNATURE[ARABIC]}
+""",
+                [invoice.user.email],
+                attachments=attachments,
+                html_message=html_message,
+            )
+        except Exception:
+            logger.exception("Failed to send invoice-generated email for invoice %s", invoice.stripe_invoice_id)
+        return
     invoice_message = (
         f"A PDF copy of your invoice is attached.\n\nInvoice: {pdf_link}"
         if attachments

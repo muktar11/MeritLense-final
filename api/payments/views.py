@@ -1784,6 +1784,55 @@ class AdminInvoiceViewSet(InvoicePdfDownloadMixin, PublicIdLookupMixin, viewsets
         # open - the PDF is attached instead, so only absolute links are shown.
         link = invoice.hosted_invoice_url if is_payable else pdf_link
         link = short_url(link, purpose="invoice_payment" if is_payable else "invoice_view") if link.startswith("http") else ""
+        from api.core.email_i18n import ARABIC, INVOICE_STATUS_AR, SIGNATURE, user_language
+
+        if user_language(invoice.user) == ARABIC:
+            name = invoice.user.get_full_name()
+            label = "ادفع الآن" if is_payable else "عرض الفاتورة"
+            status_ar = INVOICE_STATUS_AR.get(invoice.status, invoice.get_status_display())
+            amount = f"{invoice.amount_due} {invoice.currency.upper()}"
+            attached = " مرفق نسخة PDF منها." if attachments else ""
+            ar_link_line = f"{'الدفع عبر الإنترنت' if is_payable else 'عرض الفاتورة'}: {link}\n" if link else ""
+            ar_message = f"""مرحبًا {name}،
+
+فاتورتك من MeritLense جاهزة.{attached}
+
+المبلغ المستحق: {amount}
+الحالة: {status_ar}
+{ar_link_line}
+إذا كانت لديك أي أسئلة حول هذه الفاتورة، يمكنك الرد على هذه الرسالة أو التواصل معنا عبر info@meritlense.com.
+
+{SIGNATURE[ARABIC]}
+"""
+            ar_html = email_button_html(
+                greeting=f"مرحبًا {name}،",
+                paragraphs=[
+                    f"فاتورتك رقم {reference} من MeritLense جاهزة.{attached}",
+                    f"المبلغ المستحق: {amount} · الحالة: {status_ar}",
+                ],
+                button_label=label,
+                button_url=link,
+                icon="💳" if is_payable else "📄",
+                footer_lines=[
+                    "إذا كانت لديك أي أسئلة حول هذه الفاتورة، يمكنك الرد على هذه الرسالة أو التواصل معنا عبر info@meritlense.com.",
+                    "",
+                    *SIGNATURE[ARABIC].split("\n"),
+                ],
+                language=ARABIC,
+            ) if link else None
+            safe_send_mail(f"فاتورتك من MeritLense رقم {reference}", ar_message, [invoice.user.email],
+                           attachments=attachments, html_message=ar_html)
+            AuditLogService.log(
+                user=request.user,
+                action='INVOICE_SENT',
+                category=AuditLogCategory.BILLING,
+                description=f"Invoice {reference} sent to {invoice.user.email}",
+                resource=invoice,
+                data={'recipient': invoice.user.email},
+                request=request,
+            )
+            return Response({'message': f'Invoice sent to {invoice.user.email}.'})
+
         button_label = "Pay now" if is_payable else "View invoice"
         link_line = f"{'Pay online' if is_payable else 'View invoice'}: {link}\n" if link else ""
         subject = f"Your MeritLense invoice {reference}"

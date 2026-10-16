@@ -166,7 +166,7 @@ class AgreementSignInitiateView(APIView):
             )
             agreements.append(agreement)
 
-        sent = otp_service.send(email, code)
+        sent = otp_service.send(email, code, language=data.get('language', 'en'))
 
         for agreement in agreements:
             AuditLogService.log(
@@ -242,7 +242,7 @@ class AgreementSignResendView(APIView):
                 'otp_resend_count', 'otp_last_sent_at',
             ])
 
-        sent = otp_service.send(email, code)
+        sent = otp_service.send(email, code, language=agreements[0].language if agreements else 'en')
 
         for agreement in agreements:
             AuditLogService.log(

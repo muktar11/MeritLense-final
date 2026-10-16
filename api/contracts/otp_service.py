@@ -36,8 +36,25 @@ class OTPService:
         )
         return code, code_hash, expires_at
 
-    def send(self, email, code):
+    def send(self, email, code, language="en"):
         from api.accounts.utils import safe_send_mail
+        from api.core.email_i18n import ARABIC, SIGNATURE
+
+        if language == ARABIC:
+            minutes = settings.AGREEMENT_OTP_VALIDITY_MINUTES
+            try:
+                sent_count = safe_send_mail("رمز التوقيع الخاص بك في MeritLense", f"""رمز التحقق لتوقيع اتفاقيتك في MeritLense هو: {code}
+
+تنتهي صلاحية هذا الرمز خلال {minutes} دقيقة، ولا يمكن استخدامه إلا مرة واحدة.
+
+إذا لم تطلب هذا الرمز، يمكنك تجاهل هذه الرسالة بأمان.
+
+{SIGNATURE[ARABIC]}
+""", [email])
+                return sent_count > 0
+            except Exception:
+                logger.exception("Failed to send OTP email to %s", email)
+                return False
 
         subject = "Your MeritLense signing code"
         message = f"""

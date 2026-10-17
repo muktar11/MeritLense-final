@@ -554,6 +554,11 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         return Response([
             {
                 "evaluation_id": str(e.public_id),
+                "assessment_type": (
+                    "SCHEDULED_INTERVIEW"
+                    if e.session_id and e.session.is_scheduled_interview
+                    else "AI_INTERVIEW"
+                ),
                 "candidate_name": f"{e.candidate_first_name} {e.candidate_last_name}".strip(),
                 "role_code": e.session.role_code if e.session_id else e.candidate_job_role,
                 "language": e.session.candidate_language if e.session_id else e.candidate_preferred_language,

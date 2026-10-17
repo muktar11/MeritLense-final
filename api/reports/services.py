@@ -414,6 +414,7 @@ class EvaluationReportService:
             raise EvaluationReportError("Report generation requires a scoring summary.")
         if summary.status not in {
             SessionEvaluationSummary.STATUS_EVALUATED,
+            SessionEvaluationSummary.STATUS_PARTIALLY_EVALUATED,
             SessionEvaluationSummary.STATUS_REQUIRES_HUMAN_REVIEW,
             SessionEvaluationSummary.STATUS_EVALUATION_FAILED,
         }:

@@ -497,6 +497,94 @@ class SlotUnavailableError(ValueError):
 
 class InterviewSessionService:
     @classmethod
+    def _ai_processing_pending(cls, session):
+        from api.translation.models import AIProcessingJob
+
+        return AIProcessingJob.objects.filter(
+            session=session,
+            status__in=("PENDING", "QUEUED", "PROCESSING"),
+        ).exists()
+
+    @classmethod
+    def generate_completed_session_outputs(cls, session, actor=None):
+        """Score and publish outputs after the session and its AI jobs finish.
+
+        Terminal AI failures remain represented as incomplete evidence by the
+        scorer; they do not prevent the candidate session from completing.
+        """
+        if session.status != InterviewSessionStatus.COMPLETED or cls._ai_processing_pending(session):
+            return None
+        evaluation = cls._ensure_linked_evaluation(session, status=EvaluationStatus.COMPLETED)
+        try:
+            summary = Week6ScoringService.run_for_evaluation(evaluation=evaluation, actor=actor)
+        except Week6ScoringError as exc:
+            summary = None
+            if actor:
+                AuditLogService.log(
+                    user=actor,
+                    action=AuditLogAction.SESSION_COMPLETED,
+                    category=AuditLogCategory.SESSION,
+                    description=f"Session completed unscored for {session.candidate.get_full_name()} - {exc}",
+                    resource=session,
+                    data=session_event_payload(session),
+                    severity=AuditLogSeverity.WARNING,
+                )
+        except Exception:
+            summary = None
+            if actor:
+                AuditLogService.log(
+                    user=actor,
+                    action=AuditLogAction.SESSION_COMPLETED,
+                    category=AuditLogCategory.SESSION,
+                    description=f"Automatic scoring failed for {session.candidate.get_full_name()} - session completed unscored",
+                    resource=session,
+                    data=session_event_payload(session),
+                    severity=AuditLogSeverity.ERROR,
+                )
+        if summary is None:
+            return None
+        if evaluation.certificate_enabled:
+            try:
+                generate_certificate(evaluation, summary)
+            except Exception:
+                if actor:
+                    AuditLogService.log(
+                        user=actor,
+                        action=AuditLogAction.SESSION_COMPLETED,
+                        category=AuditLogCategory.SESSION,
+                        description=f"Automatic certificate generation failed for {session.candidate.get_full_name()}",
+                        resource=session,
+                        data=session_event_payload(session),
+                        severity=AuditLogSeverity.ERROR,
+                    )
+        # Avoid duplicate immutable reports on retries, but replace an
+        # earlier partial report if later AI recovery changed the result.
+        active_report = evaluation.reports.filter(report_status="ACTIVE").first()
+        report_matches_summary = bool(
+            active_report
+            and active_report.overall_percentage == summary.overall_percentage
+            and active_report.critical_failures == summary.critical_failures
+            and active_report.metadata.get("summary_status") == summary.status
+            and active_report.metadata.get("evaluated_response_count") == summary.evaluated_response_count
+            and active_report.metadata.get("incomplete_response_count") == summary.incomplete_response_count
+        )
+        if not report_matches_summary:
+            try:
+                EvaluationReportService.generate_for_evaluation(evaluation=evaluation, actor=actor)
+            except Exception:
+                if actor:
+                    AuditLogService.log(
+                        user=actor,
+                        action=AuditLogAction.SESSION_COMPLETED,
+                        category=AuditLogCategory.SESSION,
+                        description=f"Automatic report generation failed for {session.candidate.get_full_name()}",
+                        resource=session,
+                        data=session_event_payload(session),
+                        severity=AuditLogSeverity.ERROR,
+                    )
+        return summary
+
+    @classmethod
     def create_session(cls, *, candidate, config, created_by, package_code="", scheduled_start_at=None,
                        answer_language=""):
         try:
@@ -1072,86 +1160,9 @@ class InterviewSessionService:
                 evaluation.readiness_override_applied = False
                 evaluation.readiness_override_reason = ""
             evaluation.save()
-            # Best-effort: most roles don't have an active scoring rule set
-            # configured yet (Week6ScoringError), and that must not block
-            # the candidate's interview from completing - it just stays
-            # unscored, same as it silently did before this ran automatically
-            # at all. A real, unexpected failure here (not "no rule set")
-            # still shouldn't roll back session completion, so it's caught
-            # too, just distinguished in the audit log.
-            try:
-                summary = Week6ScoringService.run_for_evaluation(evaluation=evaluation, actor=actor)
-            except Week6ScoringError as exc:
-                summary = None
-                if actor:
-                    AuditLogService.log(
-                        user=actor,
-                        action=AuditLogAction.SESSION_COMPLETED,
-                        category=AuditLogCategory.SESSION,
-                        description=(
-                            f"Session completed unscored for {session.candidate.get_full_name()} - {exc}"
-                        ),
-                        resource=session,
-                        data=session_event_payload(session),
-                        severity=AuditLogSeverity.WARNING,
-                    )
-            except Exception:
-                summary = None
-                if actor:
-                    AuditLogService.log(
-                        user=actor,
-                        action=AuditLogAction.SESSION_COMPLETED,
-                        category=AuditLogCategory.SESSION,
-                        description=f"Automatic scoring failed for {session.candidate.get_full_name()} - session completed unscored",
-                        resource=session,
-                        data=session_event_payload(session),
-                        severity=AuditLogSeverity.ERROR,
-                    )
-            # Certificate issuance follows the same "score + report +
-            # certificate" bundle as scoring itself - real scoring output
-            # is a prerequisite (can't put real numbers on a certificate
-            # that doesn't exist), and certificate_enabled respects the
-            # existing per-tier flag the system already uses to gate
-            # issuance. Same non-blocking contract as scoring above - a
-            # PDF-generation failure must not roll back completion.
-            if summary is not None and evaluation.certificate_enabled:
-                try:
-                    generate_certificate(evaluation, summary)
-                except Exception:
-                    if actor:
-                        AuditLogService.log(
-                            user=actor,
-                            action=AuditLogAction.SESSION_COMPLETED,
-                            category=AuditLogCategory.SESSION,
-                            description=f"Automatic certificate generation failed for {session.candidate.get_full_name()}",
-                            resource=session,
-                            data=session_event_payload(session),
-                            severity=AuditLogSeverity.ERROR,
-                        )
-            # The employer-facing AI report previously had no automatic
-            # trigger anywhere - it only ever got created if someone
-            # manually clicked "Generate Report" in a secondary modal, so a
-            # fully scored evaluation could sit with no report at all
-            # unless a human happened to go looking for that action.
-            # Generate it as part of the same best-effort completion bundle
-            # as scoring/certificate: requires real scoring output to exist
-            # (same precondition as the certificate above), and a failure
-            # here must not roll back session completion any more than a
-            # scoring or certificate failure does.
-            if summary is not None:
-                try:
-                    EvaluationReportService.generate_for_evaluation(evaluation=evaluation, actor=actor)
-                except Exception:
-                    if actor:
-                        AuditLogService.log(
-                            user=actor,
-                            action=AuditLogAction.SESSION_COMPLETED,
-                            category=AuditLogCategory.SESSION,
-                            description=f"Automatic report generation failed for {session.candidate.get_full_name()}",
-                            resource=session,
-                            data=session_event_payload(session),
-                            severity=AuditLogSeverity.ERROR,
-                        )
+        # If async interpretation is queued, the final worker will call this
+        # output generator after all jobs reach a terminal state.
+        cls.generate_completed_session_outputs(session, actor=actor)
         if actor:
             AuditLogService.log(
                 user=actor,

@@ -2414,7 +2414,25 @@ class AutomaticScoringOnCompletionTests(TestCase):
             is_active=True,
         )
 
+        from api.translation.models import AIProcessingJob
+
+        job = AIProcessingJob.objects.create(
+            response=response,
+            session=self.session,
+            question=session_question,
+            idempotency_key="auto-result-after-async",
+            status="QUEUED",
+        )
         InterviewSessionService.complete_session(self.session, actor=self.user)
+        self.assertFalse(SessionEvaluationSummary.objects.filter(session=self.session).exists())
+
+        # The last async interpretation job now triggers scoring and report
+        # generation for the already-completed assessment.
+        job.status = "COMPLETED"
+        job.save(update_fields=["status"])
+        from api.translation.services import AIProcessingOrchestrationService
+
+        AIProcessingOrchestrationService._finalize_session_if_ready(self.session, actor=self.user)
 
         summary = SessionEvaluationSummary.objects.get(session=self.session)
         self.assertEqual(float(summary.overall_percentage), 100.0)

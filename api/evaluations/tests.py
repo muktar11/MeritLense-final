@@ -3499,10 +3499,7 @@ class CertificateEligibilityTests(TestCase):
 
 
 class EvaluatorRatingTests(TestCase):
-    """The evaluator's manual 0-100 rating on the 5 approved dimensions is
-    purely additive: it must never change Evaluation.score/readiness_status,
-    and must only trigger certificate regeneration when a certificate was
-    already issued - never first-issue one on its own."""
+    """Evaluator ratings set outcomes only on scheduled evaluator-led paths."""
 
     VALID_RATINGS = {
         "safety_awareness": 80,
@@ -3641,17 +3638,17 @@ class EvaluatorRatingTests(TestCase):
         self.assertEqual(rating.safety_awareness, 80)
         self.assertEqual(rating.rated_by, self.user)
 
-    def test_resubmission_updates_the_same_row(self):
+    def test_resubmission_is_rejected_after_final_submission(self):
         self.client.post(self.url, self.VALID_RATINGS, format="json")
         first_rated_at = EvaluatorRating.objects.get(evaluation=self.evaluation).rated_at
 
         updated = {**self.VALID_RATINGS, "safety_awareness": 45}
         response = self.client.post(self.url, updated, format="json")
 
-        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.status_code, 409, response.data)
         self.assertEqual(EvaluatorRating.objects.count(), 1)
         rating = EvaluatorRating.objects.get(evaluation=self.evaluation)
-        self.assertEqual(rating.safety_awareness, 45)
+        self.assertEqual(rating.safety_awareness, 80)
         self.assertGreaterEqual(rating.rated_at, first_rated_at)
 
     def test_out_of_range_values_are_rejected(self):
@@ -3697,6 +3694,18 @@ class EvaluatorRatingTests(TestCase):
         self.assertEqual(self.evaluation.score, original_score)
         self.assertEqual(self.evaluation.readiness_status, original_readiness)
         self.assertEqual(self.evaluation.certificate_status, original_cert_status)
+
+    def test_scheduled_rating_sets_four_field_average_and_readiness(self):
+        self.session.scheduled_start_at = timezone.now() + timezone.timedelta(hours=1)
+        self.session.save(update_fields=["scheduled_start_at"])
+
+        response = self.client.post(self.url, self.VALID_RATINGS, format="json")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.score, Decimal("75.00"))
+        self.assertEqual(self.evaluation.readiness_status, "READY")
+        self.assertEqual(response.data["overall_score"], 75.0)
 
     def test_submitting_a_rating_does_not_first_issue_a_certificate(self):
         # certificate_status stays NOT_ISSUED - no summary/certificate exists yet,

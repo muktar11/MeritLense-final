@@ -275,6 +275,16 @@ class EvaluationReportService:
             "communication": rating.communication if rating.communication is not None else 0,
             "task_execution": rating.task_execution,
         })
+        summary = evaluation.session_summaries.select_related("rule_set").first()
+        secondary_score = None
+        if summary is not None:
+            ai_score = cls._rounded_whole(summary.overall_percentage)
+            secondary_score = {
+                "source": "AI_ASSESSMENT",
+                "value": ai_score,
+                "display": f"{ai_score}%",
+                "label": "AI Assessment Score (Reference)",
+            }
         with transaction.atomic():
             stale_count = cls._mark_previous_reports_stale(evaluation=evaluation, actor=actor)
             report_number = cls._build_report_number(evaluation=evaluation)
@@ -301,6 +311,33 @@ class EvaluationReportService:
                 "rated_by": rating.rated_by.get_full_name() if rating.rated_by else "",
                 "rated_at": rating.rated_at.isoformat() if rating.rated_at else "",
                 "transcript_included": False,
+                "assessment_context": {
+                    "assessment_mode": "Employer-led / Evaluator-rated",
+                    "candidate_name": evaluation.candidate.get_full_name(),
+                    "target_role": evaluation.session.role_code or evaluation.candidate.job_role or "",
+                    "assessment_status": cls._derive_assessment_status(evaluation),
+                    "assessment_date": evaluation.completed_at.isoformat() if evaluation.completed_at else "",
+                },
+                "executive_summary": {
+                    "overall_score": float(score),
+                    "overall_score_available": True,
+                    "overall_score_display": f"{score}%",
+                    "score_source": "EVALUATOR_ASSESSMENT",
+                    "overall_score_unavailable_reason": None,
+                    "readiness_indicator": {"code": readiness, "label": readiness_label},
+                    "secondary_score": secondary_score,
+                },
+                "evaluator_rating": {
+                    "safety_awareness": rating.safety_awareness,
+                    "hygiene": rating.hygiene,
+                    "communication": rating.communication,
+                    "task_execution": rating.task_execution,
+                    "behavioral_risk_level": behavioral_risk_level(rating.behavior_integrity),
+                    "consistency": calculate_response_consistency(evaluation, fallback_rating=rating),
+                    "comments": rating.comments,
+                    "rated_by_name": rating.rated_by.get_full_name() if rating.rated_by else "",
+                    "rated_at": rating.rated_at.isoformat() if rating.rated_at else "",
+                },
             }
             html = render_to_string("reports/evaluator_assessment_summary.html", {"report": payload})
             pdf_bytes = None

@@ -129,10 +129,15 @@ def submit_evaluator_rating(evaluation, *, ratings, actor):
         rated_by=actor,
         rated_at=timezone.now(),
     )
-    _apply_evaluator_outcome(evaluation, rating)
-    if evaluation.session_id and evaluation.session.is_scheduled_interview:
+    scheduled = bool(evaluation.session_id and evaluation.session.is_scheduled_interview)
+    if scheduled:
+        _apply_evaluator_outcome(evaluation, rating)
         from api.reports.services import EvaluationReportService
         EvaluationReportService.generate_evaluator_report(evaluation=evaluation, actor=actor)
+    if evaluation.certificate_status == CertificateStatus.ISSUED:
+        summary = evaluation.session_summaries.select_related("rule_set").first()
+        if summary is not None:
+            generate_certificate(evaluation, summary)
     return rating, True
 
 
@@ -156,9 +161,9 @@ def correct_evaluator_rating(evaluation, *, ratings, reason, actor):
         updated_at=timezone.now(),
     )
     rating.refresh_from_db()
-    _apply_evaluator_outcome(evaluation, rating)
-
-    if evaluation.session_id and evaluation.session.is_scheduled_interview:
+    scheduled = bool(evaluation.session_id and evaluation.session.is_scheduled_interview)
+    if scheduled:
+        _apply_evaluator_outcome(evaluation, rating)
         from api.reports.services import EvaluationReportService
         EvaluationReportService.generate_evaluator_report(evaluation=evaluation, actor=actor)
 

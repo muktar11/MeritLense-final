@@ -876,6 +876,13 @@ class EvaluationInputBuilderService:
             "review_reason": " ".join(review_reasons).strip(),
             "legal_disclaimer": LEGAL_DISCLAIMER_TEXT,
             "metadata": {
+                "score_evidence_reliable": not bool(
+                    (confidence_score is not None and confidence_score < Decimal(str(settings.AI_INTERPRETATION_MIN_CONFIDENCE)))
+                    or indicators.get("uncertainty_notes")
+                    or indicators.get("transcript_issues")
+                    or response.translation_status == "FAILED"
+                    or indicators.get("indicator_review_ids")
+                ),
                 "question_code": getattr(template, "question_code", ""),
                 "question_version": getattr(template, "question_version", ""),
                 "rubric_version": response.session.rubric_version,
@@ -948,6 +955,12 @@ class EvaluationInputBuilderService:
             "review_reason": " ".join(review_reasons).strip(),
             "legal_disclaimer": LEGAL_DISCLAIMER_TEXT,
             "metadata": {
+                "score_evidence_reliable": not bool(
+                    (confidence_score is not None and confidence_score < Decimal(str(settings.AI_INTERPRETATION_MIN_CONFIDENCE)))
+                    or interpretation.normalized_indicators.get("uncertainty_notes")
+                    or interpretation.normalized_indicators.get("transcript_issues")
+                    or response.translation_status == "FAILED"
+                ),
                 "question_code": getattr(template, "question_code", ""),
                 "question_version": getattr(template, "question_version", ""),
                 "rubric_version": response.session.rubric_version,
@@ -1668,6 +1681,7 @@ class AIProcessingOrchestrationService:
     @transaction.atomic
     def run_async_job(cls, *, job, actor=None):
         if job.status == "COMPLETED":
+            cls._finalize_session_if_ready(job.session, actor=actor)
             return job.response
         job.status = "PROCESSING"
         job.started_at = timezone.now()
@@ -1686,7 +1700,22 @@ class AIProcessingOrchestrationService:
         if job.status == "FAILED":
             job.error_message = updated_response.interpretation_error or updated_response.translation_error
         job.save(update_fields=["status", "completed_at", "error_message", "updated_at"])
+        cls._finalize_session_if_ready(job.session, actor=actor)
         return updated_response
+
+    @classmethod
+    def _finalize_session_if_ready(cls, session, actor=None):
+        if session.status != "COMPLETED":
+            return
+        from api.sessions.services import InterviewSessionService
+
+        try:
+            InterviewSessionService.generate_completed_session_outputs(session, actor=actor)
+        except Exception:
+            # Output generation must not cause an already completed AI job to
+            # be retried or poison-queued. The session completion audit path
+            # records scoring/report failures when an actor is available.
+            return
 
     @classmethod
     def get_response_status_payload(cls, response):

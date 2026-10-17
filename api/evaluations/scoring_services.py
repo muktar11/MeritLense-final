@@ -180,6 +180,16 @@ class Week6ScoringService:
     @classmethod
     def _score_response(cls, *, evaluation, response, rule_set):
         artifact = getattr(response, "evaluation_input_artifact", None)
+        # Without a prepared evidence artifact, there is no defensible basis
+        # for a score. Leave this response out of scoring; the session rollup
+        # will mark it incomplete instead of manufacturing a zero.
+        if artifact is None:
+            return None
+        if artifact.metadata.get("score_evidence_reliable") is False:
+            # The interpreter marked the evidence uncertain. It cannot be
+            # converted into either a pass or a zero; leave this response
+            # incomplete until evidence is reliable.
+            return None
         rule = cls._resolve_rule(rule_set=rule_set, response=response, artifact=artifact)
         if rule is None:
             if artifact is None:
@@ -202,7 +212,7 @@ class Week6ScoringService:
             if indicator in observed or indicator in artifact_risk_flags
         ]
 
-        requires_human_review = bool(getattr(artifact, "requires_human_review", False) or artifact is None)
+        requires_human_review = bool(getattr(artifact, "requires_human_review", False))
         max_score = Decimal(str(rule.max_score))
         raw_score = cls._calculate_rule_score(
             rule=rule,
@@ -219,9 +229,6 @@ class Week6ScoringService:
         effective_score = raw_score
         if critical_failure:
             effective_score = cls.DECIMAL_ZERO
-
-        if requires_human_review and artifact is None:
-            passed_required = False
 
         percentage = cls._percentage(raw_score, max_score)
         template = getattr(response.question, "question_template", None)
@@ -494,17 +501,18 @@ class Week6ScoringService:
             for result in competency_results
             if result.status == CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD
         ]
-        requires_human_review = any(result.requires_human_review for result in response_results)
-
-        if not response_results:
-            status = SessionEvaluationSummary.STATUS_PENDING
-        elif requires_human_review:
-            status = SessionEvaluationSummary.STATUS_REQUIRES_HUMAN_REVIEW
-        elif critical_failures:
-            status = SessionEvaluationSummary.STATUS_EVALUATION_FAILED
-        elif incomplete_response_count > 0 or any(
+        if incomplete_response_count > 0 or any(
             result.status == CompetencyEvaluationResult.STATUS_INCOMPLETE for result in competency_results
         ):
+            status = SessionEvaluationSummary.STATUS_PARTIALLY_EVALUATED
+        elif critical_failures:
+            status = SessionEvaluationSummary.STATUS_EVALUATION_FAILED
+        elif not response_results:
+            status = SessionEvaluationSummary.STATUS_PENDING
+        elif any(result.requires_human_review for result in response_results):
+            # The evidence exists, but interpretation uncertainty means a
+            # reliable outcome is unavailable. Do not release a guessed
+            # score or turn this into a zero; represent it as incomplete.
             status = SessionEvaluationSummary.STATUS_PARTIALLY_EVALUATED
         else:
             status = SessionEvaluationSummary.STATUS_EVALUATED
@@ -660,6 +668,12 @@ class Week6ScoringService:
                     evaluation.readiness_override_reason = ""
                     readiness_reason = "Deterministic scoring completed without critical failures."
             update_fields.extend(["readiness_status", "readiness_override_applied", "readiness_override_reason"])
+        elif summary.status == SessionEvaluationSummary.STATUS_PARTIALLY_EVALUATED:
+            evaluation.readiness_status = ReadinessStatus.INCOMPLETE
+            evaluation.readiness_override_applied = False
+            evaluation.readiness_override_reason = ""
+            readiness_reason = "Insufficient evidence to determine a complete assessment result."
+            update_fields.extend(["readiness_status", "readiness_override_applied", "readiness_override_reason"])
         else:
             evaluation.readiness_status = ReadinessStatus.PENDING
             evaluation.readiness_override_applied = False
@@ -671,7 +685,7 @@ class Week6ScoringService:
             update_fields.extend(["readiness_status", "readiness_override_applied", "readiness_override_reason"])
 
         evaluation.save(update_fields=list(dict.fromkeys(update_fields)))
-        if evaluation.readiness_indicator_enabled:
+        if evaluation.readiness_indicator_enabled and summary.status != SessionEvaluationSummary.STATUS_PARTIALLY_EVALUATED:
             EvaluationReadinessRecordService.persist_once(
                 evaluation=evaluation,
                 readiness_status=evaluation.readiness_status,

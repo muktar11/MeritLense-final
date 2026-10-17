@@ -140,6 +140,8 @@ class EvaluationReportService:
 
     @classmethod
     def generate_for_evaluation(cls, *, evaluation, actor):
+        if evaluation.session_id and evaluation.session.is_scheduled_interview and getattr(evaluation, "evaluator_rating", None):
+            return cls.generate_evaluator_report(evaluation=evaluation, actor=actor)
         cls._log_started(evaluation=evaluation, actor=actor)
         try:
             with transaction.atomic():
@@ -256,6 +258,86 @@ class EvaluationReportService:
         except EvaluationReportError:
             cls._log_failed(evaluation=evaluation, actor=actor)
             raise
+
+    @classmethod
+    def generate_evaluator_report(cls, *, evaluation, actor):
+        """Create an immutable, evaluator-rated report version for scheduled interviews."""
+        from api.evaluations.evaluator_rating_services import (
+            behavioral_risk_level, calculate_evaluator_outcome, calculate_response_consistency,
+        )
+
+        rating = getattr(evaluation, "evaluator_rating", None)
+        if rating is None or evaluation.session_id is None:
+            raise EvaluationReportError("A scheduled evaluator rating and interview session are required.")
+        score, readiness = calculate_evaluator_outcome({
+            "safety_awareness": rating.safety_awareness,
+            "hygiene": rating.hygiene if rating.hygiene is not None else 0,
+            "communication": rating.communication if rating.communication is not None else 0,
+            "task_execution": rating.task_execution,
+        })
+        with transaction.atomic():
+            stale_count = cls._mark_previous_reports_stale(evaluation=evaluation, actor=actor)
+            report_number = cls._build_report_number(evaluation=evaluation)
+            version_number = evaluation.reports.count() + 1
+            report_version = f"1.{version_number - 1}"
+            readiness_label = {"READY": "Ready", "PARTIALLY_READY": "Partially Ready", "NOT_READY": "Not Ready"}[readiness]
+            payload = {
+                "language": "en", "classification": "Employer-led / Evaluator-rated",
+                "report_name": "Scheduled Assessment Summary", "report_version": report_version,
+                "report_status": EvaluationReport.STATUS_ACTIVE,
+                "assessment_mode": "Employer-led / Evaluator-rated",
+                "candidate_name": evaluation.candidate.get_full_name(),
+                "role": evaluation.session.role_code or evaluation.candidate.job_role or "",
+                "report_number": report_number,
+                "overall_score": float(score), "readiness_status": readiness,
+                "readiness_label": readiness_label,
+                "ratings": {
+                    "safety_awareness": rating.safety_awareness, "hygiene": rating.hygiene,
+                    "communication": rating.communication, "task_execution": rating.task_execution,
+                    "behavioral_indicators": behavioral_risk_level(rating.behavior_integrity),
+                    "consistency": calculate_response_consistency(evaluation, fallback_rating=rating),
+                },
+                "comments": rating.comments,
+                "rated_by": rating.rated_by.get_full_name() if rating.rated_by else "",
+                "rated_at": rating.rated_at.isoformat() if rating.rated_at else "",
+                "transcript_included": False,
+            }
+            html = render_to_string("reports/evaluator_assessment_summary.html", {"report": payload})
+            pdf_bytes = None
+            if HTML is not None:
+                try:
+                    pdf_bytes = HTML(string=html, base_url=str(getattr(settings, "BASE_DIR", ""))).write_pdf()
+                except Exception:
+                    pass
+            if pdf_bytes is None:
+                pdf_bytes = cls._build_simple_pdf([
+                    "Scheduled Assessment Summary", "Employer-led / Evaluator-rated",
+                    f"Candidate: {payload['candidate_name']}", f"Role: {payload['role']}",
+                    f"Overall score: {score}%", f"Readiness: {readiness_label}",
+                    f"Safety: {rating.safety_awareness}; Hygiene: {rating.hygiene}; Communication: {rating.communication}",
+                    f"Task execution: {rating.task_execution}; Behavioral indicators: {payload['ratings']['behavioral_indicators']}",
+                    f"Consistency: {payload['ratings']['consistency']}/100", f"Evaluator: {payload['rated_by']}",
+                    f"Comments: {rating.comments}",
+                ])
+            pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
+            payload["document_integrity"] = {"hash_value": pdf_hash}
+            report = EvaluationReport(
+                evaluation=evaluation, session=evaluation.session, candidate=evaluation.candidate,
+                report_number=report_number, report_version=report_version, report_status=EvaluationReport.STATUS_ACTIVE,
+                overall_score=score, max_score=100, overall_percentage=score,
+                readiness_status=readiness, readiness_indicator=readiness,
+                scoring_rule_set_name="Evaluator-rated four-field equal average",
+                scoring_rule_version="40/60 readiness bands", pdf_hash=pdf_hash,
+                report_payload=payload, competency_breakdown=payload["ratings"],
+                response_evidence_summary=[], human_review_flags=[], critical_failures=[],
+                generated_by=actor if getattr(actor, "is_authenticated", False) else None,
+                generated_at=timezone.now(), last_regenerated_at=timezone.now() if stale_count else None,
+                metadata={"assessment_source": "EMPLOYER_EVALUATOR", "stale_previous_reports": stale_count},
+            )
+            report.employer_pdf.save(f"{report_number}.pdf", ContentFile(pdf_bytes), save=False)
+            report.save()
+        cls._log_completed(evaluation=evaluation, actor=actor, report=report, stale_previous_reports=stale_count)
+        return report
 
     @classmethod
     def export_payload(cls, report):
@@ -414,6 +496,7 @@ class EvaluationReportService:
             raise EvaluationReportError("Report generation requires a scoring summary.")
         if summary.status not in {
             SessionEvaluationSummary.STATUS_EVALUATED,
+            SessionEvaluationSummary.STATUS_PARTIALLY_EVALUATED,
             SessionEvaluationSummary.STATUS_REQUIRES_HUMAN_REVIEW,
             SessionEvaluationSummary.STATUS_EVALUATION_FAILED,
         }:
@@ -889,6 +972,7 @@ class EvaluationReportService:
             "consistency": calculate_response_consistency(evaluation, fallback_rating=rating),
             "rated_by_name": rating.rated_by.get_full_name() if rating.rated_by else None,
             "rated_at": rating.rated_at.isoformat() if rating.rated_at else None,
+            "comments": rating.comments,
         }
 
     @classmethod
@@ -924,14 +1008,11 @@ class EvaluationReportService:
                 "secondary": ai_secondary if base_score_available else None,
             }
         pools = evaluator_rating_payload
-        # Average of the 5 approved dimensions only - psych_professional
-        # (not an approved dimension) and consistency (a reliability
-        # metric, not a competency) are deliberately excluded. hygiene and
-        # communication can be None on ratings submitted before those
-        # dimensions were collected; skip rather than crash on those.
+        # The approved employer-led headline is the equal average of four
+        # fields. Behavioral Indicators and Consistency remain separate.
         dimension_scores = [
             pools[key]
-            for key in ("safety_awareness", "hygiene", "communication", "task_execution", "behavior_integrity")
+            for key in ("safety_awareness", "hygiene", "communication", "task_execution")
             if pools.get(key) is not None
         ]
         average = round(sum(dimension_scores) / len(dimension_scores)) if dimension_scores else 0

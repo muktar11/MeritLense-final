@@ -352,6 +352,8 @@ class EvaluatorRatingSerializer(PublicIdModelSerializer):
     rated_by_name = serializers.SerializerMethodField()
     consistency = serializers.SerializerMethodField()
     behavioral_risk_level = serializers.SerializerMethodField()
+    overall_score = serializers.SerializerMethodField()
+    readiness_status = serializers.SerializerMethodField()
 
     class Meta:
         model = EvaluatorRating
@@ -363,6 +365,7 @@ class EvaluatorRatingSerializer(PublicIdModelSerializer):
             'id', 'safety_awareness', 'hygiene', 'communication',
             'behavior_integrity', 'behavioral_risk_level',
             'task_execution', 'consistency',
+            'comments', 'overall_score', 'readiness_status',
             'rated_by', 'rated_by_name', 'rated_at',
             'created_at', 'updated_at',
         ]
@@ -376,6 +379,15 @@ class EvaluatorRatingSerializer(PublicIdModelSerializer):
 
         return calculate_response_consistency(obj.evaluation, fallback_rating=obj)
 
+    def get_overall_score(self, obj):
+        from .evaluator_rating_services import calculate_evaluator_outcome
+        values = {"safety_awareness": obj.safety_awareness, "hygiene": obj.hygiene or 0,
+                  "communication": obj.communication or 0, "task_execution": obj.task_execution}
+        return float(calculate_evaluator_outcome(values)[0])
+
+    def get_readiness_status(self, obj):
+        return obj.evaluation.readiness_status
+
     def get_behavioral_risk_level(self, obj):
         from .evaluator_rating_services import behavioral_risk_level
 
@@ -388,6 +400,7 @@ class EvaluatorRatingWriteSerializer(serializers.Serializer):
     communication = serializers.IntegerField(min_value=0, max_value=100)
     behavior_integrity = serializers.IntegerField(min_value=0, max_value=100)
     task_execution = serializers.IntegerField(min_value=0, max_value=100)
+    comments = serializers.CharField(required=False, allow_blank=True, max_length=10000)
 
 
 class EvaluationListSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):

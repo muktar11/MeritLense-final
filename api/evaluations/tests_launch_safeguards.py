@@ -24,7 +24,7 @@ from api.core.constants import (
     AgreementMethod, AgreementType, EvaluationType, InterviewEvaluationTier, ReadinessStatus, Roles,
 )
 from api.evaluations.certificate_services import certificate_eligibility
-from api.evaluations.models import Evaluation, EvaluationReadinessCorrection
+from api.evaluations.models import Evaluation, EvaluationReadinessCorrection, SessionEvaluationSummary
 from api.evaluations.scoring_services import Week6ScoringService
 from api.interviews.models import InterviewConfiguration
 from api.payments.models import PackageBalance
@@ -201,18 +201,23 @@ class LaunchSafeguardTests(TestCase):
 
     # -- 3. Unsafe answers cannot produce an unreviewed Ready -----------------
 
-    def test_unsafe_answer_with_all_correct_steps_is_held_not_ready(self):
+    def test_unsafe_answer_is_scored_without_a_release_hold(self):
         for mode in ("unsafe_with_steps", "free_text_risk", "low_confidence"):
             with self.subTest(mode=mode):
                 evaluation, summary, _ = self._assess("elderly_caregiver", "AR", mode=mode)
-                self.assertEqual(evaluation.review_status, Evaluation.REVIEW_REQUIRED)
-                self.assertNotEqual(evaluation.readiness_status, ReadinessStatus.READY)
-                self.assertEqual(certificate_eligibility(evaluation, summary), (False, "HUMAN_REVIEW_PENDING"))
-                self.assertTrue(evaluation.review_reasons)
+                self.assertEqual(evaluation.review_status, Evaluation.REVIEW_NOT_REQUIRED)
+                if mode == "low_confidence":
+                    self.assertEqual(summary.status, SessionEvaluationSummary.STATUS_PARTIALLY_EVALUATED)
+                    self.assertEqual(summary.evaluated_response_count, summary.total_response_count - 1)
+                    self.assertEqual(summary.incomplete_response_count, 1)
+                    self.assertEqual(evaluation.readiness_status, ReadinessStatus.INCOMPLETE)
+                else:
+                    self.assertGreater(summary.evaluated_response_count, 0)
+                self.assertFalse(certificate_eligibility(evaluation, summary)[0])
 
     # -- 4/5. Release safeguard ---------------------------------------------
 
-    def test_held_result_is_invisible_to_the_employer_on_every_route(self):
+    def test_scored_safety_failure_is_visible_but_not_certifiable(self):
         from api.reports.services import EvaluationReportService
 
         evaluation, _, _ = self._assess("security_guard", "EN", mode="unsafe_with_steps")
@@ -220,30 +225,26 @@ class LaunchSafeguardTests(TestCase):
         employer = APIClient()
         employer.force_authenticate(self.owner)
         base = f"/api/v1/evaluations/evaluations/{evaluation.public_id}"
-        for path in ("report", "scoring-summary", "response-results", "competency-results",
-                     "readiness-legal-record", "certificate"):
-            with self.subTest(route=path):
-                self.assertEqual(employer.get(f"{base}/{path}").status_code, 403)
+        self.assertEqual(employer.get(f"{base}/report").status_code, 200)
+        self.assertEqual(employer.get(f"{base}/scoring-summary").status_code, 200)
         detail = employer.get(base).json()
-        self.assertIsNone(detail["score"])
-        self.assertEqual(detail["readiness_status"], "PENDING")
-        self.assertIsNone(detail["latest_report"])
-        self.assertEqual(detail["review_status"], "REQUIRED")
-        self.assertEqual(employer.get(f"/api/v1/evaluations/reports/{report.public_id}").status_code, 404)
+        self.assertIsNotNone(detail["score"])
+        self.assertNotEqual(detail["readiness_status"], "PENDING")
+        self.assertEqual(detail["latest_report"]["id"], str(report.public_id))
+        self.assertEqual(detail["review_status"], Evaluation.REVIEW_NOT_REQUIRED)
+        self.assertEqual(employer.get(f"/api/v1/evaluations/reports/{report.public_id}").status_code, 200)
         listed = employer.get("/api/v1/evaluations/reports").json()
         listed = listed.get("results", listed) if isinstance(listed, dict) else listed
-        self.assertNotIn(str(report.public_id), [r["id"] for r in listed])
+        self.assertIn(str(report.public_id), [r["id"] for r in listed])
         scores = employer.get("/api/v1/evaluations/candidate-scores").json()
-        self.assertNotIn(str(evaluation.public_id), [s["evaluation_id"] for s in scores])
-        # The reviewer still sees everything.
-        reviewer = APIClient()
-        reviewer.force_authenticate(self.admin)
-        self.assertEqual(reviewer.get(f"{base}/scoring-summary").status_code, 200)
-        queue = reviewer.get("/api/v1/evaluations/evaluations/pending-review").json()
-        self.assertIn(str(evaluation.public_id), [q["evaluation_id"] for q in queue])
+        self.assertIn(str(evaluation.public_id), [s["evaluation_id"] for s in scores])
+        self.assertFalse(certificate_eligibility(evaluation, evaluation.session_summaries.first())[0])
 
     def test_only_an_admin_reviewer_can_release_and_release_is_audited(self):
         evaluation, _, _ = self._assess("child_caregiver", "AR", mode="free_text_risk")
+        evaluation.review_status = Evaluation.REVIEW_REQUIRED
+        evaluation.review_reasons = ["Legacy held assessment under review"]
+        evaluation.save(update_fields=["review_status", "review_reasons"])
         url = f"/api/v1/evaluations/evaluations/{evaluation.public_id}/human-review"
         employer = APIClient()
         employer.force_authenticate(self.owner)
@@ -269,6 +270,9 @@ class LaunchSafeguardTests(TestCase):
         # which report generation requires; the release must still go
         # through (production returned 500 and the result stayed held).
         evaluation, _, _ = self._assess("child_caregiver", "EN", mode="free_text_risk")
+        evaluation.review_status = Evaluation.REVIEW_REQUIRED
+        evaluation.review_reasons = ["Legacy held assessment under review"]
+        evaluation.save(update_fields=["review_status", "review_reasons"])
         InterviewSession.objects.filter(pk=evaluation.session_id).update(candidate_consent_agreement=None)
         reviewer = APIClient()
         reviewer.force_authenticate(self.admin)
@@ -294,12 +298,11 @@ class LaunchSafeguardTests(TestCase):
         self.assertFalse(eligible)
         self.assertEqual(reason, "REQUIRED_COMPETENCY_BELOW_THRESHOLD")
 
-    def test_initial_launch_setting_holds_every_result_until_reviewed(self):
+    def test_initial_launch_setting_does_not_delay_results(self):
         with override_settings(REVIEW_ALL_RESULTS=True):
             evaluation, _, _ = self._assess("farm_worker", "AR")
         self.assertEqual(evaluation.readiness_status, ReadinessStatus.READY)
-        self.assertEqual(evaluation.review_status, Evaluation.REVIEW_REQUIRED)
-        self.assertIn("Initial launch period", " ".join(evaluation.review_reasons))
+        self.assertEqual(evaluation.review_status, Evaluation.REVIEW_NOT_REQUIRED)
         evaluation, _, _ = self._assess("farm_worker", "AR")
         self.assertEqual(evaluation.review_status, Evaluation.REVIEW_NOT_REQUIRED)
 

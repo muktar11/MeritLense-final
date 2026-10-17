@@ -5,7 +5,49 @@ from django.utils import timezone
 from api.core.constants import CertificateStatus
 
 from .certificate_services import generate_certificate
-from .models import EvaluatorRating
+from .models import EvaluatorRating, EvaluatorRatingCorrection
+
+
+SCORE_FIELDS = ("safety_awareness", "hygiene", "communication", "task_execution")
+
+
+def calculate_evaluator_outcome(ratings):
+    """Apply the evaluator-approved four-field average and readiness bands."""
+    values = [Decimal(str(ratings[field])) for field in SCORE_FIELDS]
+    score = (sum(values, Decimal("0")) / Decimal(len(values))).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    if score < Decimal("40"):
+        readiness = "NOT_READY"
+    elif score < Decimal("60"):
+        readiness = "PARTIALLY_READY"
+    else:
+        readiness = "READY"
+    return score, readiness
+
+
+def _rating_values(rating):
+    return {
+        "safety_awareness": rating.safety_awareness,
+        "hygiene": rating.hygiene,
+        "communication": rating.communication,
+        "task_execution": rating.task_execution,
+        "behavior_integrity": rating.behavior_integrity,
+        "comments": rating.comments,
+    }
+
+
+def _apply_evaluator_outcome(evaluation, rating):
+    score, readiness = calculate_evaluator_outcome(_rating_values(rating))
+    evaluation.score = score
+    evaluation.readiness_status = readiness
+    evaluation.readiness_override_applied = False
+    evaluation.readiness_override_reason = ""
+    evaluation.save(update_fields=[
+        "score", "readiness_status", "readiness_override_applied",
+        "readiness_override_reason", "updated_at",
+    ])
+    return score, readiness
 
 
 def _consistency_from_percentages(percentages):
@@ -78,16 +120,47 @@ def behavioral_risk_level(behavior_integrity_score):
 
 
 def submit_evaluator_rating(evaluation, *, ratings, actor):
-    """Creates or updates the single EvaluatorRating row for `evaluation`.
-    If a certificate was already issued, regenerates it so the PDF picks
-    up the new ratings - safe to re-call (generate_certificate is
-    idempotent) and non-blocking (a PDF failure here must not prevent the
-    rating itself from saving, matching complete_session()'s contract for
-    scoring/certificate side effects)."""
-    rating, created = EvaluatorRating.objects.update_or_create(
+    """Store a single final rating. Any later change must use correction flow."""
+    if EvaluatorRating.objects.filter(evaluation=evaluation).exists():
+        raise ValueError("The evaluator rating is final. An authorized correction is required to change it.")
+    rating = EvaluatorRating.objects.create(
         evaluation=evaluation,
-        defaults={**ratings, "rated_by": actor, "rated_at": timezone.now()},
+        **ratings,
+        rated_by=actor,
+        rated_at=timezone.now(),
     )
+    _apply_evaluator_outcome(evaluation, rating)
+    if evaluation.session_id and evaluation.session.is_scheduled_interview:
+        from api.reports.services import EvaluationReportService
+        EvaluationReportService.generate_evaluator_report(evaluation=evaluation, actor=actor)
+    return rating, True
+
+
+def correct_evaluator_rating(evaluation, *, ratings, reason, actor):
+    """Authorized correction with immutable before/after audit data."""
+    rating = EvaluatorRating.objects.get(evaluation=evaluation)
+    previous_values = _rating_values(rating)
+    corrected_values = {**previous_values, **ratings}
+    EvaluatorRatingCorrection.objects.create(
+        evaluation=evaluation,
+        rating=rating,
+        previous_values=previous_values,
+        corrected_values=corrected_values,
+        reason=reason.strip(),
+        corrected_by=actor,
+    )
+    EvaluatorRating.objects.filter(pk=rating.pk).update(
+        **ratings,
+        rated_by=actor,
+        rated_at=timezone.now(),
+        updated_at=timezone.now(),
+    )
+    rating.refresh_from_db()
+    _apply_evaluator_outcome(evaluation, rating)
+
+    if evaluation.session_id and evaluation.session.is_scheduled_interview:
+        from api.reports.services import EvaluationReportService
+        EvaluationReportService.generate_evaluator_report(evaluation=evaluation, actor=actor)
 
     if evaluation.certificate_status == CertificateStatus.ISSUED:
         summary = evaluation.session_summaries.select_related("rule_set").first()
@@ -96,5 +169,4 @@ def submit_evaluator_rating(evaluation, *, ratings, actor):
                 generate_certificate(evaluation, summary)
             except Exception:
                 pass
-
-    return rating, created
+    return rating

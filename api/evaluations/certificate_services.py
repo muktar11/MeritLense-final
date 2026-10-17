@@ -538,8 +538,8 @@ def certificate_eligibility(evaluation, summary):
     Assessment -> Verification/Completion Checks -> Assessment Logic ->
     Readiness Level -> Report -> Certificate Decision.
 
-    Ready / Partially Ready -> eligible (Report + Certificate).
-    Not Ready -> not eligible (Report only - training/re-assessment path).
+    Readiness labels and AI readiness/role-threshold rules do not decide
+    certificate eligibility. The existing non-readiness safeguards remain.
     Incomplete assessment or failed/missing identity verification ->
     not eligible regardless of readiness (Preliminary/Incomplete Report
     only) - a certificate must never be issued on data that isn't both
@@ -560,10 +560,14 @@ def certificate_eligibility(evaluation, summary):
     # Release safeguard: nothing is certified while awaiting human review.
     if evaluation.is_held_for_review:
         return False, "HUMAN_REVIEW_PENDING"
+    # Completeness and quality remain summary-derived safeguards. If no
+    # summary exists, this assessment cannot pass those existing checks.
+    if summary is None:
+        return False, "SUMMARY_REQUIRED"
     review_approved = evaluation.review_status == evaluation.REVIEW_APPROVED
-
     readiness_record = EvaluationReadinessRecordService.get_existing(evaluation)
     indicator = EvaluationReportService._resolve_readiness_indicator(evaluation, readiness_record)
+
     assessment_completeness = EvaluationReportService._derive_assessment_completeness(summary)
     response_results = list(
         evaluation.response_results.select_related("response").only(
@@ -600,42 +604,29 @@ def certificate_eligibility(evaluation, summary):
         return False, "INCOMPLETE"
     if not _minimum_quality_met(assessment_quality):
         return False, "QUALITY_BELOW_THRESHOLD"
-    role_code = session.role_code if session else None
-    # Both branches below are re-derived fresh from the actual
-    # CompetencyEvaluationResult data every call, independent of `indicator`
-    # (which can come from a stale, locked EvaluationReadinessDecisionRecord
-    # written before this check existed - see the readiness gate fix in
-    # Week6ScoringService._apply_evaluation_rollups). A required competency
-    # that is genuinely below its own pass_threshold, or a required
-    # dimension that was never sufficiently covered, must never be
-    # certificate-eligible, whatever the cached indicator claims.
-    role_competency_result = evaluate_role_competency_readiness(summary, role_code)
-    if role_competency_result is not None:
-        # Migrated role (currently just Driver-v1.2): coverage and
-        # threshold are both decided by the same Required/Critical model
-        # that produced the readiness status in the first place, so this
-        # can never disagree with it the way the legacy pair of checks
-        # below could for a migrated role.
-        status, _reason = role_competency_result
-        if status == ReadinessStatus.INCOMPLETE:
-            return False, "INCOMPLETE"
-        if status == ReadinessStatus.NOT_READY:
-            return False, "REQUIRED_COMPETENCY_BELOW_THRESHOLD"
-        # READY or PARTIALLY_READY - both eligible, continue to the
-        # remaining checks below (human review, evaluator rating, etc).
-    else:
-        if len(covered_dimensions) < minimum_required_dimensions_for_role(role_code):
-            return False, "INSUFFICIENT_COMPETENCY_COVERAGE"
-        failed_required_dimensions = below_threshold_dimensions(summary) & set(required_dimensions_for_role(role_code))
-        if failed_required_dimensions:
-            return False, "REQUIRED_COMPETENCY_BELOW_THRESHOLD"
+    scheduled_evaluator_path = bool(session and session.is_scheduled_interview)
+    if not scheduled_evaluator_path:
+        role_code = session.role_code if session else None
+        role_competency_result = evaluate_role_competency_readiness(summary, role_code)
+        if role_competency_result is not None:
+            readiness, _reason = role_competency_result
+            if readiness == ReadinessStatus.INCOMPLETE:
+                return False, "INCOMPLETE"
+            if readiness == ReadinessStatus.NOT_READY:
+                return False, "REQUIRED_COMPETENCY_BELOW_THRESHOLD"
+        else:
+            if len(covered_dimensions) < minimum_required_dimensions_for_role(role_code):
+                return False, "INSUFFICIENT_COMPETENCY_COVERAGE"
+            failed_required_dimensions = below_threshold_dimensions(summary) & set(required_dimensions_for_role(role_code))
+            if failed_required_dimensions:
+                return False, "REQUIRED_COMPETENCY_BELOW_THRESHOLD"
     # A reviewer's recorded approval resolves the review flags; the
     # threshold and coverage checks above still apply to the actual scores.
     if not review_approved and (human_review_flags or _human_review_pending(summary)):
         return False, "HUMAN_REVIEW_PENDING"
     if session and session.is_scheduled_interview and getattr(evaluation, "evaluator_rating", None) is None:
         return False, "EVALUATOR_RATING_PENDING"
-    if indicator["code"] == "NOT_READY":
+    if not scheduled_evaluator_path and indicator["code"] == "NOT_READY":
         return False, "NOT_READY"
     return True, indicator["code"]
 

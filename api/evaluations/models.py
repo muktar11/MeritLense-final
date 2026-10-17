@@ -882,15 +882,14 @@ class CertificateAccessGrant(TimeStampedModel):
 
 
 class EvaluatorRating(TimeStampedModel):
-    """Evaluator's manual 0-100 rating on the 5 approved report dimensions
+    """Final evaluator-entered field ratings for a scheduled assessment.
     (EvaluationReportService.CANONICAL_COMPETENCY_DIMENSIONS in
     api/reports/services.py - Safety, Hygiene, Communication, Practical
-    Tasks, Behavioral Indicators). Separate from, and never blended into,
-    Evaluation.score/readiness_status or certificate_eligibility() - purely
-    an additional, evaluator-entered signal. One mutable row per
-    evaluation, updated in place on resubmission (unlike
-    EvaluationReadinessDecisionRecord, which is immutable, or
-    EvaluationReport, which is snapshotted per version).
+    Tasks, Behavioral Indicators). The headline evaluator result is based on
+    Safety, Hygiene, Communication, and Practical Task Execution only;
+    Behavioral Indicators and Consistency are handled separately. A final
+    submission is locked. Authorized corrections are recorded as immutable
+    EvaluatorRatingCorrection snapshots and produce a new report version.
 
     psych_professional is deprecated: it isn't one of the 5 approved
     dimensions and its use raises legal/compliance questions (implied
@@ -928,6 +927,7 @@ class EvaluatorRating(TimeStampedModel):
     task_execution = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(0), MaxValueValidator(100)]
     )
+    comments = models.TextField(blank=True)
     rated_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -941,5 +941,41 @@ class EvaluatorRating(TimeStampedModel):
         verbose_name = "Evaluator Rating"
         verbose_name_plural = "Evaluator Ratings"
 
+    def save(self, *args, **kwargs):
+        if self.pk:
+            original = type(self).objects.filter(pk=self.pk).values(
+                "safety_awareness", "hygiene", "communication", "behavior_integrity",
+                "task_execution", "comments",
+            ).first()
+            if original and any(original[field] != getattr(self, field) for field in original):
+                raise ValidationError("Final evaluator ratings may only be changed through the authorized correction workflow.")
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"Evaluator rating for evaluation {self.evaluation_id}"
+
+
+class EvaluatorRatingCorrection(TimeStampedModel):
+    """Immutable, auditable before/after snapshot for an authorized rating correction."""
+
+    evaluation = models.ForeignKey(
+        Evaluation, on_delete=models.CASCADE, related_name="evaluator_rating_corrections"
+    )
+    rating = models.ForeignKey(
+        EvaluatorRating, on_delete=models.PROTECT, related_name="corrections"
+    )
+    previous_values = models.JSONField()
+    corrected_values = models.JSONField()
+    reason = models.TextField()
+    corrected_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Evaluator rating correction records are immutable.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Evaluator rating correction records cannot be deleted.")

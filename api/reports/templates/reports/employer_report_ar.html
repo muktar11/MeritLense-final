@@ -1543,6 +1543,7 @@
             </div>
           </div>
           <p class="tiny-copy">تُعرض المؤشرات السلوكية كمستوى خطر، وفق القسم 4 من مواصفات التقرير، وليس كدرجة رقمية. اتساق الإجابات ({{ report.evaluator_rating.consistency }}/100) هو مقياس موثوقية داعم، وليس كفاءة مقيَّمة، وليس من الأبعاد الخمسة المعتمدة أعلاه.</p>
+          {% if report.evaluator_rating.comments %}<p class="tiny-copy"><strong>تعليقات المقيم:</strong> {{ report.evaluator_rating.comments|linebreaksbr }}</p>{% endif %}
         {% else %}
           <p class="tiny-copy">لم يتم تقييمه بعد من قبل مقيّم.</p>
         {% endif %}

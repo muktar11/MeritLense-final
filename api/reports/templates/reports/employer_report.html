@@ -1531,6 +1531,7 @@
             </div>
           </div>
           <p class="tiny-copy">Behavioral Indicators is shown as a risk level, per Report Specification Section 4, not a numeric score. Response Consistency ({{ report.evaluator_rating.consistency }}/100) is a supporting reliability metric, not a rated competency, and is not one of the 5 approved dimensions above.</p>
+          {% if report.evaluator_rating.comments %}<p class="tiny-copy"><strong>Evaluator Comments:</strong> {{ report.evaluator_rating.comments|linebreaksbr }}</p>{% endif %}
         {% else %}
           <p class="tiny-copy">Not yet rated by an evaluator.</p>
         {% endif %}

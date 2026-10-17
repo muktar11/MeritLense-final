@@ -16,7 +16,7 @@ from .utils import (
     send_evaluation_cancelled_email,
     send_evaluation_completed_email
 )
-from .models import Evaluation
+from .models import Evaluation, EvaluatorRating
 from .serializers import (
     CompetencyEvaluationResultSerializer,
     EvaluationReadinessDecisionRecordSerializer,
@@ -41,7 +41,7 @@ from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverit
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
 from .models import Certificate, EvaluationReadinessDecisionRecord, ScoringRuleSet, SessionEvaluationSummary
 from .scoring_services import Week6ScoringError, Week6ScoringService
-from .evaluator_rating_services import submit_evaluator_rating
+from .evaluator_rating_services import submit_evaluator_rating, correct_evaluator_rating
 from .certificate_services import generate_certificate
 from api.reports.models import EvaluationReport
 from api.reports.serializers import EvaluationReportSerializer
@@ -233,8 +233,8 @@ class CandidateScoreSummaryView(APIView):
                     "evaluation_id": str(evaluation.public_id),
                     "role_code": evaluation.session.role_code or evaluation.candidate.job_role,
                     "evaluation_tier": evaluation.evaluation_tier,
-                    "overall_percentage": round(sum(c["percentage"] for c in competencies) / len(competencies), 2),
-                    "status": SessionEvaluationSummary.STATUS_EVALUATED,
+                    "overall_percentage": float(evaluation.score),
+                    "status": evaluation.readiness_status,
                     "source": self.SOURCE_EVALUATOR_RATING,
                     "generated_at": rated_at,
                     "competencies": competencies,
@@ -684,11 +684,14 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
 
         serializer = EvaluatorRatingWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        rating, created = submit_evaluator_rating(
-            evaluation,
-            ratings=serializer.validated_data,
-            actor=request.user,
-        )
+        try:
+            rating, created = submit_evaluator_rating(
+                evaluation,
+                ratings=serializer.validated_data,
+                actor=request.user,
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
         AuditLogService.log(
             user=request.user,
             action=AuditLogAction.EVALUATOR_RATING_SUBMITTED,
@@ -701,6 +704,31 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             EvaluatorRatingSerializer(rating).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=['post'], url_path='evaluator-rating/correct')
+    def correct_evaluator_rating(self, request, id=None):
+        if request.user.role not in [Roles.ADMIN, Roles.SUPERADMIN]:
+            raise PermissionDenied("Only administrators may authorize evaluator rating corrections.")
+        evaluation = self.get_object()
+        serializer = EvaluatorRatingWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reason = request.data.get("reason", "")
+        if not isinstance(reason, str) or not reason.strip():
+            return Response({"detail": "A correction reason is required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            rating = correct_evaluator_rating(
+                evaluation, ratings=serializer.validated_data, reason=reason, actor=request.user
+            )
+        except EvaluatorRating.DoesNotExist:
+            return Response({"detail": "No evaluator rating exists to correct."}, status=status.HTTP_404_NOT_FOUND)
+        AuditLogService.log(
+            user=request.user, action=AuditLogAction.EVALUATOR_RATING_SUBMITTED,
+            category=AuditLogCategory.EVALUATION,
+            description=f"Authorized evaluator rating correction for {evaluation.candidate.get_full_name()}: {reason.strip()}",
+            resource=evaluation,
+            data={"reason": reason.strip(), "corrected_values": serializer.validated_data},
+        )
+        return Response(EvaluatorRatingSerializer(rating).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="generate-report")
     def generate_report(self, request, id=None):

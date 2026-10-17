@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><style>
+body{font:14px Arial,sans-serif;color:#17202a;margin:42px}h1{color:#4f46e5}h2{margin-top:28px;border-bottom:1px solid #ddd;padding-bottom:6px}
+.label{color:#555}.result{font-size:22px;font-weight:bold}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.item{padding:12px;background:#f5f3ff;border-radius:8px}
+.comments{white-space:pre-wrap;border:1px solid #ddd;padding:14px;min-height:45px}
+</style></head><body>
+<h1>Scheduled Assessment Summary</h1><p><strong>Employer-led / Evaluator-rated</strong></p>
+<p>Candidate: {{ report.candidate_name }}<br>Role: {{ report.role }}<br>Report: {{ report.report_number }} · Version {{ report.report_version }}</p>
+<h2>Calculated outcome</h2><p class="result">{{ report.overall_score }}% — {{ report.readiness_label }}</p>
+<p class="label">Equal average of Safety, Hygiene, Communication, and Task Execution. Readiness bands: under 40% Not Ready; 40–59% Partially Ready; 60% or more Ready.</p>
+<h2>Evaluator ratings</h2><div class="grid">
+<div class="item">Safety Awareness: {{ report.ratings.safety_awareness }}%</div><div class="item">Hygiene &amp; Standards: {{ report.ratings.hygiene }}%</div>
+<div class="item">Communication: {{ report.ratings.communication }}%</div><div class="item">Task Execution: {{ report.ratings.task_execution }}%</div>
+<div class="item">Behavioral Indicators: {{ report.ratings.behavioral_indicators }} risk</div><div class="item">Consistency: {{ report.ratings.consistency }}/100</div>
+</div><h2>Evaluator comments</h2><div class="comments">{{ report.comments|default:"No comments provided." }}</div>
+<p>Rated by {{ report.rated_by }} on {{ report.rated_at }}.</p>
+<p>This summary records an employer-led evaluator assessment. It does not contain a verbatim transcript.</p>
+</body></html>

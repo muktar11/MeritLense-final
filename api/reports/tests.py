@@ -1178,14 +1178,15 @@ class EvaluationReportApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         summary = response.data["report_payload"]["executive_summary"]
-        # Average of the 5 approved dimensions only - consistency is a
-        # reliability metric, not a competency, and is excluded.
-        expected = round((80 + 75 + 85 + 70 + 60) / 5)
+        # The evaluator-led outcome is the four-field equal average; the
+        # behavioral indicator remains a separate risk measure.
+        expected = round((80 + 75 + 85 + 60) / 4)
         self.assertEqual(summary["overall_score"], expected)
         self.assertTrue(summary["overall_score_available"])
         self.assertEqual(summary["score_source"], "EVALUATOR_ASSESSMENT")
         self.assertIsNotNone(summary["secondary_score"])
         self.assertEqual(summary["secondary_score"]["source"], "AI_ASSESSMENT")
+        self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_mode"], "Employer-led / Evaluator-rated")
 
     def test_ai_interview_report_score_source_unchanged(self):
         response = self.client.post(

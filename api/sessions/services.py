@@ -9,6 +9,7 @@ from django.conf import settings
 
 from api.audit.services import AuditLogService
 from api.core.constants import (
+    PackageAudience,
     AuditLogAction,
     AuditLogCategory,
     AuditLogSeverity,
@@ -571,24 +572,16 @@ class InterviewSessionService:
             readiness_indicator_enabled = package_context["readiness_indicator_enabled"]
             certificate_enabled = package_context["certificate_enabled"] and is_full
             expiry_duration = package_session_config.duration_minutes or config.duration_minutes
-            # The package's coverage can be lower than what this
-            # InterviewConfiguration was explicitly built/selected for (e.g.
-            # a FULL config picked under a package whose coverage for this
-            # role is only SCREENING). Refuse rather than silently change
-            # the selected tier in either direction: the admin must either
-            # pick a configuration that matches what their package actually
-            # covers, or upgrade the package - never a silent swap, up or
-            # down.
-            if (
-                config.evaluation_tier == InterviewEvaluationTier.FULL
-                and package_coverage_tier != InterviewEvaluationTier.FULL
-            ):
-                raise ValueError(
-                    f"The {package_session_config.package_name} package only covers Screening-tier "
-                    f"interviews for {config.role_name or config.role_code}, not Full. Select a "
-                    "Screening configuration, or upgrade the package to unlock Full evaluations for "
-                    "this role."
-                )
+            # Any active package with slots may run a Full Assessment (17 Oct
+            # 2026): a role covered only at Screening level no longer blocks
+            # Full, and the session gets the Full treatment rather than the
+            # Screening gate on readiness/certificate/task observation.
+            if is_full and package_coverage_tier != InterviewEvaluationTier.FULL:
+                coverage_level = "FULL"
+                is_b2c_package = package_session_config.audience == PackageAudience.B2C
+                readiness_indicator_enabled = is_b2c_package or package_session_config.readiness_indicator_enabled
+                certificate_enabled = is_b2c_package or package_session_config.certificate_enabled
+                task_observation_enabled = package_session_config.task_observation_enabled
 
         expiry_anchor = scheduled_start_at or timezone.now()
 

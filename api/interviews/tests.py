@@ -2019,14 +2019,10 @@ class InterviewSessionApiTests(APITestCase):
         self.assertTrue(session.readiness_indicator_enabled)
         self.assertTrue(session.certificate_enabled)
 
-    def test_package_coverage_below_config_tier_blocks_session_creation(self):
-        # self.config is FULL. A package whose coverage for this role is
-        # only SCREENING must not silently swap the session down to
-        # SCREENING (confusing - the admin picked Full and got Screening
-        # with no explanation - and previously unscoreable, since no
-        # SCREENING-tier ScoringRuleSet existed for any role). It must
-        # refuse instead, so the admin picks a matching config or upgrades
-        # the package.
+    def test_full_assessment_allowed_on_a_screening_coverage_package(self):
+        # 17 Oct 2026: any package with slots may run a Full Assessment.
+        # self.config is FULL; the package covers this role only at
+        # Screening level. The session is created as Full, never downgraded.
         PackageSessionConfig.objects.create(
             package_code="basic",
             package_name="Basic",
@@ -2058,10 +2054,10 @@ class InterviewSessionApiTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400, response.data)
-        self.assertIn("Screening", response.data["detail"])
-        self.assertIn("Basic", response.data["detail"])
-        self.assertFalse(InterviewSession.objects.filter(candidate=self.candidate).exists())
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["evaluation_tier"], "FULL")
+        self.assertEqual(response.data["coverage_level"], "FULL")
+        self.assertTrue(response.data["certificate_enabled"])
 
     def test_b2c_screening_package_grants_readiness_but_never_a_certificate(self):
         # A B2C package (Basic/Essential) is configured with

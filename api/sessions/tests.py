@@ -387,14 +387,11 @@ class SilentTierUpgradeRegressionTests(TestCase):
         self.assertEqual(session.evaluation_tier, InterviewEvaluationTier.FULL)
         self.assertEqual(session.config_id, self.full_config.id)
 
-    def test_full_selection_under_a_screening_only_package_is_refused_not_downgraded(self):
-        with self.assertRaises(ValueError):
-            InterviewSessionService.create_session(
-                candidate=self.candidate, config=self.full_config, created_by=self.user,
-                package_code="screening-only-package",
-            )
-
-        self.assertFalse(
-            InterviewSession.objects.filter(candidate=self.candidate).exists(),
-            "a refused session must not be created at a silently-downgraded tier",
+    def test_full_selection_under_a_screening_only_package_runs_full(self):
+        # 17 Oct 2026: a Screening-only package no longer blocks Full.
+        session = InterviewSessionService.create_session(
+            candidate=self.candidate, config=self.full_config, created_by=self.user,
+            package_code="screening-only-package",
         )
+        self.assertEqual(session.evaluation_tier, InterviewEvaluationTier.FULL)
+        self.assertEqual(session.coverage_level, "FULL")

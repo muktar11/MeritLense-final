@@ -289,7 +289,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             self.permission_classes = [IsAuthenticated, CanManageEvaluation, IsCompanyApproved]
-        elif self.action in ['list', 'retrieve']:
+        elif self.action in ['list', 'retrieve', 'scheduled_outputs']:
             self.permission_classes = [IsAuthenticated, CanViewEvaluation]
         elif self.action in ['complete', 'reschedule', 'cancel']:
             self.permission_classes = [IsAuthenticated, CanManageEvaluation, IsCompanyApproved]
@@ -668,6 +668,46 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response(EvaluationReadinessDecisionRecordSerializer(record).data)
+
+    @action(detail=True, methods=['get', 'post'], url_path='scheduled-outputs')
+    def scheduled_outputs(self, request, id=None):
+        evaluation = self.get_object()
+        held = self._held_for_review_response(evaluation)
+        if held is not None:
+            return held
+        if not evaluation.session_id or not evaluation.session.is_scheduled_interview:
+            return Response({'detail': 'Only available for scheduled evaluator-led assessments.'}, status=400)
+        can_manage = request.user.role in [Roles.ADMIN, Roles.SUPERADMIN]
+        if request.method == 'POST':
+            if not can_manage:
+                raise PermissionDenied('Only administrators may record exception actions.')
+            notes = request.data.get('notes', '')
+            operation = request.data.get('operation')
+            if operation not in ['request_correction', 'record_resolution'] or not isinstance(notes, str) or not notes.strip() or len(notes) > 10000:
+                return Response({'detail': 'Choose a valid action and supply notes (maximum 10000 characters).'}, status=400)
+            AuditLogService.log(
+                user=request.user, action=AuditLogAction.EVALUATOR_RATING_SUBMITTED,
+                category=AuditLogCategory.EVALUATION, resource=evaluation,
+                description=f'Scheduled evaluation exception: {operation}',
+                data={'operation': operation, 'notes': notes.strip()},
+            )
+            return Response({'detail': 'Exception action recorded.'})
+        corrections = evaluation.evaluator_rating_corrections.select_related('corrected_by').order_by('created_at', 'pk')
+        return Response({
+            'can_manage_exceptions': can_manage,
+            'certificate_status': evaluation.certificate_status,
+            'certificate_url': EvaluationSerializer(evaluation, context={'request': request}).data.get('certificate_url'),
+            'reports': [{
+                'report_number': report.report_number, 'report_status': report.report_status,
+                'generated_at': report.generated_at,
+                'pdf_url': request.build_absolute_uri(report.employer_pdf.url) if report.employer_pdf and report.report_status == 'ACTIVE' else None,
+            } for report in evaluation.reports.all()],
+            'corrections': [{
+                'created_at': item.created_at, 'reason': item.reason,
+                'recorded_by': item.corrected_by.get_full_name() if item.corrected_by else None,
+                'previous_values': item.previous_values, 'corrected_values': item.corrected_values,
+            } for item in corrections],
+        })
 
     @action(detail=True, methods=['get', 'post'], url_path='evaluator-rating')
     def evaluator_rating(self, request, id=None):

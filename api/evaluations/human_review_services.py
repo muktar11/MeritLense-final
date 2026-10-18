@@ -112,6 +112,11 @@ class HumanReviewService:
 
         if not can_see_held_results(reviewer):
             raise HumanReviewError("Only an admin reviewer can approve a held result.")
+        if evaluation.session_id and evaluation.session.is_scheduled_interview:
+            raise HumanReviewError(
+                "Scheduled evaluator-led readiness is derived from ratings. "
+                "Use the authorized evaluator rating correction workflow."
+            )
         if evaluation.review_status != Evaluation.REVIEW_REQUIRED:
             raise HumanReviewError("This evaluation is not awaiting human review.")
         if decision not in REVIEW_DECISIONS:

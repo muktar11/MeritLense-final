@@ -3611,6 +3611,25 @@ class EvaluatorRatingTests(TestCase):
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 404)
 
+    def test_scheduled_outputs_rejects_ai_interview(self):
+        response = self.client.get(self.url.replace('evaluator-rating', 'scheduled-outputs'))
+        self.assertEqual(response.status_code, 400)
+
+    def test_scheduled_outputs_available_to_owner_without_admin_actions(self):
+        self.session.scheduled_start_at = timezone.now()
+        self.session.save(update_fields=['scheduled_start_at'])
+        response = self.client.get(self.url.replace('evaluator-rating', 'scheduled-outputs'))
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data['can_manage_exceptions'])
+        self.assertEqual(response.data['corrections'], [])
+
+    def test_owner_cannot_record_admin_exception(self):
+        self.session.scheduled_start_at = timezone.now()
+        self.session.save(update_fields=['scheduled_start_at'])
+        response = self.client.post(self.url.replace('evaluator-rating', 'scheduled-outputs'),
+                                    {'operation': 'record_resolution', 'notes': 'Checked evidence'}, format='json')
+        self.assertEqual(response.status_code, 403)
+
     def test_get_does_not_crash_on_pre_migration_rating_with_null_dimensions(self):
         # Regression test: a production incident where GET (and any list
         # endpoint serializing EvaluatorRating) 500'd for every rating

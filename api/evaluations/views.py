@@ -51,7 +51,7 @@ from api.sessions.services import InterviewSessionService
 
 
 def _accessible_evaluations_queryset(user, request=None):
-    queryset = Evaluation.objects.select_related("session", "evaluator_rating")
+    queryset = Evaluation.objects.select_related("session", "evaluator_rating", "candidate")
 
     if user.role in [Roles.ADMIN, Roles.SUPERADMIN]:
         return queryset
@@ -289,7 +289,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             self.permission_classes = [IsAuthenticated, CanManageEvaluation, IsCompanyApproved]
-        elif self.action in ['list', 'retrieve', 'scheduled_outputs']:
+        elif self.action in ['list', 'retrieve', 'scheduled_outputs', 'assessment_results']:
             self.permission_classes = [IsAuthenticated, CanViewEvaluation]
         elif self.action in ['complete', 'reschedule', 'cancel']:
             self.permission_classes = [IsAuthenticated, CanManageEvaluation, IsCompanyApproved]
@@ -668,6 +668,40 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response(EvaluationReadinessDecisionRecordSerializer(record).data)
+
+    @action(detail=True, methods=['get'], url_path='assessment-results')
+    def assessment_results(self, request, id=None):
+        evaluation = self.get_object()
+        held = self._held_for_review_response(evaluation)
+        if held is not None:
+            return held
+        if evaluation.status != 'COMPLETED':
+            return Response({'detail': 'Assessment results are available after completion.'}, status=409)
+        transcript = []
+        if evaluation.session_id:
+            for question in evaluation.session.questions.prefetch_related('responses').order_by('question_order'):
+                responses = list(question.responses.all())
+                transcript.append({
+                    'question': question.question_text,
+                    'responses': [{
+                        'original': response.original_transcript or response.transcript or response.text_response,
+                        'language': response.transcript_language,
+                        'translation': response.translated_transcript,
+                        'translation_language': response.translation_target_language,
+                    } for response in responses],
+                })
+        # Ratings alone never imply that dialogue was captured.
+        has_transcript = any(response['original'].strip() for item in transcript for response in item['responses'])
+        reports = evaluation.reports.select_related('generated_by').all()
+        return Response({
+            'evaluation': EvaluationSerializer(evaluation, context={'request': request}).data,
+            'transcript': transcript if has_transcript else [],
+            'reports': EvaluationReportSerializer(reports, many=True, context={'request': request}).data,
+            'corrections': [{
+                'created_at': item.created_at, 'reason': item.reason,
+                'recorded_by': item.corrected_by.get_full_name() if item.corrected_by else None,
+            } for item in evaluation.evaluator_rating_corrections.select_related('corrected_by').order_by('created_at')],
+        })
 
     @action(detail=True, methods=['get', 'post'], url_path='scheduled-outputs')
     def scheduled_outputs(self, request, id=None):

@@ -404,6 +404,7 @@ class EvaluatorRatingWriteSerializer(serializers.Serializer):
 
 
 class EvaluationListSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):
+    candidate = serializers.UUIDField(source='candidate.public_id', read_only=True)
     candidate_name = serializers.SerializerMethodField()
     evaluation_type_display = serializers.CharField(source='get_evaluation_type_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
@@ -423,7 +424,8 @@ class EvaluationListSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):
     class Meta:
         model = Evaluation
         fields = [
-            'id', 'candidate_name', 'evaluation_type', 'evaluation_type_display',
+            'id', 'candidate', 'candidate_name', 'evaluation_type', 'evaluation_type_display',
+            'candidate_job_role', 'candidate_email', 'candidate_preferred_language', 'evaluation_tier', 'completed_at',
             'status', 'status_display', 'scheduled_date', 'duration_minutes',
             'score', 'latest_session_summary', 'is_scored', 'readiness_legal_record', 'latest_report',
             'readiness_status', 'readiness_override_applied', 'created_by', 'created_at',

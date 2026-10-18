@@ -3615,6 +3615,59 @@ class EvaluatorRatingTests(TestCase):
         response = self.client.get(self.url.replace('evaluator-rating', 'scheduled-outputs'))
         self.assertEqual(response.status_code, 400)
 
+    def test_assessment_results_does_not_invent_transcript(self):
+        response = self.client.get(self.url.replace('evaluator-rating', 'assessment-results'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['transcript'], [])
+        self.assertEqual(response.data['evaluation']['id'], str(self.evaluation.public_id))
+
+    def test_assessment_results_preserves_original_translation_and_unanswered_items(self):
+        question = SessionQuestion.objects.create(session=self.session, question_text='Describe safe work.', question_order=1)
+        SessionQuestion.objects.create(session=self.session, question_text='An unanswered question.', question_order=2)
+        CandidateResponse.objects.create(
+            session=self.session, question=question, text_response='Captured answer',
+            original_transcript='Original answer', transcript_language='AM',
+            translated_transcript='Translated answer', translation_target_language='EN',
+        )
+        response = self.client.get(self.url.replace('evaluator-rating', 'assessment-results'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['transcript'][0]['responses'][0]['original'], 'Original answer')
+        self.assertEqual(response.data['transcript'][0]['responses'][0]['translation'], 'Translated answer')
+        self.assertEqual(response.data['transcript'][1]['responses'], [])
+
+    def test_assessment_results_rejects_incomplete_session(self):
+        self.evaluation.status = EvaluationStatus.IN_PROGRESS
+        self.evaluation.save(update_fields=['status'])
+        response = self.client.get(self.url.replace('evaluator-rating', 'assessment-results'))
+        self.assertEqual(response.status_code, 409)
+
+    def test_assessment_results_is_not_visible_to_another_account(self):
+        outsider = User.objects.create_user(email='other-result-owner@example.com', password='testpass123', role=Roles.B2C)
+        self.client.force_authenticate(outsider)
+        response = self.client.get(self.url.replace('evaluator-rating', 'assessment-results'))
+        self.assertEqual(response.status_code, 404)
+
+    def test_b2b_owner_can_open_company_assessment_results(self):
+        company = Company.objects.create(name='Results company', registration_number='RESULTS-B2B', admin_user=self.user)
+        self.user.role = Roles.B2B
+        self.user.save(update_fields=['role'])
+        CompanyEmployerProfile.objects.create(
+            user=self.user, company=company, company_name=company.name,
+            company_registration_number=company.registration_number,
+        )
+        self.evaluation.company = company
+        self.evaluation.save(update_fields=['company'])
+        response = self.client.get(self.url.replace('evaluator-rating', 'assessment-results'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['evaluation']['id'], str(self.evaluation.public_id))
+
+    def test_assessment_results_masks_held_results(self):
+        self.evaluation.review_status = Evaluation.REVIEW_REQUIRED
+        self.evaluation.save(update_fields=['review_status'])
+        response = self.client.get(self.url.replace('evaluator-rating', 'assessment-results'))
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['code'], 'awaiting_human_review')
+
     def test_scheduled_outputs_available_to_owner_without_admin_actions(self):
         self.session.scheduled_start_at = timezone.now()
         self.session.save(update_fields=['scheduled_start_at'])

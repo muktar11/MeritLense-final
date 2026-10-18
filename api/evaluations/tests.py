@@ -3779,6 +3779,99 @@ class EvaluatorRatingTests(TestCase):
         self.assertEqual(self.evaluation.readiness_status, "READY")
         self.assertEqual(response.data["overall_score"], 75.0)
 
+    def _make_scheduled_in_progress(self):
+        self.session.scheduled_start_at = timezone.now()
+        self.session.status = 'IN_PROGRESS'
+        self.session.save(update_fields=['scheduled_start_at', 'status'])
+        self.evaluation.status = EvaluationStatus.IN_PROGRESS
+        self.evaluation.save(update_fields=['status'])
+
+    def test_scheduled_75_percent_finalizes_and_first_issues_certificate_without_ai_summary(self):
+        self._make_scheduled_in_progress()
+        response = self.client.post(self.url, self.VALID_RATINGS, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.evaluation.refresh_from_db()
+        self.session.refresh_from_db()
+        self.assertEqual(self.evaluation.status, EvaluationStatus.COMPLETED)
+        self.assertEqual(self.session.status, 'COMPLETED')
+        self.assertEqual(self.evaluation.score, Decimal('75.00'))
+        self.assertEqual(self.evaluation.certificate_status, 'ISSUED')
+        self.assertFalse(self.evaluation.session_summaries.exists())
+        result = self.client.get(self.url.replace('evaluator-rating', 'assessment-results'))
+        self.assertEqual(result.status_code, 200, result.data)
+        self.assertTrue(result.data['evaluation']['certificate_url'].startswith('http://testserver/'))
+        self.assertTrue(result.data['certificate_eligibility']['eligible'])
+
+    def test_scheduled_certificate_preserves_identity_and_consent_safeguards(self):
+        from api.evaluations.certificate_services import certificate_eligibility
+        self._make_scheduled_in_progress()
+        self.session.identity_verified = False
+        self.session.candidate_consent_agreement = None
+        self.session.save(update_fields=['identity_verified', 'candidate_consent_agreement'])
+        response = self.client.post(self.url, self.VALID_RATINGS, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.evaluation.refresh_from_db()
+        self.assertFalse(Certificate.objects.filter(evaluation=self.evaluation).exists())
+        eligible, reason = certificate_eligibility(self.evaluation, None)
+        self.assertEqual((eligible, reason), (False, 'VERIFICATION_FAILED'))
+        self.session.identity_verified = True
+        self.session.save(update_fields=['identity_verified'])
+        self.evaluation.refresh_from_db()
+        eligible, reason = certificate_eligibility(self.evaluation, None)
+        self.assertEqual((eligible, reason), (False, 'CONSENT_REQUIRED'))
+
+    def test_scheduled_screening_does_not_issue_certificate(self):
+        self._make_scheduled_in_progress()
+        self.evaluation.evaluation_tier = InterviewEvaluationTier.SCREENING
+        self.evaluation.save(update_fields=['evaluation_tier'])
+        response = self.client.post(self.url, self.VALID_RATINGS, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertFalse(Certificate.objects.filter(evaluation=self.evaluation).exists())
+
+    def test_scheduled_certificate_disabled_does_not_issue(self):
+        self._make_scheduled_in_progress()
+        self.evaluation.certificate_enabled = False
+        self.evaluation.save(update_fields=['certificate_enabled'])
+        response = self.client.post(self.url, self.VALID_RATINGS, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertFalse(Certificate.objects.filter(evaluation=self.evaluation).exists())
+        result = self.client.get(self.url.replace('evaluator-rating', 'assessment-results'))
+        self.assertEqual(result.data['certificate_eligibility']['reason'], 'CERTIFICATE_DISABLED')
+
+    def test_other_account_cannot_finalize_scheduled_assessment(self):
+        self._make_scheduled_in_progress()
+        EvaluatorRating.objects.create(evaluation=self.evaluation, **self.VALID_RATINGS, rated_by=self.user)
+        self.client.force_authenticate(self.other_user)
+        response = self.client.post(self.url.replace('evaluator-rating', 'finalize-scheduled'), {}, format='json')
+        self.assertEqual(response.status_code, 404)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.status, EvaluationStatus.IN_PROGRESS)
+
+    def test_legacy_rated_scheduled_result_is_visible_and_recovery_is_idempotent(self):
+        self._make_scheduled_in_progress()
+        EvaluatorRating.objects.create(evaluation=self.evaluation, **self.VALID_RATINGS, rated_by=self.user)
+        result = self.client.get(self.url.replace('evaluator-rating', 'assessment-results'))
+        self.assertEqual(result.status_code, 200, result.data)
+        self.evaluation.refresh_from_db()
+        self.assertEqual(self.evaluation.status, EvaluationStatus.IN_PROGRESS)
+        url = self.url.replace('evaluator-rating', 'finalize-scheduled')
+        response = self.client.post(url, {}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['certificate_status'], 'ISSUED')
+        self.assertTrue(response.data['certificate_url'])
+        again = self.client.post(url, {}, format='json')
+        self.assertEqual(again.status_code, 200, again.data)
+        self.assertEqual(Certificate.objects.filter(evaluation=self.evaluation).count(), 1)
+        self.assertEqual(self.evaluation.reports.count(), 1)
+
+    def test_cancelled_scheduled_submission_does_not_leave_a_rating(self):
+        self._make_scheduled_in_progress()
+        self.evaluation.status = EvaluationStatus.CANCELLED
+        self.evaluation.save(update_fields=['status'])
+        response = self.client.post(self.url, self.VALID_RATINGS, format='json')
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(EvaluatorRating.objects.filter(evaluation=self.evaluation).exists())
+
     @patch('api.reports.services.EvaluationReportService._render_employer_pdf', return_value=(b'%PDF-shared-report', 'shared-hash'))
     def test_scheduled_submission_uses_the_same_report_renderer_as_ai(self, render_pdf):
         from api.reports.services import EvaluationReportService

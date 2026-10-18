@@ -1,6 +1,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.utils import timezone
+from django.db import transaction
 
 from api.core.constants import CertificateStatus
 
@@ -119,6 +120,50 @@ def behavioral_risk_level(behavior_integrity_score):
     return "Low"
 
 
+def _complete_scheduled_assessment(evaluation, *, actor):
+    session = evaluation.session
+    if evaluation.status == 'CANCELLED' or session.status in ('CANCELLED', 'EXPIRED', 'FAILED'):
+        raise ValueError('A cancelled, expired or failed assessment cannot be finalized with ratings.')
+    was_completed = evaluation.status == 'COMPLETED' and session.status == 'COMPLETED'
+    now = timezone.now()
+    session.status = 'COMPLETED'
+    session.ended_at = session.ended_at or now
+    session.save(update_fields=['status', 'ended_at', 'updated_at'])
+    if evaluation.status != 'COMPLETED':
+        evaluation.complete()
+    if not was_completed:
+        from api.audit.services import AuditLogService
+        from api.core.constants import AuditLogAction, AuditLogCategory
+        AuditLogService.log(
+            user=actor, action=AuditLogAction.EVALUATION_COMPLETED,
+            category=AuditLogCategory.EVALUATION, resource=evaluation,
+            description='Scheduled assessment completed from final evaluator submission.',
+            data={'evaluation_id': str(evaluation.public_id), 'source': 'EVALUATOR_ASSESSMENT'},
+        )
+
+
+@transaction.atomic
+def finalize_scheduled_assessment(evaluation, *, actor, regenerate=False):
+    """Idempotent completion and eligibility-checked certificate recovery."""
+    if not evaluation.session_id or not evaluation.session.is_scheduled_interview:
+        raise ValueError('Only scheduled evaluator-led assessments can be finalized here.')
+    rating = getattr(evaluation, 'evaluator_rating', None)
+    if rating is None:
+        raise ValueError('Final evaluator ratings are required.')
+    if any(value is None for key, value in _rating_values(rating).items() if key != 'comments'):
+        raise ValueError('Complete evaluator ratings are required before finalizing the assessment.')
+    _complete_scheduled_assessment(evaluation, actor=actor)
+    _apply_evaluator_outcome(evaluation, rating)
+    if not evaluation.reports.filter(report_status='ACTIVE').exists():
+        from api.reports.services import EvaluationReportService
+        EvaluationReportService.generate_evaluator_report(evaluation=evaluation, actor=actor)
+    if regenerate or evaluation.certificate_status != CertificateStatus.ISSUED:
+        summary = evaluation.session_summaries.select_related('rule_set').first()
+        generate_certificate(evaluation, summary)
+    return evaluation
+
+
+@transaction.atomic
 def submit_evaluator_rating(evaluation, *, ratings, actor):
     """Store a single final rating. Any later change must use correction flow."""
     if EvaluatorRating.objects.filter(evaluation=evaluation).exists():
@@ -131,16 +176,19 @@ def submit_evaluator_rating(evaluation, *, ratings, actor):
     )
     scheduled = bool(evaluation.session_id and evaluation.session.is_scheduled_interview)
     if scheduled:
+        _complete_scheduled_assessment(evaluation, actor=actor)
         _apply_evaluator_outcome(evaluation, rating)
         from api.reports.services import EvaluationReportService
         EvaluationReportService.generate_evaluator_report(evaluation=evaluation, actor=actor)
-    if evaluation.certificate_status == CertificateStatus.ISSUED:
+        finalize_scheduled_assessment(evaluation, actor=actor, regenerate=True)
+    elif evaluation.certificate_status == CertificateStatus.ISSUED:
         summary = evaluation.session_summaries.select_related("rule_set").first()
         if summary is not None:
             generate_certificate(evaluation, summary)
     return rating, True
 
 
+@transaction.atomic
 def correct_evaluator_rating(evaluation, *, ratings, reason, actor):
     """Authorized correction with immutable before/after audit data."""
     rating = EvaluatorRating.objects.get(evaluation=evaluation)
@@ -163,11 +211,13 @@ def correct_evaluator_rating(evaluation, *, ratings, reason, actor):
     rating.refresh_from_db()
     scheduled = bool(evaluation.session_id and evaluation.session.is_scheduled_interview)
     if scheduled:
+        _complete_scheduled_assessment(evaluation, actor=actor)
         _apply_evaluator_outcome(evaluation, rating)
         from api.reports.services import EvaluationReportService
         EvaluationReportService.generate_evaluator_report(evaluation=evaluation, actor=actor)
+        finalize_scheduled_assessment(evaluation, actor=actor, regenerate=True)
 
-    if evaluation.certificate_status == CertificateStatus.ISSUED:
+    elif evaluation.certificate_status == CertificateStatus.ISSUED:
         summary = evaluation.session_summaries.select_related("rule_set").first()
         if summary is not None:
             try:

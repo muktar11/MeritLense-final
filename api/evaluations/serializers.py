@@ -89,6 +89,7 @@ class ReviewHoldMaskMixin:
 
 
 class EvaluationSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):
+    certificate_url = serializers.SerializerMethodField()
     candidate_details = CandidateSerializer(source='candidate', read_only=True)
     evaluation_type_display = serializers.CharField(source='get_evaluation_type_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
@@ -146,6 +147,15 @@ class EvaluationSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):
     
     def get_meeting_short_link(self, obj):
         return meeting_short_link(obj.meeting_link)
+
+    def get_certificate_url(self, obj):
+        from api.evaluations.human_review_services import is_hidden_from
+        request = self.context.get('request')
+        if is_hidden_from(obj, getattr(request, 'user', None)) or obj.certificate_status != CertificateStatus.ISSUED:
+            return ''
+        certificate = getattr(obj, 'certificate', None)
+        url = certificate.pdf_file.url if certificate and certificate.pdf_file else obj.certificate_url
+        return request.build_absolute_uri(url) if request and url else url or ''
 
     def get_created_by_name(self, obj):
         return obj.created_by.get_full_name()

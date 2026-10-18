@@ -41,7 +41,7 @@ from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverit
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
 from .models import Certificate, EvaluationReadinessDecisionRecord, ScoringRuleSet, SessionEvaluationSummary
 from .scoring_services import Week6ScoringError, Week6ScoringService
-from .evaluator_rating_services import submit_evaluator_rating, correct_evaluator_rating
+from .evaluator_rating_services import submit_evaluator_rating, correct_evaluator_rating, finalize_scheduled_assessment
 from .certificate_services import generate_certificate
 from api.reports.models import EvaluationReport
 from api.reports.serializers import EvaluationReportSerializer
@@ -291,7 +291,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             self.permission_classes = [IsAuthenticated, CanManageEvaluation, IsCompanyApproved]
         elif self.action in ['list', 'retrieve', 'scheduled_outputs', 'assessment_results']:
             self.permission_classes = [IsAuthenticated, CanViewEvaluation]
-        elif self.action in ['complete', 'reschedule', 'cancel']:
+        elif self.action in ['complete', 'reschedule', 'cancel', 'finalize_scheduled']:
             self.permission_classes = [IsAuthenticated, CanManageEvaluation, IsCompanyApproved]
         elif self.action == 'evaluator_rating':
             self.permission_classes = (
@@ -675,7 +675,13 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         held = self._held_for_review_response(evaluation)
         if held is not None:
             return held
-        if evaluation.status != 'COMPLETED':
+        finalized_rating = bool(
+            evaluation.session_id and evaluation.session.is_scheduled_interview
+            and getattr(evaluation, 'evaluator_rating', None)
+            and evaluation.status != 'CANCELLED'
+            and evaluation.session.status not in ('CANCELLED', 'EXPIRED', 'FAILED')
+        )
+        if evaluation.status != 'COMPLETED' and not finalized_rating:
             return Response({'detail': 'Assessment results are available after completion.'}, status=409)
         transcript = []
         if evaluation.session_id:
@@ -693,7 +699,11 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         # Ratings alone never imply that dialogue was captured.
         has_transcript = any(response['original'].strip() for item in transcript for response in item['responses'])
         reports = evaluation.reports.select_related('generated_by').all()
+        from .certificate_services import certificate_eligibility
+        eligible, reason = certificate_eligibility(evaluation, evaluation.session_summaries.select_related('rule_set').first())
         return Response({
+            'certificate_eligibility': {'eligible': eligible, 'reason': reason},
+            'can_finalize': finalized_rating and CanManageEvaluation().has_object_permission(request, self, evaluation),
             'evaluation': EvaluationSerializer(evaluation, context={'request': request}).data,
             'transcript': transcript if has_transcript else [],
             'reports': EvaluationReportSerializer(reports, many=True, context={'request': request}).data,
@@ -702,6 +712,15 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
                 'recorded_by': item.corrected_by.get_full_name() if item.corrected_by else None,
             } for item in evaluation.evaluator_rating_corrections.select_related('corrected_by').order_by('created_at')],
         })
+
+    @action(detail=True, methods=['post'], url_path='finalize-scheduled')
+    def finalize_scheduled(self, request, id=None):
+        evaluation = self.get_object()
+        try:
+            finalize_scheduled_assessment(evaluation, actor=request.user)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=400)
+        return Response(EvaluationSerializer(evaluation, context={'request': request}).data)
 
     @action(detail=True, methods=['get', 'post'], url_path='scheduled-outputs')
     def scheduled_outputs(self, request, id=None):

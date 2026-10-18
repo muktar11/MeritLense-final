@@ -464,8 +464,13 @@ def _readiness_gauge_context(evaluation, language):
     re-deriving a second, possibly-inconsistent judgment from the score."""
     from api.reports.services import EvaluationReportService
 
-    readiness_record = EvaluationReadinessRecordService.get_existing(evaluation)
-    indicator = EvaluationReportService._resolve_readiness_indicator(evaluation, readiness_record)
+    if evaluation.session_id and evaluation.session.is_scheduled_interview and getattr(evaluation, 'evaluator_rating', None):
+        from .evaluator_rating_services import calculate_evaluator_outcome, _rating_values
+        _, status = calculate_evaluator_outcome(_rating_values(evaluation.evaluator_rating))
+        indicator = {'code': status}
+    else:
+        readiness_record = EvaluationReadinessRecordService.get_existing(evaluation)
+        indicator = EvaluationReportService._resolve_readiness_indicator(evaluation, readiness_record)
     gauge = READINESS_GAUGE.get(indicator["code"], READINESS_GAUGE["PARTIALLY_READY"])
     label = gauge["label_ar"] if language == "ar" else gauge["label"]
     return {"label": label, "position": gauge["position"]}
@@ -491,8 +496,8 @@ def _language_context(language):
 def _evaluator_rating_context(evaluation, language="en"):
     """The evaluator's manual 0-100 ratings on the 5 approved report
     dimensions, if any have been submitted (see EvaluatorRating in
-    models.py) - purely additional display data, never a factor in
-    certificate_eligibility(). Behavioral Indicators is surfaced only as a
+    models.py). Scheduled eligibility separately requires complete final
+    ratings; this helper only controls display. Behavioral Indicators is surfaced only as a
     Risk Level (High/Medium/Low), per Report Specification Section 4 - see
     behavioral_risk_level(). psych_professional is deliberately omitted -
     see EvaluatorRating's docstring."""
@@ -557,11 +562,35 @@ def certificate_eligibility(evaluation, summary):
     # account type or package - checked here so no caller can bypass it.
     if evaluation.evaluation_tier != InterviewEvaluationTier.FULL:
         return False, "SCREENING_NO_CERTIFICATE"
+    if not evaluation.certificate_enabled:
+        return False, "CERTIFICATE_DISABLED"
     # Release safeguard: nothing is certified while awaiting human review.
     if evaluation.is_held_for_review:
         return False, "HUMAN_REVIEW_PENDING"
-    # Completeness and quality remain summary-derived safeguards. If no
-    # summary exists, this assessment cannot pass those existing checks.
+    session = evaluation.session
+    if session and session.is_scheduled_interview:
+        # Final evaluator inputs are this method's evidence. Requiring an
+        # AI scoring summary would prevent every ratings-only assessment
+        # from issuing a certificate.
+        rating = getattr(evaluation, 'evaluator_rating', None)
+        if rating is None:
+            return False, 'EVALUATOR_RATING_PENDING'
+        if not session.identity_verified:
+            return False, 'VERIFICATION_FAILED'
+        if evaluation.status != 'COMPLETED' or session.status != 'COMPLETED':
+            return False, 'COMPLETION_UNVERIFIED'
+        consent = session.candidate_consent_agreement
+        if not consent or consent.status != 'SIGNED':
+            return False, 'CONSENT_REQUIRED'
+        from .evaluator_rating_services import _rating_values, calculate_evaluator_outcome, SCORE_FIELDS
+        values = _rating_values(rating)
+        if any(values[field] is None for field in (*SCORE_FIELDS, 'behavior_integrity')):
+            return False, 'INCOMPLETE'
+        if any(not 0 <= values[field] <= 100 for field in (*SCORE_FIELDS, 'behavior_integrity')):
+            return False, 'INCOMPLETE'
+        return True, calculate_evaluator_outcome(values)[1]
+    # AI completeness and quality remain summary-derived safeguards. If no
+    # summary exists, an AI assessment cannot pass those existing checks.
     if summary is None:
         return False, "SUMMARY_REQUIRED"
     review_approved = evaluation.review_status == evaluation.REVIEW_APPROVED

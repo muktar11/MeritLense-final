@@ -1500,7 +1500,7 @@
                       <span class="status-text status-warn"><span class="dot"></span>{{ item.assessment_status|default:"مراجعة" }}</span>
                     {% endif %}
                   </td>
-                  <td>{{ item.completed_response_count }}/{{ item.response_count }}</td>
+                  <td>{% if item.source == "EVALUATOR_ASSESSMENT" %}تقييم المقيّم{% else %}{{ item.completed_response_count }}/{{ item.response_count }}{% endif %}</td>
                   <td>{{ item.explanation }}</td>
                 </tr>
               {% empty %}
@@ -1523,11 +1523,11 @@
             </div>
             <div class="status-card">
               <div class="status-card-title">النظافة والمعايير</div>
-              <div class="status-card-score">{% if report.evaluator_rating.hygiene %}{{ report.evaluator_rating.hygiene }}/100{% else %}غير متاح{% endif %}</div>
+              <div class="status-card-score">{% if report.evaluator_rating.hygiene != None %}{{ report.evaluator_rating.hygiene }}/100{% else %}غير متاح{% endif %}</div>
             </div>
             <div class="status-card">
               <div class="status-card-title">القدرة على التواصل</div>
-              <div class="status-card-score">{% if report.evaluator_rating.communication %}{{ report.evaluator_rating.communication }}/100{% else %}غير متاح{% endif %}</div>
+              <div class="status-card-score">{% if report.evaluator_rating.communication != None %}{{ report.evaluator_rating.communication }}/100{% else %}غير متاح{% endif %}</div>
             </div>
             <div class="status-card">
               <div class="status-card-title">تنفيذ المهام العملية</div>

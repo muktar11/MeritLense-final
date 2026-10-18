@@ -339,24 +339,12 @@ class EvaluationReportService:
                     "rated_at": rating.rated_at.isoformat() if rating.rated_at else "",
                 },
             }
-            html = render_to_string("reports/evaluator_assessment_summary.html", {"report": payload})
-            pdf_bytes = None
-            if HTML is not None:
-                try:
-                    pdf_bytes = HTML(string=html, base_url=str(getattr(settings, "BASE_DIR", ""))).write_pdf()
-                except Exception:
-                    pass
-            if pdf_bytes is None:
-                pdf_bytes = cls._build_simple_pdf([
-                    "Scheduled Assessment Summary", "Employer-led / Evaluator-rated",
-                    f"Candidate: {payload['candidate_name']}", f"Role: {payload['role']}",
-                    f"Overall score: {score}%", f"Readiness: {readiness_label}",
-                    f"Safety: {rating.safety_awareness}; Hygiene: {rating.hygiene}; Communication: {rating.communication}",
-                    f"Task execution: {rating.task_execution}; Behavioral indicators: {payload['ratings']['behavioral_indicators']}",
-                    f"Consistency: {payload['ratings']['consistency']}/100", f"Evaluator: {payload['rated_by']}",
-                    f"Comments: {rating.comments}",
-                ])
-            pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
+            cls._prepare_evaluator_report_payload(payload, evaluation=evaluation, actor=actor)
+            # Both assessment methods use the same document template,
+            # privacy filtering and PDF-rendering fallback chain.
+            pdf_bytes, pdf_hash = cls._render_employer_pdf(
+                report_payload=payload, report_number=report_number,
+            )
             payload["document_integrity"] = {"hash_value": pdf_hash}
             report = EvaluationReport(
                 evaluation=evaluation, session=evaluation.session, candidate=evaluation.candidate,
@@ -365,7 +353,7 @@ class EvaluationReportService:
                 readiness_status=readiness, readiness_indicator=readiness,
                 scoring_rule_set_name="Evaluator-rated four-field equal average",
                 scoring_rule_version="40/60 readiness bands", pdf_hash=pdf_hash,
-                report_payload=payload, competency_breakdown=payload["ratings"],
+                report_payload=payload, competency_breakdown=payload["competency_breakdown"],
                 response_evidence_summary=[], human_review_flags=[], critical_failures=[],
                 generated_by=actor if getattr(actor, "is_authenticated", False) else None,
                 generated_at=timezone.now(), last_regenerated_at=timezone.now() if stale_count else None,
@@ -375,6 +363,89 @@ class EvaluationReportService:
             report.save()
         cls._log_completed(evaluation=evaluation, actor=actor, report=report, stale_previous_reports=stale_count)
         return report
+
+    @classmethod
+    def _prepare_evaluator_report_payload(cls, payload, *, evaluation, actor):
+        """Adapt actual evaluator inputs to the shared employer document schema.
+
+        No question-bank results or dialogue are synthesized from ratings.
+        The existing evaluator outcome remains authoritative.
+        """
+        session = evaluation.session
+        language = cls._report_language(session)
+        rating = evaluation.evaluator_rating
+        dimensions = (
+            ('SAFETY', 'Safety Awareness', rating.safety_awareness),
+            ('HYGIENE', 'Hygiene & Standards', rating.hygiene),
+            ('COMMUNICATION', 'Communication Ability', rating.communication),
+            ('PRACTICAL_TASKS', 'Practical Task Execution', rating.task_execution),
+        )
+        if language == 'ar':
+            dimensions = tuple(
+                (code, cls.CANONICAL_COMPETENCY_DIMENSIONS_AR[index], value)
+                for index, (code, _, value) in enumerate(dimensions)
+            )
+        breakdown = [{
+            'competency_code': code, 'competency_name': name,
+            'score': value, 'max_score': 100, 'percentage': value,
+            'score_display': f'{value}/100' if value is not None else 'N/A',
+            'assessment_status': ('تقييم المقيّم' if language == 'ar' else 'Evaluator rated') if value is not None else 'NOT_ASSESSED',
+            'source': 'EVALUATOR_ASSESSMENT',
+            'status': 'EVALUATOR_RATED' if value is not None else 'NOT_ASSESSED',
+            'explanation': ('تقييم أدخله المقيّم.' if language == 'ar' else 'Evaluator-entered rating.') if value is not None else ('لم يُقيّم.' if language == 'ar' else 'Not assessed.'),
+        } for code, name, value in dimensions]
+        readiness = {
+            'code': payload['readiness_status'], 'display': payload['readiness_label'],
+            'value': payload['readiness_label'],
+        }
+        if language == 'ar':
+            from api.evaluations.readiness_record_services import EvaluationReadinessRecordService
+            readiness['value'] = EvaluationReadinessRecordService._map_indicator(payload['readiness_status'])
+        action, action_display = cls._derive_suggested_action(
+            readiness_indicator=readiness, override_triggered=False, language=language,
+        )
+        generated_at = timezone.now()
+        payload.update({
+            'language': language,
+            'classification': cls.CLASSIFICATION_AR if language == 'ar' else cls.CLASSIFICATION,
+            'report_name': cls.REPORT_NAME_AR if language == 'ar' else cls.REPORT_NAME,
+            'report_status': cls._display_report_status(EvaluationReport.STATUS_ACTIVE, language=language),
+            'generated_at': generated_at.isoformat(),
+            'generated_by': actor.get_full_name() if getattr(actor, 'is_authenticated', False) else payload['rated_by'],
+            'legal_disclaimer': cls.LEGAL_DISCLAIMER_AR if language == 'ar' else cls.LEGAL_DISCLAIMER,
+            'document_integrity': {},
+            'candidate_snapshot': cls._build_candidate_snapshot(evaluation.candidate, session),
+            'identity_verification': cls._build_identity_verification_summary(session, language=language),
+            'data_processing_consent': cls._build_consent_summary(session, language=language),
+            'competency_breakdown': breakdown,
+            'assessment_methodology': [{
+                'domain': name, 'evaluated': 'تقييمات المقيّم وتعليقاته' if language == 'ar' else 'Evaluator ratings and comments',
+                'method': 'بقيادة صاحب العمل / تقييم المقيّم' if language == 'ar' else 'Employer-led / Evaluator-rated',
+            } for _, name, _ in dimensions],
+            'critical_competency_status': [],
+            'risk_indicators': {'items': [], 'note': 'See evaluator-entered behavioral indicators.'},
+            'evidence_summary': [{'category': 'Evaluator comments', 'finding': rating.comments, 'source': 'Evaluator'}] if rating.comments else [],
+            'improvement_plan': [],
+            'verification_status': cls._derive_qr_verification_status(EvaluationReport.STATUS_ACTIVE, language=language),
+            'qr_verification_url': cls._build_qr_verification_url(report_number=payload['report_number']),
+        })
+        payload['assessment_context'].update({
+            'candidate_reference': str(evaluation.candidate.public_id),
+            'target_role': session.role_name or evaluation.candidate.get_job_role_display(),
+            'assessment_language': cls._display_language(session.candidate_language, language=language),
+            'assessment_duration_minutes': cls._derive_assessment_duration_minutes(session),
+            'assessment_coverage': [{'label': name, 'covered': value is not None} for _, name, value in dimensions],
+            'competencies_assessed_count': sum(value is not None for _, _, value in dimensions),
+            'competencies_required_count': len(dimensions),
+        })
+        payload['executive_summary'].update({
+            'readiness_indicator': readiness,
+            'readiness_reason': {'employer_message': 'مشتق من تقييمات المقيّم المقدمة.' if language == 'ar' else 'Derived from submitted evaluator ratings.'},
+            'suggested_action': action, 'suggested_action_display': action_display,
+            'assessment_scope': 'بقيادة صاحب العمل / تقييم المقيّم' if language == 'ar' else 'Employer-led / Evaluator-rated',
+            'evaluation_reliability': 'أدلة أدخلها المقيّم' if language == 'ar' else 'Evaluator-entered evidence',
+            'reliability_factors': ['تقييمات وتعليقات قدمها المقيّم المسجل.' if language == 'ar' else 'Ratings and comments supplied by the recorded evaluator.'],
+        })
 
     @classmethod
     def export_payload(cls, report):

@@ -1492,7 +1492,7 @@
                       <span class="status-text status-warn"><span class="dot"></span>{{ item.assessment_status|default:"Review" }}</span>
                     {% endif %}
                   </td>
-                  <td>{{ item.completed_response_count }}/{{ item.response_count }}</td>
+                  <td>{% if item.source == "EVALUATOR_ASSESSMENT" %}Evaluator-rated{% else %}{{ item.completed_response_count }}/{{ item.response_count }}{% endif %}</td>
                   <td>{{ item.explanation }}</td>
                 </tr>
               {% empty %}
@@ -1515,11 +1515,11 @@
             </div>
             <div class="status-card">
               <div class="status-card-title">Hygiene &amp; Standards</div>
-              <div class="status-card-score">{% if report.evaluator_rating.hygiene %}{{ report.evaluator_rating.hygiene }}/100{% else %}N/A{% endif %}</div>
+              <div class="status-card-score">{% if report.evaluator_rating.hygiene != None %}{{ report.evaluator_rating.hygiene }}/100{% else %}N/A{% endif %}</div>
             </div>
             <div class="status-card">
               <div class="status-card-title">Communication Ability</div>
-              <div class="status-card-score">{% if report.evaluator_rating.communication %}{{ report.evaluator_rating.communication }}/100{% else %}N/A{% endif %}</div>
+              <div class="status-card-score">{% if report.evaluator_rating.communication != None %}{{ report.evaluator_rating.communication }}/100{% else %}N/A{% endif %}</div>
             </div>
             <div class="status-card">
               <div class="status-card-title">Practical Task Execution</div>

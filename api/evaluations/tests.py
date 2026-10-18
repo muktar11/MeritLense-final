@@ -3779,6 +3779,45 @@ class EvaluatorRatingTests(TestCase):
         self.assertEqual(self.evaluation.readiness_status, "READY")
         self.assertEqual(response.data["overall_score"], 75.0)
 
+    @patch('api.reports.services.EvaluationReportService._render_employer_pdf', return_value=(b'%PDF-shared-report', 'shared-hash'))
+    def test_scheduled_submission_uses_the_same_report_renderer_as_ai(self, render_pdf):
+        from api.reports.services import EvaluationReportService
+
+        self.session.scheduled_start_at = timezone.now()
+        self.session.save(update_fields=['scheduled_start_at'])
+        response = self.client.post(self.url, {**self.VALID_RATINGS, 'comments': 'Evaluator evidence'}, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        report = self.evaluation.reports.get(report_status='ACTIVE')
+        self.assertEqual(report.report_payload['report_name'], EvaluationReportService.REPORT_NAME)
+        self.assertEqual(report.report_payload['evaluator_rating']['comments'], 'Evaluator evidence')
+        self.assertEqual(report.report_payload['executive_summary']['score_source'], 'EVALUATOR_ASSESSMENT')
+        self.assertEqual(report.overall_percentage, Decimal('75.00'))
+        self.assertFalse(report.report_payload['transcript_included'])
+        self.assertEqual(len(report.competency_breakdown), 4)
+        render_pdf.assert_called_once()
+        self.assertEqual(render_pdf.call_args.kwargs['report_payload']['assessment_context']['target_role'], self.session.role_name)
+        EvaluationReportService.render_existing_pdf(report)
+        self.assertEqual(render_pdf.call_count, 2)
+
+    @patch('api.reports.services.EvaluationReportService._render_employer_pdf', return_value=(b'%PDF-shared-report', 'shared-hash'))
+    def test_scheduled_shared_report_keeps_zero_ratings_in_both_templates(self, render_pdf):
+        from django.template.loader import render_to_string
+
+        self.session.scheduled_start_at = timezone.now()
+        self.session.candidate_language = 'AR'
+        self.session.save(update_fields=['scheduled_start_at', 'candidate_language'])
+        response = self.client.post(self.url, {
+            **self.VALID_RATINGS, 'hygiene': 0, 'communication': 0, 'comments': 'Recorded evaluator comment',
+        }, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        report = self.evaluation.reports.get(report_status='ACTIVE')
+        self.assertEqual(report.report_payload['language'], 'ar')
+        for template in ['reports/employer_report.html', 'reports/employer_report_ar.html']:
+            html = render_to_string(template, {'report': report.report_payload, 'report_number': report.report_number})
+            self.assertIn('0/100', html)
+            self.assertIn('Recorded evaluator comment', html)
+        self.assertEqual(report.report_payload['competency_breakdown'][1]['score_display'], '0/100')
+
     def test_submitting_a_rating_does_not_first_issue_a_certificate(self):
         # certificate_status stays NOT_ISSUED - no summary/certificate exists yet,
         # so there's nothing eligible for submit_evaluator_rating to regenerate.

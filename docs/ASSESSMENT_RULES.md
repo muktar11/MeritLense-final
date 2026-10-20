@@ -96,9 +96,9 @@
 | EXC-01 | Routine cases automated; quality monitoring never delays valid outcomes | Partial | One response flagged for review makes the whole summary incomplete |
 | EXC-02 | Low confidence is a signal; translation failure doesn't void reliable original | Gap | |
 | EXC-03 | Classified, bounded, idempotent retries | Partial | Queue retries exist; `run_async_job` can return FAILED and drop the message |
-| EXC-04 | Failed jobs stay retryable or become visible incidents | Partial | Output failures now always logged (PR); no incident record |
+| EXC-04 | Failed jobs stay retryable or become visible incidents | Done | Output failures logged and opened as incidents; poison-queued jobs open an incident (`run_ai_queue_worker`) |
 | EXC-05 | No unsupported Ready; uncertain questions never inflate % | Partial | See CAL-04 |
-| EXC-06 | Incident with owner, deadline, next action; admin notified in-system and by email | Gap | |
+| EXC-06 | Incident with owner, deadline, next action; admin notified in-system and by email | Partial | `api/monitoring`: `ServiceIncident`, one email per incident to Admin/Super Admin, admin API `/api/v1/monitoring/incidents`, Django admin. No admin UI page yet; the customer is not yet shown the next action |
 | EXC-07 | Admin repairs delivery; engine decides readiness | Gap | See AUD-02 |
 | CRD-01–03 | Exact once-only points restoration for verified platform failure | Gap | Reservation release exists; confirmed points are never restored |
 

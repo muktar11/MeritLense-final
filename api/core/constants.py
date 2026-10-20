@@ -1142,6 +1142,8 @@ class AuditLogAction:
     PAYMENT_METHOD_REMOVED = "PAYMENT_METHOD_REMOVED"
     
     SYSTEM_CONFIG_CHANGED = "SYSTEM_CONFIG_CHANGED"
+    SERVICE_INCIDENT_OPENED = "SERVICE_INCIDENT_OPENED"
+    SERVICE_INCIDENT_UPDATED = "SERVICE_INCIDENT_UPDATED"
     API_KEY_CREATED = "API_KEY_CREATED"
     API_KEY_REVOKED = "API_KEY_REVOKED"
 
@@ -1336,6 +1338,8 @@ class AuditLogAction:
         (PAYMENT_METHOD_REMOVED, "Payment Method Removed"),
         
         (SYSTEM_CONFIG_CHANGED, "System Config Changed"),
+        (SERVICE_INCIDENT_OPENED, "Service Incident Opened"),
+        (SERVICE_INCIDENT_UPDATED, "Service Incident Updated"),
         (API_KEY_CREATED, "API Key Created"),
         (API_KEY_REVOKED, "API Key Revoked"),
 

@@ -96,3 +96,27 @@ class Command(BaseCommand):
             f"Moved message {message.id} to '{settings.AZURE_QUEUE_POISON_NAME}' after "
             f"{message.dequeue_count} attempts: {error}"
         )
+        self._report_incident(queue_service, message, error)
+
+    def _report_incident(self, queue_service, message, error):
+        """EXC-04 / EXC-06: a job that exhausted its retries becomes a visible
+        incident. Until it is processed, its session's outputs are not
+        generated, so this must not pass unnoticed."""
+        from api.monitoring.models import ServiceIncident
+        from api.monitoring.services import ServiceIncidentService
+        from api.sessions.models import CandidateResponse
+
+        session = None
+        try:
+            response_id = queue_service.decode_job_message(message.content)["payload"].get("response_id")
+            response = CandidateResponse.objects.select_related("session").filter(public_id=response_id).first()
+            session = response.session if response else None
+        except Exception:
+            pass
+        ServiceIncidentService.report(
+            cause=ServiceIncident.CAUSE_QUEUE_POISONED,
+            summary=f"AI processing job exhausted {message.dequeue_count} attempts",
+            details=f"Queue message {message.id}: {error}",
+            session=session,
+            affected_output="evidence for one answer; session outputs not generated",
+        )

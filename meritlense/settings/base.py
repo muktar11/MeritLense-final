@@ -255,6 +255,16 @@ EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL")
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "")
+
+# Service incidents (rulebook EXC-04/EXC-06). Engineering parameters, not
+# assessment thresholds: hours until an incident's response deadline, an
+# optional default owner, and extra addresses notified besides the
+# ADMIN/SUPERADMIN accounts.
+SERVICE_INCIDENT_RESPONSE_HOURS = int(os.getenv("SERVICE_INCIDENT_RESPONSE_HOURS", "24"))
+SERVICE_INCIDENT_DEFAULT_OWNER_EMAIL = os.getenv("SERVICE_INCIDENT_DEFAULT_OWNER_EMAIL", "")
+SERVICE_INCIDENT_NOTIFY_EMAILS = [
+    email.strip() for email in os.getenv("SERVICE_INCIDENT_NOTIFY_EMAILS", "").split(",") if email.strip()
+]
 # Base for the short payment/invoice links in emails (<base>/p/<code>).
 # Must be a host that routes to this Django app.
 SHORT_LINK_BASE_URL = os.getenv("SHORT_LINK_BASE_URL", "https://api.meritlense.com")

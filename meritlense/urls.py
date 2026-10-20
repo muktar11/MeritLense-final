@@ -41,6 +41,7 @@ api_v1_patterns = [
     path('payments/', include('api.payments.urls')),
     path('dashboard/', include('api.dashboard.urls')),
     path('audit/', include('api.audit.urls')),
+    path('monitoring/', include('api.monitoring.urls')),
     path('agreements/', include('api.contracts.urls')),
     path('live-calls/', include('api.live_calls.urls')),
     path('knowledge/', include('api.knowledge.urls')),

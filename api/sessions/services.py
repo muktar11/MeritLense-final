@@ -566,6 +566,11 @@ class InterviewSessionService:
             )
         if summary is None:
             return None
+        if session.is_scheduled_interview and getattr(evaluation, "evaluator_rating", None) is None:
+            # GOV-02: the AI summary above is reference only. A scheduled
+            # assessment's report and certificate come from the evaluator's
+            # rating, which finalize_scheduled_assessment produces.
+            return summary
         if evaluation.certificate_enabled:
             try:
                 generate_certificate(evaluation, summary)

@@ -143,7 +143,12 @@ class EvaluationReportService:
 
     @classmethod
     def generate_for_evaluation(cls, *, evaluation, actor):
-        if evaluation.session_id and evaluation.session.is_scheduled_interview and getattr(evaluation, "evaluator_rating", None):
+        if evaluation.session_id and evaluation.session.is_scheduled_interview:
+            # GOV-02 / DOC-05: a scheduled assessment's report is the
+            # evaluator's. Until the rating is submitted there is no result
+            # to report; the AI transcript score is reference only.
+            if getattr(evaluation, "evaluator_rating", None) is None:
+                raise EvaluationReportError("This scheduled assessment is awaiting the evaluator's rating.")
             return cls.generate_evaluator_report(evaluation=evaluation, actor=actor)
         cls._log_started(evaluation=evaluation, actor=actor)
         try:
@@ -388,6 +393,7 @@ class EvaluationReportService:
             ('HYGIENE', 'Hygiene & Standards', rating.hygiene),
             ('COMMUNICATION', 'Communication Ability', rating.communication),
             ('PRACTICAL_TASKS', 'Practical Task Execution', rating.task_execution),
+            ('BEHAVIORAL', 'Behavioral Indicators', rating.behavior_integrity),
         )
         if language == 'ar':
             dimensions = tuple(
@@ -401,8 +407,9 @@ class EvaluationReportService:
             'assessment_status': ('تقييم المقيّم' if language == 'ar' else 'Evaluator rated') if value is not None else 'NOT_ASSESSED',
             'source': 'EVALUATOR_ASSESSMENT',
             'status': 'EVALUATOR_RATED' if value is not None else 'NOT_ASSESSED',
-            'explanation': ('تقييم أدخله المقيّم.' if language == 'ar' else 'Evaluator-entered rating.') if value is not None else ('لم يُقيّم.' if language == 'ar' else 'Not assessed.'),
+            'explanation': cls._evaluator_rating_explanation(code, value, language),
         } for code, name, value in dimensions]
+        risk_indicators, improvement_plan = cls._evaluator_risks_and_plan(dimensions, language=language)
         readiness = {
             'code': payload['readiness_status'], 'display': payload['readiness_label'],
             'value': payload['readiness_label'],
@@ -432,9 +439,9 @@ class EvaluationReportService:
                 'method': 'بقيادة صاحب العمل / تقييم المقيّم' if language == 'ar' else 'Employer-led / Evaluator-rated',
             } for _, name, _ in dimensions],
             'critical_competency_status': [],
-            'risk_indicators': {'items': [], 'note': 'See evaluator-entered behavioral indicators.'},
+            'risk_indicators': risk_indicators,
             'evidence_summary': [{'category': 'Evaluator comments', 'finding': rating.comments, 'source': 'Evaluator'}] if rating.comments else [],
-            'improvement_plan': [],
+            'improvement_plan': improvement_plan,
             'verification_status': cls._derive_qr_verification_status(EvaluationReport.STATUS_ACTIVE, language=language),
             'qr_verification_url': cls._build_qr_verification_url(report_number=payload['report_number']),
         })
@@ -455,6 +462,77 @@ class EvaluationReportService:
             'evaluation_reliability': 'أدلة أدخلها المقيّم' if language == 'ar' else 'Evaluator-entered evidence',
             'reliability_factors': ['تقييمات وتعليقات قدمها المقيّم المسجل.' if language == 'ar' else 'Ratings and comments supplied by the recorded evaluator.'],
         })
+
+    # Rating bands reuse the OUT-01 boundaries (below 40, below 60). They
+    # describe each rating in the report only; the readiness outcome is
+    # unchanged until a safety gate for this path is decided (OUT-04,
+    # docs/governance/RULEBOOK_V1_ESCALATIONS.md item 3).
+    EVALUATOR_RISK_KEYS = {
+        'SAFETY': 'safety_risk', 'HYGIENE': 'hygiene_risk', 'COMMUNICATION': 'communication_risk',
+        'PRACTICAL_TASKS': 'practical_tasks_risk', 'BEHAVIORAL': 'integrity_risk',
+    }
+
+    @classmethod
+    def _evaluator_rating_explanation(cls, code, value, language):
+        if value is None:
+            return 'لم يُقيّم.' if language == 'ar' else 'Not assessed.'
+        if code == 'BEHAVIORAL':
+            # SCH-06: shown as rated; how it counts on this path is undecided.
+            return (
+                'تقييم أدخله المقيّم. غير مُدرج في الدرجة الإجمالية حاليًا.'
+                if language == 'ar'
+                else 'Evaluator-entered rating. Not currently included in the overall score.'
+            )
+        return 'تقييم أدخله المقيّم.' if language == 'ar' else 'Evaluator-entered rating.'
+
+    @classmethod
+    def _evaluator_risks_and_plan(cls, dimensions, *, language="en"):
+        """DOC-03 / DOC-04: each rated competency gets a risk block and, when
+        rated below 60, an improvement item, so a weak rating is never shown
+        as "no risk" whatever the overall average."""
+        risks = {
+            'note': (
+                'مستوى المخاطر مشتق من تقييم المقيّم لكل كفاءة: أقل من 40 مرتفع، وأقل من 60 متوسط.'
+                if language == 'ar'
+                else 'Risk levels come from each evaluator rating: below 40 is High, below 60 is Medium.'
+            ),
+        }
+        plan = []
+        for code, name, value in dimensions:
+            key = cls.EVALUATOR_RISK_KEYS[code]
+            if value is None:
+                risks[key] = {
+                    'level': 'Not Assessed', 'risk_score': None,
+                    'risk_score_display': 'غير مقيَّم' if language == 'ar' else 'Not Assessed',
+                    'evidence': ['لم يُقيّم المقيّم هذه الكفاءة.' if language == 'ar' else 'The evaluator did not rate this competency.'],
+                }
+                continue
+            value = int(value)
+            if value < 40:
+                level, priority = 'High', 'High'
+            elif value < 60:
+                level, priority = 'Medium', 'Medium'
+            else:
+                level, priority = 'Low', None
+            evidence = []
+            if priority:
+                evidence.append(
+                    f'قيّم المقيّم {name} بدرجة {value}/100.' if language == 'ar' else f'The evaluator rated {name} {value}/100.'
+                )
+                plan.append({
+                    'competency': name,
+                    'priority': priority,
+                    'gap': f'{name}: {value}/100' if language == 'ar' else f'{name} rated {value}/100.',
+                    'recommended_action': (
+                        ('تدريب موجّه ثم إعادة التقييم' if priority == 'High' else 'تدريب مركّز')
+                        if language == 'ar'
+                        else ('Targeted training, then re-assessment' if priority == 'High' else 'Focused training')
+                    ),
+                })
+            risks[key] = {
+                'level': level, 'risk_score': 100 - value, 'risk_score_display': str(100 - value), 'evidence': evidence,
+            }
+        return risks, plan
 
     @classmethod
     def export_payload(cls, report):

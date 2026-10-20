@@ -6,11 +6,11 @@
 - Code cites rules by their rulebook ID, for example `# SCR-04` or `rulebook CER-02`.
 - This file records, for each rule, whether the platform follows it and where.
 - When a change closes a gap, update the row here in the same commit.
-- Open methodology questions are in [governance/RULEBOOK_V1_ESCALATIONS.md](governance/RULEBOOK_V1_ESCALATIONS.md), referred to below as **Esc 1–4**. Don't guess those values (REL-02).
+- Open methodology questions are in [governance/RULEBOOK_V1_ESCALATIONS.md](governance/RULEBOOK_V1_ESCALATIONS.md), referred to below as **Esc 1–5**. Don't guess those values (REL-02).
 
 **Status key:**
 - **Done**: implemented and tested.
-- **Done (PR)**: implemented on `feat/rulebook-v1-corrections`.
+- **Done (PR)**: implemented and deployed (backend #224, #225 and later).
 - **Partial**: some of the rule is in place; the row says what is missing.
 - **Gap**: not built yet.
 - **Blocked**: waiting on a methodology decision (Esc 1–4 or the rule named).
@@ -20,7 +20,7 @@
 | ID | Rule in brief | Status | Where |
 | --- | --- | --- | --- |
 | GOV-01 | AI extracts evidence, rules score, employer decides | Done | `ResponseInterpretationService` (no scoring in prompt), `Week6ScoringService` |
-| GOV-02 | AI-led and employer-led paths stay distinct | Done (PR) | AI no longer writes scheduled outcomes (`_apply_evaluation_rollups`); report mode labels |
+| GOV-02 | AI-led and employer-led paths stay distinct | Done | AI no longer writes scheduled outcomes (`_apply_evaluation_rollups`). No report is produced for a scheduled assessment until it is rated (`generate_for_evaluation`, `generate_completed_session_outputs`) |
 | GOV-03 | Same decision logic for B2B and B2C | Done | Scoring has no account-type branch; readiness display differs only by package entitlement |
 | GOV-04 | Completion, evidence, readiness, review, certificate stored separately | Partial | Separate fields exist; evidence validity is per response only |
 | GOV-05 | Approved versioned spec governs; record contradictions | Done | Version pinning on session and evaluation; contradictions in the escalations file |
@@ -67,7 +67,7 @@
 | SCH-06 | Behavioral Indicators stays a scoring competency | Blocked (SCH-06) | `behavior_integrity` is excluded from the average today |
 | SCH-07 | Draft editing, lock on submit, no AI overwrite | Partial | Lock and audit done. AI overwrite closed (PR). No draft state; rule version not stored on the rating |
 | OUT-01 | 60+ Ready, 40–<60 Partially Ready, <40 Not Ready, before rounding, subject to gates | Done | `calculate_evaluator_outcome` (scheduled). AI path is decided by gates |
-| OUT-02 | AI path keeps role-profile Critical/Non-Critical checks | Done | `evaluate_role_competency_readiness` |
+| OUT-02 | AI path keeps role-profile Critical/Non-Critical checks; verify the versioned threshold configuration | Partial (Esc 5) | `evaluate_role_competency_readiness`. Competency pass marks come from importer-set per-question thresholds, so they vary with the questions drawn |
 | OUT-03 | Confirmed critical failure prevents Ready | Done | `_apply_evaluation_rollups` |
 | OUT-04 | High average can't bypass a safety gate on employer path | Blocked (Esc 3) | |
 | OUT-05 | Incomplete and Insufficient Evidence shown as their cause, not poor performance | Done | Readiness INCOMPLETE → "Insufficient Evidence" |
@@ -79,9 +79,9 @@
 | --- | --- | --- | --- |
 | DOC-01 | Valid results and reports delivered automatically; certificate problems never block them | Partial | Outputs are independent. A report needs signed consent: a manager-started session without consent still gets no report, now logged as an error |
 | DOC-02 | Names: Interview Transcript, Assessment Analysis Report, Readiness Certificate | Gap | |
-| DOC-03 | Report states path, versions, coverage, reasons; risks under the right competency | Partial | Risk mapping done (PR) |
+| DOC-03 | Report states path, versions, coverage, reasons; risks under the right competency | Partial | Risk mapping done on both paths. Evaluator report: a risk block and improvement item for each rating, plus the Behavioral row |
 | DOC-04 | Competency with a critical failure never "Passed" or "no risk" | Done (PR) | Competency table status, explanation, risk evidence |
-| DOC-05 | Report only what was measured; label employer-led results | Done (PR) | Audio, observation, simulation and other-role claims removed. "Cognitive" band remains in the API payload only (not displayed) |
+| DOC-05 | Report only what was measured; label employer-led results | Done | Audio, observation, simulation and other-role claims removed. "Cognitive" band remains in the API payload only (not displayed) |
 | CER-01 | Document the approved certificate configuration per path | Blocked (Esc 4) | |
 | CER-02 | ≥60 alone is not enough; Not Ready gets no readiness certificate | Done (PR) | Scheduled path now refuses Not Ready |
 | CER-03 | Keep the approved Partially Ready treatment | Done | Partially Ready is eligible on both paths |

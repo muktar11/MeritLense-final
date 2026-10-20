@@ -1660,7 +1660,7 @@
           </div>
         </div>
 
-        {% if summary.readiness_indicator.code == "READY" %}
+        {% if summary.readiness_indicator.code == "READY" and not report.improvement_plan %}
           <div class="plan-card">
             <div class="plan-title">لا حاجة لخطة تحسين</div>
             <div class="plan-copy">نتيجة الجاهزية هي "جاهز"، لذا لا حاجة لخطة علاجية منظَّمة في التقرير الحالي الموجَّه لصاحب العمل.</div>

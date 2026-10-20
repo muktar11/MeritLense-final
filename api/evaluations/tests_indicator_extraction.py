@@ -140,7 +140,7 @@ class IndicatorExtractionTests(TestCase):
         response.refresh_from_db()
         Week6ScoringService.run_for_evaluation(evaluation=evaluation)
         evaluation.refresh_from_db()
-        return ResponseEvaluationResult.objects.get(response=response), evaluation
+        return ResponseEvaluationResult.objects.filter(response=response).first(), evaluation
 
     # -- registry --------------------------------------------------------
 
@@ -261,13 +261,17 @@ class IndicatorExtractionTests(TestCase):
                 self.assertEqual(decision["decision"], "context_only_no_effect")
 
     @override_settings(**ID_MODE)
-    def test_uncertain_or_unquoted_evidence_goes_to_review_and_does_not_count(self):
-        result, _ = self._score("HK-TSK-001", "AR", ControlledExtractor(uncertain=True))
-        self.assertTrue(result.requires_human_review)
-        self.assertEqual(result.score, Decimal("0"))
-        result, _ = self._score("HK-TSK-001", "AR", ControlledExtractor(quote=False))
-        self.assertTrue(result.requires_human_review)
-        self.assertEqual(result.matched_indicators, [])
+    def test_uncertain_or_unquoted_evidence_does_not_count(self):
+        # Genuinely unresolved evidence is neither a pass nor a zero: the
+        # answer is left incomplete (SCR-04), not scored and not routed to
+        # routine review (management direction of 20 Oct 2026).
+        for extractor in (ControlledExtractor(uncertain=True), ControlledExtractor(quote=False)):
+            result, evaluation = self._score("HK-TSK-001", "AR", extractor)
+            if result is None:
+                self.assertFalse(evaluation.response_results.exists())
+            else:
+                self.assertEqual(result.matched_indicators, [])
+                self.assertNotEqual(result.score, Decimal("5"))
 
     @override_settings(**ID_MODE)
     def test_unknown_indicator_ids_are_ignored_and_audited(self):

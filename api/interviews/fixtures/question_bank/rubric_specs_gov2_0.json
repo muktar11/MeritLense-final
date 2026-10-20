@@ -237,24 +237,8 @@
       "kind": "completion",
       "note": "completion_pct: steps_completed/4x100",
       "denominator": 6,
-      "open": "Note divides by 4 steps; the approved Must Include lists 6. Steps 3-6 correspond to the original 4; steps 1-2 (mobility plan and helpers, consent) were added in v2 and are separate requirements. Until management confirms the proposal below, only a complete answer (all 6) is scored.",
-      "pending_unless_complete": true,
-      "proposed": {
-        "kind": "completion",
-        "denominator": 4,
-        "counted": [
-          3,
-          4,
-          5,
-          6
-        ],
-        "missing_caps": {
-          "1": 0.5,
-          "2": 0.75
-        },
-        "note": "10 x steps 3-6 evidenced / 4. Step 1 (mobility plan, required aid or helpers) not evidenced: capped at 50%. Step 2 (explain and obtain consent) not evidenced: capped at 75%. Both: 50%. Affirmed ignoring of required assistance or dizziness, pulling the arms, or unsafe lifting (negative indicators 1-3): 0 and critical failure. Proposed new negative indicator: proceeding after the person refuses = 0 and critical failure. Alternative for decision: step 1 Essential (0 when not evidenced).",
-        "status": "PROPOSED"
-      }
+      "open": "Conflict awaiting management decision (no caps introduced). Approved score note: 'completion_pct: steps_completed/4x100'. v1.2 Must Include (4): positions self correctly; supports weight properly; checks balance; moves slowly. GOV2.0 Must Include (6): 1 check the mobility plan and required aid or helpers; 2 explain and obtain consent; 3 secure the chair and position feet safely (= v1.2 positions self correctly); 4 trained standing technique without pulling the arms or carrying the full weight (= supports weight properly); 5 stand gradually (= moves slowly); 6 check balance and stop for pain or dizziness (= checks balance). Points 1-2 have no v1.2 counterpart. Until decided, only a complete answer (all 6) is scored; an incomplete one is held.",
+      "pending_unless_complete": true
     },
     "HH-IGR-002": {
       "kind": "bands",

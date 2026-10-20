@@ -27,6 +27,7 @@ from api.core.constants import (
     EvaluationStatus,
     EvaluationType,
 )
+from api.evaluations import rubric_specs
 from api.evaluations.models import Evaluation
 from api.evaluations.scoring_services import Week6ScoringError, Week6ScoringService
 from api.evaluations.certificate_services import generate_certificate
@@ -223,11 +224,9 @@ class QuestionGenerationService:
             .exclude(session=session)
             .values_list("question_template__question_code", flat=True)
         )
-        try:
-            if profile is None:
-                raise AllocationGap([f"{bank.version}: no role profile for {session.role_code}"])
-            result = select_questions(
-                pool=[QuestionCandidate.from_template(template) for template in templates],
+        def select(pool):
+            return select_questions(
+                pool=[QuestionCandidate.from_template(template) for template in pool],
                 allocation=profile["allocation"][tier_key],
                 critical=critical_competencies(profile),
                 tier=tier_key,
@@ -236,6 +235,36 @@ class QuestionGenerationService:
                 candidate_skills=session.candidate.get_skills_list(),
                 previous_codes=previous_codes,
             )
+
+        try:
+            if profile is None:
+                raise AllocationGap([f"{bank.version}: no role profile for {session.role_code}"])
+            if rubric_specs.selection_gate_active(bank.version):
+                # Rubric gaps are resolved before selection (management
+                # direction of 20 Oct 2026): draw only questions whose
+                # answers can be scored without a held band. If that pool
+                # cannot meet the approved coverage, coverage wins and the
+                # shortfall is recorded as a visible availability exception.
+                complete = [t for t in templates if rubric_specs.rule_complete(bank.version, t.question_code)]
+                try:
+                    result = select(complete)
+                except AllocationGap as gap:
+                    result = select(templates)
+                    incomplete = [c.code for c in result.questions
+                                  if not rubric_specs.rule_complete(bank.version, c.code)]
+                    AuditLogService.log(
+                        user=session.created_by,
+                        action=AuditLogAction.SESSION_FAILED,
+                        category=AuditLogCategory.QUESTION,
+                        description="Rubric availability exception: approved coverage needs questions whose "
+                                    "scoring rule is not yet complete.",
+                        resource=session,
+                        severity=AuditLogSeverity.WARNING,
+                        data={"question_set_version": bank.version, "tier": tier_key,
+                              "incomplete_rule_questions": incomplete, "gaps": gap.gaps},
+                    )
+            else:
+                result = select(templates)
         except AllocationGap as gap:
             AuditLogService.log(
                 user=session.created_by,
@@ -546,16 +575,17 @@ class InterviewSessionService:
             )
 
     @classmethod
-    def generate_completed_session_outputs(cls, session, actor=None, issue_certificate=True):
+    def generate_completed_session_outputs(cls, session, actor=None, certificate_test_document=False):
         """Score and publish outputs after the session and its AI jobs finish.
 
         Terminal AI failures remain represented as incomplete evidence by the
         scorer; they do not prevent the candidate session from completing.
         A failure here never blocks the other outputs (DOC-01), is always
         logged (EXC-04) and, when it is a platform failure, opens a service
-        incident that notifies administrators (EXC-06). A re-scoring run
-        passes issue_certificate=False: re-scoring alone never issues a
-        certificate (management review of 20 Oct 2026).
+        incident that notifies administrators (EXC-06). After an authorized
+        re-score the normal eligibility rules apply automatically; a re-score
+        of a test assessment passes certificate_test_document=True so its
+        certificate is marked as a test document.
         """
         if session.status != InterviewSessionStatus.COMPLETED or cls._ai_processing_pending(session):
             return None
@@ -589,9 +619,9 @@ class InterviewSessionService:
             # assessment's report and certificate come from the evaluator's
             # rating, which finalize_scheduled_assessment produces.
             return summary
-        if evaluation.certificate_enabled and issue_certificate:
+        if evaluation.certificate_enabled:
             try:
-                generate_certificate(evaluation, summary)
+                generate_certificate(evaluation, summary, test_document=certificate_test_document)
             except Exception as exc:
                 cls._log_output_failure(
                     session, actor, f"Automatic certificate generation failed for {candidate_name}: {exc}",

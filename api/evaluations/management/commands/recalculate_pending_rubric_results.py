@@ -10,10 +10,12 @@ review of 20 Oct 2026; rulebook AUD-02/AUD-03):
   certificate and active report ids, and the rule-set / rubric-spec versions
   that produced them are preserved in a write-once ScoreRecalculationSnapshot
   carrying the run label;
-- re-scoring never issues a certificate on its own: certificates are held
-  unless --apply-certificate-eligibility is given, in which case the normal
-  certificate_eligibility check decides. The earlier report is superseded,
-  not deleted.
+- after re-scoring, the normal approved eligibility rules decide the
+  certificate automatically (management direction of 20 Oct 2026); no
+  separate release step. --test-data marks the resulting certificates as
+  test documents (watermarked, never verified as valid). The earlier report
+  is superseded, not deleted; the earlier certificate's record and PDF
+  reference are kept in the snapshot.
 """
 import json
 
@@ -68,9 +70,9 @@ class Command(BaseCommand):
         parser.add_argument("--list-pending", action="store_true",
                             help="List every evaluation held as pending, without changing anything.")
         parser.add_argument("--dry-run", action="store_true", help="Show what the named evaluations would do.")
-        parser.add_argument("--apply-certificate-eligibility", action="store_true",
-                            help="After re-scoring, run the normal certificate eligibility check and issue "
-                                 "or revoke accordingly. Without it, certificates are left untouched.")
+        parser.add_argument("--test-data", action="store_true",
+                            help="The named evaluations are test assessments: certificates produced for them are "
+                                 "marked as test documents, not valid customer certificates.")
 
     def handle(self, *args, **options):
         from api.sessions.services import InterviewSessionService
@@ -121,7 +123,7 @@ class Command(BaseCommand):
                     rubric_spec_versions=specs, before=capture_scoring_records(evaluation),
                 )
             new_summary = InterviewSessionService.generate_completed_session_outputs(
-                evaluation.session, issue_certificate=options["apply_certificate_eligibility"])
+                evaluation.session, certificate_test_document=options["test_data"])
             evaluation.refresh_from_db()
             after = {
                 "pending": (new_summary.metadata if new_summary else {}).get("rubric_pending_question_codes"),
@@ -137,7 +139,7 @@ class Command(BaseCommand):
                 description=f"Recalculated evaluation {evaluation.public_id} after scoring-rule approval.",
                 resource=evaluation,
                 data={"before": before, "after": after, "reason": REASON, "run_label": snapshot.run_label,
-                      "certificate_eligibility_applied": options["apply_certificate_eligibility"],
+                      "test_data": options["test_data"],
                       "snapshot_id": str(snapshot.pk), "rubric_spec_versions": {"before": specs, "after": after_specs}},
             )
             recalculated += 1

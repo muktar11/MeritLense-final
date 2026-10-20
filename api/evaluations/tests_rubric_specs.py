@@ -39,6 +39,20 @@ V2_BY_CODE = {q["question_code"]: q for q in V2["questions"]}
 DRAFT = "GOV2.0-RC1"
 
 
+def approve_templates(questions=()):
+    """Simulates approval of every rule template (and, optionally, of named
+    questions) without changing the fixture."""
+    spec_set = rubric_specs.spec_set_for_version(DRAFT)
+    classification = json.loads(json.dumps(spec_set["classification"]))
+    for template in classification["templates"].values():
+        template["status"] = "APPROVED"
+    for code in questions:
+        classification["questions"][code]["review_status"] = "APPROVED"
+    approved = {**spec_set, "classification": classification}
+    return mock.patch.object(rubric_specs, "spec_set_for_version",
+                             lambda version: approved if version == DRAFT else None)
+
+
 def run(code, matched, negatives=(), total=None):
     _, spec = rubric_specs.spec_for(DRAFT, code)
     q = V2_BY_CODE[code]
@@ -103,13 +117,12 @@ class RubricExecutionTests(SimpleTestCase):
     # 3 surface-appropriate cleaner, 4 clean then disinfect, 5 avoid
     # cross-contamination, 6 rinse/dry if required, 7 final check and hand
     # hygiene. An illustrative rule (not an approved one) exercising every
-    # predicate: point 4 is a prerequisite, point 1 is conditional.
+    # predicate: point 4 is a prerequisite.
     ILLUSTRATIVE_RULE = {
         "rule_version": "TEST-1",
         "full": [[1], [4], [5], [7]],
         "partial": [[4], [5]],
         "prerequisites": [4],
-        "conditional": [1],
         "negative_caps": {},
     }
 
@@ -173,37 +186,67 @@ class RubricExecutionTests(SimpleTestCase):
             self.assertEqual((missing["score"], missing["band"], missing["critical_failure"]),
                              (Decimal("0.00"), rubric_specs.BAND_PREREQUISITE_MISSING, False))
             self.assertEqual(run("HK-TSK-002", [1, 2, 3, 4, 6, 7])["band"], rubric_specs.BAND_BELOW_MINIMUM)
-            # Conditional point: inapplicable counts as met; unknown and
-            # decisive is held, never guessed; unknown and not decisive is scored.
+            # Conditional point ("gloves/PPE as required"): met when the
+            # answer shows it does not apply; left unmentioned it is a
+            # candidate omission and scored, never a hold.
             _, spec = rubric_specs.spec_for(DRAFT, "HK-TSK-002")
+
             def execute(matched, inapplicable=()):
                 return rubric_specs.execute(spec, max_score=5, matched_ordinals=matched, total_points=7,
                                             negative_ordinals=[], inapplicable_ordinals=inapplicable)
+
             self.assertEqual(execute([4, 5, 7], inapplicable=[1])["score"], Decimal("5.00"))
-            held = execute([4, 5, 7])
-            self.assertEqual((held["status"], held["band"], held["undetermined_ordinals"]),
-                             (rubric_specs.STATUS_PENDING, rubric_specs.BAND_CONDITION_UNDETERMINED, [1]))
-            self.assertEqual(execute([4, 5])["score"], Decimal("3.00"))
+            omitted = execute([4, 5, 7])
+            self.assertEqual((omitted["score"], omitted["status"]), (Decimal("3.00"), "DEFINED"))
             # Affirmed unsafe action: 0 and critical failure.
             unsafe = run("HK-TSK-002", range(1, 8), negatives=[1])
             self.assertEqual((unsafe["score"], unsafe["critical_failure"]), (Decimal("0.00"), True))
 
-    def test_ecg_tsk_001_proposal_caps_missing_mobility_plan_and_consent(self):
+    def test_ecg_tsk_001_conflict_is_documented_without_caps(self):
+        # Management direction: no 50%/75% caps; the conflict is shown with
+        # the exact points and mapping, and only a complete answer scores.
         _, spec = rubric_specs.spec_for(DRAFT, "ECG-TSK-001")
-        proposal = spec["proposed"]
-
-        def score(matched, negatives=()):
-            return rubric_specs.execute(proposal, max_score=10, matched_ordinals=matched, total_points=6,
-                                        negative_ordinals=negatives)["score"]
-
-        self.assertEqual(score(range(1, 7)), Decimal("10.00"))
-        self.assertEqual(score([1, 2, 3, 4, 5]), Decimal("7.50"))   # 3 of the 4 counted steps
-        self.assertEqual(score([2, 3, 4, 5, 6]), Decimal("5.00"))   # mobility plan missing
-        self.assertEqual(score([1, 3, 4, 5, 6]), Decimal("7.50"))   # consent missing
-        self.assertEqual(score([3, 4, 5, 6]), Decimal("5.00"))      # both missing
-        self.assertEqual(score(range(1, 7), negatives=[3]), Decimal("0.00"))
-        # Not active: until confirmed, an incomplete answer stays pending.
+        self.assertNotIn("proposed", spec)
+        self.assertNotIn("missing_caps", spec)
+        self.assertIn("steps_completed/4", spec["open"])
+        self.assertEqual(run("ECG-TSK-001", range(1, 7))["score"], Decimal("10.00"))
         self.assertEqual(run("ECG-TSK-001", [1, 2, 3, 4, 5])["status"], rubric_specs.STATUS_PENDING)
+
+    def test_templates_are_proposed_and_every_question_is_mapped(self):
+        classification = rubric_specs.spec_set_for_version(DRAFT)["classification"]
+        self.assertEqual(set(classification["templates"]), {
+            "TPL-SAFEGUARD", "TPL-INTEGRITY", "TPL-HYGIENE", "TPL-COMMUNICATION", "TPL-PROCEDURE"})
+        self.assertEqual({t["status"] for t in classification["templates"].values()}, {"PROPOSED"})
+        exceptions = 0
+        for code, entry in classification["questions"].items():
+            mapping = entry["mapping"]
+            self.assertIn(mapping["template"], classification["templates"], code)
+            self.assertTrue(mapping["central"] and set(mapping["central"]) <= set(entry["core"]), code)
+            exceptions += mapping.get("exception") == "NO_PARTIAL_CREDIT"
+        self.assertEqual(exceptions, 24)
+        self.assertFalse(rubric_specs.selection_gate_active(DRAFT))
+        self.assertFalse(rubric_specs.rule_complete(DRAFT, "HK-TSK-002"))
+
+    def test_approved_templates_score_by_central_and_compensable_outcomes(self):
+        classification = rubric_specs.spec_set_for_version(DRAFT)["classification"]
+        entry = classification["questions"]["HK-TSK-002"]
+        core, central = entry["core"], entry["mapping"]["central"]
+        exception_code = next(c for c, e in classification["questions"].items() if e["mapping"].get("exception"))
+        with approve_templates():
+            version, spec = rubric_specs.spec_for(DRAFT, "HK-TSK-002")
+            self.assertTrue(version.endswith(f"+{entry['mapping']['template']}.v1"))
+            self.assertEqual(run("HK-TSK-002", core)["score"], Decimal("5.00"))      # supporting omitted
+            self.assertEqual(run("HK-TSK-002", central)["score"], Decimal("3.00"))   # several compensable gaps
+            below = run("HK-TSK-002", [o for o in range(1, 8) if o not in central])
+            self.assertEqual((below["score"], below["band"], below["critical_failure"]),
+                             (Decimal("0.00"), rubric_specs.BAND_BELOW_MINIMUM, False))
+            self.assertTrue(rubric_specs.selection_gate_active(DRAFT))
+            self.assertTrue(rubric_specs.rule_complete(DRAFT, "HK-TSK-002"))
+            self.assertFalse(rubric_specs.rule_complete(DRAFT, "ECG-TSK-001"))
+            # A no-partial-credit exception needs its own question approval.
+            self.assertNotIn("rule", rubric_specs.spec_for(DRAFT, exception_code)[1])
+        with approve_templates(questions=[exception_code]):
+            self.assertIsNone(rubric_specs.spec_for(DRAFT, exception_code)[1]["rule"]["partial"])
 
     def test_affirmed_negative_is_a_zero_and_critical_failure(self):
         result = run("HK-TSK-002", range(1, 8), negatives=[1])
@@ -383,18 +426,15 @@ class RubricScoringJourneyTests(TestCase):
         self.assertEqual(evaluation.readiness_status, ReadinessStatus.INCOMPLETE)
         self.assertIn("awaiting approval", evaluation.readiness_override_reason)
 
-        # An approved rule is deployed: the audited recalculation finalises it.
-        approved = {**rubric_specs.spec_set_for_version(DRAFT)}
-        approved["generic_530"] = {**approved["generic_530"], "multi_omission_score": 0}
+        # The rule templates are approved and deployed: the named, audited
+        # re-score of this test assessment finalises it.
         from api.audit.models import AuditLog
 
-        with mock.patch.object(rubric_specs, "spec_set_for_version",
-                               lambda version: approved if version == DRAFT else None):
+        with approve_templates():
             with self.assertRaises(CommandError):  # never a blanket re-score
                 call_command("recalculate_pending_rubric_results", verbosity=0)
-            certificate_before = evaluation.certificate_status
             call_command("recalculate_pending_rubric_results", evaluation=[str(evaluation.public_id)],
-                         run_label="TEST-RUN-1", verbosity=0)
+                         run_label="TEST-RUN-1", test_data=True, verbosity=0)
         evaluation.refresh_from_db()
         latest = evaluation.session_summaries.order_by("-generated_at").first()
         self.assertEqual(latest.metadata["rubric_pending_question_codes"], [])
@@ -421,8 +461,23 @@ class RubricScoringJourneyTests(TestCase):
         report = evaluation.reports.get(report_status="ACTIVE")
         self.assertEqual(report.overall_percentage, latest.overall_percentage)
         self.assertEqual(snapshot.run_label, "TEST-RUN-1")
-        # Re-scoring alone never issues a certificate.
-        self.assertEqual(evaluation.certificate_status, certificate_before)
+        # The normal eligibility rule decides the certificate automatically;
+        # a test assessment's certificate is marked as a test document.
+        from api.core.constants import CertificateStatus
+
+        eligible, _ = certificate_eligibility(evaluation, latest)
+        if eligible:
+            self.assertEqual(evaluation.certificate_status, CertificateStatus.ISSUED)
+            self.assertTrue(evaluation.certificate.is_test_document)
+        else:
+            self.assertNotEqual(evaluation.certificate_status, CertificateStatus.ISSUED)
+
+    def test_selection_draws_only_complete_rules_once_templates_are_approved(self):
+        with approve_templates():
+            evaluation, summary, codes = self._assess("elderly_caregiver", lambda code: (all_points(code)[0], set()))
+            self.assertTrue(all(rubric_specs.rule_complete(DRAFT, code) for code in codes), codes)
+            self.assertNotIn("ECG-TSK-001", codes)
+            self.assertEqual(summary.metadata["rubric_pending_question_codes"], [])
 
     def test_affirmed_unsafe_action_is_not_ready_without_review(self):
         target = {}

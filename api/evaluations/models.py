@@ -848,6 +848,10 @@ class Certificate(TimeStampedModel):
     pdf_hash = models.CharField(max_length=64, blank=True, help_text="SHA-256 hex digest of the generated PDF binary.")
     issued_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True)
+    # A document produced for a test assessment (e.g. a re-scored trial
+    # session): watermarked, and never verified as a valid certificate.
+    # Once set it stays set on regeneration.
+    is_test_document = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = "Certificate"

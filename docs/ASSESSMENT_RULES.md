@@ -25,7 +25,7 @@
 | GOV-03 | Same decision logic for B2B and B2C | Done | Scoring has no account-type branch; readiness display differs only by package entitlement |
 | GOV-04 | Completion, evidence, readiness, review, certificate stored separately | Partial | Separate fields exist; evidence validity is per response only |
 | GOV-05 | Approved versioned spec governs; record contradictions | Done | Version pinning on session and evaluation; contradictions in the escalations file |
-| GOV-06 | Every selectable question has executable bands | Partial | All 2,100 GOV2.0-RC1 questions execute their own note via `rubric_specs.py` and `rubric_specs_gov2_0.json`. HK-PRO-001 and HK-BEH-002 gaps closed by decisions D and E. Pending: per-question scoring rules (full/partial/prerequisite predicates, conditional points) activated only when approved with passing acceptance cases (Esc A); ECG-TSK-001 step consequences (Esc C) |
+| GOV-06 | Every selectable question has executable bands | Partial | All 2,100 GOV2.0-RC1 questions execute their own note via `rubric_specs.py` and `rubric_specs_gov2_0.json`. HK-PRO-001 and HK-BEH-002 gaps closed by decisions D and E. Pending: five rule templates with a mapping for every generic question (central outcomes, exceptions), active once a template is approved and the generated acceptance cases pass (Esc A); ECG-TSK-001 conflict (Esc C) |
 
 ## Assessment paths and languages
 
@@ -53,7 +53,7 @@
 | SCR-05 | 70 legacy notes executed as written (0/5, 0/2/3, completion %) | Done | 66 × 0/5 need only the elements their note names; HK-PRO-001 "calm only" = 2; completion % over the note's steps |
 | SCR-06 | Missing point, failed mandatory, zero and critical failure are distinct | Done | Decision 2 (20 Oct): no point is mandatory without an approved specification; none of the 89 D-02 drafts is applied. A missing point lowers the band, an affirmed negative indicator is 0 + critical failure. Core alone never zeroes an answer. Under an approved question rule, a missing approved prerequisite is a separate band (`PREREQUISITE_MISSING`, 0, not a critical failure) |
 | SCR-07 | Negative evidence read in context; each negative needs severity | Partial | Context handling done. Affirmed own-conduct negatives are scored by the rules, not sent to review. Severities beyond the note's own bands (HK-BEH-001/002) blocked on D-04 |
-| SCR-08 | Resolve "two or more omissions" per question | Partial (Esc A) | Decision A (20 Oct): no interim zero. Affected answers stay unscored (`PENDING_APPROVAL`) and the result is held with that cause; `recalculate_pending_rubric_results` re-scores after approval. Count rule rejected (management review 20 Oct). Reviewed Core/Supporting classification in `rubric_core_points_gov2_0.json`, every question `NOT_APPROVED`; a question is scored by its own rule only once approved and its acceptance cases pass |
+| SCR-08 | Resolve "two or more omissions" per question | Partial (Esc A) | Decision A (20 Oct): no interim zero. Affected answers stay unscored (`PENDING_APPROVAL`) and the result is held with that cause; `recalculate_pending_rubric_results` re-scores after approval. Count rule rejected (management review 20 Oct). Template rule: 3 = central outcome(s) evidenced with compensable gaps; 0 = a central outcome missing. Templates `PROPOSED`; once approved, selection draws only questions with a complete rule |
 | CAL-01 | Overall % = earned / assigned maximum | Done | `_build_session_summary` (RESPONSE_SUM). Check that layer weighting never overrides RESPONSE_SUM |
 | CAL-02 | Keep approved aggregation and weights | Done (PR) | FIX-02 weights repaired; equal-competency weighting not used |
 | CAL-03 | Every assigned question reconciled to a response state | Done (PR) | `run_for_evaluation`: unanswered questions make the summary incomplete; counts in summary metadata |
@@ -87,7 +87,7 @@
 | CER-02 | ≥60 alone is not enough; Not Ready gets no readiness certificate | Done (PR) | Scheduled path now refuses Not Ready |
 | CER-03 | Keep the approved Partially Ready treatment | Done | Partially Ready is eligible on both paths |
 | AUD-01 | Corrections record original, replacement, reason, actor, time | Partial | Evaluator corrections recorded, but `rated_by` is overwritten |
-| AUD-02 | Recalculate after correction; no manual readiness selection | Partial | Rule-approval re-scoring (`recalculate_pending_rubric_results`) runs only on named evaluations under a run label, preserves the original records and rule versions in `ScoreRecalculationSnapshot`, and never issues a certificate on its own. `HumanReviewService.approve` still accepts a chosen readiness |
+| AUD-02 | Recalculate after correction; no manual readiness selection | Partial | Rule-approval re-scoring (`recalculate_pending_rubric_results`) runs only on named evaluations under a run label, preserves the original records and rule versions in `ScoreRecalculationSnapshot`, then applies normal certificate eligibility; `--test-data` marks certificates as test documents. `HumanReviewService.approve` still accepts a chosen readiness |
 | AUD-03 | New output version; previous marked superseded | Done | Reports versioned, earlier ones marked STALE |
 
 ## Recovery, exceptions and points

@@ -35,62 +35,66 @@ All 89 drafted classifications are on questions with the generic score note ("5 
 
 ## Still open
 
-**A. Question scoring rules for the generic-note questions.**
+**A. Rule templates for the generic-note questions** (`GOV2.0-RC1_rule_templates_for_decision.xlsx`).
 
-Management review of 20 Oct 2026 (`MeritLense_Core_Supporting_Decision_Note.md`, `MeritLense_Core_Supporting_Reviewed_Proposals.xlsx`) governs. Built on PR #228:
+Management direction of 20 Oct 2026: draft full, partial and zero conditions from the existing specifications and the agreed methodology. Group equivalent questions under reusable templates with per-question mappings and exceptions. Submit only new or conflicting decisions.
 
-- **Source of record.** `rubric_core_points_gov2_0.json` (classification `GOV2.0-RC1-core-reviewed-2026-10-20`) holds the reviewed workbook exactly:
-  - 6,247 Core and 3,105 Supporting points.
-  - 539 revised proposals.
-  - Review coverage per question: 492 targeted context review, 1,534 structural check only.
-  - Every question is `NOT_APPROVED`.
-- **No count rule.** "One Core missing = 3, two = 0" and "all Core = 5" are rejected. Core alone creates no zero, critical failure or certificate gate.
-- **Activation is per question.** A question's rule is applied only when the question is `APPROVED` and carries a `rule` with:
-  - `full` and `partial` predicates (groups of points; a group lists equivalents);
-  - any approved `prerequisites` and `conditional` points;
-  - `negative_caps`;
-  - acceptance cases covering every required category, all passing.
+- **Source of record.** `rubric_core_points_gov2_0.json` holds:
+  - the reviewed Core/Supporting classification (management workbook);
+  - five templates (`TPL-SAFEGUARD`, `TPL-INTEGRITY`, `TPL-HYGIENE`, `TPL-COMMUNICATION`, `TPL-PROCEDURE`), each `PROPOSED`;
+  - a mapping for every question: template, central outcome(s), exception.
+- **Rule under a template:**
+  - 5: every Core outcome evidenced and safe. Supporting is never required.
+  - 3: every central outcome evidenced safely; other Core outcomes are compensable gaps.
+  - 0: a central outcome missing (`BELOW_MINIMUM`), nothing evidenced, or an affirmed negative indicator (critical failure, unchanged).
+- **Central outcomes:** 1,595 questions use the decisive safeguard identified in the second pass; 431 use the main outcome chosen in the template pass.
+- **Exceptions:** 24 questions where every Core outcome is central have no 3 band (`NO_PARTIAL_CREDIT`). These need question approval.
+- **Decisions requested** (sheet "Decisions requested"):
+  - D1: the central-outcome definition.
+  - D2: 3 for one or more compensable gaps.
+  - D3: conditional points are candidate omissions, never holds.
+  - D4: combined points.
+  - D5: the 24 exceptions.
+  - D6: ECG-TSK-001.
 
-  Otherwise the generic rule stays: two or more omissions are held as pending, with no interim zero.
-- **Acceptance categories:** full, partial, supporting omission, below minimum, equivalent paraphrase, affirmed unsafe, negated unsafe, evidence loss. Prerequisite omission and condition-inapplicable are added when the rule has such points. EN/AR interpretation of the same expected outcomes still has to be run per question before approval.
-- **Scoring under an approved rule:**
-  - Prerequisite missing: 0, recorded separately and not a critical failure.
-  - Full predicates met: 5.
-  - Partial predicates (minimum viable competence) met: 3, whatever the number of compensable gaps.
-  - Otherwise: 0, below minimum.
-  - Affirmed negative: 0 and critical failure, unless the rule gives it a cap.
-  - Conditional point: counts as met when the answer shows the condition does not apply (`inapplicable_ids`). If applicability is unknown and would change the band, the answer is held (`CONDITION_UNDETERMINED`), never guessed.
-- **Engineering second pass** (`GOV2.0-RC1_engineering_second_pass_proposals.xlsx`): withdrawn as a scoring proposal. Kept only as reviewer suggestions: 1,774 candidate prerequisites and 147 additional Core candidates (`candidate_*` fields, never applied), plus the D-02 crosswalk and the ECG mapping.
-- **Overlap with the 89 D-02 drafts:** all 244 drafted points are mapped point by point (crosswalk sheet). Being Core makes none of them a gate.
+  Everything else is unchanged and needs no approval.
+- **Activation:**
+  - Approving a template activates its mapped questions. 2,002 of 2,026 become scorable once all five are approved; the 24 exceptions need their own approval.
+  - A question-specific rule still overrides its template. It needs its question approved.
+  - Every rule must pass acceptance cases generated from its mapping before it scores.
+- **No routine holds:**
+  - Once a bank has an approved template, question selection draws only questions whose rule is complete.
+  - If approved coverage cannot be met that way, coverage wins and a visible "rubric availability exception" is logged.
+  - Unclear applicability is a candidate omission. Only genuinely unresolved evidence (uncertain or lost) stays incomplete.
+- **Additional 147 proposals** (sheet "Additional 147 proposals"):
+  - Supporting points the engineering second pass would make Core, each with its reason.
+  - Consequence: required for 5, a compensable gap for 3, never a gate.
+  - These are proposals only.
 - **Re-scoring.** `recalculate_pending_rubric_results` works as follows:
-  - Requires `--evaluation <public id>` for each assessment and a `--run-label`. `--list-pending` lists candidates without changing anything.
-  - Before re-scoring, it stores the original records and rule versions in a write-once `ScoreRecalculationSnapshot`.
-  - Certificates are left untouched unless `--apply-certificate-eligibility` is given (pending decision 2 below).
-  - The earlier report is superseded, not deleted.
+  - It runs on named evaluations under a run label and preserves the original records and rule versions in a write-once `ScoreRecalculationSnapshot`.
+  - It then applies the normal eligibility rules automatically, with no separate release step.
+  - `--test-data` marks resulting certificates as test documents: watermarked, and reported as `TEST_DOCUMENT` by the public verification endpoint. A previous certificate's record and PDF reference stay in the snapshot.
 
-**Decisions requested**
-1. Who writes each question's full, partial and zero predicates: management or a specialist, or engineering drafting for sign-off?
-2. After an approved re-score, should an eligible certificate follow the normal eligibility rule automatically, or wait for a separate release step? Until decided, it is held.
-3. Should the 147 additional Core candidates be reviewed as a further proposal list?
+**C. ECG-TSK-001: resolve the conflict (no caps).**
 
-**C. ECG-TSK-001: confirm the step consequences.**
+- Approved score note: "completion_pct: steps_completed/4×100". The package records `en_points` 4 and `ar_points` 6.
+- v1.2 Must Include (4): positions self correctly; supports weight properly; checks balance; moves slowly. v1.2 negative indicators: pulls abruptly; no balance check.
 
-| Original v1.2 step (4) | Current Must Include (6) | Relation |
-| --- | --- | --- |
-| — | 1. Check mobility plan and required aid or helpers | New, independent preparatory step |
-| — | 2. Explain and obtain consent | New, independent preparatory step |
-| Positions self correctly | 3. Secure the chair and position feet safely | Rewording of the original step |
-| Supports weight properly | 4. Trained technique, no pulling arms or carrying full weight | Rewording of the original step |
-| Moves slowly | 5. Stand gradually | Same step |
-| Checks balance | 6. Check balance; stop for pain or dizziness | Same step, extended |
+| GOV2.0 point | v1.2 outcome |
+| --- | --- |
+| 1. Check the mobility plan and required aid or helpers | none (added in GOV2.0) |
+| 2. Explain and obtain consent | none (added in GOV2.0) |
+| 3. Secure the chair and position feet safely | Positions self correctly |
+| 4. Trained standing technique, no pulling arms or carrying full weight | Supports weight properly |
+| 5. Stand gradually | Moves slowly |
+| 6. Check balance and stop for pain or dizziness | Checks balance (extended) |
 
-- Proposal (`rubric_specs_gov2_0.json` → `ECG-TSK-001.proposed`, not active): score 10 × (steps 3–6 evidenced) / 4, the original denominator. Steps 1 and 2 are separate requirements, not optional detail:
-  - Mobility plan and required aid or helpers not evidenced: capped at 50%.
-  - Explanation and consent not evidenced: capped at 75%. Both missing: 50%.
-  - Affirmed ignoring of required assistance or dizziness, pulling the arms or unsafe lifting: 0 and critical failure (existing negative indicators).
-  - Proceeding after the person refuses: proposed new negative indicator, 0 and critical failure.
-- Alternative for decision: step 1 as Essential (0 when not evidenced) instead of the 50% cap.
-- Until confirmed, only a complete answer (all 6 steps) is scored; an incomplete one is held as pending.
+- GOV2.0 negative indicators: pulls the arms; lifts unsafely; ignores required assistance or dizziness.
+- Current behaviour: only a complete answer (all 6) is scored; an incomplete one is held.
+- Options:
+  - A: denominator 4 over points 3–6, with an explicit consequence you set for points 1–2.
+  - B: denominator 6, with the note revised.
+  - C: other.
 
 ## Also open, already listed in the rulebook
 

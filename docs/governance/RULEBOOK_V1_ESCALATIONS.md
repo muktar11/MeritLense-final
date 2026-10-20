@@ -2,7 +2,7 @@
 
 20 Oct 2026. Raised under REL-02 of the MeritLense Assessment Governance and Decision Rulebook v1.0 (`docs/governance/MeritLense_Assessment_Rulebook_Implementation_v1.pdf`).
 
-Engineering is going ahead with every correction the rulebook fully defines. The four items below cannot be built as written without guessing a value, which REL-02 forbids. Each one names the rules involved, the evidence and a recommended resolution. One answer per item is enough.
+Engineering is going ahead with every correction the rulebook fully defines. The five items below cannot be built as written without guessing a value, which REL-02 forbids. Each one names the rules involved, the evidence and a recommended resolution. One answer per item is enough.
 
 ## 1. The "two or more omissions" case is undefined for 96% of the bank
 
@@ -57,6 +57,20 @@ Questions that need different treatment override it in their own specification. 
 **Request.** Send the approved certificate policy, or confirm that the current code checks are the approved policy:
 - **AI-led:** Full tier, certificate enabled, not held, identity verified, completed, consent signed, complete evidence, minimum quality, critical competencies at 60% or above, review flags resolved, not Not Ready.
 - **Employer-led:** Full tier, certificate enabled, not held, rating present, identity verified, completed, consent signed, all ratings present, not Not Ready.
+
+## 5. Competency pass marks depend on which questions are drawn
+
+**Rules:** OUT-02, GOV-03, GOV-05.
+
+**Evidence.**
+- A competency passes when its score reaches the sum of its questions' pass thresholds. Those thresholds are set by the importer, not by an approved specification:
+  - 0/3/5 questions pass at 3 (60%);
+  - legacy 0/5 questions pass only at 5 (100%);
+  - completion-percentage questions pass at 7 of 10.
+- So the competency pass mark changes with the question draw. In the production run on 20 Oct, Safety Awareness needed 68% because one 0/5 question was drawn, while Hygiene needed 60%. Both scored 60%; Safety failed and Hygiene passed.
+- Two candidates with the same percentage on the same competency can therefore get different results.
+
+**Recommendation.** One approved pass threshold per competency, 60% unless the role profile says otherwise, independent of which questions are drawn. Per-question pass thresholds stop affecting competency status.
 
 ## Also open, already listed in the rulebook
 

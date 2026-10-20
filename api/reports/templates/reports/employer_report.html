@@ -1644,7 +1644,7 @@
           </div>
         </div>
 
-        {% if summary.readiness_indicator.code == "READY" %}
+        {% if summary.readiness_indicator.code == "READY" and not report.improvement_plan %}
           <div class="plan-card">
             <div class="plan-title">No Improvement Plan Required</div>
             <div class="plan-copy">The readiness result is Ready, so no structured remediation plan is required in the current employer-facing report.</div>

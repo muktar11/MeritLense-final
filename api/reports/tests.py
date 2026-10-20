@@ -1139,7 +1139,10 @@ class EvaluationReportApiTests(TestCase):
             )
         Week6ScoringService.run_for_evaluation(evaluation=self.evaluation, actor=self.user, rule_set=self.rule_set)
 
-    def test_scheduled_interview_report_shows_ai_score_as_secondary_when_rating_pending(self):
+    def test_scheduled_interview_has_no_report_while_rating_pending(self):
+        # GOV-02: the pending report used to carry a readiness label and the
+        # AI's percentage on a result nobody had rated (seen on production
+        # 20 Oct). The report now waits for the evaluator's rating.
         self._add_full_competency_coverage()
         self.session.scheduled_start_at = timezone.now() - timezone.timedelta(days=1)
         self.session.save(update_fields=["scheduled_start_at"])
@@ -1150,15 +1153,8 @@ class EvaluationReportApiTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 200)
-        summary = response.data["report_payload"]["executive_summary"]
-        self.assertIsNone(summary["overall_score"])
-        self.assertFalse(summary["overall_score_available"])
-        self.assertEqual(summary["overall_score_unavailable_reason"], "EVALUATOR_RATING_PENDING")
-        self.assertEqual(summary["overall_score_display"], "Pending Evaluator Rating")
-        self.assertEqual(summary["score_source"], None)
-        self.assertIsNotNone(summary["secondary_score"])
-        self.assertEqual(summary["secondary_score"]["source"], "AI_ASSESSMENT")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(self.evaluation.reports.exists())
 
     def test_scheduled_interview_report_uses_evaluator_average_once_rated(self):
         self._add_full_competency_coverage()
@@ -1220,10 +1216,28 @@ class EvaluationReportApiTests(TestCase):
             {},
             format="json",
         )
-        self.assertEqual(
-            scheduled_response.data["report_payload"]["assessment_context"]["assessment_mode"],
-            "Scheduled Interview (Evaluator-Conducted)",
+        # GOV-02: no report before the evaluator's rating exists.
+        self.assertEqual(scheduled_response.status_code, 400)
+
+        EvaluatorRating.objects.create(
+            evaluation=self.evaluation, safety_awareness=35, hygiene=80, communication=75,
+            task_execution=80, behavior_integrity=70, rated_by=self.user,
         )
+        rated_response = self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {},
+            format="json",
+        )
+        self.assertEqual(rated_response.status_code, 200, rated_response.data)
+        payload = rated_response.data["report_payload"]
+        self.assertEqual(payload["assessment_context"]["assessment_mode"], "Employer-led / Evaluator-rated")
+        # DOC-03 / DOC-04: a 35 Safety rating is a High risk with a plan item,
+        # even though the four-field average still reads Ready.
+        self.assertEqual(payload["readiness_status"], "READY")
+        self.assertEqual(payload["risk_indicators"]["safety_risk"]["level"], "High")
+        self.assertEqual(payload["risk_indicators"]["integrity_risk"]["level"], "Low")
+        self.assertEqual([item["competency"] for item in payload["improvement_plan"]], ["Safety Awareness"])
+        self.assertIn("Behavioral Indicators", [row["competency_name"] for row in payload["competency_breakdown"]])
 
 
 class ReportArabicLanguageTests(TestCase):

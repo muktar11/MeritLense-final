@@ -432,6 +432,13 @@ class TransitionAndBilingualTests(TestCase):
                     with self.subTest(role=role_code, tier=tier, mode=mode):
                         en, _ = self._journey(role_code, "EN", tier, mode)
                         ar, _ = self._journey(role_code, "AR", tier, mode)
+                        if mode == "unsafe_with_steps":
+                            # The unsafe answer scores 0, and each session draws
+                            # its own questions, so the point totals can differ
+                            # (e.g. 100/105 vs 105/110); outcomes may not.
+                            for side in (en, ar):
+                                self.assertLess(side.pop("overall"), Decimal("100.00"))
+                                side.pop("competencies")
                         self.assertEqual(en, ar)
                         self.assertEqual(en["questions"], 21 if tier == InterviewEvaluationTier.FULL else 7)
                         if mode == "complete":
@@ -445,8 +452,11 @@ class TransitionAndBilingualTests(TestCase):
                             self.assertEqual(en["overall"], Decimal("0.00"))
                             self.assertNotEqual(en["readiness"], ReadinessStatus.READY)
                         if mode == "unsafe_with_steps":
-                            self.assertEqual(en["review"], Evaluation.REVIEW_REQUIRED)
+                            # Decisions 2-3 (20 Oct 2026): the rules decide a
+                            # confirmed unsafe act; no review hold.
+                            self.assertEqual(en["review"], Evaluation.REVIEW_NOT_REQUIRED)
                             self.assertNotEqual(en["readiness"], ReadinessStatus.READY)
+                            self.assertFalse(en["certificate"][0])
 
     # -- approved methodology gates (management decisions, 13 Oct 2026) -----
 
@@ -470,7 +480,10 @@ class TransitionAndBilingualTests(TestCase):
                 with self.subTest(role=role_code, lang=lang):
                     evaluation, summary, _ = self._assess(self._session(role_code, lang), mode=fail(competency))
                     self.assertEqual(evaluation.readiness_status, expected, evaluation.readiness_override_reason)
-                    self.assertFalse(certificate_eligibility(evaluation, summary)[0])
+                    # Decision 4 (20 Oct 2026): Partially Ready may be
+                    # certified; Not Ready never.
+                    self.assertEqual(certificate_eligibility(evaluation, summary)[0],
+                                     expected == ReadinessStatus.PARTIALLY_READY)
 
     def test_approved_critical_questions_gate_release_without_automatic_not_ready(self):
         self._activate()
@@ -496,10 +509,12 @@ class TransitionAndBilingualTests(TestCase):
                     # The other 20 answers carry the result...
                     self.assertGreaterEqual(summary.overall_percentage, Decimal("80"))
                     self.assertIn(evaluation.readiness_status, (ReadinessStatus.READY, ReadinessStatus.PARTIALLY_READY))
-                    # ...but it is held, not released and not certified.
-                    self.assertEqual(evaluation.review_status, Evaluation.REVIEW_REQUIRED)
-                    self.assertTrue(any(code in r for r in evaluation.review_reasons), evaluation.review_reasons)
-                    self.assertEqual(certificate_eligibility(evaluation, summary), (False, "HUMAN_REVIEW_PENDING"))
+                    # ...and an empty answer to a Critical question is a scored
+                    # zero, not a confirmed safety failure: it is released by
+                    # the rules with no review hold (decisions 3-4, 20 Oct 2026).
+                    self.assertEqual(evaluation.review_status, Evaluation.REVIEW_NOT_REQUIRED)
+                    self.assertFalse(summary.critical_failures)
+                    self.assertTrue(certificate_eligibility(evaluation, summary)[0])
 
     def test_safety_failure_cannot_be_overridden_by_the_overall_score(self):
         self._activate()
@@ -507,8 +522,9 @@ class TransitionAndBilingualTests(TestCase):
             with self.subTest(lang=lang):
                 # Every required point present, plus one affirmed unsafe act.
                 evaluation, summary, _ = self._assess(self._session("skilled_trades", lang), mode="unsafe_with_steps")
-                self.assertEqual(evaluation.review_status, Evaluation.REVIEW_REQUIRED)
-                self.assertNotEqual(evaluation.readiness_status, ReadinessStatus.READY)
+                self.assertEqual(evaluation.review_status, Evaluation.REVIEW_NOT_REQUIRED)
+                self.assertEqual(evaluation.readiness_status, ReadinessStatus.NOT_READY)
+                self.assertTrue(summary.critical_failures)
                 self.assertEqual(certificate_eligibility(evaluation, summary)[0], False)
 
     def test_reports_are_generated_for_both_languages(self):

@@ -61,8 +61,11 @@ def activate(bank):
     QuestionTemplate.objects.filter(question_set_version=bank.version).update(
         is_active=True, question_status=QuestionLifecycleStatus.ACTIVE,
     )
-    ScoringRuleSet.objects.filter(question_set_version=bank.version).update(is_active=True)
-    ScoringRule.objects.filter(rule_set__question_set_version=bank.version).update(is_active=True)
+    rule_sets = ScoringRuleSet.objects.filter(question_set_version=bank.version)
+    rule_sets.update(is_active=True)
+    # Rule-set ids first: the joined UPDATE got a pathological plan on a
+    # freshly loaded table and ran for 15+ minutes in the test suite.
+    ScoringRule.objects.filter(rule_set_id__in=list(rule_sets.values_list("id", flat=True))).update(is_active=True)
     InterviewRubric.objects.filter(rubric_version=bank.version).update(is_active=True)
     for config in plan:
         config.question_set_version = bank.version

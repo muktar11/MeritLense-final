@@ -663,6 +663,8 @@ class ResponseInterpretationService:
                 "for example, 'call the mechanic', 'contact the garage', and 'go to a nearby workshop' should "
                 "all be treated as satisfying a step about contacting a repair professional. Do not withhold "
                 "credit merely because the candidate's wording differs from expected_steps' own phrasing. "
+                "A short or concise answer that clearly conveys a step's intent addresses that step; do not "
+                "require elaboration, detail or the step's exact wording. "
                 "For mentioned_steps and missing_steps, choose entries only from question.expected_steps, copied "
                 "verbatim (exact text, not translated or paraphrased) - do not invent new step phrasing; this "
                 "verbatim requirement applies only to how you label a matched step, not to how you judge whether "
@@ -850,7 +852,13 @@ class EvaluationInputBuilderService:
         concerns = list(indicators.get("safety_risks") or []) + list(indicators.get("compliance_risks") or [])
         if concerns:
             review_reasons.append("Possible safety or compliance concern: " + "; ".join(concerns)[:500] + ".")
-        if indicators.get("negative_evidence_ids"):
+        from api.evaluations.rubric_specs import spec_set_for_version
+
+        rubric_scored = template is not None and spec_set_for_version(template.question_set_version) is not None
+        # Where the question's rubric is executable, an affirmed negative
+        # indicator is scored by the rules (0 and a critical failure, or the
+        # band the note gives it) - not a case for human review (EXC-01).
+        if indicators.get("negative_evidence_ids") and not rubric_scored:
             review_reasons.append(
                 "Negative indicator evidence recorded for human review (severity not yet assigned): "
                 + ", ".join(indicators["negative_evidence_ids"]) + "."

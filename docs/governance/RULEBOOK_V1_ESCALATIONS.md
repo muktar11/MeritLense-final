@@ -1,79 +1,56 @@
-# Rulebook v1.0: decisions needed from the methodology owner
+# Rulebook v1.0: methodology decisions
 
 20 Oct 2026. Raised under REL-02 of the MeritLense Assessment Governance and Decision Rulebook v1.0 (`docs/governance/MeritLense_Assessment_Rulebook_Implementation_v1.pdf`).
 
-Engineering is going ahead with every correction the rulebook fully defines. The five items below cannot be built as written without guessing a value, which REL-02 forbids. Each one names the rules involved, the evidence and a recommended resolution. One answer per item is enough.
+## Decided by management, 20 Oct 2026
 
-## 1. The "two or more omissions" case is undefined for 96% of the bank
+Management answered items 1–5 below. These are settled and are not to be reopened.
 
-**Rules:** GOV-06, SCR-02, SCR-08, REL-02.
+| # | Topic | Decision | Built |
+| --- | --- | --- | --- |
+| 1 | Partial credit | Score each question by its own approved rubric, including permitted partial credit and the 70 legacy exceptions. No universal "one missing = 3, two missing = 0" rule. Accept equivalent wording and concise answers. Incomplete rubrics are question-bank configuration issues, not candidate-review cases. | `api/evaluations/rubric_specs.py`, `rubric_specs_gov2_0.json`; interpretation prompt `week5-v3-concise-answers` |
+| 2 | Mandatory indicators | Mandatory only where the approved scoring specification explicitly says so; Must Include alone is not enough. Reconcile the 89 D-02 drafts in one batch. A secondary omission, an essential missing requirement and an affirmed unsafe action are distinct. | No approved specification makes any point mandatory, so none of the 89 drafts is applied (batch result below). An affirmed negative indicator is scored by the rules. |
+| 3 | Scheduled-assessment safety | A confirmed critical safety failure prevents Ready and the certificate, whatever the average. A missing detail is not by itself an unsafe action. Keep the readiness boundaries; don't copy scheduled rules onto the AI path. | Pending: needs item B below |
+| 4 | Certificates, reports, transcripts | Ready and Partially Ready may be certified under the eligibility requirements; Not Ready and Screening never. No routine admin approval. Reports for every reliable outcome; transcripts wherever conversation was captured. | Pending |
+| 5 | Competency thresholds | One stable threshold per role and competency: 60% default, approved role-specific exceptions. | `Week6ScoringService._aggregate_competencies`; exceptions read from the role profile's `competency_thresholds` (none approved today) |
 
-**Evidence.**
-- 2,016 of the 2,100 questions in GOV2.0-RC1 use one generic score note: "5 = core evidence complete and safe; 3 = safe/correct direction with one material element missing; 0 = hard-negative, unsafe/unauthorized action, concealment, or falsification."
-- That note does not say how to score a safe answer missing two or more points. It also does not say which points are "material".
-- GOV-06 says a question with an undefined rubric must not be selected. Read literally, that leaves only the 84 questions with their own score notes selectable, and no role can fill a Full assessment.
+### D-02 batch reconciliation (decision 2)
 
-**Recommendation.** Approve one bank-wide default:
-- every Must Include point is material unless the question says otherwise;
-- an answer that is safe, but misses two or more material points, scores 0.
+All 89 drafted classifications are on questions with the generic score note ("5 = core evidence complete and safe; 3 = ... one material element missing; 0 = hard-negative ..."). That note assigns no mandatory consequence to any point, and no other approved specification does. Result:
 
-Questions that need different treatment override it in their own specification. This keeps the bank usable and avoids a universal proportional rule, which SCR-08 rules out.
+- **Established requirements kept:** the note's own bands, and the hard-negative 0 for an affirmed unsafe, unauthorized, concealing or falsifying action.
+- **Not applied:** all 89 drafts. A missing drafted point lowers the band like any other point; it does not zero the answer.
+- **No draft needs a separate decision.** Where a draft is a "do not ..." safety point (e.g. SNC-SAF-001 "do not restrain or put objects in the mouth"), the opposite affirmed action is already a negative indicator and scores 0 as a critical failure.
 
-**Until decided:** the scorer keeps today's behaviour, where any missing required point scores 0. Partial credit (SCR-02) is not switched on.
+## Still open
 
-## 2. Which Must Include points are mandatory
+Each item names the question or rule, our recommendation, and what it changes. The system applies the interim shown until decided.
 
-**Rules:** SCR-06, GOV-05, D-02.
+**A. Generic note: a safe answer missing two or more points (SCR-08, 2,026 questions).**
+- The note defines 5 (all points) and 3 (one material element missing), but not two or more missing.
+- Interim: no band above 0, marked `INTERIM_PENDING_DECISION` on the result.
+- Impact: 1,130 of these questions list 5 to 8 points, so a concise answer covering most of them can score 0.
+- Recommendation: mark which points are core on those 1,130 questions, as one SME batch drafted for approval. Missing a non-core point would then never lower the band. Until approved, keep the interim.
+- Example: HK-TSK-002 (7 points). An answer covering 5 points, safely, scores 0 today.
 
-**Evidence.**
-- SCR-06 says not every Must Include point is mandatory by default.
-- GOV-05 says the 89 AI-drafted mandatory classifications (D-02) are not proof of approval.
-- So for most questions nothing approved says which missing points are failed mandatory conditions and which are ordinary omissions.
+**B. Scheduled path: how a critical safety failure is confirmed (decision 3, OUT-04).**
+- Recommendation: the evaluator records an explicit "critical safety failure" mark on the scorecard with a short evidence note. That mark caps the outcome at Not Ready and blocks the certificate. A low Safety rating alone does not.
+- Impact: one new scorecard field. Unflagged results keep their current outcome.
 
-**Recommendation.** Decide this together with item 1:
-- a missing point lowers the band (5 → 3 → 0) under the default in item 1;
-- "mandatory" means a point whose absence alone forces 0, and applies only where a question's specification says so;
-- the 89 D-02 drafts are reviewed as a batch and either approved or dropped.
+**C. ECG-TSK-001: completion denominator.** The note says steps_completed/4, but the approved Must Include lists 6 steps.
+- Interim: completion over the 6 listed steps.
+- Recommendation: confirm 6.
 
-## 3. Safety gate for employer-led (scheduled) assessments
+**D. HK-PRO-001 ("3: all 3 | 2: calm only | 0: refusal").** An answer that clarifies and adjusts, but doesn't mention listening calmly, has no band.
+- Interim: 0.
+- Recommendation: 2.
 
-**Rules:** OUT-01, OUT-04, CER-02.
-
-**Evidence.**
-- Today the outcome is the plain average of four ratings, with no Critical-competency rule.
-- Safety 30 with three other ratings of 90 averages 75, which is Ready.
-- OUT-04 says a high average must not bypass "an applicable approved safety gate". None is defined for this path.
-
-**Recommendation.** For employer-led results, any Critical competency in the role profile rated below 40 caps the outcome at Not Ready, and below 60 caps it at Partially Ready. This uses the existing 40/60 boundaries (OUT-01) and the existing role profiles, with no new numbers.
-
-**Already fixed regardless (CER-02):** Not Ready no longer receives a readiness certificate on this path.
-
-## 4. Source of the approved certificate policy
-
-**Rules:** CER-01, CER-03.
-
-**Evidence.** CER-01 says to document "the actual gate configuration", not one inferred from current code or the 19 Oct draft. No document holding that approved configuration has been supplied to engineering.
-
-**Request.** Send the approved certificate policy, or confirm that the current code checks are the approved policy:
-- **AI-led:** Full tier, certificate enabled, not held, identity verified, completed, consent signed, complete evidence, minimum quality, critical competencies at 60% or above, review flags resolved, not Not Ready.
-- **Employer-led:** Full tier, certificate enabled, not held, rating present, identity verified, completed, consent signed, all ratings present, not Not Ready.
-
-## 5. Competency pass marks depend on which questions are drawn
-
-**Rules:** OUT-02, GOV-03, GOV-05.
-
-**Evidence.**
-- A competency passes when its score reaches the sum of its questions' pass thresholds. Those thresholds are set by the importer, not by an approved specification:
-  - 0/3/5 questions pass at 3 (60%);
-  - legacy 0/5 questions pass only at 5 (100%);
-  - completion-percentage questions pass at 7 of 10.
-- So the competency pass mark changes with the question draw. In the production run on 20 Oct, Safety Awareness needed 68% because one 0/5 question was drawn, while Hygiene needed 60%. Both scored 60%; Safety failed and Hygiene passed.
-- Two candidates with the same percentage on the same competency can therefore get different results.
-
-**Recommendation.** One approved pass threshold per competency, 60% unless the role profile says otherwise, independent of which questions are drawn. Per-question pass thresholds stop affecting competency status.
+**E. HK-BEH-002 ("5: no touch+inform | 3: touches | 0: takes").** An answer that leaves the cash untouched but doesn't inform anyone has no band.
+- Interim: 0.
+- Recommendation: 3.
 
 ## Also open, already listed in the rulebook
 
 - **SCH-05:** fixed points for each scorecard level. The current 0–100 entry stays until the mapping is supplied.
 - **SCH-06:** how Behavioral Indicators and consistency count on the employer-led path. Today Behavior & Integrity is rated but left out of the average.
-- **D-04:** severity and gate consequences for the 735 drafted negative indicators (SCR-07).
+- **D-04:** severity and gate consequences for the 735 drafted negative indicators (SCR-07). Every affirmed negative stays a critical failure except where a question's own note gives it a band.

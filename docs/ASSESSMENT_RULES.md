@@ -25,7 +25,7 @@
 | GOV-03 | Same decision logic for B2B and B2C | Done | Scoring has no account-type branch; readiness display differs only by package entitlement |
 | GOV-04 | Completion, evidence, readiness, review, certificate stored separately | Partial | Separate fields exist; evidence validity is per response only |
 | GOV-05 | Approved versioned spec governs; record contradictions | Done | Version pinning on session and evaluation; contradictions in the escalations file |
-| GOV-06 | Every selectable question has executable bands | Partial | All 2,100 GOV2.0-RC1 questions execute their own note via `rubric_specs.py` and `rubric_specs_gov2_0.json`. Still undefined: two or more omissions on the generic note (Esc 1), ECG-TSK-001 denominator, HK-PRO-001 and HK-BEH-002 gaps |
+| GOV-06 | Every selectable question has executable bands | Partial | All 2,100 GOV2.0-RC1 questions execute their own note via `rubric_specs.py` and `rubric_specs_gov2_0.json`. HK-PRO-001 and HK-BEH-002 gaps closed by decisions D and E. Pending approval: core/supporting batch (Esc A), ECG-TSK-001 denominator (Esc C) |
 
 ## Assessment paths and languages
 
@@ -53,7 +53,7 @@
 | SCR-05 | 70 legacy notes executed as written (0/5, 0/2/3, completion %) | Done | 66 × 0/5 need only the elements their note names; HK-PRO-001 "calm only" = 2; completion % over the note's steps |
 | SCR-06 | Missing point, failed mandatory, zero and critical failure are distinct | Done | Decision 2 (20 Oct): no point is mandatory without an approved specification; none of the 89 D-02 drafts is applied. A missing point lowers the band, an affirmed negative indicator is 0 + critical failure |
 | SCR-07 | Negative evidence read in context; each negative needs severity | Partial | Context handling done. Affirmed own-conduct negatives are scored by the rules, not sent to review. Severities beyond the note's own bands (HK-BEH-001/002) blocked on D-04 |
-| SCR-08 | Resolve "two or more omissions" per question | Partial (Esc 1) | Interim: no band above 0, marked `INTERIM_PENDING_DECISION` on the result |
+| SCR-08 | Resolve "two or more omissions" per question | Partial (Esc A) | Decision A (20 Oct): no interim zero. Affected answers stay unscored (`PENDING_APPROVAL`) and the result is held with that cause; `recalculate_pending_rubric_results` re-scores after approval. Core/supporting batch proposed in `rubric_core_points_gov2_0.json` |
 | CAL-01 | Overall % = earned / assigned maximum | Done | `_build_session_summary` (RESPONSE_SUM). Check that layer weighting never overrides RESPONSE_SUM |
 | CAL-02 | Keep approved aggregation and weights | Done (PR) | FIX-02 weights repaired; equal-competency weighting not used |
 | CAL-03 | Every assigned question reconciled to a response state | Done (PR) | `run_for_evaluation`: unanswered questions make the summary incomplete; counts in summary metadata |
@@ -70,7 +70,7 @@
 | OUT-01 | 60+ Ready, 40–<60 Partially Ready, <40 Not Ready, before rounding, subject to gates | Done | `calculate_evaluator_outcome` (scheduled). AI path is decided by gates |
 | OUT-02 | AI path keeps role-profile Critical/Non-Critical checks; verify the versioned threshold configuration | Done | Decision 5 (20 Oct): `_aggregate_competencies` uses 60% per competency, or the role profile's `competency_thresholds` exception, on pooled versions. No approved exception exists today |
 | OUT-03 | Confirmed critical failure prevents Ready | Done | `_apply_evaluation_rollups` |
-| OUT-04 | High average can't bypass a safety gate on employer path | Blocked (Esc 3) | |
+| OUT-04 | High average can't bypass a safety gate on employer path | Done | Decision B (20 Oct): evaluator's confirmed `critical_safety_failure` with required evidence note gives Not Ready and blocks the certificate (`calculate_evaluator_outcome`, `certificate_eligibility`, evaluator report) |
 | OUT-05 | Incomplete and Insufficient Evidence shown as their cause, not poor performance | Done | Readiness INCOMPLETE → "Insufficient Evidence" |
 | OUT-06 | Ready / Partially Ready / Not Ready = جاهز / جاهز جزئيًا / غير جاهز | Done (PR) | `_resolve_readiness_indicator`, `READINESS_GAUGE`, comparison labels, templates. Frontend label map needs the matching UI PR |
 

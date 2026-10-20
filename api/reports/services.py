@@ -288,6 +288,7 @@ class EvaluationReportService:
             "hygiene": rating.hygiene if rating.hygiene is not None else 0,
             "communication": rating.communication if rating.communication is not None else 0,
             "task_execution": rating.task_execution,
+            "critical_safety_failure": rating.critical_safety_failure,
         })
         summary = evaluation.session_summaries.select_related("rule_set").first()
         secondary_score = None
@@ -351,6 +352,8 @@ class EvaluationReportService:
                     "comments": rating.comments,
                     "rated_by_name": rating.rated_by.get_full_name() if rating.rated_by else "",
                     "rated_at": rating.rated_at.isoformat() if rating.rated_at else "",
+                    "critical_safety_failure": rating.critical_safety_failure,
+                    "critical_safety_failure_note": rating.critical_safety_failure_note,
                 },
             }
             cls._prepare_evaluator_report_payload(payload, evaluation=evaluation, actor=actor)
@@ -368,7 +371,8 @@ class EvaluationReportService:
                 scoring_rule_set_name="Evaluator-rated four-field equal average",
                 scoring_rule_version="40/60 readiness bands", pdf_hash=pdf_hash,
                 report_payload=payload, competency_breakdown=payload["competency_breakdown"],
-                response_evidence_summary=[], human_review_flags=[], critical_failures=[],
+                response_evidence_summary=[], human_review_flags=[],
+                critical_failures=payload.get("critical_failures", []),
                 generated_by=actor if getattr(actor, "is_authenticated", False) else None,
                 generated_at=timezone.now(), last_regenerated_at=timezone.now() if stale_count else None,
                 metadata={"assessment_source": "EMPLOYER_EVALUATOR", "stale_previous_reports": stale_count},
@@ -410,6 +414,30 @@ class EvaluationReportService:
             'explanation': cls._evaluator_rating_explanation(code, value, language),
         } for code, name, value in dimensions]
         risk_indicators, improvement_plan = cls._evaluator_risks_and_plan(dimensions, language=language)
+        critical_failures = []
+        if rating.critical_safety_failure:
+            # Decision B (20 Oct 2026): the evaluator's confirmed critical
+            # safety failure is reported under Safety with its evidence note.
+            label = 'إخفاق حرج في السلامة أكده المقيّم' if language == 'ar' else 'Critical safety failure confirmed by the evaluator'
+            critical_failures = [{
+                'competency_code': 'safety_awareness', 'competency_name': breakdown[0]['competency_name'],
+                'topic': breakdown[0]['competency_name'], 'source': 'EVALUATOR_ASSESSMENT',
+                'reason': f"{label}: {rating.critical_safety_failure_note}",
+            }]
+            safety = dict(risk_indicators.get('safety_risk') or {})
+            safety.update({
+                'level': 'High',
+                'risk_score_display': 'مرتفع' if language == 'ar' else 'High',
+                'evidence': [critical_failures[0]['reason'], *(safety.get('evidence') or [])],
+            })
+            risk_indicators['safety_risk'] = safety
+            if not any(item.get('competency') == breakdown[0]['competency_name'] for item in improvement_plan):
+                improvement_plan.insert(0, {
+                    'competency': breakdown[0]['competency_name'], 'priority': 'High',
+                    'gap': critical_failures[0]['reason'],
+                    'recommended_action': 'تدريب موجّه ثم إعادة التقييم' if language == 'ar' else 'Targeted training, then re-assessment',
+                })
+        payload['critical_failures'] = critical_failures
         readiness = {
             'code': payload['readiness_status'], 'display': payload['readiness_label'],
             'value': payload['readiness_label'],
@@ -456,7 +484,10 @@ class EvaluationReportService:
         })
         payload['executive_summary'].update({
             'readiness_indicator': readiness,
-            'readiness_reason': {'employer_message': 'مشتق من تقييمات المقيّم المقدمة.' if language == 'ar' else 'Derived from submitted evaluator ratings.'},
+            'readiness_reason': {'employer_message': (
+                critical_failures[0]['reason'] if critical_failures
+                else 'مشتق من تقييمات المقيّم المقدمة.' if language == 'ar' else 'Derived from submitted evaluator ratings.'
+            )},
             'suggested_action': action, 'suggested_action_display': action_display,
             'assessment_scope': 'بقيادة صاحب العمل / تقييم المقيّم' if language == 'ar' else 'Employer-led / Evaluator-rated',
             'evaluation_reliability': 'أدلة أدخلها المقيّم' if language == 'ar' else 'Evaluator-entered evidence',

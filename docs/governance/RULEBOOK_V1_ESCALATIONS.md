@@ -22,32 +22,40 @@ All 89 drafted classifications are on questions with the generic score note ("5 
 - **Not applied:** all 89 drafts. A missing drafted point lowers the band like any other point; it does not zero the answer.
 - **No draft needs a separate decision.** Where a draft is a "do not ..." safety point (e.g. SNC-SAF-001 "do not restrain or put objects in the mouth"), the opposite affirmed action is already a negative indicator and scores 0 as a critical failure.
 
+## Decided by management, 20 Oct 2026 (second round)
+
+| Item | Decision | Built |
+| --- | --- | --- |
+| A. Two or more omissions on the generic note | Classify core and supporting points across the 2,026 questions, longest lists first. Missing a supporting detail must not force zero. No interim zero for customer scoring on affected answers. Submit classifications and scoring conditions in one batch. | Answers that cover some points but miss two or more are left unscored as `PENDING_APPROVAL`. An answer with no required point at all is insufficient evidence, which SCR-03 already scores 0; the result shows "scoring rule awaiting approval" and `recalculate_pending_rubric_results` re-scores them once a rule is approved. Proposed batch: `rubric_core_points_gov2_0.json` (status PROPOSED) and `GOV2.0-RC1_core_points_for_approval.xlsx`. |
+| B. Scheduled critical safety failure | Explicit field with a required evidence note. A confirmed failure is Not Ready and blocks the readiness certificate; its absence bypasses nothing. | `EvaluatorRating.critical_safety_failure` and note (migration 0030), scorecard UI, evaluator report |
+| C. ECG-TSK-001 | Map the six steps to the original four before changing the denominator. | Mapping below. Until confirmed, only a complete answer is scored. |
+| D. HK-PRO-001 | 2 for clarifying and adjusting without mentioning calm, absent refusal or other disqualifying evidence. | Band added |
+| E. HK-BEH-002 | 3 for leaving the cash untouched without reporting, absent taking or concealment. | Band added; "fails to report" scores 3 on this question, not a critical failure |
+| 89 D-02 classifications | Removed as unapproved mandatory gates; kept as ordinary scoring evidence. | Already built |
+
 ## Still open
 
-Each item names the question or rule, our recommendation, and what it changes. The system applies the interim shown until decided.
+**A. Approve the core/supporting batch** (`GOV2.0-RC1_core_points_for_approval.xlsx`).
+- Proposed conditions:
+  - 5 = all core points, answer safe. Supporting details are not required; the note says "5 = core evidence complete and safe".
+  - 3 = exactly one core point missing, answer safe.
+  - 0 = two or more core points missing, or an affirmed hard-negative.
+- Impact: 2,026 questions. 155 short lists are core throughout, so they behave exactly like today. The rest stop penalising missing supporting detail.
+- Until approved, answers missing two or more points are held as pending, so most results stay held.
+- To switch on: set `status` to `APPROVED` and deploy, then run `recalculate_pending_rubric_results`.
 
-**A. Generic note: a safe answer missing two or more points (SCR-08, 2,026 questions).**
-- The note defines 5 (all points) and 3 (one material element missing), but not two or more missing.
-- Interim: no band above 0, marked `INTERIM_PENDING_DECISION` on the result.
-- Impact: 1,130 of these questions list 5 to 8 points, so a concise answer covering most of them can score 0.
-- Recommendation: mark which points are core on those 1,130 questions, as one SME batch drafted for approval. Missing a non-core point would then never lower the band. Until approved, keep the interim.
-- Example: HK-TSK-002 (7 points). An answer covering 5 points, safely, scores 0 today.
+**C. ECG-TSK-001: confirm the denominator.**
 
-**B. Scheduled path: how a critical safety failure is confirmed (decision 3, OUT-04).**
-- Recommendation: the evaluator records an explicit "critical safety failure" mark on the scorecard with a short evidence note. That mark caps the outcome at Not Ready and blocks the certificate. A low Safety rating alone does not.
-- Impact: one new scorecard field. Unflagged results keep their current outcome.
+| Original v1.2 step (4) | Current Must Include (6) | Relation |
+| --- | --- | --- |
+| — | 1. Check mobility plan and required aid or helpers | New, independent preparatory step |
+| — | 2. Explain and obtain consent | New, independent preparatory step |
+| Positions self correctly | 3. Secure the chair and position feet safely | Rewording of the original step |
+| Supports weight properly | 4. Trained technique, no pulling arms or carrying full weight | Rewording of the original step |
+| Moves slowly | 5. Stand gradually | Same step |
+| Checks balance | 6. Check balance; stop for pain or dizziness | Same step, extended |
 
-**C. ECG-TSK-001: completion denominator.** The note says steps_completed/4, but the approved Must Include lists 6 steps.
-- Interim: completion over the 6 listed steps.
-- Recommendation: confirm 6.
-
-**D. HK-PRO-001 ("3: all 3 | 2: calm only | 0: refusal").** An answer that clarifies and adjusts, but doesn't mention listening calmly, has no band.
-- Interim: 0.
-- Recommendation: 2.
-
-**E. HK-BEH-002 ("5: no touch+inform | 3: touches | 0: takes").** An answer that leaves the cash untouched but doesn't inform anyone has no band.
-- Interim: 0.
-- Recommendation: 3.
+- Recommendation: keep the approved 4-step denominator over steps 3–6, with steps 1–2 as supporting detail. The package's own `en_points` for this question is 4.
 
 ## Also open, already listed in the rulebook
 

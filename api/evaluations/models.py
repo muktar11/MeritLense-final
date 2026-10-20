@@ -928,6 +928,12 @@ class EvaluatorRating(TimeStampedModel):
         validators=[MinValueValidator(0), MaxValueValidator(100)]
     )
     comments = models.TextField(blank=True)
+    # Management decision B (20 Oct 2026, rulebook OUT-04): the evaluator's
+    # confirmed critical safety failure, with its required evidence note.
+    # It produces Not Ready and blocks the readiness certificate whatever
+    # the average; a low Safety rating alone does not set it.
+    critical_safety_failure = models.BooleanField(default=False)
+    critical_safety_failure_note = models.TextField(blank=True)
     rated_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -945,7 +951,7 @@ class EvaluatorRating(TimeStampedModel):
         if self.pk:
             original = type(self).objects.filter(pk=self.pk).values(
                 "safety_awareness", "hygiene", "communication", "behavior_integrity",
-                "task_execution", "comments",
+                "task_execution", "comments", "critical_safety_failure", "critical_safety_failure_note",
             ).first()
             if original and any(original[field] != getattr(self, field) for field in original):
                 raise ValidationError("Final evaluator ratings may only be changed through the authorized correction workflow.")

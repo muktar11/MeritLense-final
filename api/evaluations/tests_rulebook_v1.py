@@ -124,6 +124,40 @@ class RulebookScoringTests(TestCase):
         evaluation.refresh_from_db()
         self.assertEqual(certificate_eligibility(evaluation, summary), (False, "NOT_READY"))
 
+    def test_confirmed_critical_safety_failure_is_not_ready_whatever_the_average(self):
+        # Decision B (20 Oct 2026) / OUT-04.
+        from api.evaluations.evaluator_rating_services import submit_evaluator_rating
+        from api.evaluations.serializers import EvaluatorRatingWriteSerializer
+
+        evaluation, summary = self._assess(scheduled=True)
+        ratings = {"safety_awareness": 90, "hygiene": 90, "communication": 90, "task_execution": 90,
+                   "behavior_integrity": 90, "critical_safety_failure": True}
+        missing_note = EvaluatorRatingWriteSerializer(data=ratings)
+        self.assertFalse(missing_note.is_valid())
+        self.assertIn("critical_safety_failure_note", missing_note.errors)
+
+        serializer = EvaluatorRatingWriteSerializer(
+            data={**ratings, "critical_safety_failure_note": "Said they would drive with failed brakes."})
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        submit_evaluator_rating(evaluation, ratings=serializer.validated_data, actor=self.owner)
+        evaluation.refresh_from_db()
+        self.assertEqual(evaluation.readiness_status, "NOT_READY")
+        self.assertEqual(evaluation.score, Decimal("90.00"))
+        self.assertIn("failed brakes", evaluation.readiness_override_reason)
+        self.assertEqual(certificate_eligibility(evaluation, summary), (False, "NOT_READY"))
+        report = evaluation.reports.get(report_status="ACTIVE")
+        self.assertEqual(report.readiness_status, "NOT_READY")
+        self.assertIn("failed brakes", report.critical_failures[0]["reason"])
+        self.assertEqual(report.report_payload["risk_indicators"]["safety_risk"]["level"], "High")
+
+    def test_no_safety_flag_keeps_the_existing_rating_outcome(self):
+        # Absence of the mark changes nothing else: same bands, same checks.
+        evaluation, summary = self._assess(scheduled=True)
+        EvaluatorRating.objects.create(evaluation=evaluation, safety_awareness=70, hygiene=70, communication=70,
+                                       task_execution=70, behavior_integrity=70, rated_by=self.owner)
+        evaluation.refresh_from_db()
+        self.assertEqual(certificate_eligibility(evaluation, summary), (True, "READY"))
+
     def test_scheduled_partially_ready_rating_stays_eligible(self):
         # CER-03: the existing Partially Ready treatment is kept.
         evaluation, summary = self._assess(scheduled=True)

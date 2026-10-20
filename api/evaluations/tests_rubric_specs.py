@@ -70,11 +70,39 @@ class RubricExecutionTests(SimpleTestCase):
         self.assertEqual(result["score"], Decimal("3.00"))
         self.assertFalse(result["critical_failure"])
 
-    def test_two_or_more_missing_on_the_generic_note_is_marked_interim(self):
+    def test_two_or_more_missing_on_the_generic_note_is_pending_not_zero(self):
+        # Decision A (20 Oct 2026): no interim zero for customer scoring.
         result = run("HK-TSK-002", [1, 2, 3, 4, 5])
         self.assertEqual(result["band"], rubric_specs.BAND_MULTI_OMISSION)
-        self.assertEqual(result["status"], "INTERIM_PENDING_DECISION")
-        self.assertEqual(result["score"], Decimal(str(SPECS["generic_530"]["multi_omission_score"])).quantize(Decimal("0.01")))
+        self.assertEqual(result["status"], rubric_specs.STATUS_PENDING)
+        self.assertIsNone(result["score"])
+        # A hard negative is still a defined 0, whatever is missing.
+        self.assertEqual(run("HK-TSK-002", [1], negatives=[2])["score"], Decimal("0.00"))
+        # No required point at all is insufficient evidence (SCR-03): 0.
+        nothing = run("HK-TSK-002", [])
+        self.assertEqual((nothing["score"], nothing["status"]), (Decimal("0.00"), "DEFINED"))
+
+    def test_proposed_core_classification_is_not_applied_until_approved(self):
+        core = json.loads((BANK / "rubric_core_points_gov2_0.json").read_text(encoding="utf-8"))
+        self.assertEqual(core["status"], "PROPOSED")
+        self.assertEqual(len(core["core_points"]), 2026)
+        _, spec = rubric_specs.spec_for(DRAFT, "HK-TSK-002")
+        self.assertNotIn("core", spec)
+
+    def test_approved_core_points_score_concise_answers_by_core_evidence(self):
+        # Decision A: missing a supporting detail never forces a lower band;
+        # the band follows the core points the note calls "core evidence".
+        _, spec = rubric_specs.spec_for(DRAFT, "HK-TSK-002")
+        spec = {**spec, "core": [4, 5], "core_scores": {"full": 5, "one_core_missing": 3, "two_or_more_core_missing": 0}}
+
+        def score(matched, negatives=()):
+            return rubric_specs.execute(spec, max_score=5, matched_ordinals=matched, total_points=7,
+                                        negative_ordinals=negatives)
+
+        self.assertEqual(score([4, 5])["score"], Decimal("5.00"))          # concise: core only
+        self.assertEqual(score([1, 2, 3, 4, 6, 7])["score"], Decimal("3.00"))  # one core missing
+        self.assertEqual(score([1, 2, 3, 6, 7])["score"], Decimal("0.00"))     # both core missing
+        self.assertEqual(score([4, 5], negatives=[1])["score"], Decimal("0.00"))
 
     def test_affirmed_negative_is_a_zero_and_critical_failure(self):
         result = run("HK-TSK-002", range(1, 8), negatives=[1])
@@ -92,6 +120,24 @@ class RubricExecutionTests(SimpleTestCase):
         self.assertEqual(run("HK-PRO-001", [1, 2, 3])["score"], Decimal("3.00"))
         self.assertEqual(run("HK-PRO-001", [1])["score"], Decimal("2.00"))
         self.assertEqual(run("HK-PRO-001", [1], negatives=[2])["score"], Decimal("0.00"))
+        # Decision D (20 Oct 2026): clarifies and adjusts without "calm" = 2.
+        self.assertEqual(run("HK-PRO-001", [2, 3])["score"], Decimal("2.00"))
+        self.assertEqual(run("HK-PRO-001", [2, 3], negatives=[2])["score"], Decimal("0.00"))
+        self.assertEqual(run("HK-PRO-001", [2])["score"], Decimal("0.00"))
+
+    def test_hk_beh_002_untouched_but_unreported_is_3(self):
+        # Decision E (20 Oct 2026).
+        self.assertEqual(run("HK-BEH-002", [1, 2, 3])["score"], Decimal("5.00"))
+        self.assertEqual(run("HK-BEH-002", [1, 2])["score"], Decimal("3.00"))
+        unreported = run("HK-BEH-002", [1, 2], negatives=[3])
+        self.assertEqual((unreported["score"], unreported["critical_failure"]), (Decimal("3.00"), False))
+        takes = run("HK-BEH-002", [2], negatives=[1])
+        self.assertEqual((takes["score"], takes["critical_failure"]), (Decimal("0.00"), True))
+
+    def test_ecg_tsk_001_scores_only_a_complete_answer_until_confirmed(self):
+        # Decision C (20 Oct 2026): denominator awaits confirmation.
+        self.assertEqual(run("ECG-TSK-001", range(1, 7))["score"], Decimal("10.00"))
+        self.assertEqual(run("ECG-TSK-001", [3, 4, 5, 6])["status"], rubric_specs.STATUS_PENDING)
 
     def test_hk_tsk_001_completion_mapping_fix_02(self):
         # FIX-02: 3 of 6 steps is 5/10, not 6/10, and never a mandatory zero.
@@ -217,6 +263,38 @@ class RubricScoringJourneyTests(TestCase):
                 # A routine partial answer never raises a review flag.
                 self.assertFalse(any(r.requires_human_review for r in results.values()))
                 self.assertTrue(all(r.passed_required_indicators for r in results.values()))
+
+    def test_undefined_band_holds_the_result_then_recalculates_on_approval(self):
+        def two_missing(code):
+            points, _ = all_points(code)
+            if code not in SPECS["questions"] and len(points) >= 4:
+                return points - {max(points), max(points) - 1}, set()
+            return points, set()
+
+        evaluation, summary, _ = self._assess("hotel_housekeeper", two_missing)
+        pending = summary.metadata["rubric_pending_question_codes"]
+        self.assertTrue(pending)
+        # No guessed zero: the answers are unscored and the result is held
+        # with its actual cause, not as poor performance.
+        self.assertFalse(evaluation.response_results.filter(
+            question__question_template__question_code__in=pending).exists())
+        self.assertEqual(summary.status, SessionEvaluationSummary.STATUS_PARTIALLY_EVALUATED)
+        self.assertEqual(evaluation.readiness_status, ReadinessStatus.INCOMPLETE)
+        self.assertIn("awaiting approval", evaluation.readiness_override_reason)
+
+        # An approved rule is deployed: the audited recalculation finalises it.
+        approved = {**rubric_specs.spec_set_for_version(DRAFT)}
+        approved["generic_530"] = {**approved["generic_530"], "multi_omission_score": 0}
+        from api.audit.models import AuditLog
+
+        with mock.patch.object(rubric_specs, "spec_set_for_version",
+                               lambda version: approved if version == DRAFT else None):
+            call_command("recalculate_pending_rubric_results", verbosity=0)
+        evaluation.refresh_from_db()
+        latest = evaluation.session_summaries.order_by("-generated_at").first()
+        self.assertEqual(latest.metadata["rubric_pending_question_codes"], [])
+        self.assertNotEqual(evaluation.readiness_status, ReadinessStatus.INCOMPLETE)
+        self.assertTrue(AuditLog.objects.filter(description__icontains="after scoring-rule approval").exists())
 
     def test_affirmed_unsafe_action_is_not_ready_without_review(self):
         target = {}

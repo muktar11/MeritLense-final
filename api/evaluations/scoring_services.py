@@ -78,11 +78,13 @@ class Week6ScoringService:
             raise Week6ScoringError("No candidate responses are available for scoring")
 
         results = []
+        rubric_pending = []
         for response in responses:
             result = cls._score_response(
                 evaluation=evaluation,
                 response=response,
                 rule_set=selected_rule_set,
+                pending=rubric_pending,
             )
             if result is not None:
                 results.append(result)
@@ -106,6 +108,7 @@ class Week6ScoringService:
             response_results=results,
             competency_results=competency_results,
             unanswered_questions=unanswered_questions,
+            rubric_pending=rubric_pending,
         )
         cls._apply_evaluation_rollups(evaluation=evaluation, summary=summary, actor=actor)
         # Release safeguard: anything that needs a person's judgement is held
@@ -191,7 +194,7 @@ class Week6ScoringService:
         return resolved
 
     @classmethod
-    def _score_response(cls, *, evaluation, response, rule_set):
+    def _score_response(cls, *, evaluation, response, rule_set, pending=None):
         artifact = getattr(response, "evaluation_input_artifact", None)
         # Without a prepared evidence artifact, there is no defensible basis
         # for a score. Leave this response out of scoring; the session rollup
@@ -254,6 +257,13 @@ class Week6ScoringService:
                 negative_ordinals=sorted(negative_ordinals),
             )
             rubric["spec_version"] = spec_version
+            if rubric["status"] == rubric_specs.STATUS_PENDING:
+                # Decision A (20 Oct 2026): no interim score. The answer stays
+                # unscored until its rule is approved, then is recalculated.
+                ResponseEvaluationResult.objects.filter(response=response, rule_set=rule_set).delete()
+                if pending is not None:
+                    pending.append(rule.question_code)
+                return None
             raw_score = rubric["score"]
             missing_required = []
             critical_hits = [
@@ -564,7 +574,7 @@ class Week6ScoringService:
 
     @classmethod
     def _build_session_summary(cls, *, evaluation, rule_set, responses, response_results, competency_results,
-                               unanswered_questions=()):
+                               unanswered_questions=(), rubric_pending=()):
         total_score = sum((Decimal(str(result.score)) for result in response_results), cls.DECIMAL_ZERO)
         max_score = sum((Decimal(str(result.max_score)) for result in response_results), cls.DECIMAL_ZERO)
         layer_breakdown, weighted_percentage = cls._compute_layer_breakdown(competency_results)
@@ -652,6 +662,9 @@ class Week6ScoringService:
                     "assigned_question_count": len(responses) + len(unanswered_questions),
                     "unanswered_question_count": len(unanswered_questions),
                     "unanswered_question_orders": [question.question_order for question in unanswered_questions],
+                    # Answers whose band awaits an approved scoring rule
+                    # (decision A, 20 Oct 2026); recalculated on approval.
+                    "rubric_pending_question_codes": list(rubric_pending),
                 },
                 "generated_at": timezone.now(),
             },
@@ -785,6 +798,14 @@ class Week6ScoringService:
             evaluation.readiness_override_applied = False
             evaluation.readiness_override_reason = ""
             readiness_reason = "Insufficient evidence to determine a complete assessment result."
+            pending_codes = (summary.metadata or {}).get("rubric_pending_question_codes") or []
+            if pending_codes:
+                # OUT-05: show the actual cause, not poor performance.
+                readiness_reason = (
+                    f"Scoring rule awaiting approval for {len(pending_codes)} answer(s) "
+                    f"({', '.join(pending_codes)}); the result will be recalculated once it is approved."
+                )
+                evaluation.readiness_override_reason = readiness_reason
             update_fields.extend(["readiness_status", "readiness_override_applied", "readiness_override_reason"])
         else:
             evaluation.readiness_status = ReadinessStatus.PENDING

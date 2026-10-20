@@ -2130,8 +2130,10 @@ class CandidateScoreSummaryApiTests(TestCase):
         self.assertEqual(rated["source"], "EVALUATOR_RATING")
         self.assertEqual(rated["status"], SessionEvaluationSummary.STATUS_EVALUATED)
         self.assertEqual(rated["role_code"], "domestic_worker")
-        # Average of the 5 approved dimensions; psych_professional excluded.
-        self.assertEqual(float(rated["overall_percentage"]), 64.2)
+        # No stored score on this older-style rating: the evaluator outcome
+        # is derived - the four-field average (OUT-01); behavior_integrity
+        # and psych_professional are not in it.
+        self.assertEqual(float(rated["overall_percentage"]), 62.75)
         self.assertEqual(
             {c["code"]: float(c["percentage"]) for c in rated["competencies"]},
             {"safety_awareness": 60.0, "hygiene_standards": 60.0, "communication_ability": 65.0,
@@ -2145,7 +2147,8 @@ class CandidateScoreSummaryApiTests(TestCase):
         self.client.force_authenticate(self.user)
         rated = next(e for e in self.client.get("/api/v1/evaluations/candidate-scores").data
                      if e["source"] == "EVALUATOR_RATING")
-        self.assertEqual(float(rated["overall_percentage"]), 70.0)
+        # Only safety and task execution of the four scored fields were rated.
+        self.assertEqual(float(rated["overall_percentage"]), 75.0)
         self.assertEqual(len(rated["competencies"]), 3)
 
     def test_rated_and_ai_results_are_ordered_newest_first_per_candidate(self):
@@ -3886,7 +3889,8 @@ class EvaluatorRatingTests(TestCase):
         self.assertEqual(report.report_payload['executive_summary']['score_source'], 'EVALUATOR_ASSESSMENT')
         self.assertEqual(report.overall_percentage, Decimal('75.00'))
         self.assertFalse(report.report_payload['transcript_included'])
-        self.assertEqual(len(report.competency_breakdown), 4)
+        # Four scored ratings plus Behavioral Indicators (shown, not averaged; SCH-06).
+        self.assertEqual(len(report.competency_breakdown), 5)
         render_pdf.assert_called_once()
         self.assertEqual(render_pdf.call_args.kwargs['report_payload']['assessment_context']['target_role'], self.session.role_name)
         EvaluationReportService.render_existing_pdf(report)

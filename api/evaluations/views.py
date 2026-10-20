@@ -41,7 +41,9 @@ from api.core.constants import AuditLogCategory, AuditLogAction, AuditLogSeverit
 from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_by_identifier
 from .models import Certificate, EvaluationReadinessDecisionRecord, ScoringRuleSet, SessionEvaluationSummary
 from .scoring_services import Week6ScoringError, Week6ScoringService
-from .evaluator_rating_services import submit_evaluator_rating, correct_evaluator_rating, finalize_scheduled_assessment
+from .evaluator_rating_services import (
+    SCORE_FIELDS, correct_evaluator_rating, finalize_scheduled_assessment, submit_evaluator_rating,
+)
 from .certificate_services import generate_certificate
 from api.reports.models import EvaluationReport
 from api.reports.serializers import EvaluationReportSerializer
@@ -102,6 +104,10 @@ class CandidateScoreSummaryView(APIView):
                     ).order_by("-generated_at", "-created_at"),
                 )
             )
+            # GOV-02: a scheduled assessment's AI summary is reference only;
+            # its result is the evaluator row below, so it is not listed
+            # here as a second, AI-scored result.
+            .filter(session__scheduled_start_at__isnull=True)
             .order_by("candidate_id", "-generated_at", "-created_at")
         )
 
@@ -201,8 +207,9 @@ class CandidateScoreSummaryView(APIView):
         """Scheduled interviews are scored by a person (EvaluatorRating), not
         by the AI pipeline, so they never get a SessionEvaluationSummary.
         Without these rows a rated scheduled interview was invisible on the
-        Scores page. The overall score is the average of the rated
-        dimensions - the same figure the Evaluations table shows."""
+        Scores page. The overall score is the evaluator outcome stored on the
+        evaluation (the four-field average, OUT-01) - the same figure the
+        Evaluations table and report show."""
         evaluations = (
             _accessible_evaluations_queryset(user, request)
             .filter(evaluator_rating__isnull=False, session__scheduled_start_at__isnull=False)
@@ -227,14 +234,21 @@ class CandidateScoreSummaryView(APIView):
             if not competencies:
                 continue
             rated_at = rating.rated_at or rating.updated_at
+            # Older ratings were saved before the evaluation stored its
+            # score; derive the same evaluator outcome instead of failing.
+            overall = evaluation.score
+            if overall is None:
+                rated = [getattr(rating, field) for field in SCORE_FIELDS if getattr(rating, field) is not None]
+                overall = sum(rated) / len(rated) if rated else 0
             rows.append(
                 {
                     "candidate_id": str(evaluation.candidate.public_id),
                     "evaluation_id": str(evaluation.public_id),
                     "role_code": evaluation.session.role_code or evaluation.candidate.job_role,
                     "evaluation_tier": evaluation.evaluation_tier,
-                    "overall_percentage": float(evaluation.score),
-                    "status": evaluation.readiness_status,
+                    "overall_percentage": round(float(overall), 2),
+                    # Same meaning as the AI rows' status: scoring is complete.
+                    "status": SessionEvaluationSummary.STATUS_EVALUATED,
                     "source": self.SOURCE_EVALUATOR_RATING,
                     "generated_at": rated_at,
                     "competencies": competencies,

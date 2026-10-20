@@ -9,6 +9,7 @@ from channels.layers import get_channel_layer
 from django.conf import settings
 
 from api.audit.services import AuditLogService
+from api.monitoring.models import ServiceIncident
 from api.core.constants import (
     PackageAudience,
     AuditLogAction,
@@ -509,9 +510,17 @@ class InterviewSessionService:
         ).exists()
 
     @classmethod
-    def _log_output_failure(cls, session, actor, description, severity=AuditLogSeverity.ERROR):
+    def _log_output_failure(cls, session, actor, description, severity=AuditLogSeverity.ERROR,
+                            incident_cause=None, affected_output=""):
         """EXC-04: an output failure is always recorded, including on the
-        candidate's own path where there is no acting user."""
+        candidate's own path where there is no acting user. A platform
+        failure also opens a service incident (EXC-06)."""
+        if incident_cause:
+            from api.monitoring.services import ServiceIncidentService
+
+            ServiceIncidentService.report(
+                cause=incident_cause, summary=description, session=session, affected_output=affected_output,
+            )
         if severity == AuditLogSeverity.ERROR:
             logger.error("%s (session %s)", description, session.public_id, exc_info=True)
         else:
@@ -542,9 +551,9 @@ class InterviewSessionService:
 
         Terminal AI failures remain represented as incomplete evidence by the
         scorer; they do not prevent the candidate session from completing.
-        A failure here never blocks the other outputs (DOC-01) and is always
-        logged (EXC-04). The durable incident with owner, deadline and
-        notifications (EXC-06) is not built yet.
+        A failure here never blocks the other outputs (DOC-01), is always
+        logged (EXC-04) and, when it is a platform failure, opens a service
+        incident that notifies administrators (EXC-06).
         """
         if session.status != InterviewSessionStatus.COMPLETED or cls._ai_processing_pending(session):
             return None
@@ -554,18 +563,25 @@ class InterviewSessionService:
             summary = Week6ScoringService.run_for_evaluation(evaluation=evaluation, actor=actor)
         except Week6ScoringError as exc:
             summary = None
+            # A candidate who answered nothing is non-completion, not a
+            # platform failure; anything else here is (e.g. a missing rule).
+            no_answers = not session.responses.exists()
             cls._log_output_failure(
                 session, actor, f"Session completed unscored for {candidate_name} - {exc}",
                 severity=AuditLogSeverity.WARNING,
+                incident_cause=None if no_answers else ServiceIncident.CAUSE_SCORING_FAILED,
+                affected_output="score, readiness, report",
             )
         except Exception as exc:
             summary = None
             cls._log_output_failure(
                 session, actor,
                 f"Automatic scoring failed for {candidate_name} - session completed unscored: {exc}",
+                incident_cause=ServiceIncident.CAUSE_SCORING_FAILED, affected_output="score, readiness, report",
             )
         if summary is None:
             return None
+        cls._report_failed_ai_processing(session, candidate_name)
         if session.is_scheduled_interview and getattr(evaluation, "evaluator_rating", None) is None:
             # GOV-02: the AI summary above is reference only. A scheduled
             # assessment's report and certificate come from the evaluator's
@@ -577,6 +593,7 @@ class InterviewSessionService:
             except Exception as exc:
                 cls._log_output_failure(
                     session, actor, f"Automatic certificate generation failed for {candidate_name}: {exc}",
+                    incident_cause=ServiceIncident.CAUSE_CERTIFICATE_FAILED, affected_output="certificate",
                 )
         # Avoid duplicate immutable reports on retries, but replace an
         # earlier partial report if later AI recovery changed the result.
@@ -595,8 +612,29 @@ class InterviewSessionService:
             except Exception as exc:
                 cls._log_output_failure(
                     session, actor, f"Automatic report generation failed for {candidate_name}: {exc}",
+                    incident_cause=ServiceIncident.CAUSE_REPORT_FAILED, affected_output="report",
                 )
         return summary
+
+    @classmethod
+    def _report_failed_ai_processing(cls, session, candidate_name):
+        """SCR-04 / EXC-06: answers whose AI processing failed leave the
+        assessment incomplete; that is a platform failure to recover, so
+        an administrator is told rather than the gap going unnoticed."""
+        failed_orders = sorted(
+            session.responses.filter(processing_status="FAILED").values_list("question__question_order", flat=True)
+        )
+        if not failed_orders:
+            return
+        from api.monitoring.services import ServiceIncidentService
+
+        ServiceIncidentService.report(
+            cause=ServiceIncident.CAUSE_AI_PROCESSING_FAILED,
+            summary=f"AI processing failed for {len(failed_orders)} answer(s) of {candidate_name}",
+            details=f"Question orders: {', '.join(str(order) for order in failed_orders)}",
+            session=session,
+            affected_output="evidence for the listed answers; assessment is incomplete",
+        )
 
     @classmethod
     def create_session(cls, *, candidate, config, created_by, package_code="", scheduled_start_at=None,

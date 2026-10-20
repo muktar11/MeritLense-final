@@ -204,6 +204,27 @@ class ReportContentTests(SimpleTestCase):
         self.assertNotIn("Possible safety or compliance concern: picks up needle by hand.", risks["integrity_risk"]["evidence"])
         self.assertEqual(risks["integrity_risk"]["level"], "Low")
 
+    def test_missing_point_on_a_behavioral_answer_is_not_an_integrity_risk(self):
+        # On 19 Oct production showed Integrity "High" with no evidence: a
+        # missing-point flag on HK-PRO-001 set the level.
+        competencies = [{"competency_code": "behavior_integrity", "competency_name": "Behavior & Integrity",
+                         "percentage": 76.92, "status": "MEETS_THRESHOLD", "assessment_status": "MEETS_THRESHOLD"}]
+        evidence = [{"candidate_response_id": "r-beh", "competency_code": "behavior_integrity"}]
+        flags = [{"flag_type": "missing_required_indicator", "candidate_response_id": "r-beh",
+                  "requires_review": True, "message": "Additional evidence is required for assessment question 18."}]
+        risk = self._risks(flags, competencies, evidence)["integrity_risk"]
+        self.assertEqual(risk["level"], "Low")
+
+    def test_integrity_concern_still_raises_integrity_risk(self):
+        competencies = [{"competency_code": "behavior_integrity", "competency_name": "Behavior & Integrity",
+                         "percentage": 80, "status": "MEETS_THRESHOLD", "assessment_status": "MEETS_THRESHOLD"}]
+        evidence = [{"candidate_response_id": "r-beh", "competency_code": "behavior_integrity"}]
+        flags = [{"flag_type": "low_confidence_interpretation", "candidate_response_id": "r-beh",
+                  "requires_review": True, "message": "Possible compliance concern: hides damage."}]
+        risk = self._risks(flags, competencies, evidence)["integrity_risk"]
+        self.assertEqual(risk["level"], "High")
+        self.assertIn("Possible compliance concern: hides damage.", risk["evidence"])
+
     def test_communication_below_threshold_is_never_low_risk(self):
         competencies = [{"competency_code": "communication_ability", "competency_name": "Communication Ability",
                          "percentage": 50, "status": "BELOW_THRESHOLD", "assessment_status": "BELOW_THRESHOLD"}]

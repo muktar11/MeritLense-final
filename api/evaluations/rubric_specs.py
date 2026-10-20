@@ -5,7 +5,9 @@ configuration in api/interviews/fixtures/question_bank/rubric_specs_*.json:
 
 - generic 5 / 3 / 0 note: 5 when every point is evidenced, 3 when exactly one
   is missing; the undefined "two or more missing" case is left unscored as
-  pending approval (SCR-08, management decision A of 20 Oct 2026);
+  pending approval (SCR-08, management decision A of 20 Oct 2026). Once a
+  question's Essential / Core / Supporting classification is individually
+  approved, it is scored by that classification instead (see execute);
 - legacy notes (SCR-05): 0/5, 0/2/3 and completion %, executed as written;
 - a Must Include point is never mandatory by default (management decision of
   20 Oct 2026, SCR-06), so no point zeroes an answer on its own;
@@ -20,10 +22,11 @@ from pathlib import Path
 
 SPEC_DIR = Path(__file__).resolve().parents[1] / "interviews" / "fixtures" / "question_bank"
 SPEC_FILES = ("rubric_specs_gov2_0.json",)
-# Core/supporting classification of the generic-note questions (decision A,
-# 20 Oct 2026). Applied only once its status is APPROVED.
-CORE_FILES = ("rubric_core_points_gov2_0.json",)
-CORE_APPROVED = "APPROVED"
+# Essential / Core / Supporting classification of the generic-note questions
+# (decision A, 20 Oct 2026). Applied per question, only to questions whose
+# review_status is APPROVED; every other question keeps the generic rule.
+CLASSIFICATION_FILES = ("rubric_core_points_gov2_0.json",)
+REVIEW_APPROVED = "APPROVED"
 
 BAND_FULL = "FULL"
 BAND_PARTIAL = "PARTIAL"
@@ -32,6 +35,10 @@ BAND_NEGATIVE = "NEGATIVE_INDICATOR"
 BAND_NEGATIVE_CAP = "NEGATIVE_INDICATOR_BAND"
 BAND_COMPLETION = "COMPLETION"
 BAND_MULTI_OMISSION = "MULTI_OMISSION"
+# An essential requirement is missing: 0, but not a critical failure - it
+# is distinct from an affirmed unsafe action (management decision 2).
+BAND_ESSENTIAL_MISSING = "ESSENTIAL_MISSING"
+BAND_CORE_OMISSIONS = "CORE_OMISSIONS"
 
 # The answer's band has no approved rule yet: it is left unscored (never a
 # guessed zero) and recalculated once the rule is approved (REL-02).
@@ -46,16 +53,14 @@ def _load_specs():
         if path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
             specs[data["bank_version"]] = data
-    for name in CORE_FILES:
+    for name in CLASSIFICATION_FILES:
         path = SPEC_DIR / name
         if path.exists():
-            core = json.loads(path.read_text(encoding="utf-8"))
-            if core.get("status") == CORE_APPROVED and core["bank_version"] in specs:
-                specs[core["bank_version"]] = {
-                    **specs[core["bank_version"]],
-                    "core_points": core["core_points"],
-                    "core_scores": core["approved_scores"],
-                    "spec_version": f"{specs[core['bank_version']]['spec_version']}+{core['classification_version']}",
+            classification = json.loads(path.read_text(encoding="utf-8"))
+            if classification["bank_version"] in specs:
+                specs[classification["bank_version"]] = {
+                    **specs[classification["bank_version"]],
+                    "classification": classification,
                 }
     return specs
 
@@ -70,13 +75,17 @@ def spec_for(question_set_version, question_code):
     spec_set = spec_set_for_version(question_set_version)
     if spec_set is None:
         return None
+    spec_version = spec_set["spec_version"]
     spec = spec_set["questions"].get(question_code)
     if spec is None:
         spec = {"kind": "generic_530", **spec_set["generic_530"]}
-        core = (spec_set.get("core_points") or {}).get(question_code)
-        if core:
-            spec = {**spec, "core": core, "core_scores": spec_set["core_scores"]}
-    return spec_set["spec_version"], spec
+        classification = spec_set.get("classification") or {}
+        entry = (classification.get("questions") or {}).get(question_code)
+        if entry and entry.get("review_status") == REVIEW_APPROVED:
+            # The result records exactly which classification scored it.
+            spec = {**spec, "ecs": entry}
+            spec_version = f"{spec_version}+{classification['classification_version']}"
+    return spec_version, spec
 
 
 def _quantize(value):
@@ -111,19 +120,25 @@ def execute(spec, *, max_score, matched_ordinals, total_points, negative_ordinal
         return result
 
     kind = spec.get("kind")
-    if kind == "generic_530" and spec.get("core"):
-        # Approved core/supporting classification: the note's "core
-        # evidence" and "material element" are the core points; supporting
-        # details never lower the band.
-        scores = spec["core_scores"]
-        missing_core = len(set(spec["core"]) - matched)
-        result["missing_core_count"] = missing_core
-        if missing_core == 0:
-            score, band = Decimal(str(scores["full"])), BAND_FULL
-        elif missing_core == 1:
-            score, band = Decimal(str(scores["one_core_missing"])), BAND_PARTIAL
+    if kind == "generic_530" and spec.get("ecs"):
+        # Approved classification for this question: any Essential point
+        # missing is 0; 5 needs every Essential and Core point; 3 allows up
+        # to the question's own number of missing Core points. Supporting
+        # points never lower the band.
+        ecs = spec["ecs"]
+        missing_essential = sorted(set(ecs["essential"]) - matched)
+        missing_core = sorted(set(ecs["core"]) - matched)
+        result.update(missing_essential=missing_essential, missing_core_count=len(missing_core))
+        if not matched:
+            score, band = Decimal("0"), BAND_ZERO
+        elif missing_essential:
+            score, band = Decimal("0"), BAND_ESSENTIAL_MISSING
+        elif not missing_core:
+            score, band = Decimal(str(spec["full_score"])), BAND_FULL
+        elif len(missing_core) <= ecs["max_core_missing_for_3"]:
+            score, band = Decimal(str(spec["partial_score"])), BAND_PARTIAL
         else:
-            score, band = Decimal(str(scores["two_or_more_core_missing"])), BAND_ZERO
+            score, band = Decimal("0"), BAND_CORE_OMISSIONS
     elif kind == "generic_530":
         if missing_count == 0 and total_points > 0:
             score, band = Decimal(str(spec["full_score"])), BAND_FULL
@@ -145,9 +160,17 @@ def execute(spec, *, max_score, matched_ordinals, total_points, negative_ordinal
         if spec.get("pending_unless_complete") and len(matched) < total_points:
             result.update(score=None, band=BAND_COMPLETION, status=STATUS_PENDING)
             return result
-        completed = min(len(matched), denominator)
+        # "counted": only these steps count toward the denominator;
+        # "missing_caps": a separate requirement whose absence caps the
+        # score at a fraction of the maximum.
+        counted = set(spec.get("counted") or matched)
+        completed = min(len(matched & counted), denominator)
         score = _quantize(max_score * Decimal(completed) / Decimal(denominator)) if denominator else Decimal("0")
         band = BAND_COMPLETION
+        caps_hit = {int(o): Decimal(str(f)) for o, f in (spec.get("missing_caps") or {}).items() if int(o) not in matched}
+        if caps_hit:
+            score = min(score, _quantize(max_score * min(caps_hit.values())))
+            result["capped_by_missing"] = sorted(caps_hit)
     else:
         score, band = Decimal("0"), BAND_ZERO
         for entry in spec.get("bands") or []:

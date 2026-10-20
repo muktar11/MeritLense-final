@@ -82,27 +82,87 @@ class RubricExecutionTests(SimpleTestCase):
         nothing = run("HK-TSK-002", [])
         self.assertEqual((nothing["score"], nothing["status"]), (Decimal("0.00"), "DEFINED"))
 
-    def test_proposed_core_classification_is_not_applied_until_approved(self):
-        core = json.loads((BANK / "rubric_core_points_gov2_0.json").read_text(encoding="utf-8"))
-        self.assertEqual(core["status"], "PROPOSED")
-        self.assertEqual(len(core["core_points"]), 2026)
-        _, spec = rubric_specs.spec_for(DRAFT, "HK-TSK-002")
-        self.assertNotIn("core", spec)
+    def test_proposed_classification_leaves_every_question_unreviewed_and_inactive(self):
+        # "Do not activate it as approved yet"; unchanged rows stay unreviewed.
+        classification = json.loads((BANK / "rubric_core_points_gov2_0.json").read_text(encoding="utf-8"))
+        self.assertEqual(classification["status"], "PROPOSED")
+        self.assertEqual(len(classification["questions"]), 2026)
+        self.assertEqual({q["review_status"] for q in classification["questions"].values()}, {"UNREVIEWED"})
+        for code, entry in classification["questions"].items():
+            total = len(split_points(V2_BY_CODE[code]["must_include_en"]))
+            self.assertTrue(set(entry["essential"] + entry["core"]) <= set(range(1, total + 1)), code)
+            self.assertFalse(set(entry["essential"]) & set(entry["core"]), code)
+        version, spec = rubric_specs.spec_for(DRAFT, "HK-TSK-002")
+        self.assertNotIn("ecs", spec)
+        self.assertEqual(version, SPECS["spec_version"])
 
-    def test_approved_core_points_score_concise_answers_by_core_evidence(self):
-        # Decision A: missing a supporting detail never forces a lower band;
-        # the band follows the core points the note calls "core evidence".
-        _, spec = rubric_specs.spec_for(DRAFT, "HK-TSK-002")
-        spec = {**spec, "core": [4, 5], "core_scores": {"full": 5, "one_core_missing": 3, "two_or_more_core_missing": 0}}
+    def _approve(self, codes):
+        spec_set = rubric_specs.spec_set_for_version(DRAFT)
+        classification = json.loads(json.dumps(spec_set["classification"]))
+        for code in codes:
+            classification["questions"][code]["review_status"] = "APPROVED"
+        approved = {**spec_set, "classification": classification}
+        return mock.patch.object(rubric_specs, "spec_set_for_version",
+                                 lambda version: approved if version == DRAFT else None)
+
+    def test_classification_applies_only_to_individually_approved_questions(self):
+        with self._approve(["HK-TSK-002"]):
+            version, spec = rubric_specs.spec_for(DRAFT, "HK-TSK-002")
+            self.assertEqual(spec["ecs"]["essential"], [4])
+            self.assertTrue(version.endswith("+GOV2.0-RC1-ecs-2026-10-20"))
+            # Another question is untouched: generic rule, base version.
+            version, spec = rubric_specs.spec_for(DRAFT, "HK-TSK-003")
+            self.assertNotIn("ecs", spec)
+            self.assertEqual(version, SPECS["spec_version"])
+
+    def test_approved_classification_scores_essential_core_and_supporting(self):
+        # HK-TSK-002: Essential 4 (clean then disinfect), Core 1, 5, 7, one
+        # Core point may be missing for a 3; points 2, 3, 6 are Supporting.
+        with self._approve(["HK-TSK-002"]):
+            concise = run("HK-TSK-002", [1, 4, 5, 7])
+            self.assertEqual((concise["score"], concise["band"]), (Decimal("5.00"), rubric_specs.BAND_FULL))
+            one_core = run("HK-TSK-002", [2, 3, 4, 5, 6, 7])
+            self.assertEqual((one_core["score"], one_core["band"]), (Decimal("3.00"), rubric_specs.BAND_PARTIAL))
+            two_core = run("HK-TSK-002", [2, 3, 4, 6, 7])
+            self.assertEqual((two_core["score"], two_core["band"]), (Decimal("0.00"), rubric_specs.BAND_CORE_OMISSIONS))
+            # Missing the essential step alone is 0, recorded apart from an
+            # affirmed unsafe action and not a critical failure.
+            essential = run("HK-TSK-002", [1, 2, 3, 5, 6, 7])
+            self.assertEqual((essential["score"], essential["band"], essential["critical_failure"]),
+                             (Decimal("0.00"), rubric_specs.BAND_ESSENTIAL_MISSING, False))
+            self.assertEqual(essential["missing_essential"], [4])
+            unsafe = run("HK-TSK-002", range(1, 8), negatives=[1])
+            self.assertEqual((unsafe["score"], unsafe["critical_failure"]), (Decimal("0.00"), True))
+            self.assertEqual(run("HK-TSK-002", [])["score"], Decimal("0.00"))
+
+    def test_two_missing_core_points_score_3_where_the_question_allows_it(self):
+        # No automatic zero for two omissions: the question's own allowance.
+        spec = {"kind": "generic_530", **SPECS["generic_530"],
+                "ecs": {"essential": [], "core": [1, 2, 3, 4], "max_core_missing_for_3": 2}}
+
+        def score(matched):
+            return rubric_specs.execute(spec, max_score=5, matched_ordinals=matched, total_points=6,
+                                        negative_ordinals=[])["score"]
+
+        self.assertEqual(score([3, 4]), Decimal("3.00"))
+        self.assertEqual(score([4, 5, 6]), Decimal("0.00"))
+
+    def test_ecg_tsk_001_proposal_caps_missing_mobility_plan_and_consent(self):
+        _, spec = rubric_specs.spec_for(DRAFT, "ECG-TSK-001")
+        proposal = spec["proposed"]
 
         def score(matched, negatives=()):
-            return rubric_specs.execute(spec, max_score=5, matched_ordinals=matched, total_points=7,
-                                        negative_ordinals=negatives)
+            return rubric_specs.execute(proposal, max_score=10, matched_ordinals=matched, total_points=6,
+                                        negative_ordinals=negatives)["score"]
 
-        self.assertEqual(score([4, 5])["score"], Decimal("5.00"))          # concise: core only
-        self.assertEqual(score([1, 2, 3, 4, 6, 7])["score"], Decimal("3.00"))  # one core missing
-        self.assertEqual(score([1, 2, 3, 6, 7])["score"], Decimal("0.00"))     # both core missing
-        self.assertEqual(score([4, 5], negatives=[1])["score"], Decimal("0.00"))
+        self.assertEqual(score(range(1, 7)), Decimal("10.00"))
+        self.assertEqual(score([1, 2, 3, 4, 5]), Decimal("7.50"))   # 3 of the 4 counted steps
+        self.assertEqual(score([2, 3, 4, 5, 6]), Decimal("5.00"))   # mobility plan missing
+        self.assertEqual(score([1, 3, 4, 5, 6]), Decimal("7.50"))   # consent missing
+        self.assertEqual(score([3, 4, 5, 6]), Decimal("5.00"))      # both missing
+        self.assertEqual(score(range(1, 7), negatives=[3]), Decimal("0.00"))
+        # Not active: until confirmed, an incomplete answer stays pending.
+        self.assertEqual(run("ECG-TSK-001", [1, 2, 3, 4, 5])["status"], rubric_specs.STATUS_PENDING)
 
     def test_affirmed_negative_is_a_zero_and_critical_failure(self):
         result = run("HK-TSK-002", range(1, 8), negatives=[1])
@@ -295,6 +355,33 @@ class RubricScoringJourneyTests(TestCase):
         self.assertEqual(latest.metadata["rubric_pending_question_codes"], [])
         self.assertNotEqual(evaluation.readiness_status, ReadinessStatus.INCOMPLETE)
         self.assertTrue(AuditLog.objects.filter(description__icontains="after scoring-rule approval").exists())
+
+        # The original records and rule versions are preserved, write-once.
+        from api.evaluations.models import ScoreRecalculationSnapshot
+
+        snapshot = ScoreRecalculationSnapshot.objects.get(evaluation=evaluation)
+        original = snapshot.before["session_summaries"][0]["fields"]
+        self.assertEqual(original["metadata"]["rubric_pending_question_codes"], pending)
+        self.assertEqual(original["status"], SessionEvaluationSummary.STATUS_PARTIALLY_EVALUATED)
+        self.assertEqual(snapshot.before["evaluation"][0]["fields"]["readiness_status"], ReadinessStatus.INCOMPLETE)
+        self.assertEqual(len(snapshot.before["response_results"]), evaluation.response_results.count() - len(pending))
+        self.assertEqual(snapshot.rubric_spec_versions, [SPECS["spec_version"]])
+        self.assertTrue(snapshot.rule_set_versions)
+        self.assertEqual(snapshot.after["pending"], [])
+        snapshot.before = {}
+        with self.assertRaises(ValueError):
+            snapshot.save()
+        # Release still passes its checks: the certificate follows the
+        # normal eligibility rule for the recalculated outcome.
+        report = evaluation.reports.get(report_status="ACTIVE")
+        self.assertEqual(report.overall_percentage, latest.overall_percentage)
+        from api.core.constants import CertificateStatus
+
+        eligible, _ = certificate_eligibility(evaluation, latest)
+        if not eligible:
+            self.assertNotEqual(evaluation.certificate_status, CertificateStatus.ISSUED)
+        elif evaluation.certificate_enabled:
+            self.assertEqual(evaluation.certificate_status, CertificateStatus.ISSUED)
 
     def test_affirmed_unsafe_action_is_not_ready_without_review(self):
         target = {}

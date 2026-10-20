@@ -9,17 +9,23 @@ class AuditLogService:
     @classmethod
     def log(cls, user, action, category, description, resource=None, 
             severity=AuditLogSeverity.INFO, data=None, request=None):
+        if user is None:
+            # Automatic actions (e.g. a recalculation run as a management
+            # command) have no acting user: record them as system actions
+            # rather than failing the action being audited.
+            return cls.log_system(action=action, category=category, description=description,
+                                  resource=resource, severity=severity, data=data, request=request)
         resource_type = None
         resource_id = None
         resource_type_name = ''
         resource_name = ''
-        
+
         if resource:
             content_type = ContentType.objects.get_for_model(resource)
             resource_type = content_type
             resource_id = resource.id
             resource_type_name = str(resource._meta.verbose_name).title()
-            
+
             if hasattr(resource, 'name'):
                 resource_name = str(resource.name)
             elif hasattr(resource, 'title'):

@@ -35,16 +35,43 @@ All 89 drafted classifications are on questions with the generic score note ("5 
 
 ## Still open
 
-**A. Approve the core/supporting batch** (`GOV2.0-RC1_core_points_for_approval.xlsx`).
-- Proposed conditions:
-  - 5 = all core points, answer safe. Supporting details are not required; the note says "5 = core evidence complete and safe".
-  - 3 = exactly one core point missing, answer safe.
-  - 0 = two or more core points missing, or an affirmed hard-negative.
-- Impact: 2,026 questions. 155 short lists are core throughout, so they behave exactly like today. The rest stop penalising missing supporting detail.
-- Until approved, answers missing two or more points are held as pending, so most results stay held.
-- To switch on: set `status` to `APPROVED` and deploy, then run `recalculate_pending_rubric_results`.
+**A. Essential / Core / Supporting classification, reviewed per question** (`GOV2.0-RC1_core_points_for_approval.xlsx`, `rubric_core_points_gov2_0.json`, classification `GOV2.0-RC1-ecs-2026-10-20`).
 
-**C. ECG-TSK-001: confirm the denominator.**
+Management review of 20 Oct: don't activate the first pass, don't assign Supporting by category, define omission consequences, and keep unchanged rows unreviewed. The second pass answers each point.
+
+- **Nothing is active.** Every question is `UNREVIEWED`. Classification applies per question, only when that question is marked `APPROVED`; every other question keeps today's rule (two or more omissions held as pending, no interim zero). A result scored under an approved row records the classification version.
+- **Every point re-read in its task.** 9,352 points: 1,774 Essential, 4,313 Core, 3,265 Supporting. 1,595 questions have at least one Essential point.
+- **Proposed scoring conditions, per question:**
+  - 0: an affirmed negative indicator. This is a critical failure, as today.
+  - 0: any Essential point missing (`ESSENTIAL_MISSING`). This is an essential missing requirement. It is not an unsafe action and not a critical failure.
+  - 5: all Essential and Core points evidenced, answer safe. Supporting points never lower the band.
+  - 3: all Essential points evidenced, and no more Core points missing than the question's own allowance.
+  - 0: more Core points missing than that allowance (`CORE_OMISSIONS`).
+  - 0: nothing evidenced (SCR-03), as today.
+- **Allowance, proposed default:** half the Core points, rounded down, minimum 1.
+  - 1,941 questions allow 1.
+  - 74 allow 2.
+  - 11 have only Essential points, so any omission is 0.
+  - A missing Essential point never qualifies for 3. Two missing Core points are 0 only where the question's allowance says so.
+- **Flagged patterns, resolved per point.** A point can carry several patterns.
+  - Combined core points (2,851): 817 Essential, 2,034 Core.
+  - Safety wording (950): 2 Essential, 323 Core, 625 Supporting.
+  - Checks / preparation (380): 2 Essential, 49 Core, 329 Supporting.
+  - Documentation (615): 24 Core, 591 Supporting.
+  - Consent / agreement (29): 5 Core, 24 Supporting. Most of these 24 are "agreed instructions" wording, not consent to care.
+  - 376 first-pass Supporting points are now Core and 3 are Essential. Examples: hand hygiene and PPE in hygiene and care tasks, consent before personal care, patient identification, allergy confirmation, airway and breathing checks, wheel brakes, "do not continue walking until assessed".
+- **Combined indicators, proposed rule:**
+  - A point naming several actions with "and" or commas is evidenced only when each action is evidenced in substance; concise or equivalent wording is accepted.
+  - Alternatives with "/" or "or" need one of them.
+  - 3,766 points have this form and are marked per question.
+  - This rule isn't in the interpretation prompt yet.
+- **Overlap with the 89 D-02 drafts:** 244 drafted mandatory points on 89 questions.
+  - First pass: 222 Core, 22 Supporting.
+  - Second pass: 87 Essential, 154 Core, 3 Supporting. The 3 are FDA-COM-008 #7, IC-TSK-013 #8 and FW-TSK-006 #6, each secondary to its task.
+  - The drafts remain unapproved and are not gates. Where a drafted point is now Essential, it zeroes the answer only after that question is approved.
+- **To switch on:** mark approved rows `APPROVED` (reviewer and date), deploy, then run `recalculate_pending_rubric_results`. Before re-scoring, that command preserves each held assessment's original summary, competency and response results and rule versions in a write-once `ScoreRecalculationSnapshot`. Certificate eligibility and report supersession then run as normal.
+
+**C. ECG-TSK-001: confirm the step consequences.**
 
 | Original v1.2 step (4) | Current Must Include (6) | Relation |
 | --- | --- | --- |
@@ -55,7 +82,13 @@ All 89 drafted classifications are on questions with the generic score note ("5 
 | Moves slowly | 5. Stand gradually | Same step |
 | Checks balance | 6. Check balance; stop for pain or dizziness | Same step, extended |
 
-- Recommendation: keep the approved 4-step denominator over steps 3–6, with steps 1–2 as supporting detail. The package's own `en_points` for this question is 4.
+- Proposal (`rubric_specs_gov2_0.json` → `ECG-TSK-001.proposed`, not active): score 10 × (steps 3–6 evidenced) / 4, the original denominator. Steps 1 and 2 are separate requirements, not optional detail:
+  - Mobility plan and required aid or helpers not evidenced: capped at 50%.
+  - Explanation and consent not evidenced: capped at 75%. Both missing: 50%.
+  - Affirmed ignoring of required assistance or dizziness, pulling the arms or unsafe lifting: 0 and critical failure (existing negative indicators).
+  - Proceeding after the person refuses: proposed new negative indicator, 0 and critical failure.
+- Alternative for decision: step 1 as Essential (0 when not evidenced) instead of the 50% cap.
+- Until confirmed, only a complete answer (all 6 steps) is scored; an incomplete one is held as pending.
 
 ## Also open, already listed in the rulebook
 

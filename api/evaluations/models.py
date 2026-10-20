@@ -780,6 +780,37 @@ class SessionEvaluationSummary(TimeStampedModel):
         ordering = ["-generated_at", "-created_at"]
 
 
+class ScoreRecalculationSnapshot(TimeStampedModel):
+    """The original scoring records of an evaluation, captured before it is
+    recalculated under a newly approved rule (rulebook AUD-02/AUD-03).
+
+    Recalculation updates the summary, competency and response results in
+    place, so this row is the preserved original: every result row as it
+    was, with the rule set, bank and rubric-spec versions that produced it.
+    `before` is write-once; `after` is filled once, when the recalculation
+    has run."""
+
+    evaluation = models.ForeignKey(Evaluation, on_delete=models.CASCADE, related_name="score_snapshots")
+    reason = models.CharField(max_length=255)
+    rule_set_versions = models.JSONField(default=list, blank=True)
+    rubric_spec_versions = models.JSONField(default=list, blank=True)
+    before = models.JSONField(default=dict)
+    after = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "Score Recalculation Snapshot"
+        verbose_name_plural = "Score Recalculation Snapshots"
+        ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            original = type(self).objects.filter(pk=self.pk).values("before", "after", "reason").first()
+            if original and (original["before"] != self.before or original["reason"] != self.reason
+                             or (original["after"] and original["after"] != self.after)):
+                raise ValueError("A score recalculation snapshot cannot be changed once recorded.")
+        super().save(*args, **kwargs)
+
+
 class Certificate(TimeStampedModel):
     """One PDF certificate per evaluation, auto-generated right after
     Week6ScoringService produces a SessionEvaluationSummary for it (see

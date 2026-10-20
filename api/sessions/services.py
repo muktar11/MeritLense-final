@@ -1,3 +1,4 @@
+import logging
 import random
 from collections import Counter
 
@@ -59,6 +60,8 @@ from .models import (
     TaskObservationResult,
 )
 from .realtime import InterviewSessionSocketRegistry
+
+logger = logging.getLogger(__name__)
 
 
 LANGUAGE_CODE_MAP = {
@@ -506,57 +509,70 @@ class InterviewSessionService:
         ).exists()
 
     @classmethod
+    def _log_output_failure(cls, session, actor, description, severity=AuditLogSeverity.ERROR):
+        """EXC-04: an output failure is always recorded, including on the
+        candidate's own path where there is no acting user."""
+        if severity == AuditLogSeverity.ERROR:
+            logger.error("%s (session %s)", description, session.public_id, exc_info=True)
+        else:
+            logger.warning("%s (session %s)", description, session.public_id)
+        if actor:
+            AuditLogService.log(
+                user=actor,
+                action=AuditLogAction.SESSION_COMPLETED,
+                category=AuditLogCategory.SESSION,
+                description=description,
+                resource=session,
+                data=session_event_payload(session),
+                severity=severity,
+            )
+        else:
+            AuditLogService.log_system(
+                action=AuditLogAction.SESSION_COMPLETED,
+                category=AuditLogCategory.SESSION,
+                description=description,
+                resource=session,
+                data=session_event_payload(session),
+                severity=severity,
+            )
+
+    @classmethod
     def generate_completed_session_outputs(cls, session, actor=None):
         """Score and publish outputs after the session and its AI jobs finish.
 
         Terminal AI failures remain represented as incomplete evidence by the
         scorer; they do not prevent the candidate session from completing.
+        A failure here never blocks the other outputs (DOC-01) and is always
+        logged (EXC-04). The durable incident with owner, deadline and
+        notifications (EXC-06) is not built yet.
         """
         if session.status != InterviewSessionStatus.COMPLETED or cls._ai_processing_pending(session):
             return None
         evaluation = cls._ensure_linked_evaluation(session, status=EvaluationStatus.COMPLETED)
+        candidate_name = session.candidate.get_full_name()
         try:
             summary = Week6ScoringService.run_for_evaluation(evaluation=evaluation, actor=actor)
         except Week6ScoringError as exc:
             summary = None
-            if actor:
-                AuditLogService.log(
-                    user=actor,
-                    action=AuditLogAction.SESSION_COMPLETED,
-                    category=AuditLogCategory.SESSION,
-                    description=f"Session completed unscored for {session.candidate.get_full_name()} - {exc}",
-                    resource=session,
-                    data=session_event_payload(session),
-                    severity=AuditLogSeverity.WARNING,
-                )
-        except Exception:
+            cls._log_output_failure(
+                session, actor, f"Session completed unscored for {candidate_name} - {exc}",
+                severity=AuditLogSeverity.WARNING,
+            )
+        except Exception as exc:
             summary = None
-            if actor:
-                AuditLogService.log(
-                    user=actor,
-                    action=AuditLogAction.SESSION_COMPLETED,
-                    category=AuditLogCategory.SESSION,
-                    description=f"Automatic scoring failed for {session.candidate.get_full_name()} - session completed unscored",
-                    resource=session,
-                    data=session_event_payload(session),
-                    severity=AuditLogSeverity.ERROR,
-                )
+            cls._log_output_failure(
+                session, actor,
+                f"Automatic scoring failed for {candidate_name} - session completed unscored: {exc}",
+            )
         if summary is None:
             return None
         if evaluation.certificate_enabled:
             try:
                 generate_certificate(evaluation, summary)
-            except Exception:
-                if actor:
-                    AuditLogService.log(
-                        user=actor,
-                        action=AuditLogAction.SESSION_COMPLETED,
-                        category=AuditLogCategory.SESSION,
-                        description=f"Automatic certificate generation failed for {session.candidate.get_full_name()}",
-                        resource=session,
-                        data=session_event_payload(session),
-                        severity=AuditLogSeverity.ERROR,
-                    )
+            except Exception as exc:
+                cls._log_output_failure(
+                    session, actor, f"Automatic certificate generation failed for {candidate_name}: {exc}",
+                )
         # Avoid duplicate immutable reports on retries, but replace an
         # earlier partial report if later AI recovery changed the result.
         active_report = evaluation.reports.filter(report_status="ACTIVE").first()
@@ -571,17 +587,10 @@ class InterviewSessionService:
         if not report_matches_summary:
             try:
                 EvaluationReportService.generate_for_evaluation(evaluation=evaluation, actor=actor)
-            except Exception:
-                if actor:
-                    AuditLogService.log(
-                        user=actor,
-                        action=AuditLogAction.SESSION_COMPLETED,
-                        category=AuditLogCategory.SESSION,
-                        description=f"Automatic report generation failed for {session.candidate.get_full_name()}",
-                        resource=session,
-                        data=session_event_payload(session),
-                        severity=AuditLogSeverity.ERROR,
-                    )
+            except Exception as exc:
+                cls._log_output_failure(
+                    session, actor, f"Automatic report generation failed for {candidate_name}: {exc}",
+                )
         return summary
 
     @classmethod

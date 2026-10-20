@@ -118,8 +118,9 @@ _MAX_ID_ATTEMPTS = 5
 # INCOMPLETE in the first place) always blocks certificate generation
 # before this gauge is ever looked up for that state - the .get() fallback
 # below is just defensive, not an expected path.
+# Rating labels: rulebook OUT-06 (docs/ASSESSMENT_RULES.md).
 READINESS_GAUGE = {
-    "NOT_READY": {"label": "Readiness Gaps Identified", "label_ar": "تم تحديد فجوات في الجاهزية", "position": 1},
+    "NOT_READY": {"label": "Not Ready", "label_ar": "غير جاهز", "position": 1},
     "PARTIALLY_READY": {"label": "Partially Ready", "label_ar": "جاهز جزئيًا", "position": 2},
     "READY": {"label": "Ready", "label_ar": "جاهز", "position": 3},
 }
@@ -323,6 +324,8 @@ def evaluate_role_competency_readiness(summary, role_code):
     values, or None if this role hasn't been migrated onto the new model -
     callers fall back to the legacy REQUIRED_DIMENSIONS_BY_ROLE +
     minimum_required_dimensions_for_role path in that case, unchanged.
+
+    Rulebook OUT-02 / OUT-03.
 
     Rules (matching the approved Driver-v1.2 specification):
     - Required Competency Coverage must be 100% - every Required dimension
@@ -539,7 +542,8 @@ def _role_profile_version(session, language="en"):
 
 
 def certificate_eligibility(evaluation, summary):
-    """Certificate issuance decision, per the MeritLense flow:
+    """Certificate issuance decision (rulebook CER-01 to CER-03), per the
+    MeritLense flow:
     Assessment -> Verification/Completion Checks -> Assessment Logic ->
     Readiness Level -> Report -> Certificate Decision.
 
@@ -588,7 +592,11 @@ def certificate_eligibility(evaluation, summary):
             return False, 'INCOMPLETE'
         if any(not 0 <= values[field] <= 100 for field in (*SCORE_FIELDS, 'behavior_integrity')):
             return False, 'INCOMPLETE'
-        return True, calculate_evaluator_outcome(values)[1]
+        outcome = calculate_evaluator_outcome(values)[1]
+        # CER-02: Not Ready never receives a certificate that represents readiness.
+        if outcome == 'NOT_READY':
+            return False, 'NOT_READY'
+        return True, outcome
     # AI completeness and quality remain summary-derived safeguards. If no
     # summary exists, an AI assessment cannot pass those existing checks.
     if summary is None:

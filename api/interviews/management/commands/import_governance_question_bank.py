@@ -1,5 +1,6 @@
 import json
 import re
+from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
@@ -60,18 +61,15 @@ def _scoring_shape(score_note):
 
 
 def _weighted_indicators(points, max_score):
+    """Equal positive weights summing to max_score (FIX-02). The last point
+    takes the rounding remainder, which stays positive: whole-number
+    rounding used to leave it at 0 or below for lists of 6+ points."""
     if not points:
         return {}
-    base = max_score / len(points)
-    weights = {}
-    running = 0
-    for i, point in enumerate(points):
-        if i == len(points) - 1:
-            weights[point] = str(max_score - running)
-        else:
-            w = round(base)
-            running += w
-            weights[point] = str(w)
+    total = Decimal(str(max_score))
+    share = (total / len(points)).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+    weights = {point: str(share) for point in points[:-1]}
+    weights[points[-1]] = str(total - share * (len(points) - 1))
     return weights
 
 

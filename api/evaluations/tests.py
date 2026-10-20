@@ -2878,7 +2878,7 @@ class CertificateGenerationTests(TestCase):
         self.evaluation.readiness_status = ReadinessStatus.NOT_READY
         self.evaluation.save(update_fields=["readiness_status"])
         not_ready = _readiness_gauge_context(self.evaluation, "en")
-        self.assertEqual(not_ready, {"label": "Readiness Gaps Identified", "position": 1})
+        self.assertEqual(not_ready, {"label": "Not Ready", "position": 1})
 
         # PENDING (the default before scoring rolls it up to READY/NOT_READY)
         # maps to the rule engine's own PARTIALLY_READY/"Partially Ready"

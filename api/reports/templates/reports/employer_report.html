@@ -1171,7 +1171,7 @@
                 {% elif summary.readiness_indicator.code == "INCOMPLETE" %}
                   <span class="status-badge tone-neutral"><span class="status-dot">I</span>Insufficient Evidence</span>
                 {% else %}
-                  <span class="status-badge tone-danger"><span class="status-dot">3</span>Readiness Gaps Identified</span>
+                  <span class="status-badge tone-danger"><span class="status-dot">3</span>Not Ready</span>
                 {% endif %}
               </div>
             </div>
@@ -1480,7 +1480,9 @@
                   </td>
                   <td><span class="score-strong">{{ item.score_display }}</span></td>
                   <td>
-                    {% if item.assessment_status == "MEETS_THRESHOLD" or item.assessment_status == "EVALUATED" %}
+                    {% if item.has_critical_failure and item.assessment_status != "NOT_ASSESSED" and item.assessment_status != "INSUFFICIENT_EVIDENCE" %}
+                      <span class="status-text status-danger"><span class="dot"></span>Critical Failure</span>
+                    {% elif item.assessment_status == "MEETS_THRESHOLD" or item.assessment_status == "EVALUATED" %}
                       <span class="status-text status-good"><span class="dot"></span>Passed</span>
                     {% elif item.assessment_status == "BELOW_THRESHOLD" %}
                       <span class="status-text status-danger"><span class="dot"></span>Below Threshold</span>

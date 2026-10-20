@@ -468,6 +468,8 @@ class TranslationService:
 
 
 class ResponseInterpretationService:
+    """Extracts evidence only, never a score (rulebook GOV-01, AI-02)."""
+
     prompt_version = settings.AI_INTERPRETATION_PROMPT_VERSION
 
     @classmethod
@@ -823,7 +825,8 @@ class EvaluationInputBuilderService:
         Rule Engine in the locked English wording the existing ScoringRule is
         keyed on (no translation step; Arabic answers resolve through the
         indicator ID). Negative evidence and uncertain observations go to
-        human review; nothing here creates a new gate (policies D-04, D-05)."""
+        human review; nothing here creates a new gate (policies D-04, D-05).
+        Context rules for negative evidence: rulebook SCR-07."""
         indicators = interpretation.normalized_indicators
         review_reasons = []
         confidence_score = interpretation.confidence_score

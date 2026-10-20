@@ -2031,11 +2031,19 @@ class EvaluationReportService:
                     else "Insufficient evidence was available to assess integrity risk."
                 ],
             }
-        has_integrity_flag = any(flag.get("requires_review") for flag in human_review_flags)
+        # DOC-03: only actual integrity concerns set the level. A missing
+        # answer point is a scoring result, not an integrity risk, so it no
+        # longer raises a "High" with no evidence behind it.
+        concern_flags = [
+            flag for flag in human_review_flags
+            if flag.get("flag_type") in {"critical_failure", "low_confidence_interpretation", "transcript_issue"}
+        ]
         risk_score = max(0, min(100, int(round(100 - float(integrity_percentage or 92)))))
-        if has_integrity_flag:
+        integrity_percentage = float(integrity_percentage) if integrity_percentage is not None else 100.0
+        below_threshold = bool(integrity_item and integrity_item.get("status") == "BELOW_THRESHOLD")
+        if any(flag.get("requires_review") for flag in concern_flags) or integrity_percentage < 40:
             level = "High"
-        elif human_review_flags:
+        elif concern_flags or below_threshold:
             level = "Medium"
         else:
             level = "Low"

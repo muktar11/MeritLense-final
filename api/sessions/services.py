@@ -546,14 +546,16 @@ class InterviewSessionService:
             )
 
     @classmethod
-    def generate_completed_session_outputs(cls, session, actor=None):
+    def generate_completed_session_outputs(cls, session, actor=None, issue_certificate=True):
         """Score and publish outputs after the session and its AI jobs finish.
 
         Terminal AI failures remain represented as incomplete evidence by the
         scorer; they do not prevent the candidate session from completing.
         A failure here never blocks the other outputs (DOC-01), is always
         logged (EXC-04) and, when it is a platform failure, opens a service
-        incident that notifies administrators (EXC-06).
+        incident that notifies administrators (EXC-06). A re-scoring run
+        passes issue_certificate=False: re-scoring alone never issues a
+        certificate (management review of 20 Oct 2026).
         """
         if session.status != InterviewSessionStatus.COMPLETED or cls._ai_processing_pending(session):
             return None
@@ -587,7 +589,7 @@ class InterviewSessionService:
             # assessment's report and certificate come from the evaluator's
             # rating, which finalize_scheduled_assessment produces.
             return summary
-        if evaluation.certificate_enabled:
+        if evaluation.certificate_enabled and issue_certificate:
             try:
                 generate_certificate(evaluation, summary)
             except Exception as exc:

@@ -792,6 +792,7 @@ class ScoreRecalculationSnapshot(TimeStampedModel):
 
     evaluation = models.ForeignKey(Evaluation, on_delete=models.CASCADE, related_name="score_snapshots")
     reason = models.CharField(max_length=255)
+    run_label = models.CharField(max_length=100, blank=True, db_index=True)
     rule_set_versions = models.JSONField(default=list, blank=True)
     rubric_spec_versions = models.JSONField(default=list, blank=True)
     before = models.JSONField(default=dict)

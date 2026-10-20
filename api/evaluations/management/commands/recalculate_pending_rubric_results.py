@@ -1,14 +1,19 @@
-"""Recalculate AI-path results held as "scoring rule awaiting approval".
+"""Re-score explicitly identified assessments held as "scoring rule awaiting
+approval", as one named, traceable run.
 
-Run after an approved rubric configuration is deployed (management decision A,
-20 Oct 2026; rulebook AUD-02/AUD-03). Each affected session is re-scored
-through the normal engine on its pinned rule set, then its certificate and
-report follow the usual output path, so release and certificate eligibility
-run their normal checks (certificate_eligibility; the earlier report is
-superseded, not deleted). Before anything is re-scored, the original summary,
-competency and response results and the rule-set / rubric-spec versions that
-produced them are preserved in a ScoreRecalculationSnapshot, and the
-recalculation is audited. Results with nothing pending are never touched.
+Run after an approved question rule is deployed (management decision A and
+review of 20 Oct 2026; rulebook AUD-02/AUD-03):
+- only the evaluations named with --evaluation (public ids) are touched, and
+  only if their latest result is still held as pending; nothing else is
+  rewritten, and published results with nothing pending never are;
+- before re-scoring, the original summary, competency and response results,
+  certificate and active report ids, and the rule-set / rubric-spec versions
+  that produced them are preserved in a write-once ScoreRecalculationSnapshot
+  carrying the run label;
+- re-scoring never issues a certificate on its own: certificates are held
+  unless --apply-certificate-eligibility is given, in which case the normal
+  certificate_eligibility check decides. The earlier report is superseded,
+  not deleted.
 """
 import json
 
@@ -20,7 +25,7 @@ from api.audit.services import AuditLogService
 from api.core.constants import AuditLogAction, AuditLogCategory
 from api.evaluations.models import ScoreRecalculationSnapshot, SessionEvaluationSummary
 
-REASON = "approved rubric configuration"
+REASON = "approved question scoring rule"
 
 
 def _rows(queryset):
@@ -57,15 +62,39 @@ class Command(BaseCommand):
     help = "Re-score assessments that were held because a question's scoring rule awaited approval."
 
     def add_arguments(self, parser):
-        parser.add_argument("--dry-run", action="store_true", help="List affected assessments only.")
+        parser.add_argument("--evaluation", action="append", default=[], metavar="PUBLIC_ID",
+                            help="Evaluation to re-score (repeatable). Required unless --list-pending.")
+        parser.add_argument("--run-label", default="", help="Name of this re-scoring run (required to re-score).")
+        parser.add_argument("--list-pending", action="store_true",
+                            help="List every evaluation held as pending, without changing anything.")
+        parser.add_argument("--dry-run", action="store_true", help="Show what the named evaluations would do.")
+        parser.add_argument("--apply-certificate-eligibility", action="store_true",
+                            help="After re-scoring, run the normal certificate eligibility check and issue "
+                                 "or revoke accordingly. Without it, certificates are left untouched.")
 
     def handle(self, *args, **options):
         from api.sessions.services import InterviewSessionService
 
+        from django.core.management.base import CommandError
+
+        held = SessionEvaluationSummary.objects.filter(metadata__rubric_pending_question_codes__0__isnull=False)
+        if options["list_pending"]:
+            for summary in held.select_related("evaluation").order_by("evaluation_id", "-generated_at"):
+                self.stdout.write(f"{summary.evaluation.public_id}: pending "
+                                  f"{', '.join(summary.metadata['rubric_pending_question_codes'])}")
+            return
+        if not options["evaluation"]:
+            raise CommandError("Name the evaluations to re-score with --evaluation (see --list-pending).")
+        if not options["dry_run"] and not options["run_label"].strip():
+            raise CommandError("Give this re-scoring run a name with --run-label.")
         evaluation_ids = set(
-            SessionEvaluationSummary.objects.filter(metadata__rubric_pending_question_codes__0__isnull=False)
-            .values_list("evaluation_id", flat=True)
+            held.filter(evaluation__public_id__in=options["evaluation"]).values_list("evaluation_id", flat=True)
         )
+        found = {str(pk) for pk in held.filter(evaluation__public_id__in=options["evaluation"])
+                 .values_list("evaluation__public_id", flat=True)}
+        for public_id in options["evaluation"]:
+            if public_id not in found:
+                self.stdout.write(self.style.WARNING(f"{public_id}: not held as pending - left untouched."))
         seen, recalculated, still_pending = set(), 0, 0
         for evaluation_id in sorted(evaluation_ids):
             summary = (
@@ -87,10 +116,12 @@ class Command(BaseCommand):
             rule_sets, specs = _versions(evaluation)
             with transaction.atomic():
                 snapshot = ScoreRecalculationSnapshot.objects.create(
-                    evaluation=evaluation, reason=REASON, rule_set_versions=rule_sets,
+                    evaluation=evaluation, reason=REASON, run_label=options["run_label"].strip(),
+                    rule_set_versions=rule_sets,
                     rubric_spec_versions=specs, before=capture_scoring_records(evaluation),
                 )
-            new_summary = InterviewSessionService.generate_completed_session_outputs(evaluation.session)
+            new_summary = InterviewSessionService.generate_completed_session_outputs(
+                evaluation.session, issue_certificate=options["apply_certificate_eligibility"])
             evaluation.refresh_from_db()
             after = {
                 "pending": (new_summary.metadata if new_summary else {}).get("rubric_pending_question_codes"),
@@ -105,7 +136,8 @@ class Command(BaseCommand):
                 category=AuditLogCategory.EVALUATION,
                 description=f"Recalculated evaluation {evaluation.public_id} after scoring-rule approval.",
                 resource=evaluation,
-                data={"before": before, "after": after, "reason": REASON,
+                data={"before": before, "after": after, "reason": REASON, "run_label": snapshot.run_label,
+                      "certificate_eligibility_applied": options["apply_certificate_eligibility"],
                       "snapshot_id": str(snapshot.pk), "rubric_spec_versions": {"before": specs, "after": after_specs}},
             )
             recalculated += 1

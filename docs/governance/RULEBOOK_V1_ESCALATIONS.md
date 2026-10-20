@@ -26,7 +26,7 @@ All 89 drafted classifications are on questions with the generic score note ("5 
 
 | Item | Decision | Built |
 | --- | --- | --- |
-| A. Two or more omissions on the generic note | Classify core and supporting points across the 2,026 questions, longest lists first. Missing a supporting detail must not force zero. No interim zero for customer scoring on affected answers. Submit classifications and scoring conditions in one batch. | Answers that cover some points but miss two or more are left unscored as `PENDING_APPROVAL`. An answer with no required point at all is insufficient evidence, which SCR-03 already scores 0; the result shows "scoring rule awaiting approval" and `recalculate_pending_rubric_results` re-scores them once a rule is approved. Proposed batch: `rubric_core_points_gov2_0.json` (status PROPOSED) and `GOV2.0-RC1_core_points_for_approval.xlsx`. |
+| A. Two or more omissions on the generic note | Classify core and supporting points across the 2,026 questions, longest lists first. Missing a supporting detail must not force zero. No interim zero for customer scoring on affected answers. Submit classifications and scoring conditions in one batch. | Answers that cover some points but miss two or more are left unscored as `PENDING_APPROVAL`. An answer with no required point at all is insufficient evidence, which SCR-03 already scores 0; the result shows "scoring rule awaiting approval" and `recalculate_pending_rubric_results` re-scores them once a rule is approved. Classification reviewed by management (see Still open A); no question rule approved yet. |
 | B. Scheduled critical safety failure | Explicit field with a required evidence note. A confirmed failure is Not Ready and blocks the readiness certificate; its absence bypasses nothing. | `EvaluatorRating.critical_safety_failure` and note (migration 0030), scorecard UI, evaluator report |
 | C. ECG-TSK-001 | Map the six steps to the original four before changing the denominator. | Mapping below. Until confirmed, only a complete answer is scored. |
 | D. HK-PRO-001 | 2 for clarifying and adjusting without mentioning calm, absent refusal or other disqualifying evidence. | Band added |
@@ -35,41 +35,43 @@ All 89 drafted classifications are on questions with the generic score note ("5 
 
 ## Still open
 
-**A. Essential / Core / Supporting classification, reviewed per question** (`GOV2.0-RC1_core_points_for_approval.xlsx`, `rubric_core_points_gov2_0.json`, classification `GOV2.0-RC1-ecs-2026-10-20`).
+**A. Question scoring rules for the generic-note questions.**
 
-Management review of 20 Oct: don't activate the first pass, don't assign Supporting by category, define omission consequences, and keep unchanged rows unreviewed. The second pass answers each point.
+Management review of 20 Oct 2026 (`MeritLense_Core_Supporting_Decision_Note.md`, `MeritLense_Core_Supporting_Reviewed_Proposals.xlsx`) governs. Built on PR #228:
 
-- **Nothing is active.** Every question is `UNREVIEWED`. Classification applies per question, only when that question is marked `APPROVED`; every other question keeps today's rule (two or more omissions held as pending, no interim zero). A result scored under an approved row records the classification version.
-- **Every point re-read in its task.** 9,352 points: 1,774 Essential, 4,313 Core, 3,265 Supporting. 1,595 questions have at least one Essential point.
-- **Proposed scoring conditions, per question:**
-  - 0: an affirmed negative indicator. This is a critical failure, as today.
-  - 0: any Essential point missing (`ESSENTIAL_MISSING`). This is an essential missing requirement. It is not an unsafe action and not a critical failure.
-  - 5: all Essential and Core points evidenced, answer safe. Supporting points never lower the band.
-  - 3: all Essential points evidenced, and no more Core points missing than the question's own allowance.
-  - 0: more Core points missing than that allowance (`CORE_OMISSIONS`).
-  - 0: nothing evidenced (SCR-03), as today.
-- **Allowance, proposed default:** half the Core points, rounded down, minimum 1.
-  - 1,941 questions allow 1.
-  - 74 allow 2.
-  - 11 have only Essential points, so any omission is 0.
-  - A missing Essential point never qualifies for 3. Two missing Core points are 0 only where the question's allowance says so.
-- **Flagged patterns, resolved per point.** A point can carry several patterns.
-  - Combined core points (2,851): 817 Essential, 2,034 Core.
-  - Safety wording (950): 2 Essential, 323 Core, 625 Supporting.
-  - Checks / preparation (380): 2 Essential, 49 Core, 329 Supporting.
-  - Documentation (615): 24 Core, 591 Supporting.
-  - Consent / agreement (29): 5 Core, 24 Supporting. Most of these 24 are "agreed instructions" wording, not consent to care.
-  - 376 first-pass Supporting points are now Core and 3 are Essential. Examples: hand hygiene and PPE in hygiene and care tasks, consent before personal care, patient identification, allergy confirmation, airway and breathing checks, wheel brakes, "do not continue walking until assessed".
-- **Combined indicators, proposed rule:**
-  - A point naming several actions with "and" or commas is evidenced only when each action is evidenced in substance; concise or equivalent wording is accepted.
-  - Alternatives with "/" or "or" need one of them.
-  - 3,766 points have this form and are marked per question.
-  - This rule isn't in the interpretation prompt yet.
-- **Overlap with the 89 D-02 drafts:** 244 drafted mandatory points on 89 questions.
-  - First pass: 222 Core, 22 Supporting.
-  - Second pass: 87 Essential, 154 Core, 3 Supporting. The 3 are FDA-COM-008 #7, IC-TSK-013 #8 and FW-TSK-006 #6, each secondary to its task.
-  - The drafts remain unapproved and are not gates. Where a drafted point is now Essential, it zeroes the answer only after that question is approved.
-- **To switch on:** mark approved rows `APPROVED` (reviewer and date), deploy, then run `recalculate_pending_rubric_results`. Before re-scoring, that command preserves each held assessment's original summary, competency and response results and rule versions in a write-once `ScoreRecalculationSnapshot`. Certificate eligibility and report supersession then run as normal.
+- **Source of record.** `rubric_core_points_gov2_0.json` (classification `GOV2.0-RC1-core-reviewed-2026-10-20`) holds the reviewed workbook exactly:
+  - 6,247 Core and 3,105 Supporting points.
+  - 539 revised proposals.
+  - Review coverage per question: 492 targeted context review, 1,534 structural check only.
+  - Every question is `NOT_APPROVED`.
+- **No count rule.** "One Core missing = 3, two = 0" and "all Core = 5" are rejected. Core alone creates no zero, critical failure or certificate gate.
+- **Activation is per question.** A question's rule is applied only when the question is `APPROVED` and carries a `rule` with:
+  - `full` and `partial` predicates (groups of points; a group lists equivalents);
+  - any approved `prerequisites` and `conditional` points;
+  - `negative_caps`;
+  - acceptance cases covering every required category, all passing.
+
+  Otherwise the generic rule stays: two or more omissions are held as pending, with no interim zero.
+- **Acceptance categories:** full, partial, supporting omission, below minimum, equivalent paraphrase, affirmed unsafe, negated unsafe, evidence loss. Prerequisite omission and condition-inapplicable are added when the rule has such points. EN/AR interpretation of the same expected outcomes still has to be run per question before approval.
+- **Scoring under an approved rule:**
+  - Prerequisite missing: 0, recorded separately and not a critical failure.
+  - Full predicates met: 5.
+  - Partial predicates (minimum viable competence) met: 3, whatever the number of compensable gaps.
+  - Otherwise: 0, below minimum.
+  - Affirmed negative: 0 and critical failure, unless the rule gives it a cap.
+  - Conditional point: counts as met when the answer shows the condition does not apply (`inapplicable_ids`). If applicability is unknown and would change the band, the answer is held (`CONDITION_UNDETERMINED`), never guessed.
+- **Engineering second pass** (`GOV2.0-RC1_engineering_second_pass_proposals.xlsx`): withdrawn as a scoring proposal. Kept only as reviewer suggestions: 1,774 candidate prerequisites and 147 additional Core candidates (`candidate_*` fields, never applied), plus the D-02 crosswalk and the ECG mapping.
+- **Overlap with the 89 D-02 drafts:** all 244 drafted points are mapped point by point (crosswalk sheet). Being Core makes none of them a gate.
+- **Re-scoring.** `recalculate_pending_rubric_results` works as follows:
+  - Requires `--evaluation <public id>` for each assessment and a `--run-label`. `--list-pending` lists candidates without changing anything.
+  - Before re-scoring, it stores the original records and rule versions in a write-once `ScoreRecalculationSnapshot`.
+  - Certificates are left untouched unless `--apply-certificate-eligibility` is given (pending decision 2 below).
+  - The earlier report is superseded, not deleted.
+
+**Decisions requested**
+1. Who writes each question's full, partial and zero predicates: management or a specialist, or engineering drafting for sign-off?
+2. After an approved re-score, should an eligible certificate follow the normal eligibility rule automatically, or wait for a separate release step? Until decided, it is held.
+3. Should the 147 additional Core candidates be reviewed as a further proposal list?
 
 **C. ECG-TSK-001: confirm the step consequences.**
 

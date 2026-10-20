@@ -78,13 +78,14 @@ class Week6ScoringService:
             raise Week6ScoringError("No candidate responses are available for scoring")
 
         results = []
-        rubric_pending = []
+        rubric_pending, rubric_undetermined = [], []
         for response in responses:
             result = cls._score_response(
                 evaluation=evaluation,
                 response=response,
                 rule_set=selected_rule_set,
                 pending=rubric_pending,
+                undetermined=rubric_undetermined,
             )
             if result is not None:
                 results.append(result)
@@ -109,6 +110,7 @@ class Week6ScoringService:
             competency_results=competency_results,
             unanswered_questions=unanswered_questions,
             rubric_pending=rubric_pending,
+            rubric_undetermined=rubric_undetermined,
         )
         cls._apply_evaluation_rollups(evaluation=evaluation, summary=summary, actor=actor)
         # Release safeguard: anything that needs a person's judgement is held
@@ -194,7 +196,7 @@ class Week6ScoringService:
         return resolved
 
     @classmethod
-    def _score_response(cls, *, evaluation, response, rule_set, pending=None):
+    def _score_response(cls, *, evaluation, response, rule_set, pending=None, undetermined=None):
         artifact = getattr(response, "evaluation_input_artifact", None)
         # Without a prepared evidence artifact, there is no defensible basis
         # for a score. Leave this response out of scoring; the session rollup
@@ -255,6 +257,7 @@ class Week6ScoringService:
                 matched_ordinals=[position for position, indicator in enumerate(expected, start=1) if indicator in observed],
                 total_points=len(expected),
                 negative_ordinals=sorted(negative_ordinals),
+                inapplicable_ordinals=sorted(cls._indicator_ordinals(artifact, rule.question_code, "inapplicable_ids", "MI")),
             )
             rubric["spec_version"] = spec_version
             if rubric["status"] == rubric_specs.STATUS_PENDING:
@@ -263,6 +266,8 @@ class Week6ScoringService:
                 ResponseEvaluationResult.objects.filter(response=response, rule_set=rule_set).delete()
                 if pending is not None:
                     pending.append(rule.question_code)
+                if undetermined is not None and rubric["band"] == rubric_specs.BAND_CONDITION_UNDETERMINED:
+                    undetermined.append(rule.question_code)
                 return None
             raw_score = rubric["score"]
             missing_required = []
@@ -345,6 +350,7 @@ class Week6ScoringService:
                         "rubric_band": rubric["band"],
                         "rubric_status": rubric["status"],
                         "rubric_missing_count": rubric["missing_count"],
+                        "rubric_missing_prerequisites": rubric.get("missing_prerequisites", []),
                     } if rubric else {}),
                 },
                 "scored_at": timezone.now(),
@@ -357,9 +363,16 @@ class Week6ScoringService:
         """Negative indicators the interpreter confirmed as the candidate's
         own affirmed conduct (indicator-ID mode, SCR-07 context rules
         already applied), as 1-based positions in the question's list."""
+        return cls._indicator_ordinals(artifact, question_code, "negative_evidence_ids", "NI")
+
+    @classmethod
+    def _indicator_ordinals(cls, artifact, question_code, key, kind):
+        """1-based positions of the V2-<code>-<kind>-NN ids listed under
+        `key` in the artifact metadata (e.g. Must Include points whose
+        condition the answer shows does not apply: "inapplicable_ids")."""
         ordinals = set()
-        prefix = f"V2-{question_code}-NI-"
-        for indicator_id in (getattr(artifact, "metadata", None) or {}).get("negative_evidence_ids") or []:
+        prefix = f"V2-{question_code}-{kind}-"
+        for indicator_id in (getattr(artifact, "metadata", None) or {}).get(key) or []:
             indicator_id = str(indicator_id)
             if indicator_id.startswith(prefix) and indicator_id[len(prefix):].isdigit():
                 ordinals.add(int(indicator_id[len(prefix):]))
@@ -574,7 +587,7 @@ class Week6ScoringService:
 
     @classmethod
     def _build_session_summary(cls, *, evaluation, rule_set, responses, response_results, competency_results,
-                               unanswered_questions=(), rubric_pending=()):
+                               unanswered_questions=(), rubric_pending=(), rubric_undetermined=()):
         total_score = sum((Decimal(str(result.score)) for result in response_results), cls.DECIMAL_ZERO)
         max_score = sum((Decimal(str(result.max_score)) for result in response_results), cls.DECIMAL_ZERO)
         layer_breakdown, weighted_percentage = cls._compute_layer_breakdown(competency_results)
@@ -665,6 +678,7 @@ class Week6ScoringService:
                     # Answers whose band awaits an approved scoring rule
                     # (decision A, 20 Oct 2026); recalculated on approval.
                     "rubric_pending_question_codes": list(rubric_pending),
+                    "rubric_condition_undetermined_codes": list(rubric_undetermined),
                 },
                 "generated_at": timezone.now(),
             },
@@ -799,12 +813,18 @@ class Week6ScoringService:
             evaluation.readiness_override_reason = ""
             readiness_reason = "Insufficient evidence to determine a complete assessment result."
             pending_codes = (summary.metadata or {}).get("rubric_pending_question_codes") or []
+            undetermined_codes = set((summary.metadata or {}).get("rubric_condition_undetermined_codes") or [])
             if pending_codes:
                 # OUT-05: show the actual cause, not poor performance.
-                readiness_reason = (
-                    f"Scoring rule awaiting approval for {len(pending_codes)} answer(s) "
-                    f"({', '.join(pending_codes)}); the result will be recalculated once it is approved."
-                )
+                awaiting = [code for code in pending_codes if code not in undetermined_codes]
+                causes = []
+                if awaiting:
+                    causes.append(f"Scoring rule awaiting approval for {len(awaiting)} answer(s) ({', '.join(awaiting)})")
+                if undetermined_codes:
+                    causes.append(f"whether a conditional requirement applies is not established for "
+                                  f"{len(undetermined_codes)} answer(s) ({', '.join(sorted(undetermined_codes))})")
+                readiness_reason = "; ".join(causes) + "; the result will be recalculated once resolved."
+                readiness_reason = readiness_reason[0].upper() + readiness_reason[1:]
                 evaluation.readiness_override_reason = readiness_reason
             update_fields.extend(["readiness_status", "readiness_override_applied", "readiness_override_reason"])
         else:

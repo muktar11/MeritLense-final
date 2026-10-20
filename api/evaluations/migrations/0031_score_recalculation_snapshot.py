@@ -20,6 +20,7 @@ class Migration(migrations.Migration):
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('reason', models.CharField(max_length=255)),
+                ('run_label', models.CharField(blank=True, db_index=True, max_length=100)),
                 ('rule_set_versions', models.JSONField(blank=True, default=list)),
                 ('rubric_spec_versions', models.JSONField(blank=True, default=list)),
                 ('before', models.JSONField(default=dict)),

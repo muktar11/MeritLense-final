@@ -211,8 +211,8 @@ def get_eligible_candidates(*, owner_type, owner, role_code):
 
 READINESS_LABELS = {
     "READY": ("Ready", "جاهز"),
-    "NOT_READY": ("Readiness Gaps Identified", "توجد فجوات جاهزية"),
-    "PARTIALLY_READY": ("Partially Ready", "جاهزية جزئية"),
+    "NOT_READY": ("Not Ready", "غير جاهز"),
+    "PARTIALLY_READY": ("Partially Ready", "جاهز جزئيًا"),
     "INCOMPLETE": ("Insufficient Evidence", "أدلة غير كافية"),
     "PENDING": ("Pending", "قيد المراجعة"),
 }

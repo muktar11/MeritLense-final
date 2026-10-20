@@ -299,7 +299,7 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(response.data["scoring_rule_version"], "week6-v1")
         self.assertEqual(response.data["rule_engine_version"], "v1.0")
         self.assertFalse(response.data["override_triggered"])
-        self.assertEqual(response.data["readiness_indicator"], "جاهزية جزئية")
+        self.assertEqual(response.data["readiness_indicator"], "جاهز جزئيًا")
         self.assertTrue(response.data["requires_human_review"])
         self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_status"], "COMPLETED")
         self.assertEqual(response.data["report_payload"]["assessment_context"]["assessment_quality"], "Limited")
@@ -395,7 +395,7 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(report.report_payload["report_name"], "MeritLense Workforce Readiness Assessment Report")
         self.assertEqual(report.report_version, "1.3")
         self.assertEqual(report.rule_engine_version, "v1.0")
-        self.assertEqual(report.readiness_indicator, "جاهزية جزئية")
+        self.assertEqual(report.readiness_indicator, "جاهز جزئيًا")
         self.assertFalse(report.override_triggered)
         self.assertEqual(report.readiness_legal_record, self.evaluation.readiness_legal_record)
         self.assertTrue(report.employer_pdf.name.endswith(".pdf"))
@@ -1210,7 +1210,7 @@ class EvaluationReportApiTests(TestCase):
         )
         self.assertEqual(
             default_response.data["report_payload"]["assessment_context"]["assessment_mode"],
-            "Guided Digital Simulation",
+            "AI-Led Interview",
         )
 
         self.session.scheduled_start_at = timezone.now() - timezone.timedelta(days=1)

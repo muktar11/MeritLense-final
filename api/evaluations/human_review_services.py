@@ -104,7 +104,11 @@ class HumanReviewService:
         """Record the reviewer's readiness decision and release the result.
         The reviewer cannot bypass the methodology: a certificate is still
         only issued if the normal eligibility rules (Full Assessment,
-        thresholds, identity, consent...) pass on the actual scores."""
+        thresholds, identity, consent...) pass on the actual scores.
+
+        Conflicts with rulebook AUD-02 (no unrestricted manual readiness
+        selection): reviewers should correct evidence and let the engine
+        recalculate. Not changed yet."""
         from api.evaluations.certificate_services import generate_certificate
         from api.evaluations.models import Evaluation
         from api.evaluations.readiness_record_services import EvaluationReadinessRecordService

@@ -13,7 +13,11 @@ SCORE_FIELDS = ("safety_awareness", "hygiene", "communication", "task_execution"
 
 
 def calculate_evaluator_outcome(ratings):
-    """Apply the evaluator-approved four-field average and readiness bands."""
+    """Apply the evaluator-approved four-field average and readiness bands.
+
+    Boundaries per rulebook OUT-01. Open: no safety gate on this path yet
+    (OUT-04, escalation item 3) and behavior_integrity is excluded from the
+    average (SCH-06)."""
     values = [Decimal(str(ratings[field])) for field in SCORE_FIELDS]
     score = (sum(values, Decimal("0")) / Decimal(len(values))).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
@@ -165,7 +169,10 @@ def finalize_scheduled_assessment(evaluation, *, actor, regenerate=False):
 
 @transaction.atomic
 def submit_evaluator_rating(evaluation, *, ratings, actor):
-    """Store a single final rating. Any later change must use correction flow."""
+    """Store a single final rating. Any later change must use correction flow.
+
+    Rulebook SCH-07 (lock on submit). Not built yet: draft state, required
+    evidence per criterion (SCH-04) and a check that the call took place."""
     if EvaluatorRating.objects.filter(evaluation=evaluation).exists():
         raise ValueError("The evaluator rating is final. An authorized correction is required to change it.")
     rating = EvaluatorRating.objects.create(

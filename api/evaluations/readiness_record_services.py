@@ -9,6 +9,8 @@ from .models import EvaluationReadinessCorrection, EvaluationReadinessDecisionRe
 class EvaluationReadinessRecordService:
     RULE_ENGINE_VERSION = "v1.0"
 
+    # Stored legal-record values. "متوسط" is the stable stored value for
+    # Partially Ready; displayed labels follow rulebook OUT-06.
     INDICATOR_READY = "جاهز"
     INDICATOR_MEDIUM = "متوسط"
     INDICATOR_NOT_READY = "غير جاهز"

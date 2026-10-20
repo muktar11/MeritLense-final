@@ -46,6 +46,9 @@ class EvaluationReportError(Exception):
 
 
 class EvaluationReportService:
+    """Report content follows rulebook DOC-01 to DOC-05: only what was
+    measured, risks under the right competency, labels per OUT-06."""
+
     REPORT_VERSION = "1.3"
     API_SCHEMA_VERSION = "1.3"
     ASSESSMENT_FRAMEWORK_VERSION = "ML-RI-1.0"
@@ -176,7 +179,13 @@ class EvaluationReportService:
                 stale_count = cls._mark_previous_reports_stale(evaluation=evaluation, actor=actor)
                 report_number = cls._build_report_number(evaluation=evaluation)
                 language = cls._report_language(evaluation.session)
-                competency_breakdown = cls._build_competency_breakdown(competency_results, language=language)
+                competency_breakdown = cls._build_competency_breakdown(
+                    competency_results,
+                    language=language,
+                    critical_failure_codes={
+                        failure.get("competency_code") for failure in (summary.critical_failures or [])
+                    },
+                )
                 response_evidence_summary = cls._build_response_evidence(response_results, language=language)
                 human_review_flags = cls._build_human_review_flags(
                     evaluation=evaluation,
@@ -878,9 +887,11 @@ class EvaluationReportService:
         return "تم تحديد فجوة في الجاهزية بناءً على إجابة المرشح." if language == "ar" else "Readiness gap identified from the candidate response."
 
     @classmethod
-    def _build_competency_breakdown(cls, competency_results, language="en"):
+    def _build_competency_breakdown(cls, competency_results, language="en", critical_failure_codes=()):
         rows = []
+        critical_failure_codes = {code for code in critical_failure_codes if code}
         for item in competency_results:
+            has_critical_failure = item.competency_code in critical_failure_codes
             display_name = cls._friendly_competency_name(item.competency_code, item.competency_name, language=language)
             max_score = cls._decimal(item.max_score)
             completed_response_count = item.completed_response_count or 0
@@ -931,6 +942,13 @@ class EvaluationReportService:
                         f"({item.percentage} percent) across {item.completed_response_count} completed responses."
                     )
                 )
+            if has_critical_failure and assessment_status not in {"NOT_ASSESSED", "INSUFFICIENT_EVIDENCE"}:
+                # DOC-04: points alone must not present this competency as passed.
+                explanation = (
+                    f"{explanation} فشل حرج في إحدى الإجابات يمنع اعتبار هذه الكفاءة ناجحة."
+                    if language == "ar"
+                    else f"{explanation} A critical failure in one answer means this competency is not passed."
+                )
             rows.append(
                 {
                     "competency_code": item.competency_code,
@@ -947,6 +965,7 @@ class EvaluationReportService:
                     "incomplete_response_count": item.incomplete_response_count,
                     "pass_threshold": cls._decimal(item.pass_threshold),
                     "explanation": explanation,
+                    "has_critical_failure": has_critical_failure,
                 }
             )
         return cls._merge_rows_by_display_name(rows, language=language)
@@ -1050,6 +1069,7 @@ class EvaluationReportService:
             "incomplete_response_count": incomplete_response_count,
             "pass_threshold": pass_threshold,
             "explanation": explanation,
+            "has_critical_failure": any(row.get("has_critical_failure") for row in group),
         }
 
     @classmethod
@@ -1464,7 +1484,7 @@ class EvaluationReportService:
                 "assessment_mode": (
                     ("مقابلة مجدولة (يجريها مقيّم)" if language == "ar" else "Scheduled Interview (Evaluator-Conducted)")
                     if is_scheduled_interview
-                    else ("محاكاة رقمية موجهة" if language == "ar" else "Guided Digital Simulation")
+                    else ("مقابلة يقودها الذكاء الاصطناعي" if language == "ar" else "AI-Led Interview")
                 ),
                 "assessment_date": (session.ended_at or generated_at).date().isoformat(),
                 "assessment_duration_minutes": cls._derive_assessment_duration_minutes(session),
@@ -1661,16 +1681,18 @@ class EvaluationReportService:
                 "code": "INCOMPLETE",
                 "level": 4,
             }
-        if raw_value in {"متوسط", "PARTIALLY_READY"} or normalized == "PARTIALLY_READY":
-            return {"value": "جاهزية جزئية", "display": "Partially Ready", "code": "PARTIALLY_READY", "level": 2}
-        if raw_value in {"غير جاهز", "NOT_READY", "توجد فجوات جاهزية"} or normalized == "NOT_READY":
+        if raw_value in {"متوسط", "PARTIALLY_READY", "جاهزية جزئية", "جاهز جزئيًا"} or normalized == "PARTIALLY_READY":
+            return {"value": "جاهز جزئيًا", "display": "Partially Ready", "code": "PARTIALLY_READY", "level": 2}
+        # OUT-06: one label per rating. The older Not Ready wording is still
+        # recognised so reports generated before the change resolve correctly.
+        if raw_value in {"غير جاهز", "NOT_READY", "توجد فجوات جاهزية", "تم تحديد فجوات في الجاهزية"} or normalized == "NOT_READY":
             return {
-                "value": "توجد فجوات جاهزية",
-                "display": "Readiness Gaps Identified",
+                "value": "غير جاهز",
+                "display": "Not Ready",
                 "code": "NOT_READY",
                 "level": 3,
             }
-        return {"value": "جاهزية جزئية", "display": "Partially Ready", "code": "PARTIALLY_READY", "level": 2}
+        return {"value": "جاهز جزئيًا", "display": "Partially Ready", "code": "PARTIALLY_READY", "level": 2}
 
     @classmethod
     def _derive_top_strengths_and_risks(cls, *, competency_breakdown, critical_failures, language="en"):
@@ -1786,7 +1808,7 @@ class EvaluationReportService:
                     {
                         "category": item.get("display_name") or item.get("competency_name") or item.get("competency_code"),
                         "finding": cls._employer_evidence_finding(item, language=language),
-                        "source": f"محاكاة {item.get('question_order')}" if language == "ar" else f"Simulation {item.get('question_order')}",
+                        "source": f"السؤال {item.get('question_order')}" if language == "ar" else f"Question {item.get('question_order')}",
                         "severity": "High" if item.get("critical_failure") else "Medium",
                     }
                 )
@@ -1830,11 +1852,28 @@ class EvaluationReportService:
                 interpretation_confidences.append(float(confidence))
         avg_language_quality = sum(interpretation_confidences) / len(interpretation_confidences) if interpretation_confidences else 1.0
 
-        integrity_flag_messages = [
-            cls._normalize_text(flag.get("message"))
-            for flag in human_review_flags
-            if flag.get("flag_type") in {"critical_failure", "low_confidence_interpretation", "transcript_issue"}
-        ]
+        # DOC-03: each risk is listed under the competency of the answer it
+        # came from. Only flags tied to Behavioral answers, or to no answer,
+        # stay in the integrity block.
+        response_risk_keys = {
+            str(item.get("candidate_response_id")): cls._risk_key_for_competency(
+                item.get("competency_code"), item.get("competency_name")
+            )
+            for item in response_evidence_summary
+            if item.get("candidate_response_id")
+        }
+        flag_messages_by_risk_key = {}
+        for flag in human_review_flags:
+            if flag.get("flag_type") not in {"critical_failure", "low_confidence_interpretation", "transcript_issue"}:
+                continue
+            # Transcript problems are about evidence quality, not one
+            # competency, and stay in the integrity block as before.
+            risk_key = (
+                "integrity_risk" if flag.get("flag_type") == "transcript_issue"
+                else response_risk_keys.get(str(flag.get("candidate_response_id"))) or "integrity_risk"
+            )
+            flag_messages_by_risk_key.setdefault(risk_key, []).append(cls._normalize_text(flag.get("message")))
+        integrity_flag_messages = flag_messages_by_risk_key.get("integrity_risk", [])
 
         return {
             "note": (
@@ -1846,20 +1885,21 @@ class EvaluationReportService:
                 competency_item=safety_item,
                 competency_percentage=safety_pct,
                 has_critical_failure=any("safety" in str((f.get("competency_code") or f.get("competency_name") or "")).lower() for f in critical_failures),
-                fallback_evidence=[f.get("reason") for f in critical_failures],
+                fallback_evidence=flag_messages_by_risk_key.get("safety_risk", []),
                 language=language,
             ),
             "hygiene_risk": cls._risk_block(
                 competency_item=hygiene_item,
                 competency_percentage=hygiene_pct,
                 has_critical_failure=any("hygiene" in str((f.get("competency_code") or f.get("competency_name") or "")).lower() for f in critical_failures),
-                fallback_evidence=[],
+                fallback_evidence=flag_messages_by_risk_key.get("hygiene_risk", []),
                 language=language,
             ),
             "communication_risk": cls._communication_risk_block(
                 avg_language_quality=avg_language_quality,
                 competency_item=communication_item,
                 competency_percentage=communication_pct,
+                extra_evidence=flag_messages_by_risk_key.get("communication_risk", []),
                 language=language,
             ),
             "practical_tasks_risk": cls._risk_block(
@@ -1869,17 +1909,35 @@ class EvaluationReportService:
                     any(token in str((f.get("competency_code") or f.get("competency_name") or "")).lower() for token in ("practical", "task"))
                     for f in critical_failures
                 ),
-                fallback_evidence=[],
+                fallback_evidence=flag_messages_by_risk_key.get("practical_tasks_risk", []),
                 language=language,
             ),
             "integrity_risk": cls._integrity_risk_block(
                 integrity_item=integrity_item,
                 integrity_percentage=integrity_pct,
-                human_review_flags=human_review_flags,
+                human_review_flags=[
+                    flag for flag in human_review_flags
+                    if flag.get("flag_type") == "transcript_issue"
+                    or (response_risk_keys.get(str(flag.get("candidate_response_id"))) or "integrity_risk") == "integrity_risk"
+                ],
                 integrity_flag_messages=integrity_flag_messages,
                 language=language,
             ),
         }
+
+    @staticmethod
+    def _risk_key_for_competency(competency_code, competency_name=""):
+        haystack = f"{competency_code or ''} {competency_name or ''}".lower()
+        for tokens, risk_key in (
+            (("safety",), "safety_risk"),
+            (("hygiene", "clean", "sanitation"), "hygiene_risk"),
+            (("communication", "language"), "communication_risk"),
+            (("practical", "task"), "practical_tasks_risk"),
+            (("integrity", "reliability", "behavior", "psych", "professional"), "integrity_risk"),
+        ):
+            if any(token in haystack for token in tokens):
+                return risk_key
+        return None
 
     @classmethod
     def _risk_block(cls, *, competency_item, competency_percentage, has_critical_failure, fallback_evidence, language="en"):
@@ -1909,6 +1967,13 @@ class EvaluationReportService:
         # by the scoring/rule engine - not owned by this service, so it stays
         # in English even when language == "ar" (see _employer_evidence_finding).
         evidence.extend(cls._normalize_text_list(fallback_evidence))
+        if has_critical_failure and not evidence:
+            # DOC-04: a competency with a critical failure never reads as "no risk".
+            evidence.append(
+                "لم يتم استيفاء متطلب سلامة أساسي في إحدى الإجابات."
+                if language == "ar"
+                else "A critical requirement was not met in at least one answer."
+            )
         return {
             "level": level,
             "risk_score": risk_score,
@@ -1917,7 +1982,7 @@ class EvaluationReportService:
         }
 
     @classmethod
-    def _communication_risk_block(cls, *, avg_language_quality, competency_item, competency_percentage, language="en"):
+    def _communication_risk_block(cls, *, avg_language_quality, competency_item, competency_percentage, extra_evidence=(), language="en"):
         if not competency_item or competency_item.get("assessment_status") in {"NOT_ASSESSED", "INSUFFICIENT_EVIDENCE"}:
             return {
                 "level": "Not Assessed",
@@ -1929,14 +1994,21 @@ class EvaluationReportService:
                     else "Insufficient evidence was available to assess communication risk."
                 ],
             }
-        risk_score = max(0, min(100, int(round((1 - avg_language_quality) * 100))))
-        if avg_language_quality < 0.5:
+        # DOC-03: the competency result counts as well as language quality,
+        # so a competency below threshold can never read as Low risk.
+        competency_percentage = float(competency_percentage or 0)
+        risk_score = max(
+            0,
+            min(100, int(round(max((1 - avg_language_quality) * 100, 100 - competency_percentage)))),
+        )
+        below_threshold = bool(competency_item and competency_item.get("status") == "BELOW_THRESHOLD")
+        if avg_language_quality < 0.5 or competency_percentage < 40:
             level = "High"
-        elif avg_language_quality <= 0.75:
+        elif avg_language_quality <= 0.75 or below_threshold or competency_percentage <= 70:
             level = "Medium"
         else:
             level = "Low"
-        evidence = []
+        evidence = list(cls._normalize_text_list(extra_evidence))
         if competency_item and competency_percentage < 70:
             label = competency_item.get("display_name") or competency_item.get("competency_name") or competency_item.get("competency_code")
             evidence.append(
@@ -2085,11 +2157,15 @@ class EvaluationReportService:
             if item.get("traceability", {}).get("transcript_reference", {}).get("confidence") is not None
         ]
         avg_stt = sum(float(score) for score in stt_scores) / len(stt_scores) if stt_scores else 0.9
+        # DOC-05 / AI-03: only claim what was captured. Audio quality is
+        # reported only when answers were transcribed from audio, and no
+        # practical observation is claimed: the platform records none.
         if language == "ar":
             factors.append("مقابلة مكتملة" if completeness >= 90 else f"اكتمال المقابلة {completeness}%")
-            if session.task_observation_enabled:
-                factors.append("تضمنت ملاحظة عملية")
-            factors.append("جودة صوت جيدة" if avg_stt >= 0.8 else "جودة الصوت تتطلب مراجعة")
+            if not stt_scores:
+                factors.append("إجابات مكتوبة؛ لم يتم تسجيل صوت")
+            else:
+                factors.append("جودة صوت جيدة" if avg_stt >= 0.8 else "جودة الصوت تتطلب مراجعة")
             factors.append("اتساق عالٍ في الإجابات" if not human_review_flags else "اتساق الإجابات يتطلب مراجعة")
             if human_review_flags:
                 return "متوسطة", factors
@@ -2100,9 +2176,9 @@ class EvaluationReportService:
             factors.append("Complete interview")
         else:
             factors.append(f"Interview completeness {completeness}%")
-        if session.task_observation_enabled:
-            factors.append("Practical observation included")
-        if avg_stt >= 0.8:
+        if not stt_scores:
+            factors.append("Typed answers; no audio captured")
+        elif avg_stt >= 0.8:
             factors.append("Good audio quality")
         else:
             factors.append("Audio quality requires review")
@@ -2148,21 +2224,26 @@ class EvaluationReportService:
 
     @classmethod
     def _build_assessment_methodology(cls, language="en"):
+        # DOC-05 / AI-03: describe only the method actually used - scenario
+        # questions answered by voice or text, scored by fixed rules. No
+        # simulation, speech-analysis or task-observation claims.
         if language == "ar":
+            method = "أسئلة سيناريو (إجابة صوتية أو مكتوبة) مقيّمة بقواعد ثابتة"
             evaluated_and_method = [
-                ("الاستجابة للطوارئ، تحديد المخاطر، معرفة البروتوكولات", "أسئلة مبنية على سيناريوهات + محاكاة"),
-                ("إجراءات النظافة، منع التلوث المتبادل", "أسئلة مبنية على سيناريوهات"),
-                ("وضوح اللغة، اتباع التعليمات، جودة الإجابة", "وحدة تقييم التواصل + معالجة الكلام"),
-                ("تسلسل الخطوات، معدل الإنجاز، إدارة الوقت", "وحدة ملاحظة المهام"),
-                ("النزاهة، الموثوقية، الاتساق تحت الضغط", "وحدة التقييم السلوكي"),
+                ("تحديد المخاطر، التصرف الآمن، الإبلاغ", method),
+                ("إجراءات النظافة، منع التلوث المتبادل", method),
+                ("وضوح الإجابة واكتمالها، الإبلاغ والتسليم", method),
+                ("تسلسل خطوات العمل ومعرفة المهام", method),
+                ("النزاهة والموثوقية في مواقف العمل", method),
             ]
         else:
+            method = "Scenario questions (voice or typed answers), scored by fixed rules"
             evaluated_and_method = [
-                ("Emergency response, hazard identification, protocol knowledge", "Scenario-based Q&A + Simulation"),
-                ("Cleanliness procedures, cross-contamination prevention", "Scenario-based Q&A"),
-                ("Language clarity, instruction following, response quality", "Communication Assessment Module + Speech Processing"),
-                ("Step sequence, completion rate, time management", "Task Observation Module"),
-                ("Integrity, reliability, consistency under pressure", "Behavioral Assessment Module"),
+                ("Hazard identification, safe action, reporting", method),
+                ("Cleanliness procedures, cross-contamination prevention", method),
+                ("Clarity and completeness of answers, reporting and handover", method),
+                ("Step sequence and task knowledge", method),
+                ("Integrity and reliability in workplace scenarios", method),
             ]
         dimensions = cls.CANONICAL_COMPETENCY_DIMENSIONS_AR if language == "ar" else cls.CANONICAL_COMPETENCY_DIMENSIONS
         return [
@@ -2550,25 +2631,11 @@ class EvaluationReportService:
                 }
             )
 
-        preferred_labels = ["Cleaning", "Child Care", "Elderly Care"]
-        preferred_roles = [
-            item for item in scored_roles
-            if item["label"] in preferred_labels
-        ]
-        if len(preferred_roles) >= 3:
-            preferred_roles.sort(key=lambda item: preferred_labels.index(item["label"]))
-            return preferred_roles[:3]
-
+        # DOC-05: no suitability claims for roles the candidate was not
+        # assessed for - only the assessed role is returned.
         current_role_code = evaluation.candidate_job_role or getattr(evaluation.candidate, "job_role", "") or "OT"
         current_role = next((item for item in scored_roles if item["code"] == current_role_code), None)
-        alternates = [item for item in scored_roles if item["code"] != current_role_code]
-        alternates.sort(key=lambda item: item["match_score"], reverse=True)
-
-        ordered = []
-        if current_role is not None:
-            ordered.append(current_role)
-        ordered.extend(alternates[:2])
-        return ordered[:3]
+        return [current_role] if current_role is not None else []
 
     @classmethod
     def _build_privacy_commitments(cls):

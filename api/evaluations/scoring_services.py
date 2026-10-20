@@ -32,6 +32,9 @@ class Week6ScoringError(Exception):
 
 
 class Week6ScoringService:
+    """Rule Engine scoring (rulebook SCR-, CAL- and OUT- rules; status of
+    each in docs/ASSESSMENT_RULES.md)."""
+
     DECIMAL_ZERO = Decimal("0.00")
     DECIMAL_HUNDRED = Decimal("100.00")
 
@@ -87,12 +90,20 @@ class Week6ScoringService:
             responses=responses,
             response_results=results,
         )
+        # CAL-03: reconcile every assigned question to a response state, so
+        # a question with no response row cannot silently drop out of the
+        # result. Without a recorded skip, an unanswered question is
+        # non-completion, not a zero.
+        unanswered_questions = list(
+            session.questions.exclude(id__in=seen_question_ids).order_by("question_order")
+        )
         summary = cls._build_session_summary(
             evaluation=evaluation,
             rule_set=selected_rule_set,
             responses=responses,
             response_results=results,
             competency_results=competency_results,
+            unanswered_questions=unanswered_questions,
         )
         cls._apply_evaluation_rollups(evaluation=evaluation, summary=summary, actor=actor)
         # Release safeguard: anything that needs a person's judgement is held
@@ -222,6 +233,11 @@ class Week6ScoringService:
             max_score=max_score,
         )
         passed_required = not missing_required and bool(expected or matched or observed)
+        # Rulebook SCR-02 / SCR-05 / SCR-06 are not applied yet: any missing
+        # required point zeroes the answer, so the 3 band and the 70 legacy
+        # score notes never apply. Blocked on the "two or more omissions"
+        # and mandatory-point decisions (docs/governance/RULEBOOK_V1_ESCALATIONS.md
+        # items 1-2); do not guess them (REL-02).
         if missing_required:
             raw_score = cls.DECIMAL_ZERO
 
@@ -323,11 +339,16 @@ class Week6ScoringService:
         if rule.scoring_method == ScoringRule.SCORING_METHOD_ALL_OR_NOTHING:
             return max_score if expected and len(matched) == len(expected) else cls.DECIMAL_ZERO
 
-        if weighted:
+        # FIX-02: the governance importers once rounded each point's share
+        # to a whole number, leaving the last point of a 6-point list at 0
+        # and of a 7-point list at -1 (HK-TSK-002). A map with a zero or
+        # negative weight is not a valid weighting, so such rules fall back
+        # to equal weights, and no score can exceed the question maximum.
+        if weighted and all(weight > 0 for weight in weighted.values()):
             matched_weight = sum(weighted.get(indicator, cls.DECIMAL_ZERO) for indicator in matched)
             total_weight = sum(weighted.values()) or cls.DECIMAL_ZERO
             if total_weight > 0:
-                return cls._quantize(max_score * (matched_weight / total_weight))
+                return min(max_score, cls._quantize(max_score * (matched_weight / total_weight)))
 
         if expected:
             return cls._quantize(max_score * (Decimal(len(matched)) / Decimal(len(expected))))
@@ -463,7 +484,8 @@ class Week6ScoringService:
         return breakdown, final_percentage
 
     @classmethod
-    def _build_session_summary(cls, *, evaluation, rule_set, responses, response_results, competency_results):
+    def _build_session_summary(cls, *, evaluation, rule_set, responses, response_results, competency_results,
+                               unanswered_questions=()):
         total_score = sum((Decimal(str(result.score)) for result in response_results), cls.DECIMAL_ZERO)
         max_score = sum((Decimal(str(result.max_score)) for result in response_results), cls.DECIMAL_ZERO)
         layer_breakdown, weighted_percentage = cls._compute_layer_breakdown(competency_results)
@@ -501,7 +523,7 @@ class Week6ScoringService:
             for result in competency_results
             if result.status == CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD
         ]
-        if incomplete_response_count > 0 or any(
+        if incomplete_response_count > 0 or unanswered_questions or any(
             result.status == CompetencyEvaluationResult.STATUS_INCOMPLETE for result in competency_results
         ):
             status = SessionEvaluationSummary.STATUS_PARTIALLY_EVALUATED
@@ -548,6 +570,9 @@ class Week6ScoringService:
                     "rule_set_name": rule_set.name,
                     "rule_set_version": rule_set.version,
                     "session_role_code": evaluation.session.role_code,
+                    "assigned_question_count": len(responses) + len(unanswered_questions),
+                    "unanswered_question_count": len(unanswered_questions),
+                    "unanswered_question_orders": [question.question_order for question in unanswered_questions],
                 },
                 "generated_at": timezone.now(),
             },
@@ -556,6 +581,13 @@ class Week6ScoringService:
 
     @classmethod
     def _apply_evaluation_rollups(cls, *, evaluation, summary, actor=None):
+        session = getattr(evaluation, "session", None)
+        if session is not None and session.is_scheduled_interview:
+            # SCH-07 / GOV-02: a scheduled assessment's outcome comes from the
+            # evaluator's ratings. The AI summary of its transcript is kept as
+            # reference only and never writes the evaluation's score,
+            # readiness or readiness record, before or after the rating.
+            return
         existing_record = EvaluationReadinessRecordService.get_existing(evaluation)
         if existing_record is not None:
             evaluation.readiness_status = EvaluationReadinessRecordService.status_from_indicator(
@@ -590,6 +622,7 @@ class Week6ScoringService:
             evaluation.readiness_override_applied = False
             evaluation.readiness_override_reason = ""
         elif summary.critical_failures:
+            # OUT-03: a confirmed critical failure prevents Ready.
             first_failure = summary.critical_failures[0]
             topic = first_failure.get("topic")
             evaluation.readiness_status = ReadinessStatus.NOT_READY

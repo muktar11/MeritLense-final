@@ -6,6 +6,7 @@ import tempfile
 from io import StringIO
 from pathlib import Path
 
+from django.core.files.base import ContentFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError, InternalError, transaction
@@ -95,6 +96,52 @@ class ClearTrialDataTests(TestCase):
         with self.assertRaises((InternalError, IntegrityError)):
             with transaction.atomic():
                 EvaluationReadinessDecisionRecord.objects.filter(evaluation=real_eval).delete()
+
+    def test_all_assessments_clears_every_assessment_and_keeps_accounts_and_configuration(self):
+        # Management decision of 22 Oct 2026: every existing assessment is an
+        # internal test, whoever created it.
+        from api.evaluations.models import Certificate
+
+        first = self._scored_with_report(self.__class__.owner, self.__class__.company)
+        second = self._scored_with_report(self.real_owner, self.real_company)
+        certificate = Certificate.objects.create(evaluation=first, candidate=first.candidate)
+        certificate.pdf_file.save("trial-cert.pdf", ContentFile(b"%PDF-1.4 trial"), save=True)
+        stored = certificate.pdf_file.name
+        configs, users = InterviewConfiguration.objects.count(), User.objects.count()
+
+        out = StringIO()
+        call_command("clear_trial_data", "--all-assessments", stdout=out)
+        self.assertIn("every assessment", out.getvalue())
+        self.assertIn("stored files", out.getvalue())
+        self.assertEqual(Evaluation.objects.count(), 2)
+        with self.assertRaises(CommandError):  # not combinable with a candidate list
+            call_command("clear_trial_data", "--all-assessments", "--candidates", self._accounts_file(["X"]),
+                         stdout=StringIO())
+
+        with self.captureOnCommitCallbacks(execute=True):
+            call_command("clear_trial_data", "--all-assessments", "--execute", "--backup-file", self._backup(),
+                         "--confirm-evaluations", "2", stdout=StringIO())
+
+        self.assertFalse(Evaluation.objects.exists())
+        self.assertFalse(InterviewSession.objects.exists())
+        self.assertFalse(Candidate.objects.exists())
+        self.assertFalse(EvaluationReport.objects.exists())
+        self.assertFalse(EvaluationReadinessDecisionRecord.objects.exists())
+        # The certificate and its file are gone: its verification link no
+        # longer resolves.
+        self.assertFalse(Certificate.objects.exists())
+        self.assertFalse(certificate.pdf_file.storage.exists(stored))
+        response = self.client.get(f"/api/v1/evaluations/certificates/verify/{certificate.verification_id}")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual((User.objects.count(), InterviewConfiguration.objects.count()), (users, configs))
+        self.assertTrue(Company.objects.filter(pk=self.real_company.pk).exists())
+        # The second assessment was created by another account: cleared too,
+        # and the account kept.
+        self.assertTrue(User.objects.filter(pk=second.created_by_id).exists())
+        entry = AuditLog.objects.get(description__startswith="Trial assessment data cleared: every assessment")
+        # The certificate PDF, plus the candidates' documents and report PDFs.
+        self.assertEqual(entry.data["scope"], "ALL_ASSESSMENTS")
+        self.assertGreaterEqual(entry.data["stored_files_removed"], 1)
 
     def test_candidate_scope_clears_only_the_listed_qa_candidates_of_the_account(self):
         # QA fixtures loaded into an account that also has a real customer

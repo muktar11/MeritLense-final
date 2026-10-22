@@ -17,6 +17,16 @@ everything under them; the accounts' other candidates and assessments stay.
 Use it when QA fixtures were loaded into an account that also holds real
 customer data.
 
+With --all-assessments (management decision of 22 Oct 2026: every existing
+assessment is an internal test), every candidate, session and evaluation in
+the system is cleared, with their reports and certificates, whoever created
+them; no account list is needed.
+
+Stored files of the cleared records (certificate and report PDFs, answer
+audio, session artifacts, candidate documents) are removed after the
+transaction commits, so a cleared certificate's or report's verification
+link stops resolving and no copy remains in media storage.
+
 What is never touched: user accounts, companies, subscriptions, package
 balances, payments, interview configurations, question banks, rule sets,
 permissions, and audit logs (a summary of this run is added to them).
@@ -31,6 +41,7 @@ Usage:
     python manage.py clear_trial_data --accounts test_accounts.json --execute \\
         --backup-file /path/backup.dump --confirm-evaluations <N from dry run>
     python manage.py clear_trial_data --accounts acct.json --candidates passports.json   # dry run, scoped
+    python manage.py clear_trial_data --all-assessments                                   # dry run, everything
 """
 import json
 from collections import Counter
@@ -39,7 +50,7 @@ from pathlib import Path
 from django.contrib.admin.utils import NestedObjects
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection, router, transaction
-from django.db.models import Q, QuerySet
+from django.db.models import FileField, Q, QuerySet
 
 from api.accounts.models import User
 from api.audit.services import AuditLogService
@@ -63,7 +74,10 @@ class Command(BaseCommand):
     help = "Clear trial assessment data of confirmed test accounts (dry run unless --execute)."
 
     def add_arguments(self, parser):
-        parser.add_argument("--accounts", required=True, help="JSON file: list of test-account emails.")
+        scope = parser.add_mutually_exclusive_group(required=True)
+        scope.add_argument("--accounts", help="JSON file: list of test-account emails.")
+        scope.add_argument("--all-assessments", action="store_true",
+                           help="Every assessment in the system is test data: clear all of them.")
         parser.add_argument("--candidates",
                             help="JSON file: list of candidate passport IDs. Clears only these candidates of the "
                                  "listed accounts and keeps the accounts' other data.")
@@ -73,15 +87,24 @@ class Command(BaseCommand):
                             help="Evaluation count shown by the dry run (required to execute).")
 
     def handle(self, *args, **options):
-        emails = sorted({e.strip().lower() for e in json.loads(Path(options["accounts"]).read_text(encoding="utf-8"))})
-        users = list(User.objects.filter(email__in=emails))
-        missing = sorted(set(emails) - {u.email.lower() for u in users})
-        if missing:
-            raise CommandError(f"Unknown accounts (fix the list): {', '.join(missing)}")
+        everything = options["all_assessments"]
+        if everything and options["candidates"]:
+            raise CommandError("--candidates narrows an account list; it cannot be combined with --all-assessments.")
+        users = []
+        if not everything:
+            emails = sorted({e.strip().lower()
+                             for e in json.loads(Path(options["accounts"]).read_text(encoding="utf-8"))})
+            users = list(User.objects.filter(email__in=emails))
+            missing = sorted(set(emails) - {u.email.lower() for u in users})
+            if missing:
+                raise CommandError(f"Unknown accounts (fix the list): {', '.join(missing)}")
 
-        candidates = Candidate.objects.filter(created_by__in=users)
+        candidates = Candidate.objects.all() if everything else Candidate.objects.filter(created_by__in=users)
         passport_ids = None
-        if options["candidates"]:
+        if everything:
+            evaluations = Evaluation.objects.all()
+            sessions = InterviewSession.objects.all()
+        elif options["candidates"]:
             passport_ids = sorted({str(p).strip() for p in
                                    json.loads(Path(options["candidates"]).read_text(encoding="utf-8"))} - {""})
             if not passport_ids:
@@ -100,7 +123,7 @@ class Command(BaseCommand):
 
         # A test candidate assessed by an account that is NOT on the list
         # means the classification is incomplete - stop, don't guess.
-        foreign = evaluations.exclude(created_by__in=users)
+        foreign = evaluations.none() if everything else evaluations.exclude(created_by__in=users)
         if foreign.exists():
             listed = ", ".join(sorted({f"{e.public_id} (by {e.created_by.email})" for e in foreign[:20]}))
             raise CommandError(f"Evaluations by accounts not on the list touch these candidates: {listed}")
@@ -116,7 +139,19 @@ class Command(BaseCommand):
         if forbidden:
             raise CommandError(f"Refusing: the clear would cascade into {', '.join(forbidden)}.")
 
-        self.stdout.write(f"Accounts ({len(users)}): {', '.join(u.email for u in users)}")
+        reports = EvaluationReport.objects.all() if everything else EvaluationReport.objects.filter(
+            Q(evaluation__in=evaluations) | Q(session__in=sessions) | Q(candidate__in=candidates))
+        files = sorted({
+            (field.storage, getattr(instance, field.name).name)
+            for instances in list(collector.data.values()) + [list(reports)]
+            for instance in instances
+            for field in instance._meta.concrete_fields
+            if isinstance(field, FileField) and getattr(instance, field.name)
+        }, key=lambda item: item[1])
+        if everything:
+            self.stdout.write("Scope: every assessment in the system (all accounts).")
+        else:
+            self.stdout.write(f"Accounts ({len(users)}): {', '.join(u.email for u in users)}")
         if passport_ids is not None:
             self.stdout.write(f"Scoped to candidates ({len(passport_ids)}): "
                               f"{', '.join(f'{c.passport_id} {c.get_full_name()}' for c in candidates)}")
@@ -124,6 +159,8 @@ class Command(BaseCommand):
                           f"candidates: {candidates.count()}")
         for label, n in sorted(counts.items()):
             self.stdout.write(f"  {n:6}  {label}")
+        self.stdout.write(f"  {reports.count():6}  reports.evaluationreport (cleared first)")
+        self.stdout.write(f"  {len(files):6}  stored files (removed after commit)")
 
         if not options["execute"]:
             self.stdout.write(self.style.WARNING("Dry run - nothing deleted. Re-run with --execute, --backup-file "
@@ -147,8 +184,8 @@ class Command(BaseCommand):
             # Reports point at readiness records through a PROTECT key, so
             # they go first. Their queryset refuses delete() by design; this
             # sanctioned clear deliberately uses the base implementation.
-            QuerySet.delete(EvaluationReport.objects.filter(
-                Q(evaluation__in=evaluations) | Q(session__in=sessions) | Q(candidate__in=candidates)))
+            report_count = reports.count()
+            QuerySet.delete(reports)
             evaluations.delete()
             sessions.delete()
             candidates.delete()
@@ -157,16 +194,31 @@ class Command(BaseCommand):
                     cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
                     for table, trigger in PROTECTED_DELETE_TRIGGERS:
                         cursor.execute(f'ALTER TABLE "{table}" ENABLE TRIGGER "{trigger}"')
+            if everything:
+                description = "Trial assessment data cleared: every assessment in the system (all internal tests)."
+            elif passport_ids is None:
+                description = f"Trial assessment data cleared for {len(users)} confirmed test accounts."
+            else:
+                description = (f"Trial assessment data cleared for {len(passport_ids)} test candidates "
+                               f"of {len(users)} accounts.")
             AuditLogService.log_system(
                 action=AuditLogAction.EVALUATION_DELETED,
                 category=AuditLogCategory.SYSTEM,
-                description=(
-                    f"Trial assessment data cleared for {len(users)} confirmed test accounts."
-                    if passport_ids is None else
-                    f"Trial assessment data cleared for {len(passport_ids)} test candidates of {len(users)} accounts."
-                ),
+                description=description,
                 severity=AuditLogSeverity.WARNING,
-                data={"accounts": [u.email for u in users], "candidate_passport_ids": passport_ids,
-                      "backup_file": backup.name, "counts": dict(counts)},
+                data={"scope": "ALL_ASSESSMENTS" if everything else "ACCOUNTS",
+                      "accounts": [u.email for u in users], "candidate_passport_ids": passport_ids,
+                      "backup_file": backup.name, "counts": {**counts, "reports.evaluationreport": report_count},
+                      "stored_files_removed": len(files)},
             )
+            transaction.on_commit(lambda: self._remove_files(files))
         self.stdout.write(self.style.SUCCESS(f"Cleared. Backup: {backup.name}. Audit log entry written."))
+
+    def _remove_files(self, files):
+        failed = 0
+        for storage, name in files:
+            try:
+                storage.delete(name)
+            except Exception:  # a missing or locked file must not undo the committed clear
+                failed += 1
+        self.stdout.write(f"Stored files removed: {len(files) - failed}; not removable: {failed}.")

@@ -287,14 +287,14 @@ def main():
         "steps": [3, 4, 5, 6],
         "safeguards": [1, 2],
         "safeguard_consequence": None,
-        "open": "Escalated (RULEBOOK_V1_ESCALATIONS.md, Esc 6). The four original v1.2 outcomes are the "
+        "status": "INACTIVE",
+        "open": "Inactive by management decision (final decisions of 22 Oct 2026, Esc 6): the proposed safeguard "
+                "deductions are not approved and no new weighting is introduced; selection uses other fully "
+                "defined questions of the same role and competency. The four original v1.2 outcomes are the "
                 "denominator: 3 = positions self correctly, 4 = supports weight properly, 5 = moves slowly, "
                 "6 = checks balance. Points 1 (check the mobility plan and required aid or helpers) and 2 "
-                "(explain and obtain consent) are applicable safeguards: an answer that evidences both is "
-                "scored steps/4; an affirmed unsafe action is scored by the negative indicators. The consequence "
-                "of an unevidenced safeguard cannot be resolved from the agreed rules (no caps, not optional, "
-                "denominator fixed at 4), so such an answer is held and the question is not selected until "
-                "decided.",
+                "(explain and obtain consent) are applicable safeguards; an answer from an earlier assessment "
+                "that does not evidence them is held, never scored by an unapproved rule.",
     })
     SPECS.write_text(json.dumps(specs, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"templates approved; {adopted} additional Core points adopted; "

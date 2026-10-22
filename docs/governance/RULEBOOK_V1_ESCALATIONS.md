@@ -45,7 +45,16 @@ Settled; not to be reopened. Full implementation and validation summary: `RULE_D
 | 4 | Normal certificate eligibility after an authorized re-score; test documents identified; previous versions kept. 147 proposals adopted where supported; no new gates; rationale recorded and effects tested. | Already built in `recalculate_pending_rubric_results`. 80 of 147 adopted, 67 not (conditional 32, duplicate 15, generic 11, out of scope 9); every decision recorded in `core_additions`. |
 | 5 | ECG-TSK-001: four original outcomes as denominator; mobility plan and consent as applicable safeguards; no caps, not optional; escalate an unresolved consequence before activation. | Built as directed; one consequence escalated (Esc 6). Not selectable until decided. |
 
-## Still open
+## Decided by management, 22 Oct 2026 (final decisions)
+
+| # | Decision | Built |
+| --- | --- | --- |
+| Esc 6 | ECG-TSK-001 stays inactive. Another fully defined, validated question of the same role and competency is used wherever required, without duplication; exactly 21 Full and 7 Screening questions with all required coverage. The proposed safeguard deductions are not approved; no new weighting. | `rubric_specs_gov2_0.json` ECG-TSK-001 `status: INACTIVE`; `rule_complete` excludes it. Selection checked for all 21 roles, both tiers and languages: 21 / 7 questions, no duplicates, coverage met. |
+| Deploy | Approved, using the established deployment and rollback procedures. | |
+| Test data | All existing assessments are internal tests: back up and verify, then remove them with their reports and certificates (verification links stop resolving). Accounts, question bank, rules, configuration and the audit record are kept. No re-scoring. | `clear_trial_data --all-assessments` |
+| Final check | Fresh, clearly identified test sessions under the updated rules: selection, scoring, readiness, reports and certificate eligibility, AI and scheduled, English and Arabic. | |
+
+## Previously escalated (now decided)
 
 **Esc 6. ECG-TSK-001: the consequence of an unevidenced safeguard.**
 
@@ -56,7 +65,7 @@ The agreed rules settle everything except one case. An answer that evidences bot
 
 Today such an answer is held (`unmet_safeguards`), not scored, and the question is not selected.
 
-Recommendation: count each unevidenced safeguard as one outcome not completed, within the existing denominator of 4: score = (outcomes evidenced − safeguards not evidenced) / 4, floor 0. No cap, the denominator stays 4, and neither safeguard is optional.
+Engineering recommendation (not approved; the question stays inactive): count each unevidenced safeguard as one outcome not completed, within the existing denominator of 4: score = (outcomes evidenced − safeguards not evidenced) / 4, floor 0. No cap, the denominator stays 4, and neither safeguard is optional.
 
 | Answer | Expected score |
 | --- | --- |

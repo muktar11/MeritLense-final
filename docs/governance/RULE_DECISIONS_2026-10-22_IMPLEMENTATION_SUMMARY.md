@@ -6,7 +6,7 @@ Scope: AI-assessed scoring of the GOV2.0-RC1 question bank (2,100 questions; 2,0
 
 - **Every generic question is now scored by its approved template rule.** All 2,026 rules are active, and all 16,758 generated acceptance cases pass.
 - **No answer is held** for a missing scoring rule. Two or more omissions are scored, not held.
-- **One question is not used:** ECG-TSK-001. It has one escalated conflict (below). Selection skips it, and no coverage depends on it.
+- **One question is not used:** ECG-TSK-001, kept inactive by management's final decision of 22 Oct (the safeguard deductions below were not approved). Selection uses other fully defined questions of the same role and competency: exactly 21 Full and 7 Screening questions, no duplicates, coverage met.
 - **No new gates.** No new mandatory point, safety gate or certificate gate was created.
 
 ## What was implemented
@@ -64,7 +64,7 @@ The full list is in `validation_2026-10-22/all_central_questions.csv`.
 - **Safeguards.** The mobility-plan check and consent are represented as applicable safeguards. There are no caps, and neither safeguard is optional.
 - **Escalated.** See below.
 
-## Escalation (one): ECG-TSK-001, an unevidenced safeguard
+## Escalation (one): ECG-TSK-001, an unevidenced safeguard (decided: keep inactive)
 
 **What the agreed rules settle:**
 - An answer that evidences both safeguards scores outcomes/4.
@@ -112,8 +112,6 @@ The full list is in `validation_2026-10-22/all_central_questions.csv`.
 
 **5. Reproducing the results.** `python scripts/validate_rule_decisions_2026_10_22.py` regenerates every figure above and writes the CSV detail to `docs/governance/validation_2026-10-22/`. `scripts/apply_rule_decisions_2026_10_22.py` regenerates the configuration from the decisions.
 
-## Not yet done
+## Final decisions (22 Oct)
 
-- **Not deployed.** Merging backend PR #228, then the UI PR #235, deploys this to production.
-- **Held assessments.** Assessments already held on production need a named re-score run on the VM after deployment, with `--test-data` for test assessments.
-- **Esc 6** above.
+ECG-TSK-001 stays inactive; deployment approved; all existing assessments are test data and are removed after a verified backup (no re-scoring); final production checks use fresh, clearly identified test sessions.

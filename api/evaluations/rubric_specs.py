@@ -115,6 +115,8 @@ def rule_complete(question_set_version, question_code):
     spec = entry[1]
     if spec.get("kind") == "generic_530":
         return bool(spec.get("rule"))
+    if spec.get("status") == "INACTIVE":
+        return False  # kept out of use by management decision
     return not (spec.get("safeguards") and spec.get("safeguard_consequence") is None)
 
 

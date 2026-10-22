@@ -1,0 +1,25 @@
+question,core,treatment,partial mapping,justification
+HCA-COM-004,3 5,PARTIAL,[[3]],Adapting communication (clear simple language or an approved aid) is the central competence; confirming understanding is a compensable gap.
+HCA-HYG-016,1 3 6,PARTIAL,[[1]],Cleaning with a material-appropriate approved product is the central competence; disinfection is conditional ('if required') and a compensable gap.
+CCG-TSK-017,1 4,PARTIAL,[[4]],Close supervision is the safeguard that keeps the child safe during the activity; material choice is a compensable gap (an affirmed unsafe material is still a zero through the negative indicator).
+CC-TSK-015,2 6,PARTIAL,"[[2, 6]]",Either occupant-hazard control (wet-floor/trip control or keeping routes open) shows safe cleaning around occupants; the other is a compensable gap. Blocking an emergency route stays a zero through the negative indicator.
+CC-TSK-016,2 4,PARTIAL,[[2]],Testing/using an approved product is the central competence; avoiding overwetting is a compensable gap (affirmed overwetting stays a zero).
+HK-TSK-004,1 3,PARTIAL,"[[1, 3]]","Either element of the sequence (high to low, or floor last because dust falls) shows the cleaning-order competence; the other is a compensable gap."
+NA-BEH-010,1 3,PARTIAL,"[[1, 3]]",Protecting the patient or promptly reporting through safeguarding each shows safe partial competence; the other is a compensable gap. Ignoring or joining in stays a zero.
+NA-SAF-021,1 2,PARTIAL,"[[1, 2]]",Stopping the transfer or locking the bed each removes the immediate risk; the other is a compensable gap.
+EMS-COM-021,1 2,PARTIAL,"[[1, 2]]","Escalating the change (point 1), or notifying the nurse/clinical lead with handover (point 2), shows the central competence; the remaining procedure is a compensable gap. Leaving without telling anyone stays a zero."
+EMS-TSK-010,2 4,PARTIAL,[[2]],Recording what was actually consumed is the central competence of a recording question; reporting concerning intake is a compensable gap (ignoring a concern when affirmed stays a zero).
+SNC-COM-012,1 4,PARTIAL,"[[1, 4]]",Addressing the person first or preserving their voice and choices each shows the central competence; the other is a compensable gap.
+SNC-HYG-017,1 2,PARTIAL,"[[1, 2]]",Hand hygiene or cleaning the shared item each controls one contamination route; the other is a compensable gap.
+IC-SAF-014,1 2,PARTIAL,[[1]],Not removing the guard or entering without isolation and authorization is the safe central action; specifying approved LOTO by authorized persons is a compensable gap.
+ES-TSK-010,1 3,PARTIAL,[[1]],"Checking aisles/exits, crowd, hazards and welfare is the patrol itself; reporting/escalating is a compensable gap."
+DRV-TSK-021,2 3,PARTIAL,[[2]],Inspecting the vehicle is the central competence; recording is a compensable gap (falsifying or not recording damage when affirmed stays a zero).
+WS-SAF-020,1 3,BINARY,,The assessed action is a single refusal to ride on forks or a pallet; both Core points state that one act and it cannot be performed in part. Supporting points are not required for 5.
+ST-TSK-005,1 3,PARTIAL,[[1]],"Explaining task status, isolation/permit status and hazards is the central handover competence; confirming understanding is a compensable gap (transferring responsibility before confirmation when affirmed stays a zero)."
+ST-COM-005,3 4,PARTIAL,[[3]],Reporting the actual result against the acceptance criterion honestly is the central competence; stating safe status and next action is a compensable gap.
+ST-SAF-007,1 2,PARTIAL,[[1]],Rerouting or protecting the cable removes the trip hazard; keeping the emergency route clear is a compensable gap (blocking it when affirmed stays a zero).
+FW-BEH-005,1 2,BINARY,,The assessed action is a single refusal to use another person's authorization; both Core points state that one act and it cannot be performed in part.
+FW-SAF-019,1 3,BINARY,,The assessed action is a single refusal to ride without an approved seat; both Core points state that one act and it cannot be performed in part.
+LS-COM-009,1 2,PARTIAL,"[[1, 2]]",A clear report of the problem or an urgent request for support each shows the central competence; the other is a compensable gap.
+LS-SAF-011,1 2,PARTIAL,"[[1, 2]]","Warning and stopping movement, or moving the person out of the crush zone, each removes the immediate danger; the other is a compensable gap."
+LS-TSK-019,2 4,PARTIAL,[[2]],Recording actual quantity/status is the central competence of a recording question; prompt reporting of significant change is a compensable gap.

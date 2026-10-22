@@ -341,7 +341,7 @@ class IndicatorExtractionTests(TestCase):
         self.assertEqual(artifact.metadata["indicator_mode"], "indicator_ids")
         self.assertEqual(len(artifact.metadata["indicator_registry"]), 8)
         self.assertTrue(all(o["quote"] for o in artifact.metadata["indicator_observations"]))
-        self.assertTrue(result.response.ai_interpretation.prompt_version.endswith("+indicator-ids-v1"))
+        self.assertTrue(result.response.ai_interpretation.prompt_version.endswith("+indicator-ids-v2"))
 
     # -- parser and locks -----------------------------------------------------
 

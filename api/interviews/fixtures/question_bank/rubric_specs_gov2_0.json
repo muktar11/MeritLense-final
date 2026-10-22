@@ -1,5 +1,5 @@
 {
-  "spec_version": "GOV2.0-RC1-rubrics-2026-10-20b",
+  "spec_version": "GOV2.0-RC1-rubrics-2026-10-22",
   "bank_version": "GOV2.0-RC1",
   "authority": "Management decisions of 20 Oct 2026 (partial credit, mandatory indicators, competency thresholds) under Rulebook v1.0 GOV-06, SCR-01 to SCR-08. Each question is scored by its own approved score note. Must Include points are never mandatory by default; none of the 89 D-02 drafts is applied because no approved specification assigns that consequence.",
   "ordinals": "Point numbers are 1-based positions in the question's English Must Include list (V2-<code>-MI-NN) and Negative Indicator list (V2-<code>-NI-NN).",
@@ -236,9 +236,19 @@
     "ECG-TSK-001": {
       "kind": "completion",
       "note": "completion_pct: steps_completed/4x100",
-      "denominator": 6,
-      "open": "Conflict awaiting management decision (no caps introduced). Approved score note: 'completion_pct: steps_completed/4x100'. v1.2 Must Include (4): positions self correctly; supports weight properly; checks balance; moves slowly. GOV2.0 Must Include (6): 1 check the mobility plan and required aid or helpers; 2 explain and obtain consent; 3 secure the chair and position feet safely (= v1.2 positions self correctly); 4 trained standing technique without pulling the arms or carrying the full weight (= supports weight properly); 5 stand gradually (= moves slowly); 6 check balance and stop for pain or dizziness (= checks balance). Points 1-2 have no v1.2 counterpart. Until decided, only a complete answer (all 6) is scored; an incomplete one is held.",
-      "pending_unless_complete": true
+      "denominator": 4,
+      "open": "Escalated (RULEBOOK_V1_ESCALATIONS.md, Esc 6). The four original v1.2 outcomes are the denominator: 3 = positions self correctly, 4 = supports weight properly, 5 = moves slowly, 6 = checks balance. Points 1 (check the mobility plan and required aid or helpers) and 2 (explain and obtain consent) are applicable safeguards: an answer that evidences both is scored steps/4; an affirmed unsafe action is scored by the negative indicators. The consequence of an unevidenced safeguard cannot be resolved from the agreed rules (no caps, not optional, denominator fixed at 4), so such an answer is held and the question is not selected until decided.",
+      "steps": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "safeguards": [
+        1,
+        2
+      ],
+      "safeguard_consequence": null
     },
     "HH-IGR-002": {
       "kind": "bands",

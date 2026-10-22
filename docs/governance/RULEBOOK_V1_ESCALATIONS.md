@@ -33,49 +33,42 @@ All 89 drafted classifications are on questions with the generic score note ("5 
 | E. HK-BEH-002 | 3 for leaving the cash untouched without reporting, absent taking or concealment. | Band added; "fails to report" scores 3 on this question, not a critical failure |
 | 89 D-02 classifications | Removed as unapproved mandatory gates; kept as ordinary scoring evidence. | Already built |
 
+## Decided by management, 22 Oct 2026 (implemented)
+
+Settled; not to be reopened. Full implementation and validation summary: `RULE_DECISIONS_2026-10-22_IMPLEMENTATION_SUMMARY.md`.
+
+| # | Decision | Built |
+| --- | --- | --- |
+| 1 | Templates approved: 5 = all applicable Core outcomes correct and safe; 3 = central practical competence shown safely with compensable gaps; 0 = below minimum competence or a defined zero condition. A missing detail within an outcome does not fail it; equivalent methods and paraphrases accepted; unsafe actions by the question's own rules; legacy exceptions kept. | Five templates `APPROVED` v2; every one of the 2,026 generic questions has an active rule. Interpreter prompt `+indicator-ids-v2` credits an outcome's substance. |
+| 2 | Keep partial credit wherever safe, meaningful partial competence can be defined; binary only where it cannot, with a justification. | 21 of the 24 questions have a `partial` mapping with its rationale; 3 are `BINARY` (WS-SAF-020, FW-BEH-005, FW-SAF-019: a single refusal that cannot be performed in part). |
+| 3 | Select only questions with complete rules; coverage never overrides completeness; otherwise an availability exception. Conditional requirements count only when applicable; silence does not establish applicability. | Selection raises a "Rubric availability exception" (audit log, session not started). 277 questions have conditional Core points; each counts only when the interpreter quotes the scenario or answer establishing it. |
+| 4 | Normal certificate eligibility after an authorized re-score; test documents identified; previous versions kept. 147 proposals adopted where supported; no new gates; rationale recorded and effects tested. | Already built in `recalculate_pending_rubric_results`. 80 of 147 adopted, 67 not (conditional 32, duplicate 15, generic 11, out of scope 9); every decision recorded in `core_additions`. |
+| 5 | ECG-TSK-001: four original outcomes as denominator; mobility plan and consent as applicable safeguards; no caps, not optional; escalate an unresolved consequence before activation. | Built as directed; one consequence escalated (Esc 6). Not selectable until decided. |
+
 ## Still open
 
-**A. Rule templates for the generic-note questions** (`GOV2.0-RC1_rule_templates_for_decision.xlsx`).
+**Esc 6. ECG-TSK-001: the consequence of an unevidenced safeguard.**
 
-Management direction of 20 Oct 2026: draft full, partial and zero conditions from the existing specifications and the agreed methodology. Group equivalent questions under reusable templates with per-question mappings and exceptions. Submit only new or conflicting decisions.
+The agreed rules settle everything except one case. An answer that evidences both safeguards is scored steps/4. An affirmed unsafe action, such as pulling the arms or ignoring required assistance, scores 0 under the negative indicators. What the agreed rules cannot settle is an answer that completes the four outcomes but does not evidence the mobility-plan check or consent. Every way to give that a consequence needs one of the three things the decision rules out:
+- a cap, which is excluded;
+- a change to the denominator of 4, which is fixed;
+- treating the safeguard as optional, which is excluded.
 
-- **Source of record.** `rubric_core_points_gov2_0.json` holds:
-  - the reviewed Core/Supporting classification (management workbook);
-  - five templates (`TPL-SAFEGUARD`, `TPL-INTEGRITY`, `TPL-HYGIENE`, `TPL-COMMUNICATION`, `TPL-PROCEDURE`), each `PROPOSED`;
-  - a mapping for every question: template, central outcome(s), exception.
-- **Rule under a template:**
-  - 5: every Core outcome evidenced and safe. Supporting is never required.
-  - 3: every central outcome evidenced safely; other Core outcomes are compensable gaps.
-  - 0: a central outcome missing (`BELOW_MINIMUM`), nothing evidenced, or an affirmed negative indicator (critical failure, unchanged).
-- **Central outcomes:** 1,595 questions use the decisive safeguard identified in the second pass; 431 use the main outcome chosen in the template pass.
-- **Exceptions:** 24 questions where every Core outcome is central have no 3 band (`NO_PARTIAL_CREDIT`). These need question approval.
-- **Decisions requested** (sheet "Decisions requested"):
-  - D1: the central-outcome definition.
-  - D2: 3 for one or more compensable gaps.
-  - D3: conditional points are candidate omissions, never holds.
-  - D4: combined points.
-  - D5: the 24 exceptions.
-  - D6: ECG-TSK-001.
+Today such an answer is held (`unmet_safeguards`), not scored, and the question is not selected.
 
-  Everything else is unchanged and needs no approval.
-- **Activation:**
-  - Approving a template activates its mapped questions. 2,002 of 2,026 become scorable once all five are approved; the 24 exceptions need their own approval.
-  - A question-specific rule still overrides its template. It needs its question approved.
-  - Every rule must pass acceptance cases generated from its mapping before it scores.
-- **No routine holds:**
-  - Once a bank has an approved template, question selection draws only questions whose rule is complete.
-  - If approved coverage cannot be met that way, coverage wins and a visible "rubric availability exception" is logged.
-  - Unclear applicability is a candidate omission. Only genuinely unresolved evidence (uncertain or lost) stays incomplete.
-- **Additional 147 proposals** (sheet "Additional 147 proposals"):
-  - Supporting points the engineering second pass would make Core, each with its reason.
-  - Consequence: required for 5, a compensable gap for 3, never a gate.
-  - These are proposals only.
-- **Re-scoring.** `recalculate_pending_rubric_results` works as follows:
-  - It runs on named evaluations under a run label and preserves the original records and rule versions in a write-once `ScoreRecalculationSnapshot`.
-  - It then applies the normal eligibility rules automatically, with no separate release step.
-  - `--test-data` marks resulting certificates as test documents: watermarked, and reported as `TEST_DOCUMENT` by the public verification endpoint. A previous certificate's record and PDF reference stay in the snapshot.
+Recommendation: count each unevidenced safeguard as one outcome not completed, within the existing denominator of 4: score = (outcomes evidenced − safeguards not evidenced) / 4, floor 0. No cap, the denominator stays 4, and neither safeguard is optional.
 
-**C. ECG-TSK-001: resolve the conflict (no caps).**
+| Answer | Expected score |
+| --- | --- |
+| All four outcomes and both safeguards | 100% (5.00 of 5) |
+| All four outcomes, consent not evidenced | 75% (3.75) |
+| All four outcomes, neither safeguard | 50% (2.50) |
+| Three outcomes and both safeguards | 75% (3.75), already scored this way |
+| Pulls the arms or ignores required help (affirmed) | 0 and critical failure, already scored this way |
+
+To activate it: set `safeguard_consequence` in `rubric_specs_gov2_0.json` and add the deduction to the completion branch of `rubric_specs.execute`.
+
+**Previous record of the ECG-TSK-001 mapping (20 Oct 2026):**
 
 - Approved score note: "completion_pct: steps_completed/4×100". The package records `en_points` 4 and `ar_points` 6.
 - v1.2 Must Include (4): positions self correctly; supports weight properly; checks balance; moves slowly. v1.2 negative indicators: pulls abruptly; no balance check.
@@ -90,11 +83,6 @@ Management direction of 20 Oct 2026: draft full, partial and zero conditions fro
 | 6. Check balance and stop for pain or dizziness | Checks balance (extended) |
 
 - GOV2.0 negative indicators: pulls the arms; lifts unsafely; ignores required assistance or dizziness.
-- Current behaviour: only a complete answer (all 6) is scored; an incomplete one is held.
-- Options:
-  - A: denominator 4 over points 3–6, with an explicit consequence you set for points 1–2.
-  - B: denominator 6, with the note revised.
-  - C: other.
 
 ## Also open, already listed in the rulebook
 

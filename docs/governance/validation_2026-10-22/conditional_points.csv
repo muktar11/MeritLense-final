@@ -1,0 +1,292 @@
+question,point,text,central
+HK-BEH-004,5,seek urgent help if immediate danger.,yes
+HK-TSK-002,1,Use gloves/PPE as required,no
+HK-TSK-002,6,rinse/dry if product requires,no
+HK-SAF-012,5,report/escalate if large or unsafe.,no
+HK-TSK-012,4,disinfect/sanitize when required,no
+HK-TSK-019,5,communicate if all work cannot be completed properly.,no
+NA-COM-003,2,approved interpreter or communication aid where needed,no
+NA-HYG-003,2,use PPE if required,no
+NA-TSK-001,5,seek second helper when required,yes
+NA-BEH-009,5,seek nurse/help if concern escalates.,no
+NA-COM-016,6,seek nurse/help if distress or risk continues.,yes
+NA-HYG-017,5,change contaminated PPE if needed before resuming care.,no
+NA-HYG-021,4,use clean supplies/PPE as needed,no
+NA-HYG-021,5,ensure patient hand hygiene if appropriate before meal assistance.,no
+NA-SAF-009,3,secure bed/chair and brakes where applicable,no
+NA-SAF-009,5,use prescribed aid and ask for help if needed.,no
+NA-SAF-016,3,promptly notify nurse/activate emergency response if severe,yes
+NA-TSK-007,6,ask for help when required.,yes
+NA-TSK-017,4,clean device as required,no
+NA-TSK-019,6,stop and seek help if unsafe.,no
+HCA-HYG-002,1,Use PPE if contamination risk,no
+HCA-HYG-003,2,clean before disinfecting where required,no
+HCA-SAF-004,2,help the client leave only if you can do so safely,no
+HCA-BEH-011,5,seek supervisor/help if behavior creates risk.,no
+HCA-COM-006,5,share only necessary information with authorized care staff if follow-up or safety action is needed.,no
+HCA-HYG-005,1,Perform hand hygiene before clean or personal-care tasks as required,no
+HCA-HYG-006,4,change contaminated clothing/PPE if needed,no
+HCA-HYG-008,2,complete dirty task and clean/disinfect reusable tools as required,no
+HCA-HYG-016,3,disinfect if required,no
+HCA-HYG-017,4,clean and disinfect affected surfaces as required by the care procedure,no
+HCA-HYG-021,1,Clean/rinse as required,no
+HCA-SAF-011,7,ask for help if required.,no
+HCA-TSK-008,4,seek authorized guidance if suitability is unclear,no
+HCA-TSK-016,5,stop if fatigue/instability appears.,yes
+EMS-HYG-003,3,clean before disinfecting where required,no
+EMS-TSK-002,5,coordinate with a second helper when required,no
+EMS-BEH-010,2,intervene within safe role if necessary,no
+EMS-BEH-013,5,seek supervisor support if behavior persists or creates risk.,no
+EMS-COM-017,6,respect refusal and seek nurse support if concern persists.,yes
+EMS-HYG-006,4,change contaminated clothing/PPE if needed,no
+EMS-HYG-010,4,assess/report exposure if skin contacted,yes
+EMS-TSK-012,3,prepare slide/positioning aid if prescribed,no
+EMS-TSK-015,4,record actual weight/time and conditions if required,no
+EMS-TSK-020,5,communicate risks and handover as required.,no
+BPS-HYG-002,2,wear PPE if required,no
+BPS-BEH-012,5,seek supervisor support if behavior persists or creates risk.,no
+BPS-HYG-006,4,change contaminated clothing/PPE if needed,no
+BPS-HYG-017,1,Use PPE as required,no
+BPS-HYG-021,5,disinfect contaminated high-touch items if needed.,no
+BPS-SAF-006,5,use prescribed aid and second helper if required.,yes
+BPS-TSK-006,6,wash from cleaner to dirtier areas using separate materials as needed,no
+BPS-TSK-016,3,seek nurse help if disconnection/manipulation would be needed,no
+SNC-AUT-004,5,seek support if distress or safety risk increases.,no
+SNC-BEH-007,3,intervene safely if appropriate,no
+SNC-COM-013,5,clarify or seek authorized support if consent is uncertain.,no
+SNC-HYG-004,3,clean/disinfect as required,no
+SNC-HYG-006,4,put on new gloves only if indicated,no
+SNC-HYG-016,3,respect disinfectant contact time and rinse if the product instructions require it,no
+SNC-SAF-006,5,call clinical/emergency help if choking or breathing difficulty occurs,yes
+SNC-SAF-012,2,alert responsible contacts/security as required,yes
+SNC-SAF-015,4,seek clinical help when required,no
+SNC-TSK-002,4,allow processing time and choice where possible,no
+SNC-TSK-008,2,prepare identification/communication/mobility items as applicable,no
+CCG-SAF-004,4,do not move child unnecessarily if serious injury suspected,yes
+CCG-COM-013,5,escalate if unresolved.,no
+CCG-COM-015,1,Separate for safety if needed,yes
+CCG-COM-020,1,Use simple neutral questions and age-appropriate pain cues/scales if approved,no
+CCG-HYG-002,4,separate raw/ready-to-eat foods as applicable,no
+CCG-HYG-003,4,remove PPE if used,no
+CCG-HYG-005,2,change gloves/PPE when indicated,no
+CCG-HYG-007,4,put on new gloves if indicated,no
+CCG-HYG-014,2,use fresh cloth as needed,no
+CCG-HYG-016,2,remove contaminated gloves if worn,no
+CCG-HYG-016,4,use new gloves only if required,no
+CCG-HYG-017,1,Use PPE as indicated,no
+CCG-SAF-010,4,follow poison/emergency guidance if exposure is suspected,yes
+CCG-SAF-016,3,remove/secure the hazard if possible,no
+CCG-SAF-019,5,move away if animal or child shows distress.,no
+CCG-TSK-005,2,perform hand hygiene and use equipment cleaned or sterilized as required for the child's age and product,no
+CCG-TSK-021,4,assist fastening as needed,no
+ECG-PRO-001,3,maintain safe distance if needed,no
+ECG-PRO-001,6,seek support/escalate if risk increases,no
+ECG-COM-013,5,report sudden new confusion if relevant.,no
+ECG-COM-014,6,stop/clarify if person objects.,yes
+ECG-HYG-002,2,use PPE as indicated,no
+ECG-HYG-003,4,change contaminated clothing/apron if needed,no
+ECG-HYG-004,1,Use PPE as indicated,no
+ECG-HYG-007,1,Use hand hygiene/PPE as indicated,no
+ECG-HYG-017,5,change contaminated clothing if needed,no
+ECG-TSK-016,3,use prescribed cup if applicable,no
+ECG-TSK-019,4,use equipment/helper if required,yes
+HH-BAD-001,5,request help if the workload cannot be completed safely.,no
+HH-BAD-002,1,Keep the guest away from the affected area if unsafe,yes
+HH-SHK-004,3,separate contaminated items as required by policy,no
+HH-BEH-007,4,report the attempt if required,no
+HH-HYG-008,1,Wear PPE as required,no
+HH-HYG-010,2,clean then disinfect as required,yes
+HH-HYG-018,1,Use PPE as required,no
+HH-HYG-022,2,clean as required,no
+HH-SAF-007,2,prevent access if needed,no
+HH-SAF-011,5,seek medical/emergency help if symptoms significant.,no
+HH-TSK-010,3,check packaging/condition/expiry if applicable,yes
+HH-TSK-012,3,vacuum systematic route including edges as required,no
+HH-TSK-014,1,Do not mark or leave the room ready if the defect prevents release,yes
+HH-TSK-022,2,clean then disinfect where required with approved product/contact time,yes
+FDA-BAD-004,5,arrange appropriate support or an accessible room if available,no
+FDA-SAF-017,4,request support/security if pressure rises,no
+FDA-SAF-026,4,call security/supervisor if refusal continues,no
+FDA-TSK-010,3,obtain approval if required,yes
+FDA-TSK-016,3,verify identity/payment as required,no
+RS-BAD-004,1,Intervene promptly and respectfully if immediate contamination risk,no
+RS-IGR-003,5,involve the supervisor if the disturbance continues.,no
+RS-IGR-005,3,decline/stop service where required,yes
+RS-IGR-005,5,involve supervisor/security when needed,no
+RS-SHK-006,4,sanitize when required with the correct contact time and rinse if instructed,yes
+RS-COM-012,1,Give realistic estimated wait if approved,no
+RS-HYG-007,2,remove gloves if used,no
+RS-HYG-007,3,wash/sanitize hands as required,yes
+RS-TSK-008,5,stop and return it to the kitchen if there is any doubt.,yes
+CC-TEK-001,1,Assess hazards and place warning signs where needed,yes
+CC-TSK-001,5,"when disinfection is required, apply the correct concentration and contact time and rinse if instructed",no
+CC-TSK-003,6,label prepared solution where required.,no
+CC-COM-002,4,correct if within scope or escalate,yes
+CC-HYG-003,2,clean then disinfect if required,no
+CC-HYG-008,3,clean then sanitize as required,no
+CC-HYG-017,5,replace if compromised,yes
+CC-SAF-015,5,seek help if beyond safe reach.,no
+CC-TSK-017,2,keep one safe route if required,no
+CC-TSK-018,1,Use PPE as required,no
+CC-TSK-022,4,keep the area restricted if a safety or hygiene defect remains,yes
+IC-CES-005,5,stop and isolate equipment if fault appears,no
+IC-TEK-006,2,coordinate isolation or shutdown with authorized personnel when required,yes
+IC-HYG-002,5,replace if damaged,no
+IC-HYG-008,1,Only if part of trained respiratory program: remove safely,no
+IC-HYG-009,5,dispose/replace if compromised.,yes
+IC-HYG-016,4,wash skin as required,yes
+SG-ER-002,4,"if breathing is absent or abnormal, start CPR/use AED if trained or follow dispatcher instructions",yes
+SG-ID-005,4,follow the site lost-property procedure with a witnessed handover when required,no
+SG-SJ-001,5,call supervisor/backup as needed,no
+SG-SJ-001,7,use force only if law/policy/training authorizes and requires it.,yes
+SG-COM-004,6,request backup if noncompliant.,no
+SG-TSK-015,2,record key ID/time/signature as required,no
+SG-TSK-021,5,stop if malfunction,no
+ES-COM-015,5,call backup if noncompliant,yes
+ES-SAF-007,3,stop entry if directed,no
+DRV-RLS-002,4,"if visibility remains inadequate, stop at a safe place clear of traffic",yes
+DRV-TK-004,2,have it fitted and checked by an authorized competent person as applicable,no
+DRV-TK-004,4,do not depart if required protection cannot be provided,yes
+DRV-TSK-004,4,stop if visibility or clearance is uncertain and request a trained spotter when needed,yes
+DRV-COM-007,1,Stop safely if needed,yes
+DRV-COM-007,3,call medical/emergency support when indicated,yes
+DRV-COM-015,4,move to safe place if followed,no
+DRV-COM-015,5,contact authorities/dispatch when needed.,no
+DRV-SAF-007,5,stop safely if visibility remains inadequate.,yes
+DRV-SAF-012,5,stop safely if conditions become unsafe.,yes
+DRV-SAF-016,4,call assistance/emergency response if fire risk,no
+DRV-SAF-017,6,stop if passage is not safe.,yes
+DRV-SAF-020,5,stop if unsafe.,yes
+DRV-TSK-012,4,stop if view is uncertain,yes
+DRV-TSK-012,5,use trained spotter when required.,no
+DRV-TSK-020,5,stop if clearance uncertain.,yes
+DRV-TSK-022,3,stop at first safe opportunity if needed,yes
+WS-COM-010,3,update task/system as required,no
+WS-COM-017,2,stop/segregate the order if still controllable,yes
+WS-SAF-015,4,follow label/SDS procedure if identified,no
+WS-SAF-021,2,isolate if unstable,no
+WS-TSK-011,5,recount if uncertain and record the exception.,no
+GL-SS-001,5,inform supervisor/safety contact if not corrected,yes
+GL-TK-003,3,use lifting aids or team lifting where needed,no
+GL-TSK-001,3,use team/mechanical aid if needed,yes
+GL-COM-002,1,Give clear immediate warning if needed,yes
+GL-COM-009,3,establish barrier/redirect route if assigned,no
+GL-SAF-012,2,ensure approved caps/guarding where required,no
+GL-TSK-010,5,set barriers if instructed,no
+GL-TSK-013,7,stop if tool mushrooms/cracks.,no
+GL-TSK-019,1,Disconnect/secure powered tools as required,yes
+GL-TSK-021,5,stop if unclear/unsafe,no
+ST-TK-001,4,ask for technical clarification if a detail is unclear or conflicts with site conditions,no
+ST-TSK-003,4,arrange a qualified retest if evidence is unavailable,no
+ST-TSK-010,1,Confirm permit/isolation as applicable,yes
+ST-TSK-017,4,maintain permits/tags/barriers as required,no
+ST-TSK-020,3,determine if within own approved repair scope,no
+FW-HYG-002,4,change PPE/hand hygiene as needed,no
+FW-COM-013,5,report affected produce if any.,no
+FW-COM-014,5,do not claim the tool is usable if uncertain.,yes
+FW-HYG-023,2,clean/sanitize as required,yes
+FW-TSK-012,3,connect with system depressurized as required,yes
+FW-TSK-017,1,Depressurize as required,yes
+FW-TSK-022,2,wash/sanitize where required,yes
+LS-HYG-001,2,clean/disinfect footwear/equipment as required,yes
+LS-HYG-005,4,separate chemicals/medicated feed as required,no
+LS-SAF-001,5,never enter high-risk enclosure alone if procedure requires support.,no
+LS-HYG-016,3,clean/change footwear/gloves as required,no
+LS-HYG-021,5,clean contaminated surfaces/equipment as needed.,no
+LS-HYG-023,2,clean/disinfect as required,no
+HK-PRO-006,2,respect personal boundaries and ask about the day’s priorities if needed.,no
+HK-COM-003,3,explain if another task will be delayed,no
+HK-COM-007,3,do not lift if unsafe,yes
+HK-HYG-004,3,replace dirty water and clean or replace a soiled mop as needed,yes
+HK-HYG-007,2,change contaminated gloves if needed and clean hands,no
+HK-SAF-009,1,Use a stable approved step stool or ladder only if available and permitted,no
+HK-SAF-015,4,"if fire or smoke develops, leave the danger area, warn others and call emergency help from a safe location.",no
+HK-SAF-017,3,use help or suitable aid if needed,no
+HK-SAF-019,4,leave/escalate if symptoms or unsafe conditions occur.,yes
+NA-BEH-004,2,do not accept money if prohibited,yes
+NA-BEH-013,4,politely decline personal contact if not permitted.,no
+NA-BEH-014,4,follow facility valuables procedure and document/handover if required.,no
+NA-COM-010,1,Report promptly using factual observations and measured amount/time if available,yes
+NA-HYG-009,2,change gloves/PPE as indicated,no
+NA-SAF-010,4,update the nurse urgently if the condition worsens.,no
+HCA-BEH-001,4,follow gift/safeguarding policy and report as required.,no
+HCA-BEH-014,3,politely decline personal social-media connection if not permitted.,yes
+HCA-COM-007,4,contact the responsible nurse/supervisor for guidance when needed.,no
+HCA-COM-018,4,contact the supervisor or responsible professional if the conflict affects care or safety.,yes
+HCA-SAF-016,3,follow care-plan escalation and seek clinical/emergency help if indicated,yes
+HCA-SAF-021,4,contact responsible clinical/family support if client persists or risk is immediate.,no
+EMS-BEH-012,2,complete task safely if possible or report inability/delay,no
+EMS-BEH-014,4,follow valuables/property procedure and document/handover if required.,yes
+EMS-HYG-012,4,perform hand hygiene if contaminated handling occurred.,no
+EMS-SAF-019,2,reduce avoidable pressure/friction if relevant and within plan,no
+BPS-HYG-001,1,Hand hygiene before/after patient contact and clean/aseptic or body-fluid-risk tasks as applicable,yes
+BPS-BEH-010,3,inform nurse/supervisor and hand over if needed,no
+BPS-BEH-011,4,follow valuables procedure and document/handover if required.,yes
+BPS-SAF-008,2,protect head/body and guide safely if possible rather than trying to hold full weight,yes
+SNC-BEH-005,3,keep everyone safe and seek trained support if risk continues.,yes
+SNC-HYG-017,2,clean/disinfect shared item between users as required,yes
+SNC-HYG-018,3,use fresh clean cloth as needed,no
+CCG-BEH-005,3,inform the parent or supervisor if needed.,no
+CCG-PRO-005,4,seek clarification from the parents if instructions are unclear or unsafe.,yes
+ECG-BEH-002,4,report/escalate the request and document as required.,no
+ECG-SAF-021,2,position pet safely during transfers/walking if agreed,no
+HH-BEH-012,3,inform supervisor if room may have been released,no
+HH-HYG-011,4,discard/reprocess if contaminated.,no
+HH-SAF-013,2,do not touch outlet/equipment or water if electrical risk,yes
+RS-COM-016,3,ask kitchen if needed,no
+RS-HYG-010,4,hand hygiene if contamination occurred.,no
+RS-HYG-014,2,wash/sanitize between uses as required,yes
+CC-BEH-013,2,correct potential contamination by recleaning/reprocessing as required,no
+CC-COM-006,3,flag if shortage affects hygiene/safety.,no
+CC-COM-013,4,seek supervisor/site support if task cannot proceed.,no
+CC-HYG-021,1,Do not disturb hazardous droppings/dust by dry sweeping if procedure prohibits,yes
+CC-SAF-008,2,do not touch electrical source or wet area if energized risk exists,yes
+IC-BR-004,1,Stop hazardous work if symptoms could affect safety,yes
+IC-CES-002,2,do not enter if not trained/authorized or controls are incomplete.,yes
+IC-BEH-010,2,do not share personal/contaminated PPE if prohibited,yes
+IC-HYG-003,3,wash/degrease/decontaminate as required,no
+IC-HYG-005,2,remove soil then disinfect if site requires,no
+IC-HYG-015,2,wash hands/forearms as required by contaminant and site procedure,no
+IC-SAF-021,3,require isolation by authorized person if procedure requires,no
+IC-SAF-021,4,stop if controls unclear.,yes
+SG-BEH-004,2,correct only through traceable approved amendment if genuinely wrong,no
+SG-BEH-010,2,tag/replace if safety/reliability affected,no
+SG-COM-020,3,arrange escort if required,no
+SG-COM-021,4,call supervisor/traffic support if refusal continues.,no
+SG-SAF-005,1,Do not touch/use radio near suspected device if site procedure prohibits,yes
+ES-COM-003,4,request supervisor/backup if refusal continues.,no
+ES-COM-009,2,avoid public/radio disclosure if prohibited,no
+DRV-TK-002,4,"if route changes, stop or adjust safely and communicate when required.",no
+DRV-BEH-017,4,stop/escalate if behavior threatens safe driving.,no
+DRV-COM-001,2,give factual location/status and revised estimate only if reasonable,no
+DRV-COM-004,3,confirm compliance before moving when required.,yes
+DRV-SAF-003,3,do not enter if depth or road condition is uncertain/unsafe,yes
+DRV-SAF-010,4,repair/replace before continuing if unsafe.,yes
+DRV-SAF-014,4,stop safely if vision is compromised.,yes
+DRV-SAF-019,1,Do not drive if fitness is impaired or warning applies,yes
+DRV-SAF-023,1,Do not continue if visibility/safety is materially affected,yes
+DRV-TSK-023,3,stop if not controlled immediately.,no
+WS-TSK-017,1,Check date/batch and documented FIFO/FEFO rule as applicable,no
+GL-BEH-004,4,escalate unsafe instruction if unresolved.,no
+GL-BEH-010,1,Stop using if safety may be affected,yes
+GL-BEH-012,2,report only direct facts if relevant,no
+GL-COM-006,4,stop movement if communication is lost.,yes
+GL-COM-007,3,do not say it is safe if uncertain.,yes
+GL-SAF-011,4,alert others if they enter.,no
+GL-TSK-023,4,sign only if assigned and checks complete.,yes
+ST-BEH-014,1,Decline if outside qualification/authorization,yes
+ST-SAF-006,3,verify fire watch/extinguisher as required,no
+ST-SAF-020,2,maintain isolation if applicable,no
+ST-SAF-023,4,repeat affected verification if required.,no
+ST-TSK-012,4,obtain other trade sign-off/clearance where required.,no
+FW-BEH-008,1,Remove from service if safety affected,yes
+FW-BEH-015,1,Make immediate area safe if possible,no
+FW-HYG-007,3,change gloves/wash hands if contaminated,no
+FW-HYG-012,4,avoid produce handling if control inadequate.,no
+LS-SAF-003,3,do not enter if conditions exceed training or safe controls.,yes
+LS-BEH-007,1,Make safe/remove from use if hazard exists,no
+LS-COM-006,3,do not claim safe if uncertain.,yes
+LS-HYG-008,4,wash hands/change gloves if contaminated.,no
+LS-HYG-012,1,Clean/treat and cover with suitable waterproof dressing/glove as required,yes
+LS-HYG-012,2,avoid high-contamination tasks if control inadequate,no
+LS-SAF-012,3,isolate energy/sharp hazards as applicable,no

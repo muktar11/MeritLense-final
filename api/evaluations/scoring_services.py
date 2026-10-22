@@ -256,6 +256,8 @@ class Week6ScoringService:
                 total_points=len(expected),
                 negative_ordinals=sorted(negative_ordinals),
                 inapplicable_ordinals=sorted(cls._indicator_ordinals(artifact, rule.question_code, "inapplicable_ids", "MI")),
+                established_ordinals=sorted(
+                    cls._indicator_ordinals(artifact, rule.question_code, "condition_established_ids", "MI")),
             )
             rubric["spec_version"] = spec_version
             if rubric["status"] == rubric_specs.STATUS_PENDING:
@@ -347,6 +349,7 @@ class Week6ScoringService:
                         "rubric_status": rubric["status"],
                         "rubric_missing_count": rubric["missing_count"],
                         "rubric_missing_prerequisites": rubric.get("missing_prerequisites", []),
+                        "rubric_inapplicable_points": rubric.get("inapplicable_ordinals", []),
                     } if rubric else {}),
                 },
                 "scored_at": timezone.now(),

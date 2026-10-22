@@ -240,29 +240,22 @@ class QuestionGenerationService:
             if profile is None:
                 raise AllocationGap([f"{bank.version}: no role profile for {session.role_code}"])
             if rubric_specs.selection_gate_active(bank.version):
-                # Rubric gaps are resolved before selection (management
-                # direction of 20 Oct 2026): draw only questions whose
-                # answers can be scored without a held band. If that pool
-                # cannot meet the approved coverage, coverage wins and the
-                # shortfall is recorded as a visible availability exception.
+                # Only questions with complete scoring rules are selected;
+                # coverage never overrides rule completeness (management
+                # decision 3 of 22 Oct 2026). If no suitable alternative meets
+                # the coverage, the session is not started and the shortfall
+                # is shown as a rubric availability exception.
                 complete = [t for t in templates if rubric_specs.rule_complete(bank.version, t.question_code)]
                 try:
                     result = select(complete)
                 except AllocationGap as gap:
-                    result = select(templates)
-                    incomplete = [c.code for c in result.questions
-                                  if not rubric_specs.rule_complete(bank.version, c.code)]
-                    AuditLogService.log(
-                        user=session.created_by,
-                        action=AuditLogAction.SESSION_FAILED,
-                        category=AuditLogCategory.QUESTION,
-                        description="Rubric availability exception: approved coverage needs questions whose "
-                                    "scoring rule is not yet complete.",
-                        resource=session,
-                        severity=AuditLogSeverity.WARNING,
-                        data={"question_set_version": bank.version, "tier": tier_key,
-                              "incomplete_rule_questions": incomplete, "gaps": gap.gaps},
-                    )
+                    excluded = sorted(t.question_code for t in templates
+                                      if not rubric_specs.rule_complete(bank.version, t.question_code))
+                    raise AllocationGap([
+                        f"Rubric availability exception: the approved coverage cannot be met from questions with "
+                        f"complete scoring rules (excluded: {', '.join(excluded) or 'none'}).",
+                        *gap.gaps,
+                    ]) from gap
             else:
                 result = select(templates)
         except AllocationGap as gap:

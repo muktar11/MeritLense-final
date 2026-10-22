@@ -15,14 +15,16 @@ SCORE_FIELDS = ("safety_awareness", "hygiene", "communication", "task_execution"
 def calculate_evaluator_outcome(ratings):
     """Apply the evaluator-approved four-field average and readiness bands.
 
-    Boundaries per rulebook OUT-01. Open: no safety gate on this path yet
-    (OUT-04, escalation item 3) and behavior_integrity is excluded from the
-    average (SCH-06)."""
+    Boundaries per rulebook OUT-01. A confirmed critical safety failure
+    (OUT-04, management decision B of 20 Oct 2026) is Not Ready whatever the
+    average. Open: behavior_integrity is excluded from the average (SCH-06)."""
     values = [Decimal(str(ratings[field])) for field in SCORE_FIELDS]
     score = (sum(values, Decimal("0")) / Decimal(len(values))).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )
-    if score < Decimal("40"):
+    if ratings.get("critical_safety_failure"):
+        readiness = "NOT_READY"
+    elif score < Decimal("40"):
         readiness = "NOT_READY"
     elif score < Decimal("60"):
         readiness = "PARTIALLY_READY"
@@ -39,6 +41,8 @@ def _rating_values(rating):
         "task_execution": rating.task_execution,
         "behavior_integrity": rating.behavior_integrity,
         "comments": rating.comments,
+        "critical_safety_failure": rating.critical_safety_failure,
+        "critical_safety_failure_note": rating.critical_safety_failure_note,
     }
 
 
@@ -46,8 +50,11 @@ def _apply_evaluator_outcome(evaluation, rating):
     score, readiness = calculate_evaluator_outcome(_rating_values(rating))
     evaluation.score = score
     evaluation.readiness_status = readiness
-    evaluation.readiness_override_applied = False
-    evaluation.readiness_override_reason = ""
+    evaluation.readiness_override_applied = bool(rating.critical_safety_failure)
+    evaluation.readiness_override_reason = (
+        f"Evaluator confirmed a critical safety failure: {rating.critical_safety_failure_note}"
+        if rating.critical_safety_failure else ""
+    )
     evaluation.save(update_fields=[
         "score", "readiness_status", "readiness_override_applied",
         "readiness_override_reason", "updated_at",

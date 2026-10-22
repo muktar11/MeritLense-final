@@ -16,6 +16,7 @@ from .certificate_services import (
     minimum_required_dimensions_for_role,
     required_dimensions_for_role,
 )
+from . import rubric_specs
 from .readiness_record_services import EvaluationReadinessRecordService
 from .models import (
     CompetencyEvaluationResult,
@@ -37,6 +38,7 @@ class Week6ScoringService:
 
     DECIMAL_ZERO = Decimal("0.00")
     DECIMAL_HUNDRED = Decimal("100.00")
+    DEFAULT_COMPETENCY_PASS_PERCENTAGE = Decimal("60.00")
 
     @classmethod
     @transaction.atomic
@@ -76,11 +78,13 @@ class Week6ScoringService:
             raise Week6ScoringError("No candidate responses are available for scoring")
 
         results = []
+        rubric_pending = []
         for response in responses:
             result = cls._score_response(
                 evaluation=evaluation,
                 response=response,
                 rule_set=selected_rule_set,
+                pending=rubric_pending,
             )
             if result is not None:
                 results.append(result)
@@ -104,6 +108,7 @@ class Week6ScoringService:
             response_results=results,
             competency_results=competency_results,
             unanswered_questions=unanswered_questions,
+            rubric_pending=rubric_pending,
         )
         cls._apply_evaluation_rollups(evaluation=evaluation, summary=summary, actor=actor)
         # Release safeguard: anything that needs a person's judgement is held
@@ -189,7 +194,7 @@ class Week6ScoringService:
         return resolved
 
     @classmethod
-    def _score_response(cls, *, evaluation, response, rule_set):
+    def _score_response(cls, *, evaluation, response, rule_set, pending=None):
         artifact = getattr(response, "evaluation_input_artifact", None)
         # Without a prepared evidence artifact, there is no defensible basis
         # for a score. Leave this response out of scoring; the session rollup
@@ -232,14 +237,52 @@ class Week6ScoringService:
             weighted=weighted,
             max_score=max_score,
         )
-        passed_required = not missing_required and bool(expected or matched or observed)
-        # Rulebook SCR-02 / SCR-05 / SCR-06 are not applied yet: any missing
-        # required point zeroes the answer, so the 3 band and the 70 legacy
-        # score notes never apply. Blocked on the "two or more omissions"
-        # and mandatory-point decisions (docs/governance/RULEBOOK_V1_ESCALATIONS.md
-        # items 1-2); do not guess them (REL-02).
-        if missing_required:
-            raw_score = cls.DECIMAL_ZERO
+        rubric = None
+        spec_entry = rubric_specs.spec_for(rule_set.question_set_version, rule.question_code) if rule.question_code else None
+        if spec_entry is not None:
+            # SCR-01 to SCR-08: the question's own approved score note decides
+            # the band. No Must Include point is mandatory by default (SCR-06),
+            # so the old "any missing required point scores 0" rule and the
+            # unapproved D-02 drafts in required_indicators no longer apply.
+            spec_version, spec = spec_entry
+            negative_ordinals = {
+                position for position, indicator in enumerate(critical_failure_indicators, start=1)
+                if indicator in observed or indicator in artifact_risk_flags
+            } | cls._negative_evidence_ordinals(artifact, rule.question_code)
+            rubric = rubric_specs.execute(
+                spec,
+                max_score=max_score,
+                matched_ordinals=[position for position, indicator in enumerate(expected, start=1) if indicator in observed],
+                total_points=len(expected),
+                negative_ordinals=sorted(negative_ordinals),
+                inapplicable_ordinals=sorted(cls._indicator_ordinals(artifact, rule.question_code, "inapplicable_ids", "MI")),
+                established_ordinals=sorted(
+                    cls._indicator_ordinals(artifact, rule.question_code, "condition_established_ids", "MI")),
+            )
+            rubric["spec_version"] = spec_version
+            if rubric["status"] == rubric_specs.STATUS_PENDING:
+                # Decision A (20 Oct 2026): no interim score. The answer stays
+                # unscored until its rule is approved, then is recalculated.
+                ResponseEvaluationResult.objects.filter(response=response, rule_set=rule_set).delete()
+                if pending is not None:
+                    pending.append(rule.question_code)
+                return None
+            raw_score = rubric["score"]
+            missing_required = []
+            critical_hits = [
+                critical_failure_indicators[position - 1]
+                for position in rubric.get("negative_ordinals", [])
+                if rubric["critical_failure"] and position <= len(critical_failure_indicators)
+            ]
+            # No point is mandatory, so no mandatory condition can fail; a
+            # partial answer is a scored band, not a review case.
+            passed_required = True
+        else:
+            passed_required = not missing_required and bool(expected or matched or observed)
+            # Pre-pooled versions (GOV1.2 and history) keep the scoring they
+            # were released with: any missing required point scores 0.
+            if missing_required:
+                raw_score = cls.DECIMAL_ZERO
 
         critical_failure = bool(critical_hits)
         effective_score = raw_score
@@ -266,9 +309,10 @@ class Week6ScoringService:
             missing_required=missing_required,
             critical_hits=critical_hits,
             requires_human_review=requires_human_review,
+            rubric=rubric,
         )
 
-        result, _ = ResponseEvaluationResult.objects.update_or_create(
+        result, _ =ResponseEvaluationResult.objects.update_or_create(
             response=response,
             rule_set=rule_set,
             defaults={
@@ -299,11 +343,39 @@ class Week6ScoringService:
                     "critical_failure_indicators": critical_failure_indicators,
                     "raw_score": str(raw_score),
                     "effective_score": str(effective_score),
+                    **({
+                        "rubric_spec_version": rubric["spec_version"],
+                        "rubric_band": rubric["band"],
+                        "rubric_status": rubric["status"],
+                        "rubric_missing_count": rubric["missing_count"],
+                        "rubric_missing_prerequisites": rubric.get("missing_prerequisites", []),
+                        "rubric_inapplicable_points": rubric.get("inapplicable_ordinals", []),
+                    } if rubric else {}),
                 },
                 "scored_at": timezone.now(),
             },
         )
         return result
+
+    @classmethod
+    def _negative_evidence_ordinals(cls, artifact, question_code):
+        """Negative indicators the interpreter confirmed as the candidate's
+        own affirmed conduct (indicator-ID mode, SCR-07 context rules
+        already applied), as 1-based positions in the question's list."""
+        return cls._indicator_ordinals(artifact, question_code, "negative_evidence_ids", "NI")
+
+    @classmethod
+    def _indicator_ordinals(cls, artifact, question_code, key, kind):
+        """1-based positions of the V2-<code>-<kind>-NN ids listed under
+        `key` in the artifact metadata (e.g. Must Include points whose
+        condition the answer shows does not apply: "inapplicable_ids")."""
+        ordinals = set()
+        prefix = f"V2-{question_code}-{kind}-"
+        for indicator_id in (getattr(artifact, "metadata", None) or {}).get(key) or []:
+            indicator_id = str(indicator_id)
+            if indicator_id.startswith(prefix) and indicator_id[len(prefix):].isdigit():
+                ordinals.add(int(indicator_id[len(prefix):]))
+        return ordinals
 
     @classmethod
     def _resolve_rule(cls, *, rule_set, response, artifact):
@@ -374,6 +446,7 @@ class Week6ScoringService:
                 "responses": [],
             })["responses"].append((response, result))
 
+        role_profile = cls._bank_role_profile(rule_set, evaluation)
         saved = []
         for competency_code, payload in grouped.items():
             items = payload["responses"]
@@ -382,9 +455,23 @@ class Week6ScoringService:
             incomplete_count = response_count - len(completed)
             total_score = sum((Decimal(str(result.score)) for result in completed), cls.DECIMAL_ZERO)
             max_score = sum((Decimal(str(result.max_score)) for result in completed), cls.DECIMAL_ZERO)
-            threshold_total = sum((Decimal(str(result.rule.pass_threshold)) for result in completed if result.rule), cls.DECIMAL_ZERO)
             percentage = cls._percentage(total_score, max_score)
-            threshold_percentage = cls._percentage(threshold_total, max_score)
+            if role_profile is not None:
+                # OUT-02 / management decision 5 (20 Oct 2026): one fixed pass
+                # mark per role and competency - 60% unless the role profile
+                # carries an approved exception - whichever questions were drawn.
+                threshold_percentage = cls._quantize(
+                    (role_profile.get("competency_thresholds") or {}).get(
+                        competency_code, cls.DEFAULT_COMPETENCY_PASS_PERCENTAGE
+                    )
+                )
+            else:
+                # Pre-pooled versions keep the per-question thresholds they
+                # were released with.
+                threshold_total = sum(
+                    (Decimal(str(result.rule.pass_threshold)) for result in completed if result.rule), cls.DECIMAL_ZERO
+                )
+                threshold_percentage = cls._percentage(threshold_total, max_score)
             # All rules mapped to a given competency_code are expected to
             # share one evaluation_layer (a competency belongs to one of
             # Cognitive/Behavioral/Task Execution) - take it from whichever
@@ -441,6 +528,20 @@ class Week6ScoringService:
         return saved
 
     @classmethod
+    def _bank_role_profile(cls, rule_set, evaluation):
+        """The approved role profile of a pooled bank version (GOV2.0+), or
+        None for pre-pooled versions."""
+        version = rule_set.question_set_version
+        if not version:
+            return None
+        from api.interviews.models import QuestionBankVersion
+
+        bank = QuestionBankVersion.objects.filter(version=version).first()
+        if bank is None:
+            return None
+        return bank.profile_for(rule_set.role_code or evaluation.session.role_code) or {}
+
+    @classmethod
     def _compute_layer_breakdown(cls, competency_results):
         """Buckets each scored competency by its evaluation_layer and
         returns (layer_breakdown, weighted_final_percentage). Competencies
@@ -485,7 +586,7 @@ class Week6ScoringService:
 
     @classmethod
     def _build_session_summary(cls, *, evaluation, rule_set, responses, response_results, competency_results,
-                               unanswered_questions=()):
+                               unanswered_questions=(), rubric_pending=()):
         total_score = sum((Decimal(str(result.score)) for result in response_results), cls.DECIMAL_ZERO)
         max_score = sum((Decimal(str(result.max_score)) for result in response_results), cls.DECIMAL_ZERO)
         layer_breakdown, weighted_percentage = cls._compute_layer_breakdown(competency_results)
@@ -573,6 +674,9 @@ class Week6ScoringService:
                     "assigned_question_count": len(responses) + len(unanswered_questions),
                     "unanswered_question_count": len(unanswered_questions),
                     "unanswered_question_orders": [question.question_order for question in unanswered_questions],
+                    # Answers whose band awaits an approved scoring rule
+                    # (decision A, 20 Oct 2026); recalculated on approval.
+                    "rubric_pending_question_codes": list(rubric_pending),
                 },
                 "generated_at": timezone.now(),
             },
@@ -706,6 +810,14 @@ class Week6ScoringService:
             evaluation.readiness_override_applied = False
             evaluation.readiness_override_reason = ""
             readiness_reason = "Insufficient evidence to determine a complete assessment result."
+            pending_codes = (summary.metadata or {}).get("rubric_pending_question_codes") or []
+            if pending_codes:
+                # OUT-05: show the actual cause, not poor performance.
+                readiness_reason = (
+                    f"Scoring rule awaiting approval for {len(pending_codes)} answer(s) "
+                    f"({', '.join(pending_codes)}); the result will be recalculated once it is approved."
+                )
+                evaluation.readiness_override_reason = readiness_reason
             update_fields.extend(["readiness_status", "readiness_override_applied", "readiness_override_reason"])
         else:
             evaluation.readiness_status = ReadinessStatus.PENDING
@@ -773,8 +885,11 @@ class Week6ScoringService:
         }
 
     @classmethod
-    def _build_explanation(cls, *, matched, missing, missing_required, critical_hits, requires_human_review):
+    def _build_explanation(cls, *, matched, missing, missing_required, critical_hits, requires_human_review,
+                           rubric=None):
         parts = []
+        if rubric:
+            parts.append(f"Rubric band: {rubric['band']} ({rubric['score']}).")
         if matched:
             parts.append(f"Matched indicators: {', '.join(matched)}.")
         if missing:

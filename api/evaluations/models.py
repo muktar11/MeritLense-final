@@ -780,6 +780,38 @@ class SessionEvaluationSummary(TimeStampedModel):
         ordering = ["-generated_at", "-created_at"]
 
 
+class ScoreRecalculationSnapshot(TimeStampedModel):
+    """The original scoring records of an evaluation, captured before it is
+    recalculated under a newly approved rule (rulebook AUD-02/AUD-03).
+
+    Recalculation updates the summary, competency and response results in
+    place, so this row is the preserved original: every result row as it
+    was, with the rule set, bank and rubric-spec versions that produced it.
+    `before` is write-once; `after` is filled once, when the recalculation
+    has run."""
+
+    evaluation = models.ForeignKey(Evaluation, on_delete=models.CASCADE, related_name="score_snapshots")
+    reason = models.CharField(max_length=255)
+    run_label = models.CharField(max_length=100, blank=True, db_index=True)
+    rule_set_versions = models.JSONField(default=list, blank=True)
+    rubric_spec_versions = models.JSONField(default=list, blank=True)
+    before = models.JSONField(default=dict)
+    after = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "Score Recalculation Snapshot"
+        verbose_name_plural = "Score Recalculation Snapshots"
+        ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            original = type(self).objects.filter(pk=self.pk).values("before", "after", "reason").first()
+            if original and (original["before"] != self.before or original["reason"] != self.reason
+                             or (original["after"] and original["after"] != self.after)):
+                raise ValueError("A score recalculation snapshot cannot be changed once recorded.")
+        super().save(*args, **kwargs)
+
+
 class Certificate(TimeStampedModel):
     """One PDF certificate per evaluation, auto-generated right after
     Week6ScoringService produces a SessionEvaluationSummary for it (see
@@ -816,6 +848,10 @@ class Certificate(TimeStampedModel):
     pdf_hash = models.CharField(max_length=64, blank=True, help_text="SHA-256 hex digest of the generated PDF binary.")
     issued_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True)
+    # A document produced for a test assessment (e.g. a re-scored trial
+    # session): watermarked, and never verified as a valid certificate.
+    # Once set it stays set on regeneration.
+    is_test_document = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = "Certificate"
@@ -928,6 +964,12 @@ class EvaluatorRating(TimeStampedModel):
         validators=[MinValueValidator(0), MaxValueValidator(100)]
     )
     comments = models.TextField(blank=True)
+    # Management decision B (20 Oct 2026, rulebook OUT-04): the evaluator's
+    # confirmed critical safety failure, with its required evidence note.
+    # It produces Not Ready and blocks the readiness certificate whatever
+    # the average; a low Safety rating alone does not set it.
+    critical_safety_failure = models.BooleanField(default=False)
+    critical_safety_failure_note = models.TextField(blank=True)
     rated_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -945,7 +987,7 @@ class EvaluatorRating(TimeStampedModel):
         if self.pk:
             original = type(self).objects.filter(pk=self.pk).values(
                 "safety_awareness", "hygiene", "communication", "behavior_integrity",
-                "task_execution", "comments",
+                "task_execution", "comments", "critical_safety_failure", "critical_safety_failure_note",
             ).first()
             if original and any(original[field] != getattr(self, field) for field in original):
                 raise ValidationError("Final evaluator ratings may only be changed through the authorized correction workflow.")

@@ -375,6 +375,7 @@ class EvaluatorRatingSerializer(PublicIdModelSerializer):
             'id', 'safety_awareness', 'hygiene', 'communication',
             'behavior_integrity', 'behavioral_risk_level',
             'task_execution', 'consistency',
+            'critical_safety_failure', 'critical_safety_failure_note',
             'comments', 'overall_score', 'readiness_status',
             'rated_by', 'rated_by_name', 'rated_at',
             'created_at', 'updated_at',
@@ -411,6 +412,19 @@ class EvaluatorRatingWriteSerializer(serializers.Serializer):
     behavior_integrity = serializers.IntegerField(min_value=0, max_value=100)
     task_execution = serializers.IntegerField(min_value=0, max_value=100)
     comments = serializers.CharField(required=False, allow_blank=True, max_length=10000)
+    critical_safety_failure = serializers.BooleanField(required=False, default=False)
+    critical_safety_failure_note = serializers.CharField(required=False, allow_blank=True, max_length=5000)
+
+    def validate(self, attrs):
+        # Decision B (20 Oct 2026): a critical safety failure needs its
+        # supporting evidence note.
+        if attrs.get("critical_safety_failure") and not (attrs.get("critical_safety_failure_note") or "").strip():
+            raise serializers.ValidationError(
+                {"critical_safety_failure_note": "Describe the evidence for the critical safety failure."}
+            )
+        if not attrs.get("critical_safety_failure"):
+            attrs["critical_safety_failure_note"] = ""
+        return attrs
 
 
 class EvaluationListSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):

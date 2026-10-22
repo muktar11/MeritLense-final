@@ -668,7 +668,7 @@ def certificate_eligibility(evaluation, summary):
     return True, indicator["code"]
 
 
-def generate_certificate(evaluation, summary):
+def generate_certificate(evaluation, summary, test_document=False):
     """Builds (or regenerates) the Certificate + PDF for `evaluation`,
     given its just-computed SessionEvaluationSummary. This is a
     presentable completion certificate, not the internal evaluation
@@ -696,6 +696,9 @@ def generate_certificate(evaluation, summary):
         evaluation=evaluation,
         defaults={"candidate": evaluation.candidate},
     )
+    # A previously issued PDF is kept in storage (a new file name is used)
+    # and its reference is preserved by any re-scoring snapshot.
+    certificate.is_test_document = certificate.is_test_document or bool(test_document)
     _assign_unique_id(certificate, "certificate_id", "ML")
     _assign_unique_id(certificate, "assessment_id", "ASM")
 
@@ -730,6 +733,7 @@ def generate_certificate(evaluation, summary):
         "qr_data_uri": _build_qr_data_uri(verification_url),
         "generated_at": now.strftime("%Y-%m-%d %H:%M UTC"),
         "evaluator_rating": _evaluator_rating_context(evaluation, language),
+        "test_document": certificate.is_test_document,
         **_language_context(language),
     }
 

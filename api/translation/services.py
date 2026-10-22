@@ -148,6 +148,23 @@ def parse_indicator_observations(value):
     return observations
 
 
+def parse_condition_findings(value):
+    """Conditional Must Include indicators the interpreter says are
+    established, with the basis and the words that establish them."""
+    if not isinstance(value, list):
+        return []
+    findings = []
+    for item in value:
+        if not isinstance(item, dict) or not str(item.get("indicator_id") or "").strip():
+            continue
+        findings.append({
+            "indicator_id": str(item.get("indicator_id")).strip(),
+            "basis": str(item.get("basis") or "").strip().lower(),
+            "quote": str(item.get("quote") or "").strip(),
+        })
+    return findings
+
+
 class GoogleTranslationProvider:
     def __init__(self):
         self.provider = settings.TRANSLATION_PROVIDER
@@ -484,7 +501,7 @@ class ResponseInterpretationService:
     # has a canonical indicator registry; otherwise everything below is
     # skipped and interpretation behaves exactly as before.
     INDICATOR_MODE = "indicator_ids"
-    INDICATOR_PROMPT_SUFFIX = "+indicator-ids-v1"
+    INDICATOR_PROMPT_SUFFIX = "+indicator-ids-v2"
     POLARITIES = ("affirmative", "negated", "hypothetical", "quoted", "uncertain")
     ATTRIBUTIONS = ("self", "other")
 
@@ -514,9 +531,27 @@ class ResponseInterpretationService:
         ))
 
     @classmethod
+    def conditional_indicator_ids(cls, indicators):
+        """Must Include indicators that apply only when their condition is
+        established (the question's active rule; management decision 3 of
+        22 Oct 2026)."""
+        from api.evaluations.rubric_specs import conditional_ordinals
+        from api.questions.models import IndicatorDefinition
+
+        must_include = [i for i in indicators if i.indicator_type == IndicatorDefinition.TYPE_MUST_INCLUDE]
+        if not must_include:
+            return set()
+        ordinals = set(conditional_ordinals(must_include[0].bank_version, must_include[0].question_code))
+        return {
+            i.indicator_id for i in must_include
+            if i.indicator_id.rsplit("-", 1)[-1].isdigit() and int(i.indicator_id.rsplit("-", 1)[-1]) in ordinals
+        }
+
+    @classmethod
     def _indicator_prompt_items(cls, indicators):
         from api.questions.models import IndicatorDefinition
 
+        conditional = cls.conditional_indicator_ids(indicators)
         items = []
         for indicator in indicators:
             item = {
@@ -524,6 +559,8 @@ class ResponseInterpretationService:
                 "type": "must_include" if indicator.indicator_type == IndicatorDefinition.TYPE_MUST_INCLUDE else "negative",
                 "text_en": indicator.text_en,
             }
+            if indicator.indicator_id in conditional:
+                item["conditional"] = True
             # Policy D-01: Arabic text is offered only when approved, or when
             # draft text is explicitly allowed (Staging).
             if indicator.text_ar and (
@@ -545,7 +582,15 @@ class ResponseInterpretationService:
         "candidate's own words copied exactly from the transcript. source_language is the language of the quote. "
         "uncertain is true when you are not confident the indicator applies. Judge meaning in whatever language "
         "the candidate used. Only report indicators the transcript actually addresses: an indicator the candidate "
-        "never mentions is simply absent, not negated. Every Must Include indicator you list in mentioned_steps "
+        "never mentions is simply absent, not negated. Credit a Must Include indicator when the candidate shows "
+        "its substance: an equivalent method or a natural paraphrase counts, and a missing minor detail within "
+        "an indicator that lists several elements does not mean the indicator was not addressed. Some Must "
+        "Include indicators are marked conditional: they apply only in a situation the indicator names (for "
+        "example 'as required', 'if needed', 'if immediate danger'). Return condition_established: a list of "
+        "objects {\"indicator_id\", \"basis\", \"quote\"} for each conditional indicator whose situation is "
+        "established - basis is question when the question's scenario states it, answer when the candidate's "
+        "own words state it; quote is those exact words. Do not list a condition as established because the "
+        "candidate did not mention it or because it might apply. Every Must Include indicator you list in mentioned_steps "
         "must also appear in observations with its quote - never return an empty observations list for an answer "
         "that addresses any indicator. Separately, list in safety_risks any unsafe, prohibited or "
         "out-of-scope action the candidate says they would take themselves - even if it is not on the indicator "
@@ -556,13 +601,15 @@ class ResponseInterpretationService:
     )
 
     @classmethod
-    def apply_indicator_policy(cls, observations, indicators, step_labels=None):
+    def apply_indicator_policy(cls, observations, indicators, step_labels=None, condition_findings=None):
         """Deterministic, auditable decision for each observation. Must
         Include evidence counts only when affirmative, about the candidate's
         own conduct, quoted, and not uncertain. A Negative Indicator is never
         turned into an automatic gate here (policy D-04: severity is not yet
         assigned) - affirmative own-conduct negatives are recorded as evidence
-        for human review; negated / hypothetical / quoted ones have no effect."""
+        for human review; negated / hypothetical / quoted ones have no effect.
+        A conditional indicator's condition is established only by a quoted
+        statement in the question or the answer, never by silence."""
         from api.questions.models import IndicatorDefinition
 
         by_id = {indicator.indicator_id: indicator for indicator in indicators}
@@ -605,6 +652,11 @@ class ResponseInterpretationService:
                 decisions.append({"indicator_id": indicator.indicator_id, "polarity": "affirmative",
                                   "attribution": "self", "quote": "", "source_language": "",
                                   "uncertain": False, "decision": "evidence_accepted_from_step_label"})
+        conditional = cls.conditional_indicator_ids(indicators)
+        established = sorted({
+            finding["indicator_id"] for finding in condition_findings or []
+            if finding["indicator_id"] in conditional and finding["basis"] in ("question", "answer") and finding["quote"]
+        })
         return {
             "indicator_mode": cls.INDICATOR_MODE,
             "indicator_observations": decisions,
@@ -613,6 +665,9 @@ class ResponseInterpretationService:
             "missing_steps": [i.text_en for i in must_include if i.indicator_id not in accepted],
             "negative_evidence_ids": sorted(set(negative_evidence)),
             "indicator_review_ids": sorted(set(review)),
+            "conditional_ids": sorted(conditional),
+            "condition_findings": list(condition_findings or []),
+            "condition_established_ids": established,
             "indicator_registry": [
                 {"id": i.indicator_id, "bank_version": i.bank_version, "text_ar_status": i.text_ar_status}
                 for i in indicators
@@ -663,6 +718,8 @@ class ResponseInterpretationService:
                 "for example, 'call the mechanic', 'contact the garage', and 'go to a nearby workshop' should "
                 "all be treated as satisfying a step about contacting a repair professional. Do not withhold "
                 "credit merely because the candidate's wording differs from expected_steps' own phrasing. "
+                "A short or concise answer that clearly conveys a step's intent addresses that step; do not "
+                "require elaboration, detail or the step's exact wording. "
                 "For mentioned_steps and missing_steps, choose entries only from question.expected_steps, copied "
                 "verbatim (exact text, not translated or paraphrased) - do not invent new step phrasing; this "
                 "verbatim requirement applies only to how you label a matched step, not to how you judge whether "
@@ -746,6 +803,9 @@ class ResponseInterpretationService:
         observations = parse_indicator_observations(payload.get("observations"))
         if observations:  # only present in indicator-ID mode; legacy output unchanged
             normalized["observations"] = observations
+        conditions = parse_condition_findings(payload.get("condition_established"))
+        if conditions:
+            normalized["condition_established"] = conditions
         return payload, normalized
 
     @classmethod
@@ -790,7 +850,8 @@ class ResponseInterpretationService:
                 normalized.get("mentioned_steps") or [],
                 [i.text_en for i in indicators if i.indicator_type == "MUST_INCLUDE"],
             )
-            normalized.update(cls.apply_indicator_policy(normalized.pop("observations", []), indicators, labels))
+            normalized.update(cls.apply_indicator_policy(normalized.pop("observations", []), indicators, labels,
+                                                         normalized.pop("condition_established", [])))
             canonical_steps = []
         if canonical_steps:
             kept_mentioned, dropped_mentioned = cls._constrain_to_canonical_steps(
@@ -850,7 +911,13 @@ class EvaluationInputBuilderService:
         concerns = list(indicators.get("safety_risks") or []) + list(indicators.get("compliance_risks") or [])
         if concerns:
             review_reasons.append("Possible safety or compliance concern: " + "; ".join(concerns)[:500] + ".")
-        if indicators.get("negative_evidence_ids"):
+        from api.evaluations.rubric_specs import spec_set_for_version
+
+        rubric_scored = template is not None and spec_set_for_version(template.question_set_version) is not None
+        # Where the question's rubric is executable, an affirmed negative
+        # indicator is scored by the rules (0 and a critical failure, or the
+        # band the note gives it) - not a case for human review (EXC-01).
+        if indicators.get("negative_evidence_ids") and not rubric_scored:
             review_reasons.append(
                 "Negative indicator evidence recorded for human review (severity not yet assigned): "
                 + ", ".join(indicators["negative_evidence_ids"]) + "."
@@ -898,6 +965,7 @@ class EvaluationInputBuilderService:
                 "indicator_observations": indicators.get("indicator_observations") or [],
                 "negative_evidence_ids": indicators.get("negative_evidence_ids") or [],
                 "indicator_review_ids": indicators.get("indicator_review_ids") or [],
+                "condition_established_ids": indicators.get("condition_established_ids") or [],
             },
         }
 

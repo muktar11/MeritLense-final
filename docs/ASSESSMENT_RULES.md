@@ -7,6 +7,7 @@
 - This file records, for each rule, whether the platform follows it and where.
 - When a change closes a gap, update the row here in the same commit.
 - Open methodology questions are in [governance/RULEBOOK_V1_ESCALATIONS.md](governance/RULEBOOK_V1_ESCALATIONS.md), referred to below as **Esc 1–5**. Don't guess those values (REL-02).
+- Management answered Esc 1–5 on 20 Oct 2026 ("following decisions"). The answers are recorded at the top of the escalations file; only the points listed there as still open remain.
 
 **Status key:**
 - **Done**: implemented and tested.
@@ -24,7 +25,7 @@
 | GOV-03 | Same decision logic for B2B and B2C | Done | Scoring has no account-type branch; readiness display differs only by package entitlement |
 | GOV-04 | Completion, evidence, readiness, review, certificate stored separately | Partial | Separate fields exist; evidence validity is per response only |
 | GOV-05 | Approved versioned spec governs; record contradictions | Done | Version pinning on session and evaluation; contradictions in the escalations file |
-| GOV-06 | Every selectable question has executable bands | Blocked (Esc 1) | 2,016 questions share an incomplete generic note |
+| GOV-06 | Every selectable question has executable bands | Partial | All 2,100 GOV2.0-RC1 questions execute their own note via `rubric_specs.py` and `rubric_specs_gov2_0.json`. HK-PRO-001 and HK-BEH-002 gaps closed by decisions D and E. Five rule templates approved 22 Oct 2026: all 2,026 generic questions have an active rule whose generated acceptance cases pass (16,758 cases, `scripts/validate_rule_decisions_2026_10_22.py`). Selection draws only complete rules; otherwise the session is not started and a "rubric availability exception" is shown. Only ECG-TSK-001 is not selectable (Esc 6) |
 
 ## Assessment paths and languages
 
@@ -46,13 +47,13 @@
 | ID | Rule in brief | Status | Where |
 | --- | --- | --- | --- |
 | SCR-01 | 5 only when full-credit conditions are met | Done | `_score_response` |
-| SCR-02 | 3 where the question's partial rule allows | Blocked (Esc 1) | The missing-required-point zeroing stays until decided |
+| SCR-02 | 3 where the question's partial rule allows | Done | Decisions of 22 Oct: generic-note questions score 3 when the central practical competence is shown safely with compensable gaps (template rule). The 24 all-central questions: 21 keep a 3 band through a partial mapping, 3 are BINARY with a recorded justification. Conditional Core points count only when their condition is established (interpreter `condition_established`, quoted). Legacy bands per `rubric_specs_gov2_0.json` unchanged. Pre-pooled versions (GOV1.2) keep their released scoring |
 | SCR-03 | Confirmed skip = 0 and kept in the denominator | Gap | No explicit skip action exists. Unanswered questions are non-completion (CAL-03) |
 | SCR-04 | Evidence loss is not a zero | Partial | Unreliable evidence is left unscored (incomplete). Retry and recapture are not built |
-| SCR-05 | 70 legacy notes executed as written (0/5, 0/2/3, completion %) | Partial | Legacy maxima are used. Band conditions are not executed: HK-PRO-001 "calm only" scores 0, not 2. Defined, so next to build |
-| SCR-06 | Missing point, failed mandatory, zero and critical failure are distinct | Blocked (Esc 2) | |
-| SCR-07 | Negative evidence read in context; each negative needs severity | Partial | Context handling done. Severities blocked on D-04 |
-| SCR-08 | Resolve "two or more omissions" per question | Blocked (Esc 1) | |
+| SCR-05 | 70 legacy notes executed as written (0/5, 0/2/3, completion %) | Done | 66 × 0/5 need only the elements their note names; HK-PRO-001 "calm only" = 2; completion % over the note's steps |
+| SCR-06 | Missing point, failed mandatory, zero and critical failure are distinct | Done | Decision 2 (20 Oct): no point is mandatory without an approved specification; none of the 89 D-02 drafts is applied. A missing point lowers the band, an affirmed negative indicator is 0 + critical failure. Core alone never zeroes an answer. Under an approved question rule, a missing approved prerequisite is a separate band (`PREREQUISITE_MISSING`, 0, not a critical failure) |
+| SCR-07 | Negative evidence read in context; each negative needs severity | Partial | Context handling done. Affirmed own-conduct negatives are scored by the rules, not sent to review. Severities beyond the note's own bands (HK-BEH-001/002) blocked on D-04 |
+| SCR-08 | Resolve "two or more omissions" per question | Done | Templates approved 22 Oct 2026: two or more missing Core outcomes score 3 when the central competence is shown, 0 when it is not; no answer is held for this. Results held under the earlier configuration are re-scored only by a named `recalculate_pending_rubric_results` run (snapshot kept, normal certificate eligibility applied, `--test-data` for test documents). 80 of the 147 additional Core proposals adopted, each with its rationale (`core_additions`) |
 | CAL-01 | Overall % = earned / assigned maximum | Done | `_build_session_summary` (RESPONSE_SUM). Check that layer weighting never overrides RESPONSE_SUM |
 | CAL-02 | Keep approved aggregation and weights | Done (PR) | FIX-02 weights repaired; equal-competency weighting not used |
 | CAL-03 | Every assigned question reconciled to a response state | Done (PR) | `run_for_evaluation`: unanswered questions make the summary incomplete; counts in summary metadata |
@@ -67,9 +68,9 @@
 | SCH-06 | Behavioral Indicators stays a scoring competency | Blocked (SCH-06) | `behavior_integrity` is excluded from the average today |
 | SCH-07 | Draft editing, lock on submit, no AI overwrite | Partial | Lock and audit done. AI overwrite closed (PR). No draft state; rule version not stored on the rating |
 | OUT-01 | 60+ Ready, 40–<60 Partially Ready, <40 Not Ready, before rounding, subject to gates | Done | `calculate_evaluator_outcome` (scheduled). AI path is decided by gates |
-| OUT-02 | AI path keeps role-profile Critical/Non-Critical checks; verify the versioned threshold configuration | Partial (Esc 5) | `evaluate_role_competency_readiness`. Competency pass marks come from importer-set per-question thresholds, so they vary with the questions drawn |
+| OUT-02 | AI path keeps role-profile Critical/Non-Critical checks; verify the versioned threshold configuration | Done | Decision 5 (20 Oct): `_aggregate_competencies` uses 60% per competency, or the role profile's `competency_thresholds` exception, on pooled versions. No approved exception exists today |
 | OUT-03 | Confirmed critical failure prevents Ready | Done | `_apply_evaluation_rollups` |
-| OUT-04 | High average can't bypass a safety gate on employer path | Blocked (Esc 3) | |
+| OUT-04 | High average can't bypass a safety gate on employer path | Done | Decision B (20 Oct): evaluator's confirmed `critical_safety_failure` with required evidence note gives Not Ready and blocks the certificate (`calculate_evaluator_outcome`, `certificate_eligibility`, evaluator report) |
 | OUT-05 | Incomplete and Insufficient Evidence shown as their cause, not poor performance | Done | Readiness INCOMPLETE → "Insufficient Evidence" |
 | OUT-06 | Ready / Partially Ready / Not Ready = جاهز / جاهز جزئيًا / غير جاهز | Done (PR) | `_resolve_readiness_indicator`, `READINESS_GAUGE`, comparison labels, templates. Frontend label map needs the matching UI PR |
 
@@ -86,7 +87,7 @@
 | CER-02 | ≥60 alone is not enough; Not Ready gets no readiness certificate | Done (PR) | Scheduled path now refuses Not Ready |
 | CER-03 | Keep the approved Partially Ready treatment | Done | Partially Ready is eligible on both paths |
 | AUD-01 | Corrections record original, replacement, reason, actor, time | Partial | Evaluator corrections recorded, but `rated_by` is overwritten |
-| AUD-02 | Recalculate after correction; no manual readiness selection | Gap | `HumanReviewService.approve` still accepts a chosen readiness |
+| AUD-02 | Recalculate after correction; no manual readiness selection | Partial | Rule-approval re-scoring (`recalculate_pending_rubric_results`) runs only on named evaluations under a run label, preserves the original records and rule versions in `ScoreRecalculationSnapshot`, then applies normal certificate eligibility; `--test-data` marks certificates as test documents. `HumanReviewService.approve` still accepts a chosen readiness |
 | AUD-03 | New output version; previous marked superseded | Done | Reports versioned, earlier ones marked STALE |
 
 ## Recovery, exceptions and points
@@ -106,7 +107,7 @@
 
 | ID | Item | Status |
 | --- | --- | --- |
-| FIX-01 | HK-SAF-001 partial case, HK-PRO-001 legacy 2 | Confirmed in the bank. Execution is SCR-05 |
+| FIX-01 | HK-SAF-001 partial case, HK-PRO-001 legacy 2 | Done. Both execute their notes (`tests_rubric_specs`) |
 | FIX-02 | Negative and zero indicator weights | Done (PR). Cause was whole-number rounding in `_weighted_indicators`; importer fixed, scorer ignores invalid maps |
 | FIX-03 | Same importer patterns across the bank | Partial. The weight guard covers every rule; generic-answer review not done |
 | FIX-04 | Reconcile selected IDs with role/tier coverage | Gap |

@@ -1597,6 +1597,7 @@ class EvaluationReportService:
                 ),
                 "assessment_date": (session.ended_at or generated_at).date().isoformat(),
                 "assessment_duration_minutes": cls._derive_assessment_duration_minutes(session),
+                "duration_ratio_percent": int(round(cls._derive_duration_ratio(session) * 100)),
                 "assessment_completeness": assessment_completeness,
                 "assessment_quality": assessment_quality,
                 "assessment_coverage": cls._derive_assessment_coverage(critical_competency_status),
@@ -2310,15 +2311,24 @@ class EvaluationReportService:
         return "Low", factors
 
     @classmethod
-    def _derive_assessment_quality(cls, *, session, summary, human_review_flags, response_evidence_summary, language="en"):
-        completeness = cls._derive_assessment_completeness(summary)
+    def _derive_duration_ratio(cls, session):
+        """Time taken as a share of the scheduled assessment time."""
         duration_minutes = cls._derive_assessment_duration_minutes(session)
         target_duration = (
             getattr(getattr(session, "package_session_config", None), "duration_minutes", None)
             or getattr(getattr(session, "config", None), "duration_minutes", None)
             or 0
         )
-        duration_ratio = (duration_minutes / target_duration) if target_duration else 1
+        return (duration_minutes / target_duration) if target_duration else 1
+
+    @classmethod
+    def _derive_assessment_quality(cls, *, session, summary, human_review_flags, response_evidence_summary, language="en"):
+        # EXC-01, management decision 23 Oct 2026: completing faster than
+        # scheduled never lowers quality below "Good", the certificate
+        # minimum. Duration is kept for monitoring only: it separates
+        # Excellent from Good and is reported as duration_ratio_percent.
+        completeness = cls._derive_assessment_completeness(summary)
+        duration_ratio = cls._derive_duration_ratio(session)
         stt_scores = [
             item.get("traceability", {}).get("transcript_reference", {}).get("confidence")
             for item in response_evidence_summary
@@ -2330,12 +2340,12 @@ class EvaluationReportService:
         if language == "ar":
             if completeness >= 90 and has_evidence and avg_stt >= 0.85 and duration_ratio >= 0.5 and not human_review_flags:
                 return "ممتازة"
-            if completeness >= 75 and has_evidence and avg_stt >= 0.7 and duration_ratio >= 0.35:
+            if completeness >= 75 and has_evidence and avg_stt >= 0.7:
                 return "جيدة"
             return "محدودة"
         if completeness >= 90 and has_evidence and avg_stt >= 0.85 and duration_ratio >= 0.5 and not human_review_flags:
             return "Excellent"
-        if completeness >= 75 and has_evidence and avg_stt >= 0.7 and duration_ratio >= 0.35:
+        if completeness >= 75 and has_evidence and avg_stt >= 0.7:
             return "Good"
         return "Limited"
 

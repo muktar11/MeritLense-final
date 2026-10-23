@@ -2881,7 +2881,7 @@ class CertificateGenerationTests(TestCase):
         self.evaluation.readiness_status = ReadinessStatus.NOT_READY
         self.evaluation.save(update_fields=["readiness_status"])
         not_ready = _readiness_gauge_context(self.evaluation, "en")
-        self.assertEqual(not_ready, {"label": "Not Ready", "position": 1})
+        self.assertEqual(not_ready, {"code": "NOT_READY", "label": "Not Ready", "position": 1})
 
         # PENDING (the default before scoring rolls it up to READY/NOT_READY)
         # maps to the rule engine's own PARTIALLY_READY/"Partially Ready"
@@ -2890,7 +2890,7 @@ class CertificateGenerationTests(TestCase):
         self.evaluation.readiness_status = ReadinessStatus.PENDING
         self.evaluation.save(update_fields=["readiness_status"])
         pending = _readiness_gauge_context(self.evaluation, "en")
-        self.assertEqual(pending, {"label": "Partially Ready", "position": 2})
+        self.assertEqual(pending, {"code": "PARTIALLY_READY", "label": "Partially Ready", "position": 2})
 
     def test_regenerating_keeps_the_same_certificate_id(self):
         self.session.identity_verified = True
@@ -3251,6 +3251,110 @@ class CertificateEligibilityTests(TestCase):
         self.assertIsNotNone(certificate)
         self.evaluation.refresh_from_db()
         self.assertEqual(self.evaluation.certificate_status, CertificateStatus.ISSUED)
+
+    def test_fast_completion_does_not_block_certificate(self):
+        # Management decision 23 Oct 2026: 5 minutes of a 45-minute Full
+        # assessment (11%) used to fall below the 35% minimum and lose the
+        # certificate. Duration now only separates Excellent from Good.
+        from api.reports.services import EvaluationReportService
+        self.session.started_at = timezone.now() - timezone.timedelta(minutes=5)
+        self.session.save(update_fields=["started_at"])
+        summary = self._summary()
+
+        eligible, reason = certificate_eligibility(self.evaluation, summary)
+
+        self.assertTrue(eligible, reason)
+        self.assertLess(EvaluationReportService._derive_duration_ratio(self.session), 0.35)
+        self.assertIsNotNone(generate_certificate(self.evaluation, summary))
+
+    def test_fast_completion_still_needs_identity_and_completion(self):
+        self.session.started_at = timezone.now() - timezone.timedelta(minutes=5)
+        self.session.identity_verified = False
+        self.session.save(update_fields=["started_at", "identity_verified"])
+        self.assertEqual(certificate_eligibility(self.evaluation, self._summary()), (False, "VERIFICATION_FAILED"))
+
+        self.session.identity_verified = True
+        self.session.save(update_fields=["identity_verified"])
+        SessionEvaluationSummary.objects.filter(evaluation=self.evaluation).delete()
+        incomplete = self._summary(total_response_count=21, evaluated_response_count=20)
+        self.assertEqual(certificate_eligibility(self.evaluation, incomplete), (False, "INCOMPLETE"))
+
+    def _render_context(self, summary):
+        from unittest import mock
+        from api.evaluations import certificate_services
+        captured = {}
+        real_render = certificate_services.render_to_string
+
+        def capture(template_name, context):
+            captured.update(context)
+            return real_render(template_name, context)
+
+        with mock.patch.object(certificate_services, "render_to_string", side_effect=capture):
+            certificate = generate_certificate(self.evaluation, summary)
+        return certificate, captured
+
+    def test_partially_ready_ai_certificate_states_level_and_gaps(self):
+        from api.core.constants import ReadinessStatus
+        self.session.role_code = "driver"
+        self.session.save(update_fields=["role_code"])
+        self.evaluation.readiness_status = ReadinessStatus.PARTIALLY_READY
+        self.evaluation.save(update_fields=["readiness_status"])
+        summary = self._summary()
+        for item in summary.competencies_summary:
+            if item["competency_code"] == "communication_ability":
+                item.update(percentage=45.0, status="BELOW_THRESHOLD")
+        summary.competencies_summary.append({
+            "competency_code": "behavior_integrity", "competency_name": "Behavior & Integrity", "percentage": 80.0,
+            "response_count": 1, "completed_response_count": 1, "status": "MEETS_THRESHOLD",
+        })
+        summary.below_threshold_competencies = [{
+            "competency_code": "communication_ability", "competency_name": "Communication Ability",
+            "percentage": 45.0, "pass_threshold": 60.0,
+        }]
+        summary.save(update_fields=["competencies_summary", "below_threshold_competencies"])
+
+        self.assertEqual(certificate_eligibility(self.evaluation, summary), (True, "PARTIALLY_READY"))
+        certificate, context = self._render_context(summary)
+
+        self.assertIsNotNone(certificate)
+        self.assertEqual(context["readiness_label"], "Partially Ready")
+        self.assertTrue(context["partially_ready"])
+        self.assertEqual(context["readiness_gaps"], ["Communication Ability"])
+
+    def test_partially_ready_scheduled_certificate_states_gaps_in_arabic(self):
+        self.session.scheduled_start_at = timezone.now() - timezone.timedelta(days=1)
+        self.session.candidate_language = "AR"
+        self.session.save(update_fields=["scheduled_start_at", "candidate_language"])
+        # Average 50: Partially Ready (OUT-01); three ratings below 60.
+        EvaluatorRating.objects.create(
+            evaluation=self.evaluation,
+            safety_awareness=70, hygiene=40, communication=45, task_execution=45, behavior_integrity=70,
+            rated_by=self.user,
+        )
+
+        self.assertEqual(certificate_eligibility(self.evaluation, self._summary()), (True, "PARTIALLY_READY"))
+        certificate, context = self._render_context(self._summary_for_existing())
+
+        self.assertIsNotNone(certificate)
+        self.assertEqual(context["readiness_label"], "جاهز جزئيًا")
+        self.assertEqual(context["readiness_gaps"], ["النظافة والمعايير", "مهارات التواصل", "تنفيذ المهام العملية"])
+        # The gaps line and the evaluator row together still fit one page.
+        from django.template.loader import render_to_string
+        from weasyprint import HTML
+        html = render_to_string("evaluations/certificate_ar.html", context)
+        self.assertEqual(len(HTML(string=html).render().pages), 1)
+
+    def _summary_for_existing(self):
+        return SessionEvaluationSummary.objects.get(evaluation=self.evaluation)
+
+    def test_ready_certificate_lists_no_gaps(self):
+        from api.core.constants import ReadinessStatus
+        self.evaluation.readiness_status = ReadinessStatus.READY
+        self.evaluation.save(update_fields=["readiness_status"])
+        certificate, context = self._render_context(self._summary())
+        self.assertIsNotNone(certificate)
+        self.assertFalse(context["partially_ready"])
+        self.assertEqual(context["readiness_gaps"], [])
 
     def test_scheduled_interview_without_rating_gets_no_certificate(self):
         from api.core.constants import CertificateStatus

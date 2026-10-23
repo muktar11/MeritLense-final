@@ -85,7 +85,7 @@
 | DOC-05 | Report only what was measured; label employer-led results | Done | Audio, observation, simulation and other-role claims removed. "Cognitive" band remains in the API payload only (not displayed) |
 | CER-01 | Document the approved certificate configuration per path | Blocked (Esc 4) | |
 | CER-02 | ≥60 alone is not enough; Not Ready gets no readiness certificate | Done (PR) | Scheduled path now refuses Not Ready |
-| CER-03 | Keep the approved Partially Ready treatment | Done | Partially Ready is eligible on both paths |
+| CER-03 | Keep the approved Partially Ready treatment | Done | Partially Ready is eligible on both paths. The certificate states the level and the training or supervision gaps (scheduled: ratings below 60; AI: below-threshold competencies), `_readiness_gaps` in `certificate_services.py` |
 | AUD-01 | Corrections record original, replacement, reason, actor, time | Partial | Evaluator corrections recorded, but `rated_by` is overwritten |
 | AUD-02 | Recalculate after correction; no manual readiness selection | Partial | Rule-approval re-scoring (`recalculate_pending_rubric_results`) runs only on named evaluations under a run label, preserves the original records and rule versions in `ScoreRecalculationSnapshot`, then applies normal certificate eligibility; `--test-data` marks certificates as test documents. `HumanReviewService.approve` still accepts a chosen readiness |
 | AUD-03 | New output version; previous marked superseded | Done | Reports versioned, earlier ones marked STALE |
@@ -94,7 +94,7 @@
 
 | ID | Rule in brief | Status | Where |
 | --- | --- | --- | --- |
-| EXC-01 | Routine cases automated; quality monitoring never delays valid outcomes | Partial | One response flagged for review makes the whole summary incomplete |
+| EXC-01 | Routine cases automated; quality monitoring never delays valid outcomes | Partial | One response flagged for review makes the whole summary incomplete. Duration no longer blocks a certificate (management decision 23 Oct 2026): the 35%-of-scheduled-time minimum was removed from the "Good" quality band; duration only separates Excellent from Good and is reported as `duration_ratio_percent`. Time limits unchanged |
 | EXC-02 | Low confidence is a signal; translation failure doesn't void reliable original | Gap | |
 | EXC-03 | Classified, bounded, idempotent retries | Partial | Queue retries exist; `run_async_job` can return FAILED and drop the message |
 | EXC-04 | Failed jobs stay retryable or become visible incidents | Done | Output failures logged and opened as incidents; poison-queued jobs open an incident (`run_ai_queue_worker`) |

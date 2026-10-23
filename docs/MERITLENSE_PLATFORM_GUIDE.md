@@ -488,17 +488,18 @@ Google Cloud billing must be **enabled** for production. Two Google services sto
 - [ ] **Reviewer staffing.** Name who works the admin **Review Queue**, and how quickly held results must be released.
 - [ ] **Certificate strictness.** Decide whether a missed required point on an otherwise Ready result should block the certificate.
 
-### 10.3 Production data clean-up: **B**
+### 10.3 Production data clean-up: **done 23 Oct 2026**
 
-- [ ] **Take and verify a database backup** first (restore check plus row counts).
-- [ ] Run `trial_data_inventory` (read-only) and keep the output.
-- [ ] Run `clear_trial_data` **as a dry run**, review it, then run it for real. This removes test registrations, candidates and validation sessions; accounts, companies, packages and configuration are kept. Known test data:
-  - `ejtiazportal+reg-*` registrations (4);
-  - `ejtiazportal+test1/test2` candidates;
-  - validation sessions on the internal test accounts (company and individual);
-  - the 13 Oct interview-language test session.
-- [ ] **Deactivate the stray test configuration** `verify_role`, which shows as "Nursing Assistant" with 1 question (version v1). Use `deactivate_test_artifacts`, or switch it off in the admin.
-- [ ] Re-check that only the 21 GOV2.0-RC1 roles (Full and Screening, EN and AR) are active.
+- [x] **Take and verify a database backup** first. 22 Oct: `meritlense-20261022-1515.dump`; 23 Oct: `meritlense-20261023-0655.dump` (sha256 924b3e0e…bdf8) plus media archive. Copies are in `prod-backups`.
+- [x] Run `clear_trial_data` as a dry run, then for real. 22 Oct: `--all-assessments` (237 evaluations). 23 Oct: the 8 PRODCHECK-20261022 test sessions (`--candidates`), with their 2 certificates (ML-2026-000001/000002), 8 reports and 18 stored files. Their verification links now return 404. The validation evidence (manifest plus copies of the 10 documents) is kept in `~/backups/prodcheck-evidence-20261023`, and the audit records are kept. Production now holds no assessments.
+- [x] **Deactivate the stray test configuration** `verify_role` (config 94) and 6 stray pre-governance question rows (23 Oct, audit-logged).
+- [x] Check that only GOV2.0-RC1 is selected. All 84 active configs (21 roles × Full/Screening × EN/AR) use GOV2.0-RC1. The 5,988 question rows are:
+  - GOV2.0-RC1: 4,200 (2,100 questions × EN + AR), all active;
+  - GOV1.2-FINAL: 882 (441 × 2), the superseded bank, kept active only as the rollback set and referenced by no config;
+  - v1.2: 900 archived history rows;
+  - 6 stray test rows, now inactive.
+
+  Selection reads only the session's own bank version and language. ECG-TSK-001 is excluded by the rule-completeness gate.
 
 ### 10.4 Security: **B**
 

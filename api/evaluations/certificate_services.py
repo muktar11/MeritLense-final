@@ -474,9 +474,46 @@ def _readiness_gauge_context(evaluation, language):
     else:
         readiness_record = EvaluationReadinessRecordService.get_existing(evaluation)
         indicator = EvaluationReportService._resolve_readiness_indicator(evaluation, readiness_record)
-    gauge = READINESS_GAUGE.get(indicator["code"], READINESS_GAUGE["PARTIALLY_READY"])
+    code = indicator["code"] if indicator["code"] in READINESS_GAUGE else "PARTIALLY_READY"
+    gauge = READINESS_GAUGE[code]
     label = gauge["label_ar"] if language == "ar" else gauge["label"]
-    return {"label": label, "position": gauge["position"]}
+    return {"code": code, "label": label, "position": gauge["position"]}
+
+
+EVALUATOR_FIELD_LABELS = {
+    "safety_awareness": ("Safety Awareness", "الوعي بالسلامة"),
+    "hygiene": ("Hygiene & Standards", "النظافة والمعايير"),
+    "communication": ("Communication Ability", "مهارات التواصل"),
+    "task_execution": ("Practical Task Execution", "تنفيذ المهام العملية"),
+}
+
+
+def _readiness_gaps(evaluation, summary, language):
+    """CER-03 / manager decision 4 (20 Oct 2026): a Partially Ready
+    certificate states the gaps that need training or supervision. These
+    are the same below-pass-mark areas that made the result Partially
+    Ready: the evaluator's ratings below 60 on the scheduled path, the
+    below-threshold competencies on the AI path."""
+    from api.reports.services import EvaluationReportService
+
+    session = evaluation.session
+    rating = getattr(evaluation, "evaluator_rating", None)
+    if session and session.is_scheduled_interview and rating is not None:
+        from .evaluator_rating_services import SCORE_FIELDS
+        index = 1 if language == "ar" else 0
+        return [
+            EVALUATOR_FIELD_LABELS[field][index]
+            for field in SCORE_FIELDS
+            if getattr(rating, field) is not None and getattr(rating, field) < 60
+        ]
+    gaps = []
+    for item in (summary.below_threshold_competencies if summary else None) or []:
+        label = EvaluationReportService._friendly_competency_name(
+            item.get("competency_code"), item.get("competency_name"), language=language,
+        )
+        if label and label not in gaps:
+            gaps.append(label)
+    return gaps
 
 
 def _certificate_language(session):
@@ -725,6 +762,10 @@ def generate_certificate(evaluation, summary, test_document=False):
         "candidate_photo_verified": candidate_photo_verified,
         "readiness_label": readiness["label"],
         "readiness_position": readiness["position"],
+        "partially_ready": readiness["code"] == "PARTIALLY_READY",
+        "readiness_gaps": (
+            _readiness_gaps(evaluation, summary, language) if readiness["code"] == "PARTIALLY_READY" else []
+        ),
         "issue_date": certificate.issued_at.strftime("%Y-%m-%d"),
         "assessment_date": (evaluation.completed_at or now).strftime("%Y-%m-%d"),
         "assessment_id": certificate.assessment_id,

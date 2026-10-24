@@ -45,6 +45,16 @@ class EvaluationReportError(Exception):
     pass
 
 
+# Report dimension code -> EvaluatorRating field that keys its evidence note.
+EVALUATOR_NOTE_FIELDS = {
+    "SAFETY": "safety_awareness",
+    "HYGIENE": "hygiene",
+    "COMMUNICATION": "communication",
+    "PRACTICAL_TASKS": "task_execution",
+    "BEHAVIORAL": "behavior_integrity",
+}
+
+
 class EvaluationReportService:
     """Report content follows rulebook DOC-01 to DOC-05: only what was
     measured, risks under the right competency, labels per OUT-06."""
@@ -468,7 +478,12 @@ class EvaluationReportService:
             } for _, name, _ in dimensions],
             'critical_competency_status': [],
             'risk_indicators': risk_indicators,
-            'evidence_summary': [{'category': 'Evaluator comments', 'finding': rating.comments, 'source': 'Evaluator'}] if rating.comments else [],
+            # SCH-04: the evaluator's evidence note for each rated competency.
+            'evidence_summary': [
+                {'category': name, 'finding': note, 'source': 'Evaluator'}
+                for code, name, _ in dimensions
+                if (note := (rating.competency_notes or {}).get(EVALUATOR_NOTE_FIELDS[code], '').strip())
+            ] + ([{'category': 'Evaluator comments', 'finding': rating.comments, 'source': 'Evaluator'}] if rating.comments else []),
             'improvement_plan': improvement_plan,
             'verification_status': cls._derive_qr_verification_status(EvaluationReport.STATUS_ACTIVE, language=language),
             'qr_verification_url': cls._build_qr_verification_url(report_number=payload['report_number']),

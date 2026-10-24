@@ -1,3 +1,4 @@
+import json
 import uuid
 
 from rest_framework import viewsets, status
@@ -42,7 +43,8 @@ from api.core.public_ids import PublicIdLookupMixin, filter_by_identifier, get_b
 from .models import Certificate, EvaluationReadinessDecisionRecord, ScoringRuleSet, SessionEvaluationSummary
 from .scoring_services import Week6ScoringError, Week6ScoringService
 from .evaluator_rating_services import (
-    SCORE_FIELDS, correct_evaluator_rating, finalize_scheduled_assessment, submit_evaluator_rating,
+    SCORE_FIELDS, correct_evaluator_rating, finalize_scheduled_assessment, save_scorecard_draft,
+    submit_evaluator_rating,
 )
 from .certificate_services import generate_certificate
 from api.reports.models import EvaluationReport
@@ -50,6 +52,8 @@ from api.reports.serializers import EvaluationReportSerializer
 from api.reports.services import EvaluationReportError, EvaluationReportService
 from api.sessions.models import InterviewSession
 from api.sessions.services import InterviewSessionService
+
+MAX_SCORECARD_DRAFT_BYTES = 100_000
 
 
 def _accessible_evaluations_queryset(user, request=None):
@@ -307,9 +311,9 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             self.permission_classes = [IsAuthenticated, CanViewEvaluation]
         elif self.action in ['complete', 'reschedule', 'cancel', 'finalize_scheduled']:
             self.permission_classes = [IsAuthenticated, CanManageEvaluation, IsCompanyApproved]
-        elif self.action == 'evaluator_rating':
+        elif self.action in ('evaluator_rating', 'evaluator_rating_draft'):
             self.permission_classes = (
-                [IsAuthenticated, CanManageEvaluation, IsCompanyApproved] if self.request.method == 'POST'
+                [IsAuthenticated, CanManageEvaluation, IsCompanyApproved] if self.request.method in ('POST', 'PUT')
                 else [IsAuthenticated, CanViewEvaluation]
             )
 
@@ -712,14 +716,25 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
                 })
         # Ratings alone never imply that dialogue was captured.
         has_transcript = any(response['original'].strip() for item in transcript for response in item['responses'])
+        # A live call's own turns are what was actually said; the question
+        # bank text a candidate turn was filed under may never have been asked.
+        conversation = []
+        if evaluation.session_id and evaluation.session.is_scheduled_interview:
+            from api.live_calls.models import LiveCallSegment
+            from api.live_calls.serializers import LiveCallSegmentSerializer
+            conversation = LiveCallSegmentSerializer(
+                LiveCallSegment.objects.filter(call__interview_session_id=evaluation.session_id), many=True,
+            ).data
         reports = evaluation.reports.select_related('generated_by').all()
         from .certificate_services import certificate_eligibility
         eligible, reason = certificate_eligibility(evaluation, evaluation.session_summaries.select_related('rule_set').first())
         return Response({
             'certificate_eligibility': {'eligible': eligible, 'reason': reason},
             'can_finalize': finalized_rating and CanManageEvaluation().has_object_permission(request, self, evaluation),
+            'can_manage_exceptions': request.user.role in [Roles.ADMIN, Roles.SUPERADMIN],
             'evaluation': EvaluationSerializer(evaluation, context={'request': request}).data,
             'transcript': transcript if has_transcript else [],
+            'conversation': conversation,
             'reports': EvaluationReportSerializer(reports, many=True, context={'request': request}).data,
             'corrections': [{
                 'created_at': item.created_at, 'reason': item.reason,
@@ -811,6 +826,25 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             EvaluatorRatingSerializer(rating).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=['get', 'put'], url_path='evaluator-rating/draft')
+    def evaluator_rating_draft(self, request, id=None):
+        """SCH-07: the scorecard in progress. No scoring effect."""
+        evaluation = self.get_object()
+        if request.method == 'GET':
+            draft = getattr(evaluation, 'evaluator_rating_draft', None)
+            return Response({
+                'data': draft.data if draft else {},
+                'updated_at': draft.updated_at if draft else None,
+            })
+        data = request.data.get('data')
+        if not isinstance(data, dict) or len(json.dumps(data)) > MAX_SCORECARD_DRAFT_BYTES:
+            return Response({'detail': 'Send the draft as an object (maximum 100 KB).'}, status=400)
+        try:
+            draft = save_scorecard_draft(evaluation, data=data, actor=request.user)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response({'data': draft.data, 'updated_at': draft.updated_at})
 
     @action(detail=True, methods=['post'], url_path='evaluator-rating/correct')
     def correct_evaluator_rating(self, request, id=None):

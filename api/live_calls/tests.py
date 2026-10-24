@@ -231,6 +231,104 @@ class LiveCallSegmentViewTests(APITestCase):
 
 
 @override_settings(
+    WEBRTC_STUN_URLS=["stun:stun.example.test:3478"],
+    CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}},
+)
+class LiveCallConversationTests(APITestCase):
+    """Scheduled interview screen: typed turns, the interview-guide
+    competency tag, the saved conversation and the evaluator-only guide."""
+
+    def setUp(self):
+        from unittest.mock import patch
+
+        self.owner = User.objects.create_user(
+            email="conv-owner@example.test", password="pass", first_name="Conv", last_name="Owner"
+        )
+        candidate = Candidate.objects.create(
+            first_name="Conv", last_name="Candidate", email="conv-candidate@example.test",
+            passport_id="LIVE-CONV-1", job_role="NA", core_skills="care",
+            passport_document="candidate/conv.pdf", created_by=self.owner,
+        )
+        config = InterviewConfiguration.objects.create(role_name="Nanny", role_code="nanny")
+        self.session = InterviewSession.objects.create(
+            candidate=candidate, config=config, role_name="Nanny", created_by=self.owner,
+            scheduled_start_at=timezone.now(), expires_at=timezone.now() + timezone.timedelta(hours=2),
+            status=InterviewSessionStatus.IN_PROGRESS,
+        )
+        self.base = f"/api/v1/live-calls/sessions/{self.session.public_id}"
+        self.client.force_authenticate(self.owner)
+        self.client.post(f"{self.base}/join")
+        self.client.force_authenticate(user=None)
+        self.client.post(f"{self.base}/join", {"token": self.session.access_token}, format="json")
+        for target, value in (
+            ("api.live_calls.views.TranslationService.translate", {"translated_text": "مرحبا"}),
+            ("api.live_calls.views.TextToSpeechService.synthesize", {"audio_bytes": b"mp3", "mime_type": "audio/mpeg"}),
+        ):
+            patcher = patch(target, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _as_evaluator(self, data):
+        self.client.force_authenticate(self.owner)
+        return self.client.post(f"{self.base}/segments", data, format="json")
+
+    def _as_candidate(self, data):
+        self.client.force_authenticate(user=None)
+        return self.client.post(f"{self.base}/segments?token={self.session.access_token}", data, format="json")
+
+    def test_typed_turn_is_translated_and_saved_with_the_guide_competency(self):
+        from .models import LiveCallSegment
+
+        response = self._as_evaluator({"text": "What would you do after a fall?", "competency": "safety_awareness"})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["segment"]["input_mode"], "TEXT")
+        self.assertEqual(response.data["segment"]["translated_text"], "مرحبا")
+        saved = LiveCallSegment.objects.get()
+        self.assertEqual((saved.speaker_role, saved.competency), ("EVALUATOR", "safety_awareness"))
+
+    def test_candidate_turn_takes_the_competency_of_the_question_it_answers(self):
+        from unittest.mock import patch
+
+        self._as_evaluator({"text": "How do you keep the kitchen clean?", "competency": "hygiene"})
+        with patch("api.live_calls.views.InterviewSessionService.get_or_activate_current_question", return_value=(None, True)):
+            response = self._as_candidate({"text": "I wipe surfaces and wash my hands."})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["segment"]["competency"], "hygiene")
+
+    def test_rejects_an_empty_turn_and_an_unknown_competency(self):
+        self.assertEqual(self._as_evaluator({"text": "  "}).status_code, 400)
+        self.assertEqual(self._as_evaluator({"text": "Hi", "competency": "charisma"}).status_code, 400)
+
+    def test_conversation_lists_saved_turns_for_both_participants(self):
+        self._as_evaluator({"text": "First question", "competency": "communication"})
+
+        self.client.force_authenticate(user=None)
+        candidate_view = self.client.get(f"{self.base}/conversation?token={self.session.access_token}")
+        self.client.force_authenticate(self.owner)
+        evaluator_view = self.client.get(f"{self.base}/conversation")
+
+        self.assertEqual(candidate_view.status_code, 200)
+        self.assertEqual([item["original_text"] for item in evaluator_view.data], ["First question"])
+        self.assertNotIn("translated_audio", evaluator_view.data[0])
+
+    def test_guide_is_evaluator_only(self):
+        self.client.force_authenticate(user=None)
+        denied = self.client.get(f"{self.base}/guide?token={self.session.access_token}")
+        self.client.force_authenticate(self.owner)
+        allowed = self.client.get(f"{self.base}/guide")
+
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(allowed.status_code, 200, allowed.data)
+        self.assertEqual(
+            [item["key"] for item in allowed.data["competencies"]],
+            ["safety_awareness", "hygiene", "communication", "task_execution", "behavior_integrity"],
+        )
+        self.assertEqual(allowed.data["candidate"]["name"], "Conv Candidate")
+
+
+@override_settings(
     CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}},
     AZURE_SPEECH_KEY="test-key",
     AZURE_SPEECH_REGION="test-region",

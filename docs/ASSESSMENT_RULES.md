@@ -34,11 +34,11 @@
 | AI-01 | 21/7 questions by role allocation, no cross-role fallback | Done | `QuestionGenerationService`, `question_allocation.py` |
 | AI-02 | Approved question in selected language; AI marks covered, missing and uncertain evidence, never scores | Partial | "Contradicted" is not a separate evidence class |
 | AI-03 | Never claim practical observation | Done (PR) | Report reliability factors and methodology |
-| SCH-01 | Employer conducts and rates; own equivalent questions allowed; coverage of role criteria required | Gap | Only bank questions in order; no criteria coverage |
-| SCH-02 | Show criteria not yet assessed; link each rating to evidence | Gap | |
+| SCH-01 | Employer conducts and rates; own equivalent questions allowed; coverage of role criteria required | Partial | The interview guide (`live-calls/.../guide`) shows the session's questions by competency as suggestions; the evaluator may ask their own. No approved per-role criteria list exists, so coverage is shown per competency |
+| SCH-02 | Show criteria not yet assessed; link each rating to evidence | Partial | Each live-call turn is saved (`LiveCallSegment`) with the competency open in the guide; a candidate turn takes the competency of the question it answers. The guide shows "Evidence recorded / Not yet assessed" per competency, and the scorecard links turns to each rating (`competency_evidence`, checked against the assessment's own call) |
 | SCH-03 | Structured scorecard; no second reviewer; rating attributed to employer | Partial | No second reviewer. An Admin correction overwrites `rated_by` (see AUD-01) |
 | LAN-01 | Keep bidirectional voice and text translation | Done | `api/live_calls` |
-| LAN-02 | Link original, translation, speaker, language and sequence; claim stored media only if kept | Partial | Candidate turns stored with original and translation; evaluator turns are not stored |
+| LAN-02 | Link original, translation, speaker, language and sequence; claim stored media only if kept | Done | Every live-call turn (both speakers, spoken or typed) is stored with original, translation, languages, speaker and time. Translated audio is not kept, so saved turns are text only. Assessment results return them as `conversation` |
 | LAN-03 | EN/AR canonical; same question and rubric identity across languages | Done | Indicator-ID mode, V2 registry |
 | LAN-04 | AI never fabricates, coaches or overwrites ratings | Done (PR) | Overwrite closed in `_apply_evaluation_rollups` |
 
@@ -63,10 +63,10 @@
 
 | ID | Rule in brief | Status | Where |
 | --- | --- | --- | --- |
-| SCH-04 | One level per criterion, evidence note, Not Assessed option | Gap | Free 0–100 entry; comments optional |
+| SCH-04 | One level per criterion, evidence note, Not Assessed option | Partial | Evidence note per competency (`competency_notes`, required by the scorecard, shown in the report's evidence summary). Levels and Not Assessed wait for SCH-05; the approved 0–100 entry per competency is kept |
 | SCH-05 | Level → fixed score mapping | Blocked (SCH-05) | Current 0–100 entry kept until mapping supplied |
 | SCH-06 | Behavioral Indicators stays a scoring competency | Blocked (SCH-06) | `behavior_integrity` is excluded from the average today |
-| SCH-07 | Draft editing, lock on submit, no AI overwrite | Partial | Lock and audit done. AI overwrite closed (PR). No draft state; rule version not stored on the rating |
+| SCH-07 | Draft editing, lock on submit, no AI overwrite | Partial | Lock and audit done. AI overwrite closed (PR). Draft: `evaluator-rating/draft` (`EvaluatorRatingDraft`, no scoring effect, removed on submit, refused after). Rule version not stored on the rating |
 | OUT-01 | 60+ Ready, 40–<60 Partially Ready, <40 Not Ready, before rounding, subject to gates | Done | `calculate_evaluator_outcome` (scheduled). AI path is decided by gates |
 | OUT-02 | AI path keeps role-profile Critical/Non-Critical checks; verify the versioned threshold configuration | Done | Decision 5 (20 Oct): `_aggregate_competencies` uses 60% per competency, or the role profile's `competency_thresholds` exception, on pooled versions. No approved exception exists today |
 | OUT-03 | Confirmed critical failure prevents Ready | Done | `_apply_evaluation_rollups` |

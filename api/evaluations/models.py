@@ -970,6 +970,11 @@ class EvaluatorRating(TimeStampedModel):
     # the average; a low Safety rating alone does not set it.
     critical_safety_failure = models.BooleanField(default=False)
     critical_safety_failure_note = models.TextField(blank=True)
+    # Rulebook SCH-02 / SCH-04: the evaluator's evidence note per rated
+    # competency and the live-call conversation turns (segment ids) that
+    # support it, keyed by rating field (safety_awareness, hygiene, ...).
+    competency_notes = models.JSONField(default=dict, blank=True)
+    competency_evidence = models.JSONField(default=dict, blank=True)
     rated_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -988,6 +993,7 @@ class EvaluatorRating(TimeStampedModel):
             original = type(self).objects.filter(pk=self.pk).values(
                 "safety_awareness", "hygiene", "communication", "behavior_integrity",
                 "task_execution", "comments", "critical_safety_failure", "critical_safety_failure_note",
+                "competency_notes", "competency_evidence",
             ).first()
             if original and any(original[field] != getattr(self, field) for field in original):
                 raise ValidationError("Final evaluator ratings may only be changed through the authorized correction workflow.")
@@ -995,6 +1001,18 @@ class EvaluatorRating(TimeStampedModel):
 
     def __str__(self):
         return f"Evaluator rating for evaluation {self.evaluation_id}"
+
+
+class EvaluatorRatingDraft(TimeStampedModel):
+    """Rulebook SCH-07: the evaluator's scorecard in progress. It has no
+    effect on scoring, readiness or documents, and is removed when the final
+    rating is submitted."""
+
+    evaluation = models.OneToOneField(
+        Evaluation, on_delete=models.CASCADE, related_name="evaluator_rating_draft"
+    )
+    data = models.JSONField(default=dict, blank=True)
+    updated_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
 
 
 class EvaluatorRatingCorrection(TimeStampedModel):

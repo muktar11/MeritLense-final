@@ -6,7 +6,7 @@ from django.core import mail
 from django.core.mail import send_mail
 from django.test import TestCase, override_settings
 
-from api.accounts.utils import send_verification_email
+from api.accounts.utils import send_document_request_email, send_verification_email
 from api.contracts.otp_service import OTPService
 from api.core.constants import Roles
 from api.core.email_template import CONFIDENTIALITY_NOTICE, LOGO_URL
@@ -116,6 +116,35 @@ class EmailTemplateTests(TestCase):
         html = _html(mail.outbox[1])
         self.assertIn("Confidentiality notice", html)
         self.assertIn("This email is confidential &amp; intended only for the addressee.", html)
+
+    def test_document_request_email_asks_to_upload_under_account_documents(self):
+        for lang, eyebrow, title, line in (
+            ("en", "Account documents", "Please upload Commercial registration certificate",
+             "Please upload Commercial registration certificate for Gulf Hospitality LLC through the Required "
+             "Documents section of your profile. Thank you for your cooperation."),
+            ("ar", "مستندات الحساب", "يرجى رفع Commercial registration certificate",
+             "يرجى رفع Commercial registration certificate الخاص بـ Gulf Hospitality LLC من خلال قسم المستندات "
+             "المطلوبة في ملفك الشخصي. شكرًا لتعاونك."),
+        ):
+            mail.outbox = []
+            user = NS(first_name="Ahmed", email="ahmed@example.com",
+                      company_profile=NS(company_name="Gulf Hospitality LLC", preferred_language=lang))
+            send_document_request_email(user, "Commercial registration certificate")
+
+            message = mail.outbox[0]
+            html = _html(message)
+            self.assertEqual(message.subject, title)
+            self.assertIn(f">{eyebrow}</p>", html)
+            self.assertIn(f">{title}</h1>", html)
+            self.assertIn(line, html)
+            self.assertIn(line, message.body)
+            self.assertNotIn("Results", html)
+            self.assertNotIn("النتائج", html)
+
+    def test_a_document_named_certificate_is_not_filed_under_results(self):
+        send_mail("Additional document requested: Training certificate", "Hello,\n\nPlease upload it.",
+                  "noreply@meritlense.com", ["a@example.com"])
+        self.assertIn(">Account documents</p>", _html(mail.outbox[0]))
 
     def test_a_branding_failure_never_blocks_the_email(self):
         with mock.patch("api.core.email_template.render_text_email", side_effect=RuntimeError("boom")):

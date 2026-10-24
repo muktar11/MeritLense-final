@@ -479,35 +479,24 @@ MeritLense Team
 
 
 def send_document_request_email(user, document_name):
-    if user_language(user) == ARABIC:
-        company_name = getattr(getattr(user, "company_profile", None), "company_name", None) or "شركتك"
-        safe_send_mail(f"مطلوب مستند إضافي: {document_name}", f"""مرحبًا {user.first_name}،
+    from api.core.email_template import render_email
 
-طلب أحد المسؤولين المستند التالي الخاص بـ {company_name}:
-
-{document_name}
-
-يرجى تسجيل الدخول ورفعه من قسم المستندات المطلوبة في ملفك الشخصي.
-
-{SIGNATURE[ARABIC]}
-""", [user.email])
-        return
-    company_name = getattr(getattr(user, "company_profile", None), "company_name", "your company")
-    safe_send_mail(
-        f"Additional document requested: {document_name}",
-        f"""Hello {user.first_name},
-
-An administrator requested the following document for {company_name}:
-
-{document_name}
-
-Please sign in and upload it from your profile's requested documents section.
-
-Best regards,
-MeritLense Team
-""",
-        [user.email],
-    )
+    lang = user_language(user)
+    company_name = getattr(getattr(user, "company_profile", None), "company_name", None)
+    if lang == ARABIC:
+        subject = title = f"يرجى رفع {document_name}"
+        eyebrow, greeting = "مستندات الحساب", f"مرحبًا {user.first_name}،"
+        text = (f"يرجى رفع {document_name} الخاص بـ {company_name or 'شركتك'} من خلال قسم "
+                "المستندات المطلوبة في ملفك الشخصي. شكرًا لتعاونك.")
+    else:
+        subject = title = f"Please upload {document_name}"
+        eyebrow, greeting = "Account documents", f"Hello {user.first_name},"
+        text = (f"Please upload {document_name} for {company_name or 'your company'} through the "
+                "Required Documents section of your profile. Thank you for your cooperation.")
+    message = f"{greeting}\n\n{text}\n\n{SIGNATURE[lang]}\n"
+    html_message = render_email(language=lang, title=title, eyebrow=eyebrow, greeting=greeting,
+                                blocks=[("p", text)])
+    safe_send_mail(subject, message, [user.email], html_message=html_message)
 
 
 def _format_currency_amount(unit_amount, currency):

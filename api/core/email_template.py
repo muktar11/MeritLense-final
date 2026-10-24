@@ -285,6 +285,8 @@ _EYEBROWS = (
     (r"signing code|رمز التوقيع", "Agreement signing", "توقيع الاتفاقية"),
     (r"verif|تأكيد حساب|رمز التحقق", "Account verification", "التحقق من الحساب"),
     (r"invitation|invited|دعوة", "Invitation", "دعوة"),
+    # Before results: a document name such as "... certificate" is not a result.
+    (r"document|upload|licen[cs]e|مستند|رفع|رخصة", "Account documents", "مستندات الحساب"),
     (r"complete|result|report|certificate|اكتمل|نتيجة|نتائج|تقرير|شهادة", "Results", "النتائج"),
     (r"evaluation|interview|assessment|schedul|تقييم|مقابلة|موعد", "Assessment update", "تحديث التقييم"),
     (r"account|licen[cs]e|document|welcome|حساب|رخصة|مستند|مرحبًا بك", "Account update", "تحديث الحساب"),

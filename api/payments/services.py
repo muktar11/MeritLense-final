@@ -35,13 +35,13 @@ def _notify_package_activated(user, package_name):
 """, [user.email])
             return
         safe_send_mail(
-            "Your Meritlense Package Is Active",
+            "Your MeritLense Package Is Active",
             f"""Hello {user.get_full_name()},
 
 Your {package_name} package is now active and ready to use.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """,
             [user.email],
         )
@@ -111,12 +111,12 @@ def _notify_one_time_payment_confirmed(payment, price, invoice):
         button_label="View invoice",
         button_url=pdf_link,
         icon="📄",
-        footer_lines=["Best regards,", "Meritlense Team"],
+        footer_lines=["Best regards,", "MeritLense Team"],
     ) if pdf_link else None
     try:
         from api.accounts.utils import safe_send_mail
         safe_send_mail(
-            "Payment Confirmed - Your Meritlense Purchase",
+            "Payment Confirmed - Your MeritLense Purchase",
             f"""Hello {payment.user.get_full_name()},
 
 We've received your payment - thank you!
@@ -128,7 +128,7 @@ Amount paid: {payment.amount} {payment.currency.upper()}
 Your package is now active and ready to use.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """,
             [payment.user.email],
             attachments=attachments,
@@ -240,28 +240,28 @@ def _notify_invoice_generated(invoice):
     html_message = email_button_html(
         greeting=f"Hello {invoice.user.get_full_name()},",
         paragraphs=[
-            "A new invoice has been generated for your Meritlense subscription.",
+            "A new invoice has been generated for your MeritLense subscription.",
             f"Amount: {invoice.amount_paid} {invoice.currency.upper()}",
             "A PDF copy of your invoice is attached." if attachments else "",
         ],
         button_label="View invoice",
         button_url=pdf_link,
         icon="📄",
-        footer_lines=["Best regards,", "Meritlense Team"],
+        footer_lines=["Best regards,", "MeritLense Team"],
     )
     try:
         from api.accounts.utils import safe_send_mail
         safe_send_mail(
-            f"Your Meritlense invoice {invoice.number or invoice.stripe_invoice_id}",
+            f"Your MeritLense invoice {invoice.number or invoice.stripe_invoice_id}",
             f"""Hello {invoice.user.get_full_name()},
 
-A new invoice has been generated for your Meritlense subscription.
+A new invoice has been generated for your MeritLense subscription.
 
 Amount: {invoice.amount_paid} {invoice.currency.upper()}
 {invoice_message}
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """,
             [invoice.user.email],
             attachments=attachments,

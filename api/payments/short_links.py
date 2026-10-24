@@ -6,7 +6,6 @@ clients that don't render HTML. The short link redirects to the original
 URL, so nothing about how payment works changes.
 """
 import secrets
-from html import escape
 from urllib.parse import urlparse
 
 from django.conf import settings
@@ -62,37 +61,16 @@ def meeting_short_link(meeting_link):
     return short if short != meeting_link else None
 
 
-def email_button_html(*, greeting, paragraphs, button_label, button_url, icon="💳", footer_lines=(), language="en"):
-    """A simple HTML email body with one call-to-action button. Table-based
-    and inline-styled so it renders in Outlook, Gmail and mobile clients.
-    language="ar" lays it out right-to-left."""
-    rtl = language == "ar"
-    direction = ' dir="rtl"' if rtl else ""
-    align = "right" if rtl else "left"
-    fallback = "إذا لم يعمل الزر، افتح هذا الرابط:" if rtl else "If the button doesn't work, open this link:"
-    body = "".join(
-        f'<p style="margin:0 0 14px;font-size:15px;line-height:1.5;color:#1f2a33;">{escape(p)}</p>'
-        for p in paragraphs if p
-    )
-    footer = "<br>".join(escape(line) for line in footer_lines)
-    url = escape(button_url, quote=True)
-    return f"""<!doctype html>
-<html{direction}><body style="margin:0;padding:0;background:#f4f6f8;"{direction}>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:24px 12px;">
-<tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0"{direction} style="max-width:560px;background:#ffffff;border-radius:8px;padding:28px 28px 24px;font-family:Arial,Tahoma,Helvetica,sans-serif;text-align:{align};">
-<tr><td>
-<p style="margin:0 0 16px;font-size:15px;color:#1f2a33;">{escape(greeting)}</p>
-{body}
-<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 20px;">
-<tr><td style="border-radius:6px;background:#1f5d73;">
-<a href="{url}" target="_blank" style="display:inline-block;padding:12px 26px;font-size:16px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:6px;">{icon}&nbsp; {escape(button_label)}</a>
-</td></tr>
-</table>
-<p style="margin:0 0 18px;font-size:12px;color:#5a6670;">{fallback} <a href="{url}" style="color:#1f5d73;">{escape(button_url)}</a></p>
-<p style="margin:0;font-size:14px;line-height:1.5;color:#1f2a33;">{footer}</p>
-</td></tr>
-</table>
-</td></tr>
-</table>
-</body></html>"""
+def email_button_html(*, greeting, paragraphs, button_label, button_url, icon=None, footer_lines=(), language="en",
+                      title=None):
+    """An email with one call-to-action button, in the shared MeritLense
+    layout (api/core/email_template.py). "A: 1 · B: 2" paragraphs become a
+    details table; footer_lines follow the button, and any sign-off in them
+    is dropped because the layout adds the approved signature. The title,
+    when not given, is the email's subject. icon is no longer shown."""
+    from api.core.email_template import blocks_from_paragraphs, render_email, without_sign_off
+
+    blocks = blocks_from_paragraphs(paragraphs, language)
+    blocks.append(("button", (button_label, button_url)))
+    blocks.extend(("p", line) for line in without_sign_off(footer_lines))
+    return render_email(language=language, title=title, greeting=greeting, blocks=blocks)

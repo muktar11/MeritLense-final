@@ -516,12 +516,14 @@ Several secrets were shared in chat or email during development. **Rotate them b
 - [ ] **Privacy Policy v1.6 needs a cookie section** describing necessary, analytics and marketing cookies and the banner choices (Accept All / Just This Time / Reject). Publish it as a new version, so new acceptances record it.
 - [ ] Have the **Terms and Privacy Arabic text** reviewed.
 - [ ] Confirm the candidate consent and data-processing text with whoever is responsible for data protection.
+- [ ] **Email confidentiality notice (and signature).** Every email now uses the unified template (24 Oct 2026, `api/core/email_template.py`). The approved confidentiality notice isn't in the codebase yet. Paste it verbatim into `CONFIDENTIALITY_NOTICE` (English and Arabic). The block stays hidden until then. The signature currently reads "Best regards, MeritLense Team, info@meritlense.com | www.meritlense.com"; replace it if a different approved wording exists.
 
 ### 10.6 Product gaps: **R**
 
 - [ ] **Profile and candidate screens** still use the older 66-country list; registration has the full list. Switch them to the same full list.
 - [ ] **Low-resource languages** (Afaan Oromo, Tigrinya, Afar, Twi, Luganda, Malagasy): after Google billing is on, test a real interview in at least one of them.
 - [ ] **Upcoming questions are visible to the candidate.** The interview link's data includes the text of all the session's questions from the start, so a candidate with browser developer tools could read ahead. No answer keys are exposed (no must-include points, keywords or scoring). Fix: return only the current question's text to the candidate, and translate upcoming questions on the server instead of in the browser.
+- [ ] **The email verification code never expires.** The email says it expires in 24 hours, but the code is stored without a creation time and is accepted until it's used or replaced by a resend. Decide whether to enforce the 24 hours (the agreement-signing code does expire, after `AGREEMENT_OTP_VALIDITY_MINUTES`).
 - [ ] **Indicator translation review** (`MeritLense_Indicator_Translation_Review_v1.2.xlsx`, about 1,613 Arabic indicator texts). Import the approved rows when they come back.
 
 ### 10.7 Infrastructure and operations: **R / A**
@@ -529,7 +531,7 @@ Several secrets were shared in chat or email during development. **Rotate them b
 - [ ] **Staging environment** (R). Today every merge to `main` goes straight to production. A staging copy would allow testing first.
 - [ ] **Automatic daily database backups**, with a periodic restore test (R).
 - [ ] **Monitoring and alerts** for server errors, failed deploys and API downtime (R).
-- [ ] **Email sending:** check that invitations, interview links and OTP emails arrive, and aren't marked as spam (R).
+- [ ] **Email sending:** check that invitations, interview links and OTP emails arrive, and aren't marked as spam (R). After the unified template deploys, check it on real Gmail and Outlook inboxes, on desktop and mobile, in English and Arabic.
 - [ ] **Cost watch** (A): monthly OpenAI usage (interpretation, transcription, translation fallback), Google Cloud usage, Stripe fees.
 - [ ] **Review Queue** (A): check daily that no result is waiting too long.
 - [ ] **Audit log** (A): look regularly for `ERROR` entries on question audio, translation and scoring.

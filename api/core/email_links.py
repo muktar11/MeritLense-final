@@ -1,4 +1,8 @@
-"""Every outgoing email shows short links instead of long URLs.
+"""Every outgoing email is sent in the branded layout, with short links
+instead of long URLs.
+
+Branding (api/core/email_template.py brand_message) runs first, so the
+links in the generated HTML are shortened with the rest.
 
 EMAIL_BACKEND is ShortLinkEmailBackend, which rewrites each message just
 before handing it to the real backend (EMAIL_INNER_BACKEND, SMTP in
@@ -108,7 +112,14 @@ class ShortLinkEmailBackend(BaseEmailBackend):
         return self.inner.close()
 
     def send_messages(self, email_messages):
+        from api.core.email_template import brand_message
+
         for message in email_messages or []:
+            try:
+                brand_message(message)
+            except Exception:
+                logger.exception("Could not build the branded HTML for email %r; sending it as is",
+                                 getattr(message, "subject", ""))
             try:
                 # A savepoint: emails are often sent inside the caller's
                 # transaction, which a failed short-link write must not break.

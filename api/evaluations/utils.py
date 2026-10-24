@@ -173,7 +173,7 @@ Location: {evaluation.location}"""
     message = f"""
 Hello {evaluation.candidate_first_name} {evaluation.candidate_last_name},
 
-An evaluation has been scheduled for you on Meritlense.
+An evaluation has been scheduled for you on MeritLense.
 
 Evaluation Details:
 - Type: {evaluation_type_display}
@@ -197,7 +197,7 @@ Please make sure to:
 If you need to reschedule or have any questions, please contact your evaluator.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
 
     if _candidate_lang(evaluation) == ARABIC:
@@ -248,7 +248,7 @@ The candidate has been emailed their own link to join at the scheduled time.
 You can join from your MeritLense dashboard once the interview starts.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
 
     _send(owner_subject, owner_message, [owner_email])
@@ -310,7 +310,7 @@ Please update your calendar accordingly.
 If you did not request this change or have any questions, please contact your evaluator.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
     
     _send(subject, message, [evaluation.candidate_email])
@@ -355,7 +355,7 @@ Cancelled Evaluation:
 If you have any questions, please contact your evaluator.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
     
     _send(subject, message, [evaluation.candidate_email])
@@ -420,7 +420,7 @@ You will receive further communication about next steps soon.
 Thank you for your participation.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
     
     _send(subject, message, [evaluation.candidate_email])

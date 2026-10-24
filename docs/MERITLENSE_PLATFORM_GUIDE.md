@@ -523,7 +523,7 @@ Several secrets were shared in chat or email during development. **Rotate them b
 - [ ] **Profile and candidate screens** still use the older 66-country list; registration has the full list. Switch them to the same full list.
 - [ ] **Low-resource languages** (Afaan Oromo, Tigrinya, Afar, Twi, Luganda, Malagasy): after Google billing is on, test a real interview in at least one of them.
 - [ ] **Upcoming questions are visible to the candidate.** The interview link's data includes the text of all the session's questions from the start, so a candidate with browser developer tools could read ahead. No answer keys are exposed (no must-include points, keywords or scoring). Fix: return only the current question's text to the candidate, and translate upcoming questions on the server instead of in the browser.
-- [ ] **The email verification code never expires.** The email says it expires in 24 hours, but the code is stored without a creation time and is accepted until it's used or replaced by a resend. Decide whether to enforce the 24 hours (the agreement-signing code does expire, after `AGREEMENT_OTP_VALIDITY_MINUTES`).
+- [x] **The email verification code now expires after 24 hours** (24 Oct 2026, matching what the email says). An expired code is refused with "This verification code has expired. Please request a new one." and `code_expired: true`; Resend issues a fresh 24-hour code. Codes already issued at deploy got 24 hours from the migration (`accounts.0027`).
 - [ ] **Indicator translation review** (`MeritLense_Indicator_Translation_Review_v1.2.xlsx`, about 1,613 Arabic indicator texts). Import the approved rows when they come back.
 
 ### 10.7 Infrastructure and operations: **R / A**

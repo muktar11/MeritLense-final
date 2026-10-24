@@ -2,6 +2,7 @@ import re
 
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -118,7 +119,8 @@ class UserRegistrationSerializer(serializers.Serializer):
             role=role,
             is_active=True,
             is_verified=False,
-            email_verification_code=verification_code
+            email_verification_code=verification_code,
+            email_verification_code_sent_at=timezone.now(),
         )
         return user
 

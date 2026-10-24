@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import LiveCallParticipant, LiveCallSession
+from .models import LiveCallParticipant, LiveCallSegment, LiveCallSession
 
 
 class LiveCallJoinSerializer(serializers.Serializer):
@@ -29,3 +29,18 @@ class LiveCallSerializer(serializers.ModelSerializer):
 
     def get_evaluation_id(self, obj):
         return str(obj.evaluation.public_id) if obj.evaluation_id else None
+
+
+class LiveCallSegmentSerializer(serializers.ModelSerializer):
+    """A saved conversation turn. Translated audio is not stored, so it is
+    only playable as it arrives during the call."""
+
+    id = serializers.UUIDField(source="segment_id", read_only=True)
+
+    class Meta:
+        model = LiveCallSegment
+        fields = (
+            "id", "speaker_role", "input_mode", "source_language", "target_language",
+            "original_text", "translated_text", "competency", "sent_at",
+        )
+        read_only_fields = fields

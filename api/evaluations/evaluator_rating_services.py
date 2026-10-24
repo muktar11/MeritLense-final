@@ -6,10 +6,27 @@ from django.db import transaction
 from api.core.constants import CertificateStatus
 
 from .certificate_services import generate_certificate
-from .models import EvaluatorRating, EvaluatorRatingCorrection
+from .models import EvaluatorRating, EvaluatorRatingCorrection, EvaluatorRatingDraft
 
 
 SCORE_FIELDS = ("safety_awareness", "hygiene", "communication", "task_execution")
+# Every competency on the scheduled scorecard, in display order. Behavioral
+# Indicators is rated but not averaged (SCH-06).
+SCORECARD_FIELDS = ("safety_awareness", "hygiene", "communication", "task_execution", "behavior_integrity")
+_DIMENSION_FIELDS = {
+    "SAFETY": "safety_awareness",
+    "HYGIENE": "hygiene",
+    "COMMUNICATION": "communication",
+    "PRACTICAL_TASKS": "task_execution",
+    "BEHAVIORAL": "behavior_integrity",
+}
+
+
+def scorecard_field_for(*values):
+    """The scorecard competency a question's skill or competency belongs to."""
+    from .certificate_services import _canonical_dimension
+
+    return _DIMENSION_FIELDS.get(_canonical_dimension(*values))
 
 
 def calculate_evaluator_outcome(ratings):
@@ -43,6 +60,8 @@ def _rating_values(rating):
         "comments": rating.comments,
         "critical_safety_failure": rating.critical_safety_failure,
         "critical_safety_failure_note": rating.critical_safety_failure_note,
+        "competency_notes": rating.competency_notes or {},
+        "competency_evidence": rating.competency_evidence or {},
     }
 
 
@@ -174,14 +193,42 @@ def finalize_scheduled_assessment(evaluation, *, actor, regenerate=False):
     return evaluation
 
 
+def _check_evidence_belongs(evaluation, evidence):
+    segment_ids = {item for items in evidence.values() for item in items}
+    if not segment_ids:
+        return
+    from api.live_calls.models import LiveCallSegment
+
+    known = set(
+        str(value) for value in LiveCallSegment.objects.filter(
+            call__interview_session_id=evaluation.session_id, segment_id__in=segment_ids,
+        ).values_list("segment_id", flat=True)
+    )
+    if segment_ids - known:
+        raise ValueError("Evidence must be conversation entries from this assessment's interview.")
+
+
+def save_scorecard_draft(evaluation, *, data, actor):
+    """SCH-07 draft editing. Refused once the rating is final."""
+    if EvaluatorRating.objects.filter(evaluation=evaluation).exists():
+        raise ValueError("The evaluator rating is final. An authorized correction is required to change it.")
+    draft, _ = EvaluatorRatingDraft.objects.update_or_create(
+        evaluation=evaluation, defaults={"data": data, "updated_by": actor},
+    )
+    return draft
+
+
 @transaction.atomic
 def submit_evaluator_rating(evaluation, *, ratings, actor):
     """Store a single final rating. Any later change must use correction flow.
 
-    Rulebook SCH-07 (lock on submit). Not built yet: draft state, required
-    evidence per criterion (SCH-04) and a check that the call took place."""
+    Rulebook SCH-07 (lock on submit; the draft is removed). Evidence links
+    must be turns of this assessment's own live call (SCH-02). Not built
+    yet: a check that the call took place."""
     if EvaluatorRating.objects.filter(evaluation=evaluation).exists():
         raise ValueError("The evaluator rating is final. An authorized correction is required to change it.")
+    _check_evidence_belongs(evaluation, ratings.get("competency_evidence") or {})
+    EvaluatorRatingDraft.objects.filter(evaluation=evaluation).delete()
     rating = EvaluatorRating.objects.create(
         evaluation=evaluation,
         **ratings,
@@ -206,6 +253,7 @@ def submit_evaluator_rating(evaluation, *, ratings, actor):
 def correct_evaluator_rating(evaluation, *, ratings, reason, actor):
     """Authorized correction with immutable before/after audit data."""
     rating = EvaluatorRating.objects.get(evaluation=evaluation)
+    _check_evidence_belongs(evaluation, ratings.get("competency_evidence") or {})
     previous_values = _rating_values(rating)
     corrected_values = {**previous_values, **ratings}
     EvaluatorRatingCorrection.objects.create(

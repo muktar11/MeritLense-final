@@ -376,6 +376,7 @@ class EvaluatorRatingSerializer(PublicIdModelSerializer):
             'behavior_integrity', 'behavioral_risk_level',
             'task_execution', 'consistency',
             'critical_safety_failure', 'critical_safety_failure_note',
+            'competency_notes', 'competency_evidence',
             'comments', 'overall_score', 'readiness_status',
             'rated_by', 'rated_by_name', 'rated_at',
             'created_at', 'updated_at',
@@ -414,6 +415,26 @@ class EvaluatorRatingWriteSerializer(serializers.Serializer):
     comments = serializers.CharField(required=False, allow_blank=True, max_length=10000)
     critical_safety_failure = serializers.BooleanField(required=False, default=False)
     critical_safety_failure_note = serializers.CharField(required=False, allow_blank=True, max_length=5000)
+    competency_notes = serializers.DictField(
+        child=serializers.CharField(allow_blank=True, max_length=5000), required=False,
+    )
+    competency_evidence = serializers.DictField(
+        child=serializers.ListField(child=serializers.UUIDField(), max_length=200), required=False,
+    )
+
+    def _validate_competency_keys(self, value):
+        from .evaluator_rating_services import SCORECARD_FIELDS
+
+        unknown = sorted(set(value) - set(SCORECARD_FIELDS))
+        if unknown:
+            raise serializers.ValidationError(f"Unknown competencies: {', '.join(unknown)}.")
+        return value
+
+    def validate_competency_notes(self, value):
+        return {key: note.strip() for key, note in self._validate_competency_keys(value).items()}
+
+    def validate_competency_evidence(self, value):
+        return {key: [str(item) for item in items] for key, items in self._validate_competency_keys(value).items()}
 
     def validate(self, attrs):
         # Decision B (20 Oct 2026): a critical safety failure needs its

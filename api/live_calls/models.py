@@ -60,3 +60,29 @@ class LiveCallParticipant(TimeStampedModel):
             models.UniqueConstraint(fields=["call", "role"], name="one_participant_per_call_role")
         ]
 
+
+class LiveCallSegment(TimeStampedModel):
+    """One translated conversation turn, kept so the evaluator can link it
+    as evidence on the scorecard (rulebook SCH-02) and the transcript shows
+    what was actually said rather than the question bank text."""
+
+    INPUT_AUDIO = "AUDIO"
+    INPUT_TEXT = "TEXT"
+    INPUT_CHOICES = [(INPUT_AUDIO, "Audio"), (INPUT_TEXT, "Text")]
+
+    call = models.ForeignKey(LiveCallSession, on_delete=models.CASCADE, related_name="segments")
+    segment_id = models.UUIDField(unique=True)
+    speaker_role = models.CharField(max_length=16, choices=LiveCallParticipant.ROLE_CHOICES)
+    input_mode = models.CharField(max_length=10, choices=INPUT_CHOICES, default=INPUT_AUDIO)
+    source_language = models.CharField(max_length=20)
+    target_language = models.CharField(max_length=20)
+    original_text = models.TextField()
+    translated_text = models.TextField(blank=True)
+    # The competency the evaluator had open in the interview guide. A
+    # candidate turn takes the competency of the evaluator turn it answers.
+    competency = models.CharField(max_length=40, blank=True)
+    sent_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["sent_at", "id"]
+

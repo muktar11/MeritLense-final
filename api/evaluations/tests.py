@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -3873,6 +3874,91 @@ class EvaluatorRatingTests(TestCase):
         self.assertEqual(self.evaluation.score, original_score)
         self.assertEqual(self.evaluation.readiness_status, original_readiness)
         self.assertEqual(self.evaluation.certificate_status, original_cert_status)
+
+    def _live_segment(self, competency="safety_awareness", session=None):
+        from api.live_calls.models import LiveCallSegment, LiveCallSession
+        call, _ = LiveCallSession.objects.get_or_create(interview_session=session or self.session)
+        return LiveCallSegment.objects.create(
+            call=call, segment_id=uuid.uuid4(), speaker_role="CANDIDATE", source_language="ur-PK",
+            target_language="ar-SA", original_text="میں مدد طلب کروں گی", translated_text="سأطلب المساعدة",
+            competency=competency, sent_at=timezone.now(),
+        )
+
+    def test_scorecard_draft_saves_and_has_no_scoring_effect(self):
+        draft_url = f"{self.url}/draft"
+        self.assertEqual(self.client.get(draft_url).data["data"], {})
+
+        saved = self.client.put(draft_url, {"data": {"ratings": {"safety_awareness": "70"}}}, format="json")
+
+        self.assertEqual(saved.status_code, 200, saved.data)
+        self.assertEqual(self.client.get(draft_url).data["data"]["ratings"]["safety_awareness"], "70")
+        self.assertFalse(EvaluatorRating.objects.filter(evaluation=self.evaluation).exists())
+
+    def test_final_submission_removes_the_draft_and_locks_it(self):
+        from api.evaluations.models import EvaluatorRatingDraft
+        self.client.put(f"{self.url}/draft", {"data": {"ratings": {}}}, format="json")
+
+        self.assertEqual(self.client.post(self.url, self.VALID_RATINGS, format="json").status_code, 201)
+
+        self.assertFalse(EvaluatorRatingDraft.objects.filter(evaluation=self.evaluation).exists())
+        locked = self.client.put(f"{self.url}/draft", {"data": {"ratings": {}}}, format="json")
+        self.assertEqual(locked.status_code, 409)
+
+    def test_draft_rejects_non_object_data(self):
+        self.assertEqual(self.client.put(f"{self.url}/draft", {"data": ["x"]}, format="json").status_code, 400)
+
+    def test_rating_keeps_evidence_notes_and_linked_turns(self):
+        segment = self._live_segment()
+        payload = {
+            **self.VALID_RATINGS,
+            "competency_notes": {"safety_awareness": "  Recognized the need for help.  "},
+            "competency_evidence": {"safety_awareness": [str(segment.segment_id)]},
+        }
+
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["competency_notes"], {"safety_awareness": "Recognized the need for help."})
+        self.assertEqual(response.data["competency_evidence"], {"safety_awareness": [str(segment.segment_id)]})
+
+    def test_evidence_from_another_assessment_is_rejected(self):
+        other_session = InterviewSession.objects.create(
+            candidate=self.candidate, config=self.config, role_name="Housekeeper", created_by=self.user,
+            expires_at=InterviewSession.build_expiry(30),
+        )
+        foreign = self._live_segment(session=other_session)
+        payload = {**self.VALID_RATINGS, "competency_evidence": {"safety_awareness": [str(foreign.segment_id)]}}
+
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(EvaluatorRating.objects.filter(evaluation=self.evaluation).exists())
+
+    def test_unknown_competency_key_is_rejected(self):
+        payload = {**self.VALID_RATINGS, "competency_notes": {"charisma": "x"}}
+        self.assertEqual(self.client.post(self.url, payload, format="json").status_code, 400)
+
+    def test_scheduled_report_lists_the_evidence_notes(self):
+        self.session.scheduled_start_at = timezone.now() - timezone.timedelta(hours=1)
+        self.session.save(update_fields=["scheduled_start_at"])
+        payload = {**self.VALID_RATINGS, "competency_notes": {"hygiene": "Explained hand washing steps."}}
+
+        self.assertEqual(self.client.post(self.url, payload, format="json").status_code, 201)
+
+        report = self.evaluation.reports.filter(report_status="ACTIVE").first()
+        findings = [item["finding"] for item in report.report_payload["evidence_summary"]]
+        self.assertIn("Explained hand washing steps.", findings)
+
+    def test_assessment_results_returns_the_live_conversation_for_scheduled(self):
+        self.session.scheduled_start_at = timezone.now() - timezone.timedelta(hours=1)
+        self.session.save(update_fields=["scheduled_start_at"])
+        self._live_segment()
+
+        response = self.client.get(self.url.replace('evaluator-rating', 'assessment-results'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["conversation"][0]["translated_text"], "سأطلب المساعدة")
+        self.assertFalse(response.data["can_manage_exceptions"])
 
     def test_scheduled_rating_sets_four_field_average_and_readiness(self):
         self.session.scheduled_start_at = timezone.now() + timezone.timedelta(hours=1)

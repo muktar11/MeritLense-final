@@ -153,6 +153,7 @@ EXACT = {
     "Password must contain at least one number.": "يجب أن تحتوي كلمة المرور على رقم واحد على الأقل.",
     "Password must contain at least one symbol.": "يجب أن تحتوي كلمة المرور على رمز واحد على الأقل.",
     "Password reset link has expired. Please request a new one.": "انتهت صلاحية رابط إعادة التعيين. يرجى طلب رابط جديد.",
+    "This verification code has expired. Please request a new one.": "انتهت صلاحية رمز التحقق. يرجى طلب رمز جديد.",
     "Passwords do not match.": "كلمتا المرور غير متطابقتين.",
     "Please upload your company stamp in Company Profile before signing this agreement.": "يرجى رفع ختم الشركة في ملف الشركة قبل توقيع هذه الاتفاقية.",
     "Price not found or inactive": "الباقة غير موجودة أو غير مفعّلة",

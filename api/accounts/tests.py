@@ -1429,7 +1429,7 @@ class AccountsWeek2Tests(APITestCase):
         user = User.objects.create_user(
             email="welcome-me@example.com", password="Password123!",
             first_name="Welcome", last_name="Me", role=Roles.B2C, is_verified=False,
-            email_verification_code="12345",
+            email_verification_code="12345", email_verification_code_sent_at=timezone.now(),
         )
         mail.outbox = []
 
@@ -1443,6 +1443,41 @@ class AccountsWeek2Tests(APITestCase):
         welcome_emails = [m for m in mail.outbox if user.email in m.to]
         self.assertEqual(len(welcome_emails), 1)
         self.assertIn("Welcome", welcome_emails[0].subject)
+
+    def test_verification_code_expires_after_24_hours_and_a_resent_code_works(self):
+        user = User.objects.create_user(
+            email="late@example.com", password="Password123!", first_name="Late", last_name="Me",
+            role=Roles.B2C, is_verified=False, email_verification_code="12345",
+            email_verification_code_sent_at=timezone.now() - timezone.timedelta(hours=24, minutes=1),
+        )
+
+        expired = self.client.post("/api/v1/auth/verify-email", {"email": user.email, "code": "12345"},
+                                   format="json")
+        self.assertEqual(expired.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(expired.data["code_expired"])
+        self.assertIn("expired", expired.data["error"])
+        user.refresh_from_db()
+        self.assertFalse(user.is_verified)
+
+        self.client.post("/api/v1/auth/resend-verification", {"email": user.email}, format="json")
+        user.refresh_from_db()
+        self.assertNotEqual(user.email_verification_code, None)
+        self.assertTrue(user.is_email_verification_code_valid())
+        fresh = self.client.post("/api/v1/auth/verify-email",
+                                 {"email": user.email, "code": user.email_verification_code}, format="json")
+        self.assertEqual(fresh.status_code, status.HTTP_200_OK, fresh.data)
+
+    def test_verification_code_is_accepted_just_inside_24_hours(self):
+        user = User.objects.create_user(
+            email="ontime@example.com", password="Password123!", first_name="On", last_name="Time",
+            role=Roles.B2C, is_verified=False, email_verification_code="54321",
+            email_verification_code_sent_at=timezone.now() - timezone.timedelta(hours=23, minutes=59),
+        )
+        response = self.client.post("/api/v1/auth/verify-email", {"email": user.email, "code": "54321"},
+                                    format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        user.refresh_from_db()
+        self.assertIsNone(user.email_verification_code_sent_at)
 
     def test_verify_documents_approval_emails_the_user(self):
         superadmin = self.create_verified_superadmin(email="approve-notify-admin@example.com")

@@ -59,6 +59,28 @@ def safe_send_mail(subject, message, recipients, attachments=None, html_message=
         raise
 
 
+def _verification_html(user, code, lang, intro, extra, expires):
+    """The verification email in the shared layout: the code as plain,
+    selectable text in its own panel (no copy button)."""
+    from api.core.email_template import code_security_notice, render_email
+
+    if lang == ARABIC:
+        title, greeting, use = ("تحقق من بريدك الإلكتروني", f"مرحبًا {user.first_name}،",
+                                "استخدم الرمز أدناه لتأكيد حسابك في MeritLense.")
+        eyebrow, expiry = "التحقق من الحساب", "تنتهي صلاحية هذا الرمز خلال 24 ساعة." if expires else None
+    else:
+        title, greeting, use = ("Verify your email", f"Hello {user.first_name},",
+                                "Use the code below to verify your MeritLense account.")
+        eyebrow, expiry = "Account verification", "Expires in 24 hours." if expires else None
+    blocks = [("p", " ".join(part for part in (intro, use) if part)),
+              ("code", {"code": code, "expiry": expiry}),
+              code_security_notice(lang)]
+    if extra:
+        blocks.append(("p", " ".join(extra.split())))
+    return render_email(language=lang, title=title, eyebrow=eyebrow, greeting=greeting, blocks=blocks,
+                        preheader=use)
+
+
 def send_verification_email(user, request=None):
     code = user.email_verification_code
     lang = email_language(user, request)
@@ -90,10 +112,13 @@ def send_verification_email(user, request=None):
 {extra}
 {SIGNATURE[ARABIC]}
 """
-        safe_send_mail(subject, message, [user.email])
+        safe_send_mail(subject, message, [user.email],
+                       html_message=_verification_html(user, code, lang, intro, extra, expires=True))
         return
 
+    intro, extra, expires = "", "", False
     if user.role == Roles.B2C:
+        intro, expires = "Thank you for registering as an Individual Employer.", True
         subject = "Verify Your Individual Employer Account"
         message = f"""
         Hello {user.first_name},
@@ -107,13 +132,16 @@ def send_verification_email(user, request=None):
         This code will expire in 24 hours.
 
         Best regards,
-        Meritlense Team
+        MeritLense Team
         """
     elif user.role == Roles.B2B:
         subject = "Verify Your Company Account"
         company_name = "Your Company"
         if hasattr(user, 'company_profile'):
             company_name = user.company_profile.company_name
+        intro, expires = f"Thank you for registering {company_name} as a Company Employer.", True
+        extra = ("Your account is ready for setup, but company access remains restricted until you upload "
+                 "your trade license from your profile and an administrator approves it.")
 
         message = f"""
         Hello {user.first_name},
@@ -131,7 +159,7 @@ def send_verification_email(user, request=None):
         approves it.
 
         Best regards,
-        Meritlense Team
+        MeritLense Team
         """
     else:
         subject = "Verify Your Account"
@@ -143,10 +171,11 @@ def send_verification_email(user, request=None):
         Please enter this 5-digit code to verify your email address.
 
         Best regards,
-        Meritlense Team
+        MeritLense Team
         """
 
-    safe_send_mail(subject, message, [user.email])
+    safe_send_mail(subject, message, [user.email],
+                   html_message=_verification_html(user, code, lang, intro, extra, expires))
 
 def generate_password_reset_token(user):
     token = secrets.token_urlsafe(32)
@@ -206,7 +235,7 @@ def send_password_reset_email(user, request):
         If you didn't request this, please ignore this email or contact support.
 
         Best regards,
-        Meritlense Team
+        MeritLense Team
         """
     elif user.role == Roles.B2B:
         company_name = "Your Company"
@@ -227,7 +256,7 @@ def send_password_reset_email(user, request):
         If you didn't request this, please ignore this email or contact support.
 
         Best regards,
-        Meritlense Team
+        MeritLense Team
         """
     else:
         subject = "Reset Your Password"
@@ -244,7 +273,7 @@ def send_password_reset_email(user, request):
         If you didn't request this, please ignore this email or contact support.
 
         Best regards,
-        Meritlense Team
+        MeritLense Team
         """
 
     safe_send_mail(subject, message, [user.email])
@@ -268,18 +297,18 @@ def send_password_reset_confirmation_email(user):
 """
         safe_send_mail(subject, message, [user.email])
         return
-    subject = "Your Meritlense Password Has Been Changed"
+    subject = "Your MeritLense Password Has Been Changed"
     message = f"""
     Hello {user.first_name},
 
-    This is a confirmation that the password for your Meritlense account ({user.email}) was just changed.
+    This is a confirmation that the password for your MeritLense account ({user.email}) was just changed.
 
     If you made this change, no further action is needed.
 
     If you did not request this change, your account may be compromised - please contact support immediately.
 
     Best regards,
-    Meritlense Team
+    MeritLense Team
     """
 
     safe_send_mail(subject, message, [user.email])
@@ -304,12 +333,12 @@ def send_admin_credentials_email(user, permissions, request=None):
     if not permissions_text:
         permissions_text = "  • No additional permissions assigned\n"
 
-    subject = "Your Meritlense Admin Account"
+    subject = "Your MeritLense Admin Account"
 
     message = f"""
 Hello {user.first_name},
 
-An administrator account has been created for you on Meritlense.
+An administrator account has been created for you on MeritLense.
 
 Login Email: {user.email}
 
@@ -322,7 +351,7 @@ To sign in, go to:
 If you don't already have your password, use "Forgot Password" on the login page to set one.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
 
     safe_send_mail(subject, message, [user.email])
@@ -356,17 +385,17 @@ def send_welcome_email(user, request=None):
     else:
         account_type = "Employer"
 
-    subject = "Welcome to Meritlense"
+    subject = "Welcome to MeritLense"
     message = f"""
 Hello {user.first_name},
 
-Welcome to Meritlense! Your {account_type} account is verified and ready to use.
+Welcome to MeritLense! Your {account_type} account is verified and ready to use.
 
 To sign in, go to:
 {login_url}
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
     safe_send_mail(subject, message, [user.email])
 
@@ -380,15 +409,15 @@ def send_account_approved_email(user):
 {SIGNATURE[ARABIC]}
 """, [user.email])
         return
-    subject = "Your Meritlense Account Has Been Approved"
+    subject = "Your MeritLense Account Has Been Approved"
     message = f"""
 Hello {user.first_name},
 
-Good news - your documents have been reviewed and your Meritlense account
+Good news - your documents have been reviewed and your MeritLense account
 has been approved. You now have full access to the platform.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
     safe_send_mail(subject, message, [user.email])
 
@@ -406,7 +435,7 @@ def send_account_rejected_email(user, reason):
 {SIGNATURE[ARABIC]}
 """, [user.email])
         return
-    subject = "Update on Your Meritlense Account"
+    subject = "Update on Your MeritLense Account"
     message = f"""
 Hello {user.first_name},
 
@@ -418,7 +447,7 @@ Please review and resubmit your documents, or contact support if you have
 any questions.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
     safe_send_mail(subject, message, [user.email])
 
@@ -443,7 +472,7 @@ restricted while an administrator reviews it. We will email you when a decision
 has been made.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """,
         [user.email],
     )
@@ -475,7 +504,7 @@ An administrator requested the following document for {company_name}:
 Please sign in and upload it from your profile's requested documents section.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """,
         [user.email],
     )
@@ -528,7 +557,7 @@ Your package will be activated automatically as soon as payment is confirmed.
 If you have any questions, please contact support.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
     html_message = email_button_html(
         greeting=f"Hello {user.first_name},",
@@ -546,7 +575,7 @@ Meritlense Team
             "Your package will be activated automatically as soon as payment is confirmed.",
             "",
             "Best regards,",
-            "Meritlense Team",
+            "MeritLense Team",
         ],
     ) if pay_link else None
     attachments = _invoice_email_attachments(package_request.invoice) if package_request.invoice_id else []
@@ -591,7 +620,7 @@ Our team will be in touch with next steps. If you have any questions, please
 contact support.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
     attachments = _invoice_email_attachments(package_request.invoice) if package_request.invoice_id else []
     safe_send_mail(subject, message, [user.email], attachments=attachments)
@@ -686,7 +715,7 @@ Please contact support if you have any questions or would like to discuss
 this further.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
     safe_send_mail(subject, message, [user.email])
 
@@ -708,11 +737,11 @@ def send_admin_contact_email(user, message, sender):
 {SIGNATURE[ARABIC]}
 """, [user.email])
         return
-    subject = "A question about your Meritlense account documents"
+    subject = "A question about your MeritLense account documents"
     body = f"""
 Hello {user.first_name},
 
-{sender.get_full_name()} from the Meritlense team has a question about your
+{sender.get_full_name()} from the MeritLense team has a question about your
 submitted documents:
 
 {message}
@@ -721,7 +750,7 @@ Please reply to this email or contact support so we can continue reviewing
 your account.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
     safe_send_mail(subject, body, [user.email])
 
@@ -773,12 +802,12 @@ def send_employer_welcome_email(user, request=None):
     else:
         account_type = "Employer"
 
-    subject = "Your Meritlense Account Has Been Created"
+    subject = "Your MeritLense Account Has Been Created"
 
     message = f"""
 Hello {user.first_name},
 
-An administrator has created a {account_type} account for you on Meritlense.
+An administrator has created a {account_type} account for you on MeritLense.
 
 Login Email: {user.email}
 
@@ -788,7 +817,7 @@ To sign in, go to:
 If you don't already have your password, use "Forgot Password" on the login page to set one.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
 
     safe_send_mail(subject, message, [user.email])
@@ -843,12 +872,12 @@ def send_team_invitation_email(invitation, request):
 """, [invitation.email])
         return
 
-    subject = f"Invitation to join {company_name} on Meritlense"
+    subject = f"Invitation to join {company_name} on MeritLense"
     
     message = f"""
 Hello {invitation.first_name},
 
-You have been invited to join {company_name} on Meritlense by {inviter_name}.
+You have been invited to join {company_name} on MeritLense by {inviter_name}.
 
 Invitation Details:
 - Company: {company_name}
@@ -865,7 +894,7 @@ This invitation link will expire on {expiration_date}.
 If you did not expect this invitation, please ignore this email or contact support.
 
 Best regards,
-Meritlense Team
+MeritLense Team
 """
     
     safe_send_mail(subject, message, [invitation.email])

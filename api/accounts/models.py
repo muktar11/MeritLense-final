@@ -8,6 +8,8 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 import random
 
+EMAIL_VERIFICATION_CODE_VALIDITY = timezone.timedelta(hours=24)
+
 
 class UserManager(BaseUserManager):
 
@@ -52,6 +54,9 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
     is_verified = models.BooleanField(default=False)
     
     email_verification_code = models.CharField(max_length=6, null=True, blank=True)
+    # When the current code was issued; it is accepted for
+    # EMAIL_VERIFICATION_CODE_VALIDITY after that (the email says 24 hours).
+    email_verification_code_sent_at = models.DateTimeField(null=True, blank=True)
     email_verified_at = models.DateTimeField(null=True, blank=True)
     
     password_reset_token = models.CharField(max_length=255, null=True, blank=True, unique=True)
@@ -113,8 +118,14 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
     def generate_verification_code(self):
         code = ''.join([str(random.randint(0, 9)) for _ in range(5)])
         self.email_verification_code = code
-        self.save(update_fields=['email_verification_code'])
+        self.email_verification_code_sent_at = timezone.now()
+        self.save(update_fields=['email_verification_code', 'email_verification_code_sent_at'])
         return code
+
+    def is_email_verification_code_valid(self):
+        if not self.email_verification_code_sent_at:
+            return False
+        return timezone.now() <= self.email_verification_code_sent_at + EMAIL_VERIFICATION_CODE_VALIDITY
     
     def is_password_reset_token_valid(self):
         if not self.password_reset_token_created_at:

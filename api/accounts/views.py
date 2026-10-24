@@ -730,10 +730,24 @@ class EmailVerificationView(APIView):
                     email_verification_code=code,
                     is_verified=False
                 )
-                
+
+                if not user.is_email_verification_code_valid():
+                    AuditLogService.log_system(
+                        action=AuditLogAction.LOGIN_FAILED,
+                        category=AuditLogCategory.SECURITY,
+                        description=f"Expired email verification code used for {email}",
+                        severity=AuditLogSeverity.WARNING,
+                        data={'email': email, 'reason': 'code_expired'}
+                    )
+                    return Response({
+                        'error': 'This verification code has expired. Please request a new one.',
+                        'code_expired': True,
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
                 user.is_verified = True
                 user.email_verified_at = timezone.now()
                 user.email_verification_code = None
+                user.email_verification_code_sent_at = None
                 user.save()
                 
                 AuditLogService.log(
@@ -816,6 +830,7 @@ class ResendVerificationView(APIView):
                 
                 new_code = ''.join([str(random.randint(0, 9)) for _ in range(5)])
                 user.email_verification_code = new_code
+                user.email_verification_code_sent_at = timezone.now()
                 user.save()
                 
                 send_verification_email(user, request)

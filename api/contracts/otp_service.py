@@ -36,6 +36,28 @@ class OTPService:
         )
         return code, code_hash, expires_at
 
+    def _html(self, code, language):
+        from api.core.email_i18n import ARABIC
+        from api.core.email_template import code_security_notice, render_email
+
+        minutes = settings.AGREEMENT_OTP_VALIDITY_MINUTES
+        if language == ARABIC:
+            title, use, label = ("رمز التوقيع الخاص بك", "استخدم الرمز أدناه لتوقيع اتفاقيتك في MeritLense.",
+                                 "رمز التوقيع الخاص بك")
+            expiry = f"تنتهي صلاحية هذا الرمز خلال {minutes} دقيقة، ولا يمكن استخدامه إلا مرة واحدة."
+            ignore, eyebrow = "إذا لم تطلب هذا الرمز، يمكنك تجاهل هذه الرسالة بأمان.", "توقيع الاتفاقية"
+        else:
+            title, use, label = ("Your signing code", "Use the code below to sign your MeritLense agreement.",
+                                 "Your signing code")
+            expiry = f"Expires in {minutes} minutes and can only be used once."
+            ignore, eyebrow = "If you didn't request this code, you can safely ignore this email.", "Agreement signing"
+        return render_email(language=language, title=title, eyebrow=eyebrow, preheader=use, blocks=[
+            ("p", use),
+            ("code", {"code": code, "label": label, "expiry": expiry}),
+            code_security_notice(language),
+            ("p", ignore),
+        ])
+
     def send(self, email, code, language="en"):
         from api.accounts.utils import safe_send_mail
         from api.core.email_i18n import ARABIC, SIGNATURE
@@ -50,7 +72,7 @@ class OTPService:
 إذا لم تطلب هذا الرمز، يمكنك تجاهل هذه الرسالة بأمان.
 
 {SIGNATURE[ARABIC]}
-""", [email])
+""", [email], html_message=self._html(code, language))
                 return sent_count > 0
             except Exception:
                 logger.exception("Failed to send OTP email to %s", email)
@@ -68,7 +90,7 @@ class OTPService:
         MeritLense Team
         """
         try:
-            sent_count = safe_send_mail(subject, message, [email])
+            sent_count = safe_send_mail(subject, message, [email], html_message=self._html(code, language))
             return sent_count > 0
         except Exception:
             logger.exception("Failed to send OTP email to %s", email)

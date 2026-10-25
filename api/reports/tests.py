@@ -2,6 +2,7 @@ import shutil
 import tempfile
 import zipfile
 from io import BytesIO
+from unittest import mock
 
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError
@@ -562,6 +563,30 @@ class EvaluationReportApiTests(TestCase):
         self.assertEqual(response["Content-Type"], "application/pdf")
         self.assertIn(f"{report.report_number}-ai-analysis.pdf", response["Content-Disposition"])
         self.assertTrue(b"".join(response.streaming_content).startswith(b"%PDF"))
+
+    def test_interview_transcript_downloads_as_a_pdf_in_english_and_arabic(self):
+        Evaluation.objects.filter(pk=self.evaluation.pk).update(status="COMPLETED")
+        for lang in ("en", "ar"):
+            with mock.patch(
+                "api.reports.services.EvaluationReportService._render_html_to_pdf",
+                wraps=EvaluationReportService._render_html_to_pdf,
+            ) as render:
+                response = self.client.get(
+                    f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/transcript-pdf", {"lang": lang}
+                )
+            self.assertEqual(response.status_code, 200, getattr(response, "data", None))
+            self.assertEqual(response["Content-Type"], "application/pdf")
+            self.assertIn("-interview-transcript.pdf", response["Content-Disposition"])
+            self.assertTrue(response.content.startswith(b"%PDF"))
+            html = render.call_args.args[0]
+            self.assertIn('dir="rtl"' if lang == "ar" else 'dir="ltr"', html)
+            self.assertIn("نص المقابلة" if lang == "ar" else "Interview Transcript", html)
+            self.assertIn(self.evaluation.session.questions.order_by("question_order").first().question_text, html)
+
+    def test_interview_transcript_pdf_waits_for_completion(self):
+        Evaluation.objects.filter(pk=self.evaluation.pk).update(status="IN_PROGRESS")
+        response = self.client.get(f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/transcript-pdf")
+        self.assertEqual(response.status_code, 409)
 
     def test_qa_and_score_rows_join_by_question_id_not_order(self):
         """_build_qa_and_score_rows must pair each answer with its own

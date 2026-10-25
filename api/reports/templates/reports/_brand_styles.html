@@ -1,0 +1,23 @@
+{% comment %}Shared look for the score report and transcript PDFs: the MeritLense
+header, details strip and confidentiality footer of the main report.
+Tables rather than flex so WeasyPrint lays them out reliably.{% endcomment %}
+    .ml-header { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+    .ml-header td { vertical-align: middle; padding: 0; }
+    .ml-logo { width: 54px; }
+    .ml-logo img { width: 46px; height: auto; display: block; }
+    .ml-wordmark { font-size: 20px; font-weight: 700; color: #3d72fc; letter-spacing: -0.2px; }
+    .ml-wordmark span { color: #8a4fff; }
+    .ml-classification { text-align: {{ ml_end|default:"right" }}; font-size: 9px; color: #6880ab; }
+    .ml-classification b { display: block; color: #1b2f5c; font-size: 10px; }
+    .ml-bar { height: 4px; border-radius: 2px; margin: 6px 0 12px; background: #3d72fc;
+              background-image: linear-gradient(90deg, #3d72fc, #8a4fff, #ff5bae); }
+    .ml-eyebrow { font-size: 9px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: #6d28d9; margin: 0 0 3px; }
+    .ml-title { font-size: 19px; font-weight: 700; color: #0f1a45; margin: 0 0 10px; }
+    .ml-meta { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid #d5e2fb;
+               border-radius: 8px; background: #f6f8fe; margin-bottom: 14px; }
+    .ml-meta td { padding: 7px 10px; vertical-align: top; border-{{ ml_start|default:"left" }}: 1px solid #d5e2fb; }
+    .ml-meta td:first-child { border-{{ ml_start|default:"left" }}: 0; }
+    .ml-meta .l { font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #6880ab; }
+    .ml-meta .v { font-size: 10.5px; font-weight: 700; color: #1b2f5c; margin-top: 2px; word-break: break-word; }
+    .ml-footer { margin-top: 18px; padding-top: 6px; border-top: 1px solid #d5e2fb; font-size: 8.5px; color: #6880ab; }
+    .ml-footer b { color: #1b2f5c; }

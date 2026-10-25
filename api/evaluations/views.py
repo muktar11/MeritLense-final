@@ -693,14 +693,41 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         held = self._held_for_review_response(evaluation)
         if held is not None:
             return held
-        finalized_rating = bool(
+        finalized_rating = self._has_finalized_rating(evaluation)
+        if evaluation.status != 'COMPLETED' and not finalized_rating:
+            return Response({'detail': 'Assessment results are available after completion.'}, status=409)
+        transcript, conversation = self._transcript_and_conversation(evaluation)
+        reports = evaluation.reports.select_related('generated_by').all()
+        from .certificate_services import certificate_eligibility
+        eligible, reason = certificate_eligibility(evaluation, evaluation.session_summaries.select_related('rule_set').first())
+        return Response({
+            'certificate_eligibility': {'eligible': eligible, 'reason': reason},
+            'can_finalize': finalized_rating and CanManageEvaluation().has_object_permission(request, self, evaluation),
+            'can_manage_exceptions': request.user.role in [Roles.ADMIN, Roles.SUPERADMIN],
+            'evaluation': EvaluationSerializer(evaluation, context={'request': request}).data,
+            'transcript': transcript,
+            'conversation': conversation,
+            'reports': EvaluationReportSerializer(reports, many=True, context={'request': request}).data,
+            'corrections': [{
+                'created_at': item.created_at, 'reason': item.reason,
+                'recorded_by': item.corrected_by.get_full_name() if item.corrected_by else None,
+            } for item in evaluation.evaluator_rating_corrections.select_related('corrected_by').order_by('created_at')],
+        })
+
+    @staticmethod
+    def _has_finalized_rating(evaluation):
+        """A scheduled assessment the evaluator has rated, and not cancelled."""
+        return bool(
             evaluation.session_id and evaluation.session.is_scheduled_interview
             and getattr(evaluation, 'evaluator_rating', None)
             and evaluation.status != 'CANCELLED'
             and evaluation.session.status not in ('CANCELLED', 'EXPIRED', 'FAILED')
         )
-        if evaluation.status != 'COMPLETED' and not finalized_rating:
-            return Response({'detail': 'Assessment results are available after completion.'}, status=409)
+
+    @staticmethod
+    def _transcript_and_conversation(evaluation):
+        """The AI interview's questions and answers, and a scheduled call's
+        own turns - shared by Assessment Results and its transcript PDF."""
         transcript = []
         if evaluation.session_id:
             for question in evaluation.session.questions.prefetch_related('responses').order_by('question_order'):
@@ -715,7 +742,8 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
                     } for response in responses],
                 })
         # Ratings alone never imply that dialogue was captured.
-        has_transcript = any(response['original'].strip() for item in transcript for response in item['responses'])
+        if not any((response['original'] or '').strip() for item in transcript for response in item['responses']):
+            transcript = []
         # A live call's own turns are what was actually said; the question
         # bank text a candidate turn was filed under may never have been asked.
         conversation = []
@@ -725,22 +753,35 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             conversation = LiveCallSegmentSerializer(
                 LiveCallSegment.objects.filter(call__interview_session_id=evaluation.session_id), many=True,
             ).data
-        reports = evaluation.reports.select_related('generated_by').all()
-        from .certificate_services import certificate_eligibility
-        eligible, reason = certificate_eligibility(evaluation, evaluation.session_summaries.select_related('rule_set').first())
-        return Response({
-            'certificate_eligibility': {'eligible': eligible, 'reason': reason},
-            'can_finalize': finalized_rating and CanManageEvaluation().has_object_permission(request, self, evaluation),
-            'can_manage_exceptions': request.user.role in [Roles.ADMIN, Roles.SUPERADMIN],
-            'evaluation': EvaluationSerializer(evaluation, context={'request': request}).data,
-            'transcript': transcript if has_transcript else [],
-            'conversation': conversation,
-            'reports': EvaluationReportSerializer(reports, many=True, context={'request': request}).data,
-            'corrections': [{
-                'created_at': item.created_at, 'reason': item.reason,
-                'recorded_by': item.corrected_by.get_full_name() if item.corrected_by else None,
-            } for item in evaluation.evaluator_rating_corrections.select_related('corrected_by').order_by('created_at')],
-        })
+        return transcript, conversation
+
+    @action(detail=True, methods=['get'], url_path='transcript-pdf')
+    def transcript_pdf(self, request, id=None):
+        """The interview transcript as a branded PDF (?lang=ar for Arabic)."""
+        from django.http import HttpResponse
+
+        from api.reports.services import EvaluationReportError, EvaluationReportService
+
+        evaluation = self.get_object()
+        held = self._held_for_review_response(evaluation)
+        if held is not None:
+            return held
+        if evaluation.status != 'COMPLETED' and not self._has_finalized_rating(evaluation):
+            return Response({'detail': 'Assessment results are available after completion.'}, status=409)
+        transcript, conversation = self._transcript_and_conversation(evaluation)
+        scheduled = bool(evaluation.session_id and evaluation.session.is_scheduled_interview and conversation)
+        if not transcript and not scheduled:
+            return Response({'detail': 'No captured dialogue for this assessment.'}, status=404)
+        language = 'ar' if str(request.query_params.get('lang', '')).lower().startswith('ar') else 'en'
+        try:
+            pdf = EvaluationReportService.render_transcript_pdf(
+                evaluation, transcript=transcript, conversation=conversation if scheduled else [], language=language,
+            )
+        except EvaluationReportError as exc:
+            return Response({'detail': str(exc)}, status=503)
+        response = HttpResponse(pdf, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{evaluation.public_id}-interview-transcript.pdf"'
+        return response
 
     @action(detail=True, methods=['post'], url_path='finalize-scheduled')
     def finalize_scheduled(self, request, id=None):

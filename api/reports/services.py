@@ -1508,15 +1508,19 @@ class EvaluationReportService:
             critical_failures=summary.critical_failures,
             language=language,
         )
+        # The rule engine also overrides when a non-critical competency is
+        # below its pass mark (READY -> PARTIALLY_READY). Only an actual
+        # critical failure is reported as an unmet critical requirement.
+        critical_override = bool(override_triggered and summary.critical_failures)
         employer_message = cls._build_employer_readiness_message(
             readiness_indicator=readiness_indicator,
             risk_indicators=risk_indicators,
-            override_triggered=override_triggered,
+            override_triggered=critical_override,
             language=language,
         )
         suggested_action, suggested_action_display = cls._derive_suggested_action(
             readiness_indicator=readiness_indicator,
-            override_triggered=override_triggered,
+            override_triggered=critical_override,
             language=language,
         )
         assessment_completeness = cls._derive_assessment_completeness(summary)
@@ -1640,9 +1644,11 @@ class EvaluationReportService:
                     "internal_reason": readiness_reason,
                 },
                 "override_triggered": override_triggered,
+                "critical_override": critical_override,
                 "override_details": {
                     "triggered": override_triggered,
-                    "rule": "critical_requirement_override" if override_triggered else None,
+                    "rule": ("critical_requirement_override" if critical_override
+                             else "competency_threshold_override" if override_triggered else None),
                     "impact": "readiness_indicator_takes_precedence_over_overall_score" if override_triggered else None,
                 },
                 "top_strengths": top_strengths,
@@ -3247,17 +3253,114 @@ class EvaluationReportService:
         payload = report.report_payload or {}
         language = payload.get("language", "en")
         template_name = "reports/qa_and_score_ar.html" if language == "ar" else "reports/qa_and_score.html"
+        rows = cls._build_qa_and_score_rows(report)
+        executive_summary = payload.get("executive_summary", {})
         context = {
-            "rows": cls._build_qa_and_score_rows(report),
+            "rows": rows,
             "report_number": report.report_number,
             "assessment_context": payload.get("assessment_context", {}),
-            "executive_summary": payload.get("executive_summary", {}),
+            "executive_summary": executive_summary,
+            # From the scored answers themselves, so reports stored before
+            # critical_override existed are described correctly too.
+            "critical_override": bool(executive_summary.get("override_triggered"))
+            and any(row.get("critical_failure") for row in rows),
+            "logo_data_uri": cls._logo_data_uri(),
+            "header_meta": cls._document_header_meta(payload.get("assessment_context", {}), report.report_number,
+                                                     language),
         }
         if language == "ar":
             from api.core.pdf_fonts import arabic_font_context
 
             context.update(arabic_font_context())
         return cls._render_html_to_pdf(render_to_string(template_name, context))
+
+    _TRANSCRIPT_LANGUAGE_NAMES = {
+        "en": ("English", "الإنجليزية"), "ar": ("Arabic", "العربية"), "am": ("Amharic", "الأمهرية"),
+        "hi": ("Hindi", "الهندية"), "ur": ("Urdu", "الأردية"), "tl": ("Filipino", "الفلبينية"),
+        "fil": ("Filipino", "الفلبينية"), "sw": ("Swahili", "السواحيلية"), "fr": ("French", "الفرنسية"),
+    }
+
+    @classmethod
+    def render_transcript_pdf(cls, evaluation, *, transcript, conversation, language="en"):
+        """The interview transcript as a PDF in the reports' look: for an AI
+        interview each question with the answer and its translation, for a
+        scheduled interview each turn of the call (pass its conversation)."""
+        ar = language == "ar"
+
+        def language_name(code):
+            key = str(code or "").split("-")[0].lower()
+            names = cls._TRANSCRIPT_LANGUAGE_NAMES.get(key)
+            return (names[1] if ar else names[0]) if names else (str(code or "").upper() or "—")
+
+        def text_dir(value):
+            # Each text keeps its own direction, so an English answer in the
+            # Arabic transcript doesn't get its punctuation flipped.
+            return "rtl" if re.search(r"[؀-ۿ]", value or "") else "ltr"
+
+        session = evaluation.session if evaluation.session_id else None
+        report = evaluation.reports.filter(report_status="ACTIVE").first()
+        when = evaluation.completed_at or evaluation.scheduled_date
+        scheduled = bool(conversation)
+        context = {
+            "rtl": ar,
+            "logo_data_uri": cls._logo_data_uri(),
+            "header_meta": [
+                ("المرشح" if ar else "Candidate",
+                 f"{evaluation.candidate_first_name} {evaluation.candidate_last_name}".strip()),
+                ("الوظيفة المستهدفة" if ar else "Target role", getattr(session, "role_name", "") or ""),
+                ("طريقة التقييم" if ar else "Method",
+                 ("بقيادة صاحب العمل" if ar else "Employer-led") if scheduled
+                 else ("مقابلة بالذكاء الاصطناعي" if ar else "AI interview")),
+                ("التاريخ" if ar else "Date", timezone.localtime(when).strftime("%Y-%m-%d") if when else ""),
+                ("رقم التقرير" if ar else "Report", report.report_number if report else ""),
+            ],
+            "turns": [{
+                "number": index + 1,
+                "speaker": ("المرشح" if ar else "Candidate") if turn.get("speaker_role") == "CANDIDATE"
+                else ("المقيّم" if ar else "Evaluator"),
+                "is_candidate": turn.get("speaker_role") == "CANDIDATE",
+                "time": str(turn.get("sent_at") or "")[11:16],
+                "typed": turn.get("input_mode") == "TEXT",
+                "original": turn.get("original_text") or "",
+                "original_dir": text_dir(turn.get("original_text")),
+                "original_language": language_name(turn.get("source_language")),
+                "translation": turn.get("translated_text") or "",
+                "translation_dir": text_dir(turn.get("translated_text")),
+                "translation_language": language_name(turn.get("target_language")),
+            } for index, turn in enumerate(conversation)],
+            "questions": [{
+                "number": index + 1,
+                "question": item["question"],
+                "question_dir": text_dir(item["question"]),
+                "answers": [{
+                    "original": (response.get("original") or "").strip(),
+                    "original_dir": text_dir(response.get("original")),
+                    "original_language": language_name(response.get("language")),
+                    "translation": (response.get("translation") or "").strip(),
+                    "translation_dir": text_dir(response.get("translation")),
+                    "translation_language": language_name(response.get("translation_language")),
+                } for response in item["responses"]],
+            } for index, item in enumerate(transcript)] if not scheduled else [],
+            "reference": str(evaluation.public_id),
+        }
+        if ar:
+            from api.core.pdf_fonts import arabic_font_context
+
+            context.update(arabic_font_context())
+        return cls._render_html_to_pdf(render_to_string("reports/transcript.html", context))
+
+    @staticmethod
+    def _document_header_meta(assessment_context, report_number, language):
+        """(label, value) pairs for the details strip under the score report
+        and transcript headers."""
+        ar = language == "ar"
+        date = str(assessment_context.get("assessment_date") or "")[:10]
+        return [
+            ("المرشح" if ar else "Candidate", assessment_context.get("candidate_name")),
+            ("الوظيفة المستهدفة" if ar else "Target role", assessment_context.get("target_role")),
+            ("رقم التقرير" if ar else "Report", report_number),
+            ("تاريخ التقييم" if ar else "Assessment date", date),
+        ]
 
     @classmethod
     def build_documents_zip(cls, report):

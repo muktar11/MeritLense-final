@@ -116,16 +116,12 @@
     .fail { color: #dc5a5a; font-weight: 700; }
     .review { color: #f1aa29; font-weight: 700; }
     .not-scored { color: #9aa8c6; font-style: italic; }
+{% include "reports/_brand_styles.html" with ml_start="right" ml_end="left" %}
+    .ml-eyebrow, .ml-meta .l { letter-spacing: 0; }
   </style>
 </head>
 <body>
-  <h1>الأسئلة والإجابات وتقرير الدرجة القائمة على القواعد</h1>
-  <div class="meta">
-    <span>رقم التقرير: {{ report_number }}</span>
-    {% if assessment_context.candidate_name %}<span>المرشح: {{ assessment_context.candidate_name }}</span>{% endif %}
-    {% if assessment_context.target_role %}<span>الوظيفة: {{ assessment_context.target_role }}</span>{% endif %}
-    {% if assessment_context.assessment_date %}<span>التاريخ: {{ assessment_context.assessment_date }}</span>{% endif %}
-  </div>
+  {% include "reports/_brand_header.html" with eyebrow="تقرير درجة التقييم" title="الأسئلة والإجابات وتقرير الدرجة القائمة على القواعد" classification_label="التصنيف" classification="سري - للاستخدام الداخلي فقط" %}
 
   <h2>النتيجة الإجمالية</h2>
   <div class="summary-box">
@@ -137,7 +133,7 @@
       <span class="summary-label">الدرجة الإجمالية</span>
       <span class="summary-value">{{ executive_summary.overall_score_display|default:executive_summary.overall_score|default:"غير متاح" }}</span>
     </div>
-    {% if executive_summary.override_triggered %}
+    {% if critical_override %}
     <div class="summary-row">
       <span class="summary-label">تجاوز المتطلب الحرج</span>
       <span class="summary-value fail">تم التطبيق - يحدد الفشل الحرج النتيجة بغض النظر عن الدرجة الإجمالية</span>
@@ -186,5 +182,6 @@
   {% empty %}
   <p>لا توجد إجابات متاحة لهذه الجلسة.</p>
   {% endfor %}
+  <div class="ml-footer"><b>سري - للاستخدام الداخلي فقط</b> | التقرير {{ report_number }} | لدعم القرار فقط؛ ويبقى قرار التوظيف النهائي لصاحب العمل.</div>
 </body>
 </html>

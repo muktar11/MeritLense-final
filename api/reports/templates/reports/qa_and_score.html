@@ -104,16 +104,11 @@
     .fail { color: #dc5a5a; font-weight: bold; }
     .review { color: #f1aa29; font-weight: bold; }
     .not-scored { color: #9aa8c6; font-style: italic; }
+{% include "reports/_brand_styles.html" %}
   </style>
 </head>
 <body>
-  <h1>Questions, Answers &amp; Rule-Based Score Report</h1>
-  <div class="meta">
-    <span>Report: {{ report_number }}</span>
-    {% if assessment_context.candidate_name %}<span>Candidate: {{ assessment_context.candidate_name }}</span>{% endif %}
-    {% if assessment_context.target_role %}<span>Role: {{ assessment_context.target_role }}</span>{% endif %}
-    {% if assessment_context.assessment_date %}<span>Date: {{ assessment_context.assessment_date }}</span>{% endif %}
-  </div>
+  {% include "reports/_brand_header.html" with eyebrow="Assessment score report" title="Questions, Answers & Rule-Based Score Report" classification_label="Classification" classification="Confidential - Internal Use Only" %}
 
   <h2>Overall Result</h2>
   <div class="summary-box">
@@ -125,7 +120,7 @@
       <span class="summary-label">Overall Score</span>
       <span class="summary-value">{{ executive_summary.overall_score_display|default:executive_summary.overall_score|default:"N/A" }}</span>
     </div>
-    {% if executive_summary.override_triggered %}
+    {% if critical_override %}
     <div class="summary-row">
       <span class="summary-label">Critical Requirement Override</span>
       <span class="summary-value fail">Applied - a critical failure determines the result regardless of overall score</span>
@@ -175,5 +170,6 @@
   {% empty %}
   <p>No responses are available for this session.</p>
   {% endfor %}
+  <div class="ml-footer"><b>CONFIDENTIAL - Internal Use Only</b> | Report {{ report_number }} | Decision support only; the final hiring decision remains with the employer.</div>
 </body>
 </html>

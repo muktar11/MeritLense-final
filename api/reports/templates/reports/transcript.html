@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="{% if rtl %}ar{% else %}en{% endif %}" dir="{% if rtl %}rtl{% else %}ltr{% endif %}">
+<head>
+  <meta charset="utf-8" />
+  <title>{% if rtl %}نص المقابلة{% else %}Interview Transcript{% endif %}</title>
+  <style>
+    @page { size: A4; margin: 12mm 14mm; }
+    {% if rtl and arabic_font_regular_uri %}
+    @font-face { font-family: "Noto Naskh Arabic"; src: url("{{ arabic_font_regular_uri }}") format("truetype"); font-weight: 400; }
+    @font-face { font-family: "Noto Naskh Arabic"; src: url("{{ arabic_font_bold_uri }}") format("truetype"); font-weight: 700; }
+    {% endif %}
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; color: #1b2f5c; font-size: {% if rtl %}12px{% else %}11px{% endif %};
+      font-family: {% if rtl %}"Noto Naskh Arabic", Arial, sans-serif{% else %}Arial, Helvetica, sans-serif{% endif %};
+    }
+    .intro { color: #6880ab; font-size: 10px; margin: 0 0 12px; }
+    .entry { border: 1px solid #d5e2fb; border-radius: 8px; padding: 10px 12px; margin-bottom: 9px; page-break-inside: avoid; }
+    .entry-head { font-weight: 700; color: #2f6fe8; margin-bottom: 6px; }
+    .entry-head .who { color: #1b2f5c; }
+    .entry-head .when { color: #9aa8c6; font-weight: 400; font-size: 9.5px; }
+    .candidate .entry-head .who { color: #0f8a55; }
+    .question { margin-bottom: 8px; font-weight: 700; color: #0f1a45; }
+    .block { border-radius: 6px; padding: 7px 9px; margin-top: 5px; }
+    .original { background: #f2f6ff; }
+    .translation { background: #f6f1ff; }
+    .block .l { font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #6880ab; margin-bottom: 2px; }
+    .translation .l { color: #7c4ddb; }
+    .block .t { white-space: pre-wrap; }
+    .missing { color: #9aa8c6; font-style: italic; }
+{% if rtl %}{% include "reports/_brand_styles.html" with ml_start="right" ml_end="left" %}
+    .ml-eyebrow, .ml-meta .l, .block .l { letter-spacing: 0; text-transform: none; }
+{% else %}{% include "reports/_brand_styles.html" %}{% endif %}
+  </style>
+</head>
+<body>
+{% if rtl %}
+  {% include "reports/_brand_header.html" with eyebrow="سجل المقابلة" title="نص المقابلة" classification_label="التصنيف" classification="سري - للاستخدام الداخلي فقط" %}
+{% else %}
+  {% include "reports/_brand_header.html" with eyebrow="Interview record" title="Interview Transcript" classification_label="Classification" classification="Confidential - Internal Use Only" %}
+{% endif %}
+
+{% if turns %}
+  <p class="intro">{% if rtl %}كل مداخلة كما قيلت في المكالمة، بلغتها الأصلية ومع ترجمتها للطرف الآخر.{% else %}Every turn as it was said in the call, in its original language and with the translation the other participant received.{% endif %}</p>
+  {% for turn in turns %}
+  <div class="entry{% if turn.is_candidate %} candidate{% endif %}">
+    <div class="entry-head">#{{ turn.number }} &middot; <span class="who">{{ turn.speaker }}</span>{% if turn.time %} <span class="when" dir="ltr">{{ turn.time }} UTC</span>{% endif %}{% if turn.typed %} <span class="when">&middot; {% if rtl %}مكتوب{% else %}typed{% endif %}</span>{% endif %}</div>
+    <div class="block original"><div class="l">{% if rtl %}الأصل{% else %}Original{% endif %} &middot; {{ turn.original_language }}</div><div class="t" dir="{{ turn.original_dir }}">{{ turn.original }}</div></div>
+    <div class="block translation"><div class="l">{% if rtl %}الترجمة{% else %}Translation{% endif %} &middot; {{ turn.translation_language }}</div>{% if turn.translation %}<div class="t" dir="{{ turn.translation_dir }}">{{ turn.translation }}</div>{% else %}<div class="missing">{% if rtl %}غير متاحة{% else %}Not available{% endif %}</div>{% endif %}</div>
+  </div>
+  {% endfor %}
+{% else %}
+  <p class="intro">{% if rtl %}كل سؤال كما عُرض على المرشح، مع إجابته بلغتها الأصلية وترجمتها.{% else %}Each question as the candidate was asked it, with their answer in its original language and its translation.{% endif %}</p>
+  {% for item in questions %}
+  <div class="entry">
+    <div class="entry-head">{% if rtl %}السؤال{% else %}Question{% endif %} {{ item.number }}</div>
+    <div class="question" dir="{{ item.question_dir }}">{{ item.question }}</div>
+    {% for answer in item.answers %}
+      <div class="block original"><div class="l">{% if rtl %}إجابة المرشح{% else %}Candidate's answer{% endif %} &middot; {{ answer.original_language }}</div>{% if answer.original %}<div class="t" dir="{{ answer.original_dir }}">{{ answer.original }}</div>{% else %}<div class="missing">{% if rtl %}مفقودة / غير واضحة{% else %}Missing / unclear{% endif %}</div>{% endif %}</div>
+      {% if answer.translation %}<div class="block translation"><div class="l">{% if rtl %}الترجمة{% else %}Translation{% endif %} &middot; {{ answer.translation_language }}</div><div class="t" dir="{{ answer.translation_dir }}">{{ answer.translation }}</div></div>{% endif %}
+    {% empty %}
+      <div class="missing">{% if rtl %}لم تتم الإجابة{% else %}Unanswered{% endif %}</div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+{% endif %}
+
+  <div class="ml-footer"><b>{% if rtl %}سري - للاستخدام الداخلي فقط{% else %}CONFIDENTIAL - Internal Use Only{% endif %}</b> | <span dir="ltr">{{ reference }}</span> | {% if rtl %}لدعم القرار فقط؛ ويبقى قرار التوظيف النهائي لصاحب العمل.{% else %}Decision support only; the final hiring decision remains with the employer.{% endif %}</div>
+</body>
+</html>

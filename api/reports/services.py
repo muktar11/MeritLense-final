@@ -3304,15 +3304,16 @@ class EvaluationReportService:
         context = {
             "rtl": ar,
             "logo_data_uri": cls._logo_data_uri(),
+            # (label, value, keep on one line)
             "header_meta": [
                 ("المرشح" if ar else "Candidate",
-                 f"{evaluation.candidate_first_name} {evaluation.candidate_last_name}".strip()),
-                ("الوظيفة المستهدفة" if ar else "Target role", getattr(session, "role_name", "") or ""),
+                 f"{evaluation.candidate_first_name} {evaluation.candidate_last_name}".strip(), False),
+                ("الوظيفة المستهدفة" if ar else "Target role", getattr(session, "role_name", "") or "", False),
                 ("طريقة التقييم" if ar else "Method",
                  ("بقيادة صاحب العمل" if ar else "Employer-led") if scheduled
-                 else ("مقابلة بالذكاء الاصطناعي" if ar else "AI interview")),
-                ("التاريخ" if ar else "Date", timezone.localtime(when).strftime("%Y-%m-%d") if when else ""),
-                ("رقم التقرير" if ar else "Report", report.report_number if report else ""),
+                 else ("مقابلة بالذكاء الاصطناعي" if ar else "AI interview"), False),
+                ("التاريخ" if ar else "Date", timezone.localtime(when).strftime("%Y-%m-%d") if when else "", True),
+                ("رقم التقرير" if ar else "Report", report.report_number if report else "", True),
             ],
             "turns": [{
                 "number": index + 1,
@@ -3351,15 +3352,15 @@ class EvaluationReportService:
 
     @staticmethod
     def _document_header_meta(assessment_context, report_number, language):
-        """(label, value) pairs for the details strip under the score report
-        and transcript headers."""
+        """(label, value, keep on one line) for the details strip under the
+        score report header."""
         ar = language == "ar"
         date = str(assessment_context.get("assessment_date") or "")[:10]
         return [
-            ("المرشح" if ar else "Candidate", assessment_context.get("candidate_name")),
-            ("الوظيفة المستهدفة" if ar else "Target role", assessment_context.get("target_role")),
-            ("رقم التقرير" if ar else "Report", report_number),
-            ("تاريخ التقييم" if ar else "Assessment date", date),
+            ("المرشح" if ar else "Candidate", assessment_context.get("candidate_name"), False),
+            ("الوظيفة المستهدفة" if ar else "Target role", assessment_context.get("target_role"), False),
+            ("رقم التقرير" if ar else "Report", report_number, True),
+            ("تاريخ التقييم" if ar else "Assessment date", date, True),
         ]
 
     @classmethod

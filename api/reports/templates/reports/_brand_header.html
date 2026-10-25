@@ -1,5 +1,5 @@
 {% comment %}Header for the score report and transcript PDFs. Context: logo_data_uri,
-header_meta (list of (label, value)), and from the include: eyebrow,
+header_meta (list of (label, value, nowrap)), and from the include: eyebrow,
 title, classification_label, classification.{% endcomment %}
 <table class="ml-header"><tr>
   {% if logo_data_uri %}<td class="ml-logo"><img src="{{ logo_data_uri }}" alt="MeritLense"></td>{% endif %}
@@ -11,6 +11,6 @@ title, classification_label, classification.{% endcomment %}
 <h1 class="ml-title">{{ title }}</h1>
 {% if header_meta %}
 <table class="ml-meta"><tr>
-  {% for label, value in header_meta %}<td><div class="l">{{ label }}</div><div class="v">{{ value|default:"—" }}</div></td>{% endfor %}
+  {% for label, value, nowrap in header_meta %}<td><div class="l">{{ label }}</div><div class="v{% if nowrap %} nowrap{% endif %}" dir="auto">{{ value|default:"—" }}</div></td>{% endfor %}
 </tr></table>
 {% endif %}

@@ -327,6 +327,36 @@ class LiveCallConversationTests(APITestCase):
         )
         self.assertEqual(allowed.data["candidate"]["name"], "Conv Candidate")
 
+    def test_guide_gives_each_question_its_approved_listen_for_points(self):
+        from api.core.constants import InterviewEvaluationTier, QuestionDifficulty, QuestionLifecycleStatus
+        from api.questions.models import QuestionTemplate
+        from api.sessions.models import SessionQuestion
+
+        template = QuestionTemplate.objects.create(
+            role_name="Nanny", role_code="nanny", question_code="NA-SAF-901", question_version="1.0",
+            question_status=QuestionLifecycleStatus.ACTIVE, domain="Safety", skill_tag="safety_awareness",
+            skill="Safety Awareness", sequence_number=1, difficulty=QuestionDifficulty.MEDIUM,
+            question_text="A child has a fever. What do you do?", question_type="safety", question_format="SCENARIO",
+            language="EN", scoring_type="0/3/5", difficulty_score=2, estimated_time_seconds=60,
+            expected_answer_type="multi_step", evaluation_tier=InterviewEvaluationTier.FULL, rubric_version="v2.0",
+            question_set_version="v1.2", critical_question=False, is_active=True,
+            expected_steps=["Check the temperature", "Inform the parent", " "],
+        )
+        SessionQuestion.objects.create(
+            session=self.session, question_template=template, question_text=template.question_text,
+            domain=template.domain, skill=template.skill_tag, difficulty=template.difficulty, question_order=1,
+            status="PENDING", is_mandatory=True,
+        )
+        self.client.force_authenticate(self.owner)
+        guide = self.client.get(f"{self.base}/guide").data
+
+        safety = next(item for item in guide["competencies"] if item["key"] == "safety_awareness")
+        self.assertEqual(safety["questions"][0]["listen_for"], ["Check the temperature", "Inform the parent"])
+        # Private guidance never reaches the conversation the candidate sees.
+        self.client.force_authenticate(user=None)
+        conversation = self.client.get(f"{self.base}/conversation?token={self.session.access_token}").data
+        self.assertNotIn("Inform the parent", json.dumps(conversation))
+
 
 @override_settings(
     CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}},

@@ -92,6 +92,26 @@ class CompanyProfileFieldsTests(CompanyFixtureMixin, TestCase):
         self.assertEqual(response.data["company_type"], "LLC")
         self.assertEqual(response.data["description"], "We care.")
 
+    def test_company_stamp_can_be_uploaded_and_removed(self):
+        """Sign Agreements' stamp card: upload, then Remove sends stamp_image null."""
+        from io import BytesIO
+
+        from PIL import Image
+
+        png = BytesIO()
+        Image.new("RGB", (40, 40), (120, 40, 200)).save(png, format="PNG")
+        uploaded = self.client.patch(reverse("company-profile"), {
+            "stamp_image": SimpleUploadedFile("stamp.png", png.getvalue(), content_type="image/png"),
+        }, format="multipart")
+        self.assertEqual(uploaded.status_code, 200, uploaded.data)
+        self.assertTrue(uploaded.data["stamp_image"])
+
+        removed = self.client.patch(reverse("company-profile"), {"stamp_image": None}, format="json")
+        self.assertEqual(removed.status_code, 200, removed.data)
+        self.assertIsNone(removed.data["stamp_image"])
+        self.company.refresh_from_db()
+        self.assertFalse(self.company.stamp_image)
+
     def test_unknown_company_type_is_rejected(self):
         response = self.client.patch(reverse("company-profile"), {"company_type": "MADE_UP"}, format="json")
         self.assertEqual(response.status_code, 400)

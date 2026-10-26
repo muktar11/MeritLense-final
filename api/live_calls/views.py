@@ -369,6 +369,11 @@ class LiveCallGuideView(GenericAPIView):
                     "text": question.question_text,
                     "order": question.question_order,
                     "status": question.status,
+                    # The approved points a good answer covers - private
+                    # evaluator guidance, never shown to the candidate or
+                    # saved in the transcript.
+                    "listen_for": [str(step).strip() for step in (getattr(template, "expected_steps", None) or [])
+                                   if str(step).strip()],
                 })
         call = LiveCallSession.objects.filter(interview_session=session).first()
         evaluation = getattr(session, "linked_evaluation", None)

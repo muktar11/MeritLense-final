@@ -19,9 +19,13 @@ from api.core.email_i18n import (
 logger = logging.getLogger(__name__)
 
 
-def safe_send_mail(subject, message, recipients, attachments=None, html_message=None):
+def safe_send_mail(subject, message, recipients, attachments=None, html_message=None, in_app=True):
     """html_message, when given, is sent as the HTML alternative; `message`
-    stays the plain-text version for clients that don't render HTML."""
+    stays the plain-text version for clients that don't render HTML.
+
+    in_app=False keeps the email out of the recipient's in-app notifications
+    - required for anything carrying a code, password or verification/reset
+    link (see api.notifications.services)."""
     from_email = settings.DEFAULT_FROM_EMAIL or "no-reply@localhost"
 
     if not settings.EMAIL_HOST:
@@ -33,8 +37,11 @@ def safe_send_mail(subject, message, recipients, attachments=None, html_message=
         return 0
 
     try:
-        if attachments or html_message:
-            email = EmailMultiAlternatives(subject, message, from_email, recipients)
+        if attachments or html_message or not in_app:
+            from api.notifications.services import IN_APP_HEADER
+
+            headers = {} if in_app else {IN_APP_HEADER: "no"}
+            email = EmailMultiAlternatives(subject, message, from_email, recipients, headers=headers)
             if html_message:
                 email.attach_alternative(html_message, "text/html")
             for attachment in attachments or []:
@@ -113,7 +120,8 @@ def send_verification_email(user, request=None):
 {SIGNATURE[ARABIC]}
 """
         safe_send_mail(subject, message, [user.email],
-                       html_message=_verification_html(user, code, lang, intro, extra, expires=True))
+                       html_message=_verification_html(user, code, lang, intro, extra, expires=True),
+                       in_app=False)
         return
 
     intro, extra, expires = "", "", False
@@ -175,7 +183,8 @@ def send_verification_email(user, request=None):
         """
 
     safe_send_mail(subject, message, [user.email],
-                   html_message=_verification_html(user, code, lang, intro, extra, expires))
+                   html_message=_verification_html(user, code, lang, intro, extra, expires),
+                   in_app=False)
 
 def generate_password_reset_token(user):
     token = secrets.token_urlsafe(32)
@@ -217,7 +226,7 @@ def send_password_reset_email(user, request):
 
 {SIGNATURE[ARABIC]}
 """
-        safe_send_mail(subject, message, [user.email])
+        safe_send_mail(subject, message, [user.email], in_app=False)
         return
 
     if user.role == Roles.B2C:
@@ -276,7 +285,7 @@ def send_password_reset_email(user, request):
         MeritLense Team
         """
 
-    safe_send_mail(subject, message, [user.email])
+    safe_send_mail(subject, message, [user.email], in_app=False)
 
 def send_password_reset_confirmation_email(user):
     """Sent after a forgot-password reset actually completes (not the
@@ -858,7 +867,7 @@ def send_team_invitation_email(invitation, request):
 إذا لم تكن تتوقع هذه الدعوة، يمكنك تجاهل هذه الرسالة أو التواصل مع الدعم.
 
 {SIGNATURE[ARABIC]}
-""", [invitation.email])
+""", [invitation.email], in_app=False)
         return
 
     subject = f"Invitation to join {company_name} on MeritLense"
@@ -886,7 +895,7 @@ Best regards,
 MeritLense Team
 """
     
-    safe_send_mail(subject, message, [invitation.email])
+    safe_send_mail(subject, message, [invitation.email], in_app=False)
 
 
 def invalidate_user_sessions(user):

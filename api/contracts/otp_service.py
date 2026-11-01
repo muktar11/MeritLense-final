@@ -72,7 +72,7 @@ class OTPService:
 إذا لم تطلب هذا الرمز، يمكنك تجاهل هذه الرسالة بأمان.
 
 {SIGNATURE[ARABIC]}
-""", [email], html_message=self._html(code, language))
+""", [email], html_message=self._html(code, language), in_app=False)
                 return sent_count > 0
             except Exception:
                 logger.exception("Failed to send OTP email to %s", email)
@@ -90,7 +90,7 @@ class OTPService:
         MeritLense Team
         """
         try:
-            sent_count = safe_send_mail(subject, message, [email], html_message=self._html(code, language))
+            sent_count = safe_send_mail(subject, message, [email], html_message=self._html(code, language), in_app=False)
             return sent_count > 0
         except Exception:
             logger.exception("Failed to send OTP email to %s", email)

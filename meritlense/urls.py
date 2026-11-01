@@ -11,6 +11,7 @@ from api.accounts.serializers import CustomTokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
 from api.core.views import health_check
 from api.payments.views import payment_short_link_redirect
+from api.notifications.views import notification_list
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
@@ -45,6 +46,8 @@ api_v1_patterns = [
     path('agreements/', include('api.contracts.urls')),
     path('live-calls/', include('api.live_calls.urls')),
     path('knowledge/', include('api.knowledge.urls')),
+    path('notifications', notification_list, name='notification-list'),
+    path('notifications/', include('api.notifications.urls')),
     path('schema', SpectacularAPIView.as_view(), name='api-v1-schema'),
     path('docs', SpectacularSwaggerView.as_view(url_name='api-v1-schema'), name='api-v1-swagger-ui'),
 ]

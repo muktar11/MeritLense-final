@@ -193,5 +193,7 @@
 <td>Final publication revision: incorporated MeritLense OÜ registry details; narrowed operational commitments; protected proprietary assessment methodology; revised security, audit, subprocessor and international-transfer language; removed unresolved placeholders and unnecessary disclosures.</td>
 </tr>
 </table>
-{% include "contracts/_seal.html" %}
+<h2>Signatures</h2>
+{% include "contracts/_party_sign.html" %}
+{% include "contracts/_seal.html" with hide_signer=True %}
 {% endblock %}

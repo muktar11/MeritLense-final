@@ -193,5 +193,7 @@
 <td>مراجعة نهائية للنشر: إدراج بيانات MeritLense OÜ الرسمية؛ تضييق الالتزامات التشغيلية غير الضرورية؛ حماية منهجية التقييم المملوكة؛ مراجعة صياغات الأمن والتدقيق والمعالجين الفرعيين والنقل الدولي؛ وإزالة الفراغات والإفصاحات غير اللازمة.</td>
 </tr>
 </table>
-{% include "contracts/_seal_ar.html" %}
+<h2>التوقيعات</h2>
+{% include "contracts/_party_sign_ar.html" %}
+{% include "contracts/_seal_ar.html" with hide_signer=True %}
 {% endblock %}

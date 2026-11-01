@@ -15,6 +15,15 @@
     padding: 8px 12px; border-radius: 6px; font-size: 9.5pt; margin-bottom: 1.5em;
   }
   .signature-block { margin-top: 2.5em; padding-top: 1em; border-top: 1px solid #ddd; }
+  /* Second Party signature block: signer details with the company stamp
+     beside them (table cells mirror automatically in RTL documents). */
+  .party-sign {
+    width: 100%; border-collapse: collapse; margin: 0.8em 0; background: #f5f3ff;
+    border: 1px solid #ddd; font-size: 10pt; line-height: 1.9; page-break-inside: avoid;
+  }
+  .party-sign td { padding: 10px 14px; vertical-align: middle; }
+  .party-sign-stamp { width: 130px; text-align: center; }
+  .party-sign-stamp img { width: 115px; height: 115px; object-fit: contain; opacity: 0.9; }
 
   .ml-seal {
     margin-top: 2.5em; padding: 12px 16px; border: 1.5px solid #6d28d9;
@@ -28,7 +37,6 @@
   .ml-seal-table td { padding: 1px 6px 1px 0; }
   .ml-seal-table td:first-child { color: #777; white-space: nowrap; }
   .ml-seal-qr { width: 70px; height: 70px; position: absolute; right: 24px; margin-top: -60px; }
-  .ml-seal-stamp { width: 90px; height: 90px; opacity: 0.85; position: absolute; right: 110px; margin-top: -75px; }
   .ml-seal-preview { border-style: dashed; background: #fafafa; }
   .ml-seal-preview .ml-seal-title { color: #999; }
   .ml-seal-preview-note { font-size: 8.5pt; color: #888; margin: 0; }
@@ -51,7 +59,6 @@
   }
   .ml-seal-table td:first-child { padding: 1px 0 1px 6px; }
   .ml-seal-qr { right: auto; left: 24px; }
-  .ml-seal-stamp { right: auto; left: 110px; }
   /* Brand wordmark stays "MeritLense" (never "LenseMerit") even inside an
      RTL document — it's split across two <span> siblings for the accent
      color, and without this the RTL bidi algorithm reorders them as

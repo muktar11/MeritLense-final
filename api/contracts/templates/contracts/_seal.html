@@ -17,7 +17,7 @@
   </div>
   <table class="ml-seal-table">
     <tr><td>Contract ID</td><td>{{ contract_id }}</td></tr>
-    <tr><td>Signed by</td><td>{{ signatory_name }}</td></tr>
+    {% if not hide_signer %}<tr><td>Signed by</td><td>{{ signatory_name }}</td></tr>{% endif %}
     <tr><td>Signed at</td><td>{{ signed_at }}</td></tr>
     <tr><td>IP address</td><td>{{ ip_address }}</td></tr>
     <tr><td>Verification ref</td><td>{{ otp_reference }}</td></tr>
@@ -25,9 +25,6 @@
   </table>
   {% if qr_data_uri %}
   <img class="ml-seal-qr" src="{{ qr_data_uri }}" alt="Verification QR code" />
-  {% endif %}
-  {% if stamp_data_uri %}
-  <img class="ml-seal-stamp" src="{{ stamp_data_uri }}" alt="Company stamp" />
   {% endif %}
 </div>
 {% endif %}

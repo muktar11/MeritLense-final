@@ -17,7 +17,7 @@ class AgreementSerializer(PublicIdModelSerializer):
         model = Agreement
         fields = [
             'id', 'agreement_type', 'agreement_type_display', 'version', 'method',
-            'status', 'status_display', 'signatory_name', 'language', 'accepted_at',
+            'status', 'status_display', 'signatory_name', 'signatory_title', 'language', 'accepted_at',
             'contract_id', 'signed_pdf_url', 'pdf_hash', 'created_at',
             'current_version', 'is_current',
         ]
@@ -66,6 +66,8 @@ class AgreementSignInitiateSerializer(serializers.Serializer):
         min_length=1,
     )
     signatory_name = serializers.CharField(max_length=255)
+    # Printed next to the name in the B2B signature block (e.g. "CEO").
+    signatory_title = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
     # Mandatory when B2B_AGREEMENT is in agreement_types (enforced in the
     # view, not here, since this checkbox doesn't apply to B2C/Candidate
     # signing) — "I confirm I am authorized to legally bind this organization."

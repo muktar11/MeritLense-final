@@ -151,6 +151,7 @@ class AgreementSignInitiateView(APIView):
                     'company': company if agreement_type in COMPANY_SCOPED_TYPES else None,
                     'method': AgreementMethod.OTP_SIGNATURE,
                     'signatory_name': data['signatory_name'],
+                    'signatory_title': data.get('signatory_title', '').strip(),
                     'language': data.get('language', 'en'),
                     'auth_checkbox_confirmed': bool(data.get('authorized_signatory_confirmed')),
                     'otp_code_hash': code_hash,

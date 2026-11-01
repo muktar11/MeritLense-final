@@ -1,0 +1,11 @@
+<table class="party-sign">
+<tr>
+<td class="party-sign-details">
+<strong>الطرف الثاني — {{ company_name }}</strong><br />
+رقم التسجيل / الترخيص: {{ company_registration_number|default:"_______________" }}<br />
+الاسم: {{ signatory_name|default:"______________________________" }}<br />
+الصفة: {{ signatory_title|default:"______________________________" }}
+</td>
+<td class="party-sign-stamp">{% if stamp_data_uri %}<img src="{{ stamp_data_uri }}" alt="ختم الشركة" />{% endif %}</td>
+</tr>
+</table>

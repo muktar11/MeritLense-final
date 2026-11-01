@@ -1,0 +1,11 @@
+<table class="party-sign">
+<tr>
+<td class="party-sign-details">
+<strong>SECOND PARTY — {{ company_name }}</strong><br />
+Registration / Licence No.: {{ company_registration_number|default:"____________" }}<br />
+Name: {{ signatory_name|default:"______________________________" }}<br />
+Title: {{ signatory_title|default:"______________________________" }}
+</td>
+<td class="party-sign-stamp">{% if stamp_data_uri %}<img src="{{ stamp_data_uri }}" alt="Company stamp" />{% endif %}</td>
+</tr>
+</table>

@@ -36,6 +36,8 @@ class Agreement(TimeStampedModel):
 
     # Typed full legal name at signing time (OTP method only).
     signatory_name = models.CharField(max_length=255, blank=True)
+    # Signer's job title (e.g. "CEO"), printed in the B2B signature block.
+    signatory_title = models.CharField(max_length=255, blank=True)
     accepted_at = models.DateTimeField(null=True, blank=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(blank=True)

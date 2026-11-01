@@ -103,14 +103,7 @@
 <p>Electronic signatures and electronic acceptance may be used to the extent permitted by applicable law.</p>
 <p>Language. This Agreement may be made available in English and Arabic. In the event of any conflict, inconsistency, or discrepancy in interpretation between the Arabic and English versions, the English version shall prevail and be the controlling version.</p>
 <h2>14. Signatures and Acknowledgment</h2>
-<table class="agreement-table">
-<tr>
-<th>FIRST PARTY — MeritLense OÜ<br />Registry Code: 17607462<br />Name: ______________________________<br />Title: _______________________________<br />Signature: ___________________________<br />Date: _______________________________</th>
-</tr>
-<tr>
-<td>SECOND PARTY — {{ company_name }}<br />Registration / Licence No.: ____________<br />Name: ______________________________<br />Title: _______________________________<br />Signature: ___________________________<br />Date: _______________________________</td>
-</tr>
-</table>
+{% include "contracts/_party_sign.html" %}
 <p>MeritLense OÜ | Registry Code: 17607462 | Ruunaoja tn 3, Lasnamäe linnaosa, Tallinn, Harju maakond, 11415, Estonia | info@meritlense.com</p>
-{% include "contracts/_seal.html" %}
+{% include "contracts/_seal.html" with hide_signer=True %}
 {% endblock %}

@@ -312,11 +312,13 @@ class AdminAgreementEndpointTests(APITestCase):
             {
                 "agreement_types": [AgreementType.B2B_AGREEMENT],
                 "signatory_name": "Signer Co",
+                "signatory_title": "  CEO ",
                 "authorized_signatory_confirmed": True,
             },
             format="json",
         )
         self.assertEqual(initiate.status_code, 200, initiate.data)
+        self.assertEqual(Agreement.objects.get(user=signer).signatory_title, "CEO")
 
         otp_email = next(m for m in mail.outbox if "signing code" in m.subject.lower())
         code = re.search(r"is:\s*(\d+)", otp_email.body).group(1)
@@ -456,3 +458,51 @@ class ResignOutdatedAgreementTests(APITestCase):
         row = self._status()
         self.assertTrue(row["is_current"])
         self.assertNotEqual(row["contract_id"], "MLB2B-OLD-1")
+
+
+class B2BSignatureBlockTests(TestCase):
+    """The B2B signature block shows only the Second Party, filled in with
+    the signer's name and title, with the company stamp beside it - not
+    repeated inside the e-signature seal."""
+
+    STAMP = "data:image/png;base64,U1RBTVA="
+
+    def _render(self, template):
+        from django.template.loader import render_to_string
+        return render_to_string(template, {
+            "company_name": "Mangeeco", "company_registration_number": "17607462",
+            "signatory_name": "Sam", "signatory_title": "CEO",
+            "contract_id": "ML-AGR-2026-5D414", "stamp_data_uri": self.STAMP,
+            "qr_data_uri": "data:image/png;base64,UVI=", "language": "en",
+        })
+
+    def test_english_block(self):
+        html = self._render("contracts/b2b_agreement.html")
+        self.assertNotIn("Registry Code: 17607462<br", html)
+        self.assertIn("SECOND PARTY — Mangeeco", html)
+        self.assertIn("Registration / Licence No.: 17607462", html)
+        self.assertIn("Name: Sam", html)
+        self.assertIn("Title: CEO", html)
+        self.assertEqual(html.count(self.STAMP), 1)
+        self.assertNotIn('class="ml-seal-stamp"', html)
+        # No blank signature/date lines, and the signer's name isn't
+        # repeated in the seal - it's already in the block above.
+        self.assertNotIn("Signature: __", html)
+        self.assertNotIn("Date: __", html)
+        self.assertNotIn("Signed by", html)
+
+    def test_b2c_seal_keeps_signer(self):
+        self.assertIn("Signed by", self._render("contracts/b2c_agreement.html"))
+
+    def test_arabic_block(self):
+        html = self._render("contracts/b2b_agreement_ar.html")
+        self.assertNotIn("الطرف الأول — MeritLense OÜ<br />", html)
+        self.assertIn("الصفة: CEO", html)
+        self.assertEqual(html.count(self.STAMP), 1)
+
+    def test_dpa_has_same_block(self):
+        html = self._render("contracts/dpa.html")
+        self.assertIn("SECOND PARTY — Mangeeco", html)
+        self.assertIn("Title: CEO", html)
+        self.assertEqual(html.count(self.STAMP), 1)
+        self.assertIn("الصفة: CEO", self._render("contracts/dpa_ar.html"))

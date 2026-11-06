@@ -19,13 +19,18 @@ from api.core.email_i18n import (
 logger = logging.getLogger(__name__)
 
 
-def safe_send_mail(subject, message, recipients, attachments=None, html_message=None, in_app=True):
+def safe_send_mail(subject, message, recipients, attachments=None, html_message=None, in_app=True, action=None):
     """html_message, when given, is sent as the HTML alternative; `message`
     stays the plain-text version for clients that don't render HTML.
 
     in_app=False keeps the email out of the recipient's in-app notifications
     - required for anything carrying a code, password or verification/reset
-    link (see api.notifications.services)."""
+    link (see api.notifications.services).
+
+    action names the page of the task the email is about, for the in-app
+    notification's "Go to task" button: a key of
+    api.notifications.actions.PAGES ("billing", "evaluations", ...) or a
+    "/dashboard/..." path."""
     from_email = settings.DEFAULT_FROM_EMAIL or "no-reply@localhost"
 
     if not settings.EMAIL_HOST:
@@ -37,10 +42,13 @@ def safe_send_mail(subject, message, recipients, attachments=None, html_message=
         return 0
 
     try:
-        if attachments or html_message or not in_app:
+        if attachments or html_message or not in_app or action:
+            from api.notifications.actions import ACTION_HEADER
             from api.notifications.services import IN_APP_HEADER
 
-            headers = {} if in_app else {IN_APP_HEADER: "no"}
+            headers = {ACTION_HEADER: action} if in_app and action else {}
+            if not in_app:
+                headers[IN_APP_HEADER] = "no"
             email = EmailMultiAlternatives(subject, message, from_email, recipients, headers=headers)
             if html_message:
                 email.attach_alternative(html_message, "text/html")
@@ -416,7 +424,7 @@ def send_account_approved_email(user):
 أخبار سارة: تمت مراجعة مستنداتك والموافقة على حسابك في MeritLense، وأصبح لديك الآن وصول كامل إلى المنصة.
 
 {SIGNATURE[ARABIC]}
-""", [user.email])
+""", [user.email], action="dashboard")
         return
     subject = "Your MeritLense Account Has Been Approved"
     message = f"""
@@ -428,7 +436,7 @@ has been approved. You now have full access to the platform.
 Best regards,
 MeritLense Team
 """
-    safe_send_mail(subject, message, [user.email])
+    safe_send_mail(subject, message, [user.email], action="dashboard")
 
 
 def send_account_rejected_email(user, reason):
@@ -442,7 +450,7 @@ def send_account_rejected_email(user, reason):
 يرجى مراجعة مستنداتك وإعادة إرسالها، أو التواصل مع الدعم إذا كانت لديك أي أسئلة.
 
 {SIGNATURE[ARABIC]}
-""", [user.email])
+""", [user.email], action="profile")
         return
     subject = "Update on Your MeritLense Account"
     message = f"""
@@ -458,7 +466,7 @@ any questions.
 Best regards,
 MeritLense Team
 """
-    safe_send_mail(subject, message, [user.email])
+    safe_send_mail(subject, message, [user.email], action="profile")
 
 
 def send_license_received_email(user):
@@ -469,7 +477,7 @@ def send_license_received_email(user):
 استلمنا الرخصة التجارية الخاصة بـ {company_name}. سيبقى الوصول إلى الشركة مقيّدًا أثناء مراجعتها من قبل أحد المسؤولين، وسنراسلك عند اتخاذ القرار.
 
 {SIGNATURE[ARABIC]}
-""", [user.email])
+""", [user.email], action="profile")
         return
     company_name = getattr(getattr(user, "company_profile", None), "company_name", "your company")
     safe_send_mail(
@@ -483,7 +491,7 @@ has been made.
 Best regards,
 MeritLense Team
 """,
-        [user.email],
+        [user.email], action="profile",
     )
 
 
@@ -505,7 +513,7 @@ def send_document_request_email(user, document_name):
     message = f"{greeting}\n\n{text}\n\n{SIGNATURE[lang]}\n"
     html_message = render_email(language=lang, title=title, eyebrow=eyebrow, greeting=greeting,
                                 blocks=[("p", text)])
-    safe_send_mail(subject, message, [user.email], html_message=html_message)
+    safe_send_mail(subject, message, [user.email], action="profile", html_message=html_message)
 
 
 def _format_currency_amount(unit_amount, currency):
@@ -577,7 +585,7 @@ MeritLense Team
         ],
     ) if pay_link else None
     attachments = _invoice_email_attachments(package_request.invoice) if package_request.invoice_id else []
-    safe_send_mail(subject, message, [user.email], attachments=attachments, html_message=html_message)
+    safe_send_mail(subject, message, [user.email], action="plans", attachments=attachments, html_message=html_message)
 
 
 def send_package_request_payment_confirmed_email(user, package_request, deal_record):
@@ -602,7 +610,7 @@ def send_package_request_payment_confirmed_email(user, package_request, deal_rec
 سيتواصل معك فريقنا بشأن الخطوات التالية. إذا كانت لديك أي أسئلة، يرجى التواصل مع الدعم.
 
 {SIGNATURE[ARABIC]}
-""", [user.email], attachments=attachments)
+""", [user.email], action="plans", attachments=attachments)
         return
     subject = f"Your {package_request.get_deal_type_display()} Package Is Now Active"
     slot_line = f"Assessment Slots: {deal_record.slot_grant}\n" if deal_record.slot_grant is not None else ""
@@ -621,7 +629,7 @@ Best regards,
 MeritLense Team
 """
     attachments = _invoice_email_attachments(package_request.invoice) if package_request.invoice_id else []
-    safe_send_mail(subject, message, [user.email], attachments=attachments)
+    safe_send_mail(subject, message, [user.email], action="plans", attachments=attachments)
 
 
 def _invoice_email_attachments(invoice):
@@ -683,7 +691,7 @@ def _send_package_request_approved_email_ar(user, package_request):
         language=ARABIC,
     ) if pay_link else None
     attachments = _invoice_email_attachments(package_request.invoice) if package_request.invoice_id else []
-    safe_send_mail(f"تمت الموافقة على طلب {deal}، والدفع مطلوب", message, [user.email],
+    safe_send_mail(f"تمت الموافقة على طلب {deal}، والدفع مطلوب", message, [user.email], action="plans",
                    attachments=attachments, html_message=html_message)
 
 
@@ -699,7 +707,7 @@ def send_package_request_denied_email(user, package_request, reason):
 يرجى التواصل مع الدعم إذا كانت لديك أي أسئلة أو رغبت في مناقشة الأمر.
 
 {SIGNATURE[ARABIC]}
-""", [user.email])
+""", [user.email], action="plans")
         return
     subject = f"Update on Your {package_request.get_deal_type_display()} Request"
     message = f"""
@@ -715,7 +723,7 @@ this further.
 Best regards,
 MeritLense Team
 """
-    safe_send_mail(subject, message, [user.email])
+    safe_send_mail(subject, message, [user.email], action="plans")
 
 
 def send_admin_contact_email(user, message, sender):
@@ -733,7 +741,7 @@ def send_admin_contact_email(user, message, sender):
 يرجى الرد على هذه الرسالة أو التواصل مع الدعم حتى نتمكن من متابعة مراجعة حسابك.
 
 {SIGNATURE[ARABIC]}
-""", [user.email])
+""", [user.email], action="profile")
         return
     subject = "A question about your MeritLense account documents"
     body = f"""
@@ -750,10 +758,10 @@ your account.
 Best regards,
 MeritLense Team
 """
-    safe_send_mail(subject, body, [user.email])
+    safe_send_mail(subject, body, [user.email], action="profile")
 
 
-def notify_superadmins(subject, message):
+def notify_superadmins(subject, message, action=None):
     """Best-effort alert to every active SuperAdmin - e.g. a new
     registration or a freshly-signed B2B contract awaiting review. Failure
     to notify admins should never break the action that triggered it, so
@@ -767,7 +775,7 @@ def notify_superadmins(subject, message):
     if not recipients:
         return
     try:
-        safe_send_mail(subject, message, recipients)
+        safe_send_mail(subject, message, recipients, action=action)
     except Exception:
         logger.exception("Failed to notify superadmins. subject=%s", subject)
 

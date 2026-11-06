@@ -340,6 +340,7 @@ class B2CRegistrationView(APIView):
                         f"New registration: {user.get_full_name()}",
                         f"A new Individual Employer account was registered: {user.get_full_name()} "
                         f"({user.email}). Pending email verification.",
+                        action="admin_accounts",
                     )
             except IntegrityError:
                 return Response(
@@ -482,6 +483,7 @@ class B2BRegistrationView(APIView):
                         f"A new Company account was registered: {company.name}, admin "
                         f"{user.get_full_name()} ({user.email}). Pending email verification, "
                         f"document review, and account approval.",
+                        action="admin_accounts",
                     )
             except IntegrityError:
                 return Response(

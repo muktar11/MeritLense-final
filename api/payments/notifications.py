@@ -1,4 +1,4 @@
-from django.core.mail import send_mail
+from django.core.mail import EmailMessage
 from django.conf import settings
 
 from api.core.email_i18n import ARABIC, SIGNATURE, user_language
@@ -11,6 +11,15 @@ from api.core.email_i18n import ARABIC, SIGNATURE, user_language
 # threshold. Both go to the Scheduler and the Account/Billing Owner -
 # these can be the same person (B2C, or a B2B admin scheduling directly),
 # in which case they simply get one email instead of two duplicates.
+
+
+def _send(subject, message, email, action):
+    """One email; action is the page for the in-app notification's "Go to
+    task" button (api.notifications.actions)."""
+    from api.notifications.actions import ACTION_HEADER
+
+    EmailMessage(subject, message, settings.DEFAULT_FROM_EMAIL, [email],
+                 headers={ACTION_HEADER: action}).send(fail_silently=False)
 
 
 def _owner_email_and_name(*, created_by, company):
@@ -48,7 +57,7 @@ def send_reservation_failed_email(*, candidate, created_by, company, role_name, 
 
     for email, name in recipients.items():
         if languages.get(email) == ARABIC:
-            send_mail("تعذّر تحديد موعد المقابلة: لا توجد خانات تقييم متاحة", f"""مرحبًا {name}،
+            _send("تعذّر تحديد موعد المقابلة: لا توجد خانات تقييم متاحة", f"""مرحبًا {name}،
 
 تعذّر إكمال محاولة لتحديد موعد مقابلة على MeritLense:
 
@@ -60,7 +69,7 @@ def send_reservation_failed_email(*, candidate, created_by, company, role_name, 
 لم يُحدَّد أي موعد ولم تُستخدم أي خانة. لحل ذلك، أضف خانات تقييم إلى حسابك من صفحة الباقات والاشتراك.
 
 {SIGNATURE[ARABIC]}
-""", settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+""", email, action="plans")
             continue
         message = f"""
 Hello {name},
@@ -78,7 +87,7 @@ Assessment Slots to your account from the Packages & Subscription page.
 Best regards,
 MeritLense Team
 """
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+        _send(subject, message, email, action="plans")
 
 
 def _owner_key(*, created_by, company):
@@ -127,7 +136,7 @@ def send_reservation_invalidated_email(*, candidate, created_by, company):
 
     for email, name in recipients.items():
         if languages.get(email) == ARABIC:
-            send_mail("أُلغيت المقابلة: تم استرداد قيمة الشراء", f"""مرحبًا {name}،
+            _send("أُلغيت المقابلة: تم استرداد قيمة الشراء", f"""مرحبًا {name}،
 
 أُلغيت تلقائيًا مقابلة مجدولة على MeritLense:
 
@@ -138,7 +147,7 @@ def send_reservation_invalidated_email(*, candidate, created_by, company):
 إذا كان ذلك غير متوقع، يرجى التواصل مع دعم MeritLense.
 
 {SIGNATURE[ARABIC]}
-""", settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+""", email, action="evaluations")
             continue
         message = f"""
 Hello {name},
@@ -156,7 +165,7 @@ If this was unexpected, please contact MeritLense support.
 Best regards,
 MeritLense Team
 """
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+        _send(subject, message, email, action="evaluations")
 
 
 # A grant this small already reads as "nearly out" in absolute terms
@@ -189,7 +198,7 @@ def send_certificate_reused_email(*, candidate, requested_by, company, remaining
 
     for email, name in recipients.items():
         if languages.get(email) == ARABIC:
-            send_mail("استُخدمت خانة تقييم: إعادة استخدام شهادة قائمة", f"""مرحبًا {name}،
+            _send("استُخدمت خانة تقييم: إعادة استخدام شهادة قائمة", f"""مرحبًا {name}،
 
 أُعيد استخدام شهادة قائمة بدلًا من إجراء مقابلة جديدة على MeritLense:
 
@@ -199,7 +208,7 @@ def send_certificate_reused_email(*, candidate, requested_by, company, remaining
 خُصمت خانة تقييم واحدة من باقتك لذلك (المتبقي: {remaining})، كما هو الحال في المقابلة الجديدة.
 
 {SIGNATURE[ARABIC]}
-""", settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+""", email, action="candidates")
             continue
         message = f"""
 Hello {name},
@@ -214,7 +223,7 @@ One Assessment Slot has been deducted from your package for this ({remaining} re
 Best regards,
 MeritLense Team
 """
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+        _send(subject, message, email, action="candidates")
 
 
 def maybe_send_low_balance_warning(*, created_by, company, remaining, limit, role_name=None):
@@ -235,7 +244,7 @@ def maybe_send_low_balance_warning(*, created_by, company, remaining, limit, rol
 
     for email, name in recipients.items():
         if languages.get(email) == ARABIC:
-            send_mail("رصيد خانات التقييم منخفض في حسابك على MeritLense", f"""مرحبًا {name}،
+            _send("رصيد خانات التقييم منخفض في حسابك على MeritLense", f"""مرحبًا {name}،
 
 أوشكت خانات التقييم في حسابك على MeritLense على النفاد:
 
@@ -244,7 +253,7 @@ def maybe_send_low_balance_warning(*, created_by, company, remaining, limit, rol
 عندما يصل المتاح إلى 0، سيتوقف تحديد مواعيد مقابلات جديدة حتى تُضاف خانات أخرى. تفضّل بزيارة صفحة الباقات والاشتراك لإعادة الشحن.
 
 {SIGNATURE[ARABIC]}
-""", settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+""", email, action="plans")
             continue
         message = f"""
 Hello {name},
@@ -259,4 +268,4 @@ more Slots are added. Visit the Packages & Subscription page to top up.
 Best regards,
 MeritLense Team
 """
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+        _send(subject, message, email, action="plans")

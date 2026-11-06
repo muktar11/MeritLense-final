@@ -737,6 +737,12 @@ class InterviewRoleMappingTests(TestCase):
         self.assertIn(evaluation.meeting_link, invitation.body)
         self.assertIn("AST", invitation.body)
 
+        # The evaluator gets their own dashboard join link, never the
+        # candidate's tokened one.
+        owner_notice = mail.outbox[1]
+        self.assertIn(f"/live-call?sessionId={evaluation.session.public_id}", owner_notice.body)
+        self.assertNotIn(evaluation.session.access_token, owner_notice.body)
+
     @override_settings(FRONTEND_URL="https://meritlense.com", SHORT_LINK_BASE_URL="https://api.meritlense.com")
     def test_assessment_meeting_link_has_a_short_link_to_share(self):
         self._config("Child Caregiver", "child_caregiver")

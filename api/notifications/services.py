@@ -38,8 +38,11 @@ def record_email_notifications(message):
     from api.accounts.models import User
     from .models import Notification
 
+    from .actions import ACTION_HEADER, action_from_body, resolve_action
+
     headers = getattr(message, "extra_headers", None) or {}
     opt_out = str(headers.pop(IN_APP_HEADER, "")).lower() == "no"
+    action = headers.pop(ACTION_HEADER, "")
     if opt_out:
         return 0
 
@@ -55,9 +58,13 @@ def record_email_notifications(message):
             )
             title = (message.subject or "").strip()[:255]
             body = _plain_body(message)
-            Notification.objects.bulk_create(
-                [Notification(user=user, title=title, body=body) for user in users]
-            )
+            Notification.objects.bulk_create([
+                Notification(
+                    user=user, title=title, body=body,
+                    action_url=resolve_action(action, user) or action_from_body(body, user),
+                )
+                for user in users
+            ])
             return len(users)
     except Exception:
         logger.exception("Could not record in-app notification for email %r", getattr(message, "subject", ""))

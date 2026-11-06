@@ -1,7 +1,7 @@
 import logging
 from zoneinfo import ZoneInfo
 
-from django.core.mail import send_mail
+from django.core.mail import EmailMessage, send_mail
 from django.conf import settings
 from django.utils import timezone
 
@@ -28,12 +28,20 @@ DISPLAY_TZ_LABEL = "AST"
 logger = logging.getLogger(__name__)
 
 
-def _send(subject, message, recipients):
+def _send(subject, message, recipients, action=None):
     """These notifications go out after the evaluation (and its interview
     session) has already been saved. Letting an SMTP error propagate turned
     a successful scheduling into a 500 the scheduler saw as "failed", even
-    though the evaluation existed. Log it instead."""
+    though the evaluation existed. Log it instead.
+
+    action: the page for the in-app notification's "Go to task" button
+    (api.notifications.actions)."""
     try:
+        if action:
+            from api.notifications.actions import ACTION_HEADER
+
+            return EmailMessage(subject, message, settings.DEFAULT_FROM_EMAIL, recipients,
+                                headers={ACTION_HEADER: action}).send(fail_silently=False)
         return send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, recipients, fail_silently=False)
     except Exception:
         logger.exception("Evaluation email failed. subject=%s recipients=%s", subject, recipients)
@@ -101,6 +109,16 @@ def _join_link(evaluation):
     if not evaluation.meeting_link:
         return ""
     return meeting_short_link(evaluation.meeting_link) or evaluation.meeting_link
+
+
+def _evaluator_join_link(evaluation, language):
+    """The evaluator's own way into the interview: the dashboard live-call
+    page, which authenticates them as the logged-in user. Never the
+    candidate's meeting_link - that carries the candidate's access token."""
+    if not evaluation.meeting_link or not evaluation.meeting_id:
+        return ""
+    scope = "business" if evaluation.company_id else "indivisual"
+    return f"{settings.FRONTEND_URL}/{language}/dashboard/{scope}/live-call?sessionId={evaluation.meeting_id}"
 
 
 def send_evaluation_scheduled_email(evaluation, request=None):
@@ -206,7 +224,13 @@ MeritLense Team
         _send(subject, message, [evaluation.candidate_email])
 
     owner_email = _account_owner_email(evaluation)
-    if user_language(_account_owner(evaluation)) == ARABIC:
+    owner_lang = user_language(_account_owner(evaluation))
+    evaluator_link = _evaluator_join_link(evaluation, owner_lang)
+    # In-app "Go to task": the interview's live-call page, else Evaluations.
+    owner_action = (f"/dashboard/{'business' if evaluation.company_id else 'indivisual'}/live-call"
+                    f"?sessionId={evaluation.meeting_id}") if evaluator_link else "evaluations"
+    if owner_lang == ARABIC:
+        ar_link = f"\n- رابط الاجتماع: {evaluator_link}" if evaluator_link else ""
         _send(
             f"تم تحديد موعد مقابلة: {evaluation.candidate_first_name} {evaluation.candidate_last_name} - {_date_ar(evaluation.scheduled_date)}",
             f"""مرحبًا {evaluation.created_by.get_full_name()}،
@@ -220,16 +244,18 @@ MeritLense Team
 - التاريخ: {_date_ar(evaluation.scheduled_date)}
 - الوقت: {_time_ar(evaluation.scheduled_date)}
 - المدة: {duration} دقيقة
-- حدّد الموعد: {creator_name}
+- حدّد الموعد: {creator_name}{ar_link}
 
-أُرسل إلى المرشح رابطه الخاص للانضمام في الموعد المحدد، ويمكنك الانضمام من لوحة التحكم في MeritLense عند بدء المقابلة.
+أُرسل إلى المرشح رابطه الخاص للانضمام في الموعد المحدد، ويمكنك الانضمام من الرابط أعلاه أو من لوحة التحكم في MeritLense عند بدء المقابلة.
 
 {SIGNATURE[ARABIC]}
 """,
             [owner_email],
+            action=owner_action,
         )
         return
     owner_subject = f"Interview scheduled: {evaluation.candidate_first_name} {evaluation.candidate_last_name} - {scheduled_date}"
+    link_line = f"\n- Meeting Link: {evaluator_link}" if evaluator_link else ""
     owner_message = f"""
 Hello {evaluation.created_by.get_full_name()},
 
@@ -242,16 +268,16 @@ Evaluation Details:
 - Date: {scheduled_date}
 - Time: {scheduled_time}
 - Duration: {duration} minutes
-- Scheduled by: {creator_name}
+- Scheduled by: {creator_name}{link_line}
 
 The candidate has been emailed their own link to join at the scheduled time.
-You can join from your MeritLense dashboard once the interview starts.
+You can join from the link above or from your MeritLense dashboard once the interview starts.
 
 Best regards,
 MeritLense Team
 """
 
-    _send(owner_subject, owner_message, [owner_email])
+    _send(owner_subject, owner_message, [owner_email], action=owner_action)
 
 def send_evaluation_rescheduled_email(evaluation, old_date, request=None):
 

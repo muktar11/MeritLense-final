@@ -14,6 +14,7 @@ def _serialize(n):
         "id": str(n.public_id),
         "title": n.title,
         "body": n.body,
+        "action_url": n.action_url or None,
         "created_at": n.created_at,
         "read": n.read_at is not None,
     }

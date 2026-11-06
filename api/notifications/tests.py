@@ -7,6 +7,7 @@ from api.accounts.models import User
 from api.accounts.utils import safe_send_mail
 from api.core.constants import Roles
 from api.notifications.models import Notification
+from api.notifications.actions import ACTION_HEADER, resolve_action
 from api.notifications.services import IN_APP_HEADER
 
 # The production email path (branding + short links + in-app copy) on top
@@ -59,6 +60,71 @@ class EmailToInAppNotificationTests(APITestCase):
     def test_non_user_recipient_gets_no_notification(self):
         safe_send_mail("Your interview link", "Join here", ["candidate@example.com"])
         self.assertFalse(Notification.objects.exists())
+
+
+@REAL_EMAIL_PATH
+@override_settings(FRONTEND_URL="https://meritlense.com")
+class NotificationTaskLinkTests(APITestCase):
+    """The "Go to task" button: the page each notification leads to."""
+
+    def setUp(self):
+        self.b2c = User.objects.create_user(
+            email="b2c-task@example.com", password="Password123!",
+            first_name="Bea", last_name="Cee", role=Roles.B2C, is_verified=True,
+        )
+        self.b2b = User.objects.create_user(
+            email="b2b-task@example.com", password="Password123!",
+            first_name="Bob", last_name="Bee", role=Roles.B2B, is_verified=True,
+        )
+
+    def _action(self, user):
+        return Notification.objects.get(user=user).action_url
+
+    def test_named_page_resolves_per_account_type(self):
+        safe_send_mail("Your invoice", "Thanks.", [self.b2c.email, self.b2b.email], action="billing")
+        self.assertEqual(self._action(self.b2c), "/dashboard/indivisual/payment?tab=billing")
+        self.assertEqual(self._action(self.b2b), "/dashboard/business/payment?tab=billing")
+        self.assertNotIn(ACTION_HEADER, mail.outbox[0].extra_headers)
+
+    def test_exact_dashboard_path_is_kept(self):
+        safe_send_mail("Interview scheduled", "Join soon.", [self.b2b.email],
+                       action="/dashboard/business/live-call?sessionId=abc-123")
+        self.assertEqual(self._action(self.b2b), "/dashboard/business/live-call?sessionId=abc-123")
+
+    def test_paths_outside_the_dashboard_are_refused(self):
+        for bad in ("https://evil.example/phish", "//evil.example", "/auth/reset-password?token=x", "nonsense"):
+            self.assertEqual(resolve_action(bad, self.b2c), "", bad)
+
+    def test_falls_back_to_a_dashboard_link_in_the_email(self):
+        safe_send_mail("Package", "See https://meritlense.com/ar/dashboard/indivisual/payment?tab=billing.",
+                       [self.b2c.email])
+        self.assertEqual(self._action(self.b2c), "/dashboard/indivisual/payment?tab=billing")
+
+    def test_login_link_leads_to_the_dashboard(self):
+        safe_send_mail("Welcome", "Sign in at https://meritlense.com/en/auth/login", [self.b2b.email])
+        self.assertEqual(self._action(self.b2b), "/dashboard/business")
+
+    def test_other_sites_and_no_link_give_no_button(self):
+        safe_send_mail("Hello", "Pay at https://checkout.stripe.com/c/pay/abc", [self.b2c.email])
+        self.assertEqual(self._action(self.b2c), "")
+
+    def test_low_slot_warning_leads_to_plans(self):
+        from api.payments.notifications import maybe_send_low_balance_warning
+        maybe_send_low_balance_warning(created_by=self.b2c, company=None, remaining=1, limit=10)
+        self.assertEqual(self._action(self.b2c), "/dashboard/indivisual/payment")
+
+    def test_document_request_leads_to_profile(self):
+        from api.accounts.utils import send_document_request_email
+        send_document_request_email(self.b2b, "Trade License")
+        self.assertEqual(self._action(self.b2b), "/dashboard/business/company-profile")
+
+    def test_api_returns_the_link(self):
+        Notification.objects.create(user=self.b2c, title="t", body="b", action_url="/dashboard/indivisual/evaluations")
+        Notification.objects.create(user=self.b2c, title="u", body="b")
+        self.client.force_authenticate(self.b2c)
+        results = self.client.get("/api/v1/notifications").data["results"]
+        self.assertEqual({n["title"]: n["action_url"] for n in results},
+                         {"t": "/dashboard/indivisual/evaluations", "u": None})
 
 
 class NotificationApiTests(APITestCase):

@@ -1820,7 +1820,7 @@ class AdminInvoiceViewSet(InvoicePdfDownloadMixin, PublicIdLookupMixin, viewsets
                 ],
                 language=ARABIC,
             ) if link else None
-            safe_send_mail(f"فاتورتك من MeritLense رقم {reference}", ar_message, [invoice.user.email],
+            safe_send_mail(f"فاتورتك من MeritLense رقم {reference}", ar_message, [invoice.user.email], action="billing",
                            attachments=attachments, html_message=ar_html)
             AuditLogService.log(
                 user=request.user,
@@ -1865,7 +1865,7 @@ MeritLense Team
                 "MeritLense Team",
             ],
         ) if link else None
-        safe_send_mail(subject, message, [invoice.user.email], attachments=attachments, html_message=html_message)
+        safe_send_mail(subject, message, [invoice.user.email], action="billing", attachments=attachments, html_message=html_message)
 
         AuditLogService.log(
             user=request.user,

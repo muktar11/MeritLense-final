@@ -12,6 +12,10 @@ class Notification(TimeStampedModel):
     user = models.ForeignKey('accounts.User', on_delete=models.CASCADE, related_name='notifications')
     title = models.CharField(max_length=255)
     body = models.TextField(blank=True)
+    # The page of the task this email is about, as a site path without the
+    # language prefix ("/dashboard/business/payment?tab=billing"); blank
+    # when there is none. See api.notifications.actions.
+    action_url = models.CharField(max_length=500, blank=True, default="")
     read_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:

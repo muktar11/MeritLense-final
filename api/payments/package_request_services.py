@@ -70,6 +70,7 @@ class PackageRequestService:
                 f"Message from requester:\n{message or '(none)'}\n\n"
                 "Review it in the SuperAdmin dashboard."
             ),
+            action="admin_package_requests",
         )
         return package_request
 

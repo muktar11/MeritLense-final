@@ -32,7 +32,7 @@ def _notify_package_activated(user, package_name):
 أصبحت باقتك ({plan_name(package_name, ARABIC)}) مفعّلة الآن وجاهزة للاستخدام.
 
 {SIGNATURE[ARABIC]}
-""", [user.email])
+""", [user.email], action="plans")
             return
         safe_send_mail(
             "Your MeritLense Package Is Active",
@@ -43,7 +43,7 @@ Your {package_name} package is now active and ready to use.
 Best regards,
 MeritLense Team
 """,
-            [user.email],
+            [user.email], action="plans",
         )
     except Exception:
         logger.exception("Failed to send package-activated email to %s", user.email)
@@ -130,7 +130,7 @@ Your package is now active and ready to use.
 Best regards,
 MeritLense Team
 """,
-            [payment.user.email],
+            [payment.user.email], action="billing",
             attachments=attachments,
             html_message=html_message,
         )
@@ -173,7 +173,7 @@ def _notify_one_time_payment_confirmed_ar(payment, price, pdf_link, attachments)
 
 {SIGNATURE[ARABIC]}
 """,
-            [payment.user.email],
+            [payment.user.email], action="billing",
             attachments=attachments,
             html_message=html_message,
         )
@@ -225,7 +225,7 @@ def _notify_invoice_generated(invoice):
 
 {SIGNATURE[ARABIC]}
 """,
-                [invoice.user.email],
+                [invoice.user.email], action="billing",
                 attachments=attachments,
                 html_message=html_message,
             )
@@ -263,7 +263,7 @@ Amount: {invoice.amount_paid} {invoice.currency.upper()}
 Best regards,
 MeritLense Team
 """,
-            [invoice.user.email],
+            [invoice.user.email], action="billing",
             attachments=attachments,
             html_message=html_message,
         )

@@ -374,6 +374,7 @@ class AgreementSignConfirmView(APIView):
                 f"{request.user.get_full_name()} ({request.user.email}) has signed the B2B "
                 f"Agreement for {company_name}. Please review the signed contract and "
                 f"approve/reject the account.",
+                action="admin_accounts",
             )
 
         return Response(AgreementSerializer(signed, many=True, context={'request': request}).data)

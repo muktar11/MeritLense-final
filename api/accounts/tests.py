@@ -1685,3 +1685,70 @@ class TeamMemberAndInvitationLookupTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class InvitationDetailsTests(APITestCase):
+    """The invitation link's page shows the inviting company's name and logo,
+    looked up with the link's secret token (public GET)."""
+
+    URL = "/api/v1/auth/companies/team/accept-invitation"
+
+    def setUp(self):
+        self.media = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.media, ignore_errors=True)
+        self.owner = User.objects.create_user(
+            email="logo-owner@example.com", password="Password123!",
+            first_name="Logo", last_name="Owner", role=Roles.B2B, is_verified=True,
+        )
+        self.company = Company.objects.create(
+            name="Logo Institute", registration_number=f"LOGO-{self.owner.id}",
+            company_size=CompanySize.SMALL, phone_number="+15550000077",
+            country="United States", city="Austin", admin_user=self.owner,
+            business_license_verified=True,
+        )
+
+    def _invitation(self, token="tok-logo-1", **extra):
+        from api.accounts.models import TeamInvitation
+
+        fields = dict(
+            company=self.company, invited_by=self.owner, email="joiner@example.com",
+            first_name="Jo", last_name="Iner", job_title="Evaluator", permissions=[],
+            token=token, expires_at=timezone.now() + timezone.timedelta(days=7),
+        )
+        fields.update(extra)
+        return TeamInvitation.objects.create(**fields)
+
+    def test_returns_company_name_and_logo_url(self):
+        with override_settings(MEDIA_ROOT=self.media):
+            self.company.logo.save("logo.png", SimpleUploadedFile("logo.png", b"png", content_type="image/png"))
+            self._invitation()
+            response = self.client.get(self.URL, {"token": "tok-logo-1"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertTrue(response.data["valid"])
+        self.assertEqual(response.data["status"], "PENDING")
+        self.assertEqual(response.data["company_name"], "Logo Institute")
+        self.assertEqual(response.data["email"], "joiner@example.com")
+        self.assertTrue(response.data["company_logo"].startswith("http"))
+        self.assertIn("companies/logos/", response.data["company_logo"])
+
+    def test_company_without_logo_returns_null(self):
+        self._invitation()
+        response = self.client.get(self.URL, {"token": "tok-logo-1"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data["company_logo"])
+
+    def test_expired_and_accepted_invitations_are_not_valid(self):
+        self._invitation(token="tok-old", expires_at=timezone.now() - timezone.timedelta(days=1))
+        self._invitation(token="tok-used", email="used@example.com", status="ACCEPTED")
+
+        old = self.client.get(self.URL, {"token": "tok-old"})
+        used = self.client.get(self.URL, {"token": "tok-used"})
+
+        self.assertEqual((old.data["valid"], old.data["status"]), (False, "EXPIRED"))
+        self.assertEqual((used.data["valid"], used.data["status"]), (False, "ACCEPTED"))
+
+    def test_unknown_or_missing_token_is_404(self):
+        self._invitation()
+        self.assertEqual(self.client.get(self.URL, {"token": "nope"}).status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(self.client.get(self.URL).status_code, status.HTTP_404_NOT_FOUND)

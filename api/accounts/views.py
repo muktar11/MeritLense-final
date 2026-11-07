@@ -2821,6 +2821,60 @@ class AcceptInvitationView(APIView):
     authentication_classes = []
 
     @extend_schema(
+        summary="Look up a team invitation by its token",
+        description=(
+            "Public: the invitation link's page uses it to show the inviting "
+            "company's name and logo before the invitee sets a password. "
+            "Only the holder of the secret token learns anything."
+        ),
+        responses={
+            200: inline_serializer(
+                name="InvitationDetailsResponse",
+                fields={
+                    "valid": serializers.BooleanField(),
+                    "status": serializers.CharField(),
+                    "company_name": serializers.CharField(),
+                    "company_logo": serializers.CharField(allow_null=True),
+                    "email": serializers.EmailField(),
+                    "first_name": serializers.CharField(),
+                    "last_name": serializers.CharField(),
+                    "job_title": serializers.CharField(),
+                },
+            ),
+            404: error_response_serializer,
+        },
+    )
+    def get(self, request):
+        token = (request.query_params.get('token') or '').strip()
+        invitation = (
+            TeamInvitation.objects.select_related('company').filter(token=token).first()
+            if token else None
+        )
+        if invitation is None:
+            return Response({'error': 'Invitation not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        company = invitation.company
+        logo = None
+        if company.logo:
+            try:
+                logo = request.build_absolute_uri(company.logo.url)
+            except ValueError:
+                logo = None
+        state = invitation.status
+        if state == 'PENDING' and not invitation.is_valid():
+            state = 'EXPIRED'
+        return Response({
+            'valid': state == 'PENDING',
+            'status': state,
+            'company_name': company.name,
+            'company_logo': logo,
+            'email': invitation.email,
+            'first_name': invitation.first_name,
+            'last_name': invitation.last_name,
+            'job_title': invitation.job_title,
+        })
+
+    @extend_schema(
         summary="Accept a team invitation",
         request=AcceptInvitationSerializer,
         responses={

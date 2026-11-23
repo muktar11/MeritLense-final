@@ -148,3 +148,39 @@ class EvaluationReport(TimeStampedModel):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Generated evaluation reports cannot be deleted.")
+
+
+def rendition_pdf_upload_to(instance, filename):
+    report = instance.report
+    return f"reports/evaluations/{report.evaluation_id}/{report.report_number}-{instance.language}.pdf"
+
+
+class EvaluationReportRendition(TimeStampedModel):
+    """A report shown in the viewer's language.
+
+    A report is written once, in the language the candidate was assessed
+    in. An employer working in another language gets this rendition: the
+    same report formatted again, from the same stored scoring results, in
+    their language. The scores, readiness and evidence are the same; only
+    the wording differs. The original report is never changed. A rendition
+    is written once per report and language; its PDF and hash are added the
+    first time it is downloaded."""
+
+    report = models.ForeignKey(EvaluationReport, on_delete=models.CASCADE, related_name="renditions")
+    language = models.CharField(max_length=8)
+    report_payload = models.JSONField(default=dict, blank=True)
+    competency_breakdown = models.JSONField(default=list, blank=True)
+    response_evidence_summary = models.JSONField(default=list, blank=True)
+    human_review_flags = models.JSONField(default=list, blank=True)
+    employer_pdf = models.FileField(upload_to=rendition_pdf_upload_to, null=True, blank=True)
+    pdf_hash = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        verbose_name = "Evaluation Report Rendition"
+        verbose_name_plural = "Evaluation Report Renditions"
+        constraints = [
+            models.UniqueConstraint(fields=["report", "language"], name="unique_report_rendition_language"),
+        ]
+
+    def __str__(self):
+        return f"{self.report.report_number} ({self.language})"

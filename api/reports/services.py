@@ -2,6 +2,7 @@ import base64
 import copy
 import hashlib
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -27,8 +28,11 @@ from api.evaluations.models import (
     ResponseEvaluationResult,
     SessionEvaluationSummary,
 )
+from api.evaluations.scoring_services import localize_scoring_explanation
 from api.reports.models import EvaluationReport
 from api.sessions.models import CandidateResponse
+
+logger = logging.getLogger(__name__)
 
 try:
     import qrcode
@@ -165,62 +169,26 @@ class EvaluationReportService:
             with transaction.atomic():
                 summary = cls._get_summary(evaluation)
                 readiness_record = cls._get_readiness_record(evaluation)
-                response_results = list(
-                    ResponseEvaluationResult.objects.filter(
-                        evaluation=evaluation,
-                        rule_set=summary.rule_set,
-                    )
-                    .select_related(
-                        "question",
-                        "response",
-                        "rule_set",
-                        "response__translation_artifact",
-                        "response__ai_interpretation",
-                        "response__evaluation_input_artifact",
-                    )
-                    .order_by("question__question_order", "created_at")
-                )
-                competency_results = list(
-                    CompetencyEvaluationResult.objects.filter(
-                        evaluation=evaluation,
-                        rule_set=summary.rule_set,
-                    ).order_by("competency_code", "created_at")
-                )
-                if not response_results:
-                    raise EvaluationReportError("Report generation requires response scoring results.")
-                if not competency_results:
-                    raise EvaluationReportError("Report generation requires competency scoring results.")
+                # Fail before marking anything stale when there is nothing to report.
+                scoring_results = cls._scoring_results(evaluation, summary)
 
                 stale_count = cls._mark_previous_reports_stale(evaluation=evaluation, actor=actor)
                 report_number = cls._build_report_number(evaluation=evaluation)
                 language = cls._report_language(evaluation.session)
-                competency_breakdown = cls._build_competency_breakdown(
-                    competency_results,
-                    language=language,
-                    critical_failure_codes={
-                        failure.get("competency_code") for failure in (summary.critical_failures or [])
-                    },
-                )
-                response_evidence_summary = cls._build_response_evidence(response_results, language=language)
-                human_review_flags = cls._build_human_review_flags(
-                    evaluation=evaluation,
-                    summary=summary,
-                    response_results=response_results,
-                    competency_results=competency_results,
-                    language=language,
-                )
-                requires_human_review = bool(
-                    human_review_flags or summary.status == SessionEvaluationSummary.STATUS_REQUIRES_HUMAN_REVIEW
-                )
-                report_payload = cls._build_report_payload(
+                composed = cls._compose_ai_report(
                     evaluation=evaluation,
                     summary=summary,
                     report_number=report_number,
-                    competency_breakdown=competency_breakdown,
-                    response_evidence_summary=response_evidence_summary,
-                    human_review_flags=human_review_flags,
                     stale_previous_reports=stale_count,
                     language=language,
+                    scoring_results=scoring_results,
+                )
+                competency_breakdown = composed["competency_breakdown"]
+                response_evidence_summary = composed["response_evidence_summary"]
+                human_review_flags = composed["human_review_flags"]
+                report_payload = composed["report_payload"]
+                requires_human_review = bool(
+                    human_review_flags or summary.status == SessionEvaluationSummary.STATUS_REQUIRES_HUMAN_REVIEW
                 )
                 pdf_bytes, pdf_hash = cls._render_employer_pdf(
                     report_payload=report_payload,
@@ -284,6 +252,74 @@ class EvaluationReportService:
             raise
 
     @classmethod
+    def _scoring_results(cls, evaluation, summary):
+        response_results = list(
+            ResponseEvaluationResult.objects.filter(
+                evaluation=evaluation,
+                rule_set=summary.rule_set,
+            )
+            .select_related(
+                "question",
+                "response",
+                "rule_set",
+                "response__translation_artifact",
+                "response__ai_interpretation",
+                "response__evaluation_input_artifact",
+            )
+            .order_by("question__question_order", "created_at")
+        )
+        competency_results = list(
+            CompetencyEvaluationResult.objects.filter(
+                evaluation=evaluation,
+                rule_set=summary.rule_set,
+            ).order_by("competency_code", "created_at")
+        )
+        if not response_results:
+            raise EvaluationReportError("Report generation requires response scoring results.")
+        if not competency_results:
+            raise EvaluationReportError("Report generation requires competency scoring results.")
+        return response_results, competency_results
+
+    @classmethod
+    def _compose_ai_report(cls, *, evaluation, summary, report_number, stale_previous_reports, language,
+                           scoring_results=None):
+        """The AI report's content in one language, built only from the
+        stored scoring results. Saves nothing, so it serves both a new
+        report and a language rendition of an existing one."""
+        response_results, competency_results = scoring_results or cls._scoring_results(evaluation, summary)
+        competency_breakdown = cls._build_competency_breakdown(
+            competency_results,
+            language=language,
+            critical_failure_codes={
+                failure.get("competency_code") for failure in (summary.critical_failures or [])
+            },
+        )
+        response_evidence_summary = cls._build_response_evidence(response_results, language=language)
+        human_review_flags = cls._build_human_review_flags(
+            evaluation=evaluation,
+            summary=summary,
+            response_results=response_results,
+            competency_results=competency_results,
+            language=language,
+        )
+        report_payload = cls._build_report_payload(
+            evaluation=evaluation,
+            summary=summary,
+            report_number=report_number,
+            competency_breakdown=competency_breakdown,
+            response_evidence_summary=response_evidence_summary,
+            human_review_flags=human_review_flags,
+            stale_previous_reports=stale_previous_reports,
+            language=language,
+        )
+        return {
+            "competency_breakdown": competency_breakdown,
+            "response_evidence_summary": response_evidence_summary,
+            "human_review_flags": human_review_flags,
+            "report_payload": report_payload,
+        }
+
+    @classmethod
     def generate_evaluator_report(cls, *, evaluation, actor):
         """Create an immutable, evaluator-rated report version for scheduled interviews."""
         from api.evaluations.evaluator_rating_services import (
@@ -293,80 +329,15 @@ class EvaluationReportService:
         rating = getattr(evaluation, "evaluator_rating", None)
         if rating is None or evaluation.session_id is None:
             raise EvaluationReportError("A scheduled evaluator rating and interview session are required.")
-        score, readiness = calculate_evaluator_outcome({
-            "safety_awareness": rating.safety_awareness,
-            "hygiene": rating.hygiene if rating.hygiene is not None else 0,
-            "communication": rating.communication if rating.communication is not None else 0,
-            "task_execution": rating.task_execution,
-            "critical_safety_failure": rating.critical_safety_failure,
-        })
-        summary = evaluation.session_summaries.select_related("rule_set").first()
-        secondary_score = None
-        if summary is not None:
-            ai_score = cls._rounded_whole(summary.overall_percentage)
-            secondary_score = {
-                "source": "AI_ASSESSMENT",
-                "value": ai_score,
-                "display": f"{ai_score}%",
-                "label": "AI Assessment Score (Reference)",
-            }
         with transaction.atomic():
             stale_count = cls._mark_previous_reports_stale(evaluation=evaluation, actor=actor)
             report_number = cls._build_report_number(evaluation=evaluation)
             version_number = evaluation.reports.count() + 1
             report_version = f"1.{version_number - 1}"
-            readiness_label = {"READY": "Ready", "PARTIALLY_READY": "Partially Ready", "NOT_READY": "Not Ready"}[readiness]
-            payload = {
-                "language": "en", "classification": "Employer-led / Evaluator-rated",
-                "report_name": "Scheduled Assessment Summary", "report_version": report_version,
-                "report_status": EvaluationReport.STATUS_ACTIVE,
-                "assessment_mode": "Employer-led / Evaluator-rated",
-                "candidate_name": evaluation.candidate.get_full_name(),
-                "role": evaluation.session.role_code or evaluation.candidate.job_role or "",
-                "report_number": report_number,
-                "overall_score": float(score), "readiness_status": readiness,
-                "readiness_label": readiness_label,
-                "ratings": {
-                    "safety_awareness": rating.safety_awareness, "hygiene": rating.hygiene,
-                    "communication": rating.communication, "task_execution": rating.task_execution,
-                    "behavioral_indicators": behavioral_risk_level(rating.behavior_integrity),
-                    "consistency": calculate_response_consistency(evaluation, fallback_rating=rating),
-                },
-                "comments": rating.comments,
-                "rated_by": rating.rated_by.get_full_name() if rating.rated_by else "",
-                "rated_at": rating.rated_at.isoformat() if rating.rated_at else "",
-                "transcript_included": False,
-                "assessment_context": {
-                    "assessment_mode": "Employer-led / Evaluator-rated",
-                    "candidate_name": evaluation.candidate.get_full_name(),
-                    "target_role": evaluation.session.role_code or evaluation.candidate.job_role or "",
-                    "assessment_status": cls._derive_assessment_status(evaluation),
-                    "assessment_date": evaluation.completed_at.isoformat() if evaluation.completed_at else "",
-                },
-                "executive_summary": {
-                    "overall_score": float(score),
-                    "overall_score_available": True,
-                    "overall_score_display": f"{score}%",
-                    "score_source": "EVALUATOR_ASSESSMENT",
-                    "overall_score_unavailable_reason": None,
-                    "readiness_indicator": {"code": readiness, "label": readiness_label},
-                    "secondary_score": secondary_score,
-                },
-                "evaluator_rating": {
-                    "safety_awareness": rating.safety_awareness,
-                    "hygiene": rating.hygiene,
-                    "communication": rating.communication,
-                    "task_execution": rating.task_execution,
-                    "behavioral_risk_level": behavioral_risk_level(rating.behavior_integrity),
-                    "consistency": calculate_response_consistency(evaluation, fallback_rating=rating),
-                    "comments": rating.comments,
-                    "rated_by_name": rating.rated_by.get_full_name() if rating.rated_by else "",
-                    "rated_at": rating.rated_at.isoformat() if rating.rated_at else "",
-                    "critical_safety_failure": rating.critical_safety_failure,
-                    "critical_safety_failure_note": rating.critical_safety_failure_note,
-                },
-            }
-            cls._prepare_evaluator_report_payload(payload, evaluation=evaluation, actor=actor)
+            payload, score, readiness = cls._compose_evaluator_payload(
+                evaluation=evaluation, actor=actor, report_number=report_number,
+                report_version=report_version, language=cls._report_language(evaluation.session),
+            )
             # Both assessment methods use the same document template,
             # privacy filtering and PDF-rendering fallback chain.
             pdf_bytes, pdf_hash = cls._render_employer_pdf(
@@ -392,15 +363,101 @@ class EvaluationReportService:
         cls._log_completed(evaluation=evaluation, actor=actor, report=report, stale_previous_reports=stale_count)
         return report
 
+    EVALUATOR_READINESS_LABELS = {
+        "READY": ("Ready", "جاهز"),
+        "PARTIALLY_READY": ("Partially Ready", "جاهز جزئيًا"),
+        "NOT_READY": ("Not Ready", "غير جاهز"),
+    }
+
     @classmethod
-    def _prepare_evaluator_report_payload(cls, payload, *, evaluation, actor):
+    def _compose_evaluator_payload(cls, *, evaluation, actor, report_number, report_version, language):
+        """The evaluator-rated report's content in one language. Saves
+        nothing; returns (payload, score, readiness)."""
+        from api.evaluations.evaluator_rating_services import (
+            behavioral_risk_level, calculate_evaluator_outcome, calculate_response_consistency,
+        )
+
+        ar = language == "ar"
+        rating = evaluation.evaluator_rating
+        score, readiness = calculate_evaluator_outcome({
+            "safety_awareness": rating.safety_awareness,
+            "hygiene": rating.hygiene if rating.hygiene is not None else 0,
+            "communication": rating.communication if rating.communication is not None else 0,
+            "task_execution": rating.task_execution,
+            "critical_safety_failure": rating.critical_safety_failure,
+        })
+        summary = evaluation.session_summaries.select_related("rule_set").first()
+        secondary_score = None
+        if summary is not None:
+            ai_score = cls._rounded_whole(summary.overall_percentage)
+            secondary_score = {
+                "source": "AI_ASSESSMENT",
+                "value": ai_score,
+                "display": f"{ai_score}%",
+                "label": "درجة تقييم الذكاء الاصطناعي (مرجعية)" if ar else "AI Assessment Score (Reference)",
+            }
+        readiness_label = cls.EVALUATOR_READINESS_LABELS[readiness][1 if ar else 0]
+        payload = {
+            "language": "en", "classification": "Employer-led / Evaluator-rated",
+            "report_name": "Scheduled Assessment Summary", "report_version": report_version,
+            "report_status": EvaluationReport.STATUS_ACTIVE,
+            "assessment_mode": "Employer-led / Evaluator-rated",
+            "candidate_name": evaluation.candidate.get_full_name(),
+            "role": evaluation.session.role_code or evaluation.candidate.job_role or "",
+            "report_number": report_number,
+            "overall_score": float(score), "readiness_status": readiness,
+            "readiness_label": readiness_label,
+            "ratings": {
+                "safety_awareness": rating.safety_awareness, "hygiene": rating.hygiene,
+                "communication": rating.communication, "task_execution": rating.task_execution,
+                "behavioral_indicators": behavioral_risk_level(rating.behavior_integrity),
+                "consistency": calculate_response_consistency(evaluation, fallback_rating=rating),
+            },
+            "comments": rating.comments,
+            "rated_by": rating.rated_by.get_full_name() if rating.rated_by else "",
+            "rated_at": rating.rated_at.isoformat() if rating.rated_at else "",
+            "transcript_included": False,
+            "assessment_context": {
+                "assessment_mode": "Employer-led / Evaluator-rated",
+                "candidate_name": evaluation.candidate.get_full_name(),
+                "target_role": evaluation.session.role_code or evaluation.candidate.job_role or "",
+                "assessment_status": cls._derive_assessment_status(evaluation),
+                "assessment_date": evaluation.completed_at.isoformat() if evaluation.completed_at else "",
+            },
+            "executive_summary": {
+                "overall_score": float(score),
+                "overall_score_available": True,
+                "overall_score_display": f"{score}%",
+                "score_source": "EVALUATOR_ASSESSMENT",
+                "overall_score_unavailable_reason": None,
+                "readiness_indicator": {"code": readiness, "label": readiness_label},
+                "secondary_score": secondary_score,
+            },
+            "evaluator_rating": {
+                "safety_awareness": rating.safety_awareness,
+                "hygiene": rating.hygiene,
+                "communication": rating.communication,
+                "task_execution": rating.task_execution,
+                "behavioral_risk_level": behavioral_risk_level(rating.behavior_integrity),
+                "consistency": calculate_response_consistency(evaluation, fallback_rating=rating),
+                "comments": rating.comments,
+                "rated_by_name": rating.rated_by.get_full_name() if rating.rated_by else "",
+                "rated_at": rating.rated_at.isoformat() if rating.rated_at else "",
+                "critical_safety_failure": rating.critical_safety_failure,
+                "critical_safety_failure_note": rating.critical_safety_failure_note,
+            },
+        }
+        cls._prepare_evaluator_report_payload(payload, evaluation=evaluation, actor=actor, language=language)
+        return payload, score, readiness
+
+    @classmethod
+    def _prepare_evaluator_report_payload(cls, payload, *, evaluation, actor, language):
         """Adapt actual evaluator inputs to the shared employer document schema.
 
         No question-bank results or dialogue are synthesized from ratings.
         The existing evaluator outcome remains authoritative.
         """
         session = evaluation.session
-        language = cls._report_language(session)
         rating = evaluation.evaluator_rating
         dimensions = (
             ('SAFETY', 'Safety Awareness', rating.safety_awareness),
@@ -480,17 +537,23 @@ class EvaluationReportService:
             'risk_indicators': risk_indicators,
             # SCH-04: the evaluator's evidence note for each rated competency.
             'evidence_summary': [
-                {'category': name, 'finding': note, 'source': 'Evaluator'}
+                {'category': name, 'finding': note, 'source': 'المقيّم' if language == 'ar' else 'Evaluator'}
                 for code, name, _ in dimensions
                 if (note := (rating.competency_notes or {}).get(EVALUATOR_NOTE_FIELDS[code], '').strip())
-            ] + ([{'category': 'Evaluator comments', 'finding': rating.comments, 'source': 'Evaluator'}] if rating.comments else []),
+            ] + ([{
+                'category': 'تعليقات المقيّم' if language == 'ar' else 'Evaluator comments',
+                'finding': rating.comments,
+                'source': 'المقيّم' if language == 'ar' else 'Evaluator',
+            }] if rating.comments else []),
             'improvement_plan': improvement_plan,
             'verification_status': cls._derive_qr_verification_status(EvaluationReport.STATUS_ACTIVE, language=language),
             'qr_verification_url': cls._build_qr_verification_url(report_number=payload['report_number']),
         })
         payload['assessment_context'].update({
             'candidate_reference': str(evaluation.candidate.public_id),
-            'target_role': session.role_name or evaluation.candidate.get_job_role_display(),
+            'assessment_mode': 'بقيادة صاحب العمل / تقييم المقيّم' if language == 'ar' else 'Employer-led / Evaluator-rated',
+            'assessment_status': cls._localize_assessment_status(payload['assessment_context'].get('assessment_status'), language),
+            'target_role': cls._localized_target_role(session, evaluation, language),
             'assessment_language': cls._display_language(session.candidate_language, language=language),
             'assessment_duration_minutes': cls._derive_assessment_duration_minutes(session),
             'assessment_coverage': [{'label': name, 'covered': value is not None} for _, name, value in dimensions],
@@ -581,11 +644,11 @@ class EvaluationReportService:
         return risks, plan
 
     @classmethod
-    def export_payload(cls, report):
-        return report.report_payload
+    def export_payload(cls, report, language=None):
+        return cls.localized_report_data(report, language)["report_payload"]
 
     @classmethod
-    def export_employer_payload(cls, report):
+    def export_employer_payload(cls, report, language=None):
         allowed_keys = [
             "language",
             "classification",
@@ -610,22 +673,37 @@ class EvaluationReportService:
             "verification_status",
             "qr_verification_url",
         ]
+        source = cls.localized_report_data(report, language)["report_payload"] or {}
         payload = {
-            key: copy.deepcopy(report.report_payload.get(key))
+            key: copy.deepcopy(source.get(key))
             for key in allowed_keys
         }
         return cls._sanitize_employer_payload(payload)
 
     @classmethod
-    def build_public_verification_payload(cls, report):
-        payload = report.report_payload
+    def build_public_verification_payload(cls, report, language=None):
+        """Public QR check. `language` is the verification page's language;
+        the role is shown in it when the report has a rendition in it. Each
+        language version's PDF hash is listed, so a downloaded rendition
+        verifies as well as the original."""
+        language = language if language in cls.VIEWER_LANGUAGES else "en"
+        payload = report.report_payload or {}
+        rendition = report.renditions.filter(language=language).first()
+        shown = (rendition.report_payload if rendition is not None else None) or payload
+        versions = [{"language": cls.report_language_of(report), "sha256_hash": report.pdf_hash}]
+        versions += [
+            {"language": item.language, "sha256_hash": item.pdf_hash}
+            for item in report.renditions.exclude(pdf_hash="").order_by("language")
+        ]
         return {
             "report_id": report.report_number,
-            "target_role": payload.get("assessment_context", {}).get("target_role"),
+            "target_role": shown.get("assessment_context", {}).get("target_role"),
             "assessment_date": payload.get("assessment_context", {}).get("assessment_date"),
+            # A code the verification page keys on - kept in English.
             "verification_status": cls._derive_qr_verification_status(report.report_status),
-            "public_report_status": cls._display_report_status(report.report_status),
+            "public_report_status": cls._display_report_status(report.report_status, language=language),
             "sha256_hash": report.pdf_hash or payload.get("document_integrity", {}).get("hash_value", ""),
+            "language_versions": versions,
             "verification_timestamp": timezone.now().isoformat(),
         }
 
@@ -719,6 +797,170 @@ class EvaluationReportService:
             report_payload=payload,
             report_number=report.report_number,
         )
+
+    # ------------------------------------------------------------------
+    # The report in the viewer's language
+    # ------------------------------------------------------------------
+    VIEWER_LANGUAGES = ("en", "ar")
+
+    @staticmethod
+    def viewer_language(request):
+        """The language the person is viewing in: `?lang=` or `?locale=`,
+        otherwise the page language the UI sends as Accept-Language. None
+        when the request doesn't say."""
+        if request is None:
+            return None
+        params = getattr(request, "query_params", None)
+        if params is None:
+            params = getattr(request, "GET", {}) or {}
+        for key in ("lang", "locale"):
+            value = str(params.get(key) or "").strip().lower()
+            if value.startswith("ar"):
+                return "ar"
+            if value.startswith("en"):
+                return "en"
+        first = request.META.get("HTTP_ACCEPT_LANGUAGE", "").split(",")[0].strip().lower()
+        if first.startswith("ar"):
+            return "ar"
+        if first.startswith("en"):
+            return "en"
+        return None
+
+    @staticmethod
+    def report_language_of(report):
+        return (report.report_payload or {}).get("language") or "en"
+
+    @classmethod
+    def rendition_for(cls, report, language):
+        """The report shown in `language` (see EvaluationReportRendition).
+        None when the report is already in that language, or when it can't
+        honestly be shown in it - a superseded report, or stored scoring
+        that no longer gives the same result. Callers then show the report
+        as written."""
+        from django.db import IntegrityError
+
+        from api.reports.models import EvaluationReportRendition
+
+        if language not in cls.VIEWER_LANGUAGES or not report.report_payload:
+            return None
+        if cls.report_language_of(report) == language:
+            return None
+        existing = report.renditions.filter(language=language).first()
+        if existing is not None:
+            return existing
+        if report.report_status != EvaluationReport.STATUS_ACTIVE:
+            return None
+        try:
+            parts = cls._rebuild_in_language(report, language)
+        except Exception:
+            logger.exception("Could not build the %s rendition of report %s", language, report.report_number)
+            return None
+        if parts is None:
+            return None
+        try:
+            with transaction.atomic():
+                return EvaluationReportRendition.objects.create(report=report, language=language, **parts)
+        except IntegrityError:
+            return report.renditions.filter(language=language).first()
+
+    @staticmethod
+    def _readiness_code(payload):
+        indicator = (payload.get("executive_summary") or {}).get("readiness_indicator")
+        if isinstance(indicator, dict):
+            return indicator.get("code")
+        return indicator
+
+    @classmethod
+    def _same_outcome(cls, original, rebuilt):
+        """A rendition only rewords: the score and readiness must match the
+        report exactly, or it isn't the same report."""
+        before = original.get("executive_summary") or {}
+        after = rebuilt.get("executive_summary") or {}
+        return (
+            cls._readiness_code(original) == cls._readiness_code(rebuilt)
+            and before.get("overall_score") == after.get("overall_score")
+            and bool(before.get("overall_score_available", True)) == bool(after.get("overall_score_available", True))
+        )
+
+    @classmethod
+    def _rebuild_in_language(cls, report, language):
+        evaluation = report.evaluation
+        original = report.report_payload or {}
+        if (report.metadata or {}).get("assessment_source") == "EMPLOYER_EVALUATOR":
+            if getattr(evaluation, "evaluator_rating", None) is None:
+                return None
+            payload, _score, _readiness = cls._compose_evaluator_payload(
+                evaluation=evaluation, actor=report.generated_by, report_number=report.report_number,
+                report_version=report.report_version, language=language,
+            )
+            parts = {
+                "competency_breakdown": payload["competency_breakdown"],
+                "response_evidence_summary": [],
+                "human_review_flags": [],
+            }
+        else:
+            summary = cls._get_summary(evaluation)
+            composed = cls._compose_ai_report(
+                evaluation=evaluation,
+                summary=summary,
+                report_number=report.report_number,
+                stale_previous_reports=(original.get("metadata") or {}).get("stale_previous_reports", 0),
+                language=language,
+            )
+            payload = composed.pop("report_payload")
+            parts = composed
+        if not cls._same_outcome(original, payload):
+            logger.warning(
+                "Report %s: the %s rendition gives a different result; showing the report as written.",
+                report.report_number, language,
+            )
+            return None
+        # Facts fixed when the report was written stay as written.
+        for key in ("generated_at", "report_version", "audit_log", "qr_verification_url"):
+            if key in original:
+                payload[key] = original[key]
+        original_date = (original.get("assessment_context") or {}).get("assessment_date")
+        if original_date:
+            payload.setdefault("assessment_context", {})["assessment_date"] = original_date
+        payload["document_integrity"] = {
+            "hash_algorithm": "SHA-256",
+            "hash_value": cls._calculate_document_hash(payload),
+        }
+        payload["source_language"] = cls.report_language_of(report)
+        return {"report_payload": payload, **parts}
+
+    @classmethod
+    def rendition_pdf(cls, rendition):
+        """The rendition's PDF, made and stored the first time it's asked for."""
+        pdf = rendition.employer_pdf
+        if pdf and pdf.name and pdf.storage.exists(pdf.name):
+            with pdf.open("rb") as handle:
+                return handle.read()
+        pdf_bytes, pdf_hash = cls._render_employer_pdf(
+            report_payload=copy.deepcopy(rendition.report_payload),
+            report_number=rendition.report.report_number,
+        )
+        rendition.pdf_hash = pdf_hash
+        rendition.employer_pdf.save(f"{rendition.report.report_number}-{rendition.language}.pdf",
+                                    ContentFile(pdf_bytes), save=False)
+        rendition.save(update_fields=["employer_pdf", "pdf_hash", "updated_at"])
+        return pdf_bytes
+
+    @classmethod
+    def localized_report_data(cls, report, language):
+        """The parts of a report that hold wording, in `language` where a
+        rendition exists - for the API serializer and payload exports."""
+        rendition = cls.rendition_for(report, language) if language else None
+        source = rendition or report
+        return {
+            "language": rendition.language if rendition else cls.report_language_of(report),
+            "source_language": cls.report_language_of(report),
+            "report_payload": source.report_payload,
+            "competency_breakdown": source.competency_breakdown,
+            "response_evidence_summary": source.response_evidence_summary,
+            "human_review_flags": source.human_review_flags,
+            "rendition": rendition,
+        }
 
     @classmethod
     def _get_summary(cls, evaluation):
@@ -1306,7 +1548,7 @@ class EvaluationReportService:
                     "required_indicators_passed": result.passed_required_indicators,
                     "critical_failure": result.critical_failure,
                     "requires_human_review": result.requires_human_review,
-                    "explanation": result.explanation,
+                    "explanation": localize_scoring_explanation(result.explanation, language),
                     "rule_set_version": result.rule_set.version,
                     "traceability": {
                         "transcript_status": response.stt_status,
@@ -1340,13 +1582,11 @@ class EvaluationReportService:
 
     @classmethod
     def _build_human_review_flags(cls, *, evaluation, summary, response_results, competency_results, language="en"):
-        """Only the "critical_failure" and "low_confidence_interpretation"
-        flag types can reach the Arabic PDF (via _build_risk_indicators'
-        integrity_flag_messages), so only their own Python-authored
-        fallback text is translated here - the rest of this method's
-        messages are API-only and/or wrap raw external text (rule-engine
-        reasons, transcript issues) that stays in English regardless of
-        language, per the same policy as _employer_evidence_finding."""
+        """Every message this method writes itself is in the report's
+        language (the dashboard shows them as review notes). Raw external
+        text it passes through - rule-engine reasons, transcript issues,
+        translation errors - stays as recorded, per the same policy as
+        _employer_evidence_finding."""
         flags = []
         for failure in summary.critical_failures:
             competency = cls._friendly_competency_name(
@@ -1416,7 +1656,8 @@ class EvaluationReportService:
                         "source": "translation",
                         "candidate_response_id": str(response.public_id),
                         "message": cls._normalize_text(response.translation_error)
-                        or "Response translation requires manual review.",
+                        or ("تتطلب ترجمة الإجابة مراجعة يدوية." if language == "ar"
+                            else "Response translation requires manual review."),
                         "requires_review": True,
                     }
                 )
@@ -1428,7 +1669,9 @@ class EvaluationReportService:
                         "source": "scoring_engine",
                         "candidate_response_id": str(response.public_id),
                         "message": (
-                            f"Additional evidence is required for assessment question {result.question.question_order}."
+                            f"يلزم مزيد من الأدلة لسؤال التقييم رقم {result.question.question_order}."
+                            if language == "ar"
+                            else f"Additional evidence is required for assessment question {result.question.question_order}."
                         ),
                         "requires_review": True,
                     }
@@ -1440,20 +1683,28 @@ class EvaluationReportService:
                         "severity": "medium",
                         "source": "session",
                         "candidate_response_id": str(response.public_id),
-                        "message": "No usable response was captured for this assessment item.",
+                        "message": (
+                            "لم تُسجَّل إجابة صالحة لهذا البند من التقييم."
+                            if language == "ar"
+                            else "No usable response was captured for this assessment item."
+                        ),
                         "requires_review": True,
                     }
                 )
         for item in competency_results:
             if item.status == CompetencyEvaluationResult.STATUS_BELOW_THRESHOLD:
-                competency = cls._friendly_competency_name(item.competency_code, item.competency_name)
+                competency = cls._friendly_competency_name(item.competency_code, item.competency_name, language=language)
                 flags.append(
                     {
                         "flag_type": "below_threshold_competency",
                         "severity": "medium",
                         "source": "scoring_engine",
                         "candidate_response_id": "",
-                        "message": f"{competency} is below the required threshold.",
+                        "message": (
+                            f"{competency} دون الحد المطلوب."
+                            if language == "ar"
+                            else f"{competency} is below the required threshold."
+                        ),
                         "requires_review": True,
                     }
                 )
@@ -3210,7 +3461,7 @@ class EvaluationReportService:
         return rows
 
     @classmethod
-    def _build_qa_and_score_rows(cls, report):
+    def _build_qa_and_score_rows(cls, report, language=None):
         """One row per question, combining the candidate's actual answer
         text (see _build_qa_rows) with its score/result/explanation. The
         score/explanation side can't come from report.report_payload -
@@ -3221,8 +3472,7 @@ class EvaluationReportService:
         ID-based relationship. Never joined by question_order or array
         position, so two rows can never swap content because of ordering,
         renumbering, or a gap in the sequence."""
-        payload = report.report_payload or {}
-        language = payload.get("language", "en")
+        language = language or cls.report_language_of(report)
         summary = report.evaluation.session_summaries.select_related("rule_set").first()
         response_results = []
         if summary is not None:
@@ -3245,15 +3495,16 @@ class EvaluationReportService:
         return rows
 
     @classmethod
-    def render_ai_analysis_pdf(cls, report):
-        return cls._render_qa_and_score_pdf(report)
+    def render_ai_analysis_pdf(cls, report, language=None):
+        return cls._render_qa_and_score_pdf(report, language=language)
 
     @classmethod
-    def _render_qa_and_score_pdf(cls, report):
-        payload = report.report_payload or {}
-        language = payload.get("language", "en")
+    def _render_qa_and_score_pdf(cls, report, language=None):
+        localized = cls.localized_report_data(report, language)
+        payload = localized["report_payload"] or {}
+        language = localized["language"]
         template_name = "reports/qa_and_score_ar.html" if language == "ar" else "reports/qa_and_score.html"
-        rows = cls._build_qa_and_score_rows(report)
+        rows = cls._build_qa_and_score_rows(report, language=language)
         executive_summary = payload.get("executive_summary", {})
         context = {
             "rows": rows,
@@ -3364,7 +3615,7 @@ class EvaluationReportService:
         ]
 
     @classmethod
-    def build_documents_zip(cls, report):
+    def build_documents_zip(cls, report, language=None):
         """Bundles every document for one evaluation into a single zip:
         the existing transcript/evidence report PDF, the existing
         certificate PDF (when one has been issued - not every evaluation
@@ -3372,7 +3623,10 @@ class EvaluationReportService:
         from live data each time (never cached) - each question paired with
         the candidate's actual answer and that answer's score/result/
         explanation together, plus the overall readiness result up top."""
-        if not report.employer_pdf or not (
+        rendition = cls.rendition_for(report, language) if language else None
+        if rendition is not None:
+            transcript_pdf_bytes = cls.rendition_pdf(rendition)
+        elif not report.employer_pdf or not (
             report.employer_pdf.name and report.employer_pdf.storage.exists(report.employer_pdf.name)
         ):
             try:
@@ -3391,7 +3645,7 @@ class EvaluationReportService:
             certificate_bytes = certificate.pdf_file.read()
             certificate.pdf_file.close()
 
-        qa_and_score_pdf_bytes = cls._render_qa_and_score_pdf(report)
+        qa_and_score_pdf_bytes = cls._render_qa_and_score_pdf(report, language=language)
 
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:

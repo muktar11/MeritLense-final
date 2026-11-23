@@ -383,7 +383,7 @@ class CandidateResponseSerializer(PublicIdModelSerializer):
             return None
         from api.evaluations.serializers import ResponseEvaluationResultSerializer
 
-        return ResponseEvaluationResultSerializer(result).data
+        return ResponseEvaluationResultSerializer(result, context=self.context).data
 
 
 class QuestionAudioArtifactSerializer(PublicIdModelSerializer):
@@ -526,7 +526,7 @@ class InterviewSessionSerializer(PublicIdModelSerializer):
             return None
         from api.evaluations.serializers import SessionEvaluationSummarySerializer
 
-        return SessionEvaluationSummarySerializer(summary).data
+        return SessionEvaluationSummarySerializer(summary, context=self.context).data
 
     def get_latest_report(self, obj):
         # Same staff-only restriction as get_latest_scoring_summary: the

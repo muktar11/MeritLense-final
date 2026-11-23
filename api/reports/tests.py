@@ -1,3 +1,5 @@
+import copy
+import hashlib
 import shutil
 import tempfile
 import zipfile
@@ -1694,3 +1696,160 @@ class EmployerPayloadFaceMatchScoreTests(TestCase):
         self.assertNotIn("method", sanitized["identity_verification"])
         self.assertNotIn("liveness_passed", sanitized["identity_verification"])
         self.assertEqual(sanitized["identity_verification"]["employer_status"], "Completed")
+
+
+class ReportViewerLanguageTests(TestCase):
+    """An employer viewing in Arabic sees an English-interview report in
+    Arabic (its rendition), with the same scores and readiness, while the
+    report itself stays as written."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._media_dir = tempfile.mkdtemp(prefix="report-viewer-lang-tests-")
+        cls._override = override_settings(MEDIA_ROOT=cls._media_dir)
+        cls._override.enable()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._override.disable()
+        shutil.rmtree(cls._media_dir, ignore_errors=True)
+        super().tearDownClass()
+
+    setUp = EvaluationReportApiTests.setUp
+
+    def _english_report(self):
+        response = self.client.post(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/generate-report",
+            {}, format="json", HTTP_ACCEPT_LANGUAGE="en",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.evaluation.refresh_from_db()
+        if self.evaluation.review_status == "REQUIRED":
+            self.evaluation.review_status = "APPROVED"
+            self.evaluation.save(update_fields=["review_status"])
+        report = EvaluationReport.objects.get(evaluation=self.evaluation, report_status="ACTIVE")
+        self.assertEqual(report.report_payload["language"], "en")
+        return report
+
+    def _get_report(self, language):
+        return self.client.get(
+            f"/api/v1/evaluations/evaluations/{self.evaluation.public_id}/report",
+            HTTP_ACCEPT_LANGUAGE=language,
+        )
+
+    def test_arabic_viewer_gets_the_report_in_arabic_with_the_same_outcome(self):
+        report = self._english_report()
+        original = copy.deepcopy(report.report_payload)
+
+        response = self._get_report("ar")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.data
+        payload = data["report_payload"]
+        self.assertEqual(data["language"], "ar")
+        self.assertEqual(data["source_language"], "en")
+        self.assertEqual(payload["language"], "ar")
+        self.assertEqual(payload["legal_disclaimer"], EvaluationReportService.LEGAL_DISCLAIMER_AR)
+        self.assertEqual(payload["classification"], EvaluationReportService.CLASSIFICATION_AR)
+        for item in payload["assessment_context"]["assessment_coverage"]:
+            self.assertIn(item["label"], EvaluationReportService.CANONICAL_COMPETENCY_DIMENSIONS_AR)
+        # Same result, only reworded.
+        self.assertEqual(
+            payload["executive_summary"]["readiness_indicator"]["code"],
+            original["executive_summary"]["readiness_indicator"]["code"],
+        )
+        self.assertEqual(payload["executive_summary"]["overall_score"], original["executive_summary"]["overall_score"])
+        self.assertEqual(payload["generated_at"], original["generated_at"])
+        # The report itself is unchanged.
+        report.refresh_from_db()
+        self.assertEqual(report.report_payload, original)
+        self.assertEqual(report.renditions.count(), 1)
+
+    def test_rendition_is_built_once_and_reused(self):
+        self._english_report()
+        first = self._get_report("ar").data["report_payload"]
+        second = self._get_report("ar").data["report_payload"]
+        self.assertEqual(first, second)
+        self.assertEqual(EvaluationReport.objects.get(evaluation=self.evaluation).renditions.count(), 1)
+
+    def test_english_viewer_gets_the_report_as_written(self):
+        report = self._english_report()
+        data = self._get_report("en").data
+        self.assertEqual(data["language"], "en")
+        self.assertEqual(data["report_payload"], report.report_payload)
+        self.assertFalse(report.renditions.exists())
+
+    def test_arabic_pdf_download_and_verification_hashes(self):
+        report = self._english_report()
+        response = self.client.get(
+            f"/api/v1/evaluations/reports/{report.public_id}/export-pdf", HTTP_ACCEPT_LANGUAGE="ar",
+        )
+        self.assertEqual(response.status_code, 200)
+        pdf_bytes = b"".join(response.streaming_content)
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        rendition = report.renditions.get(language="ar")
+        self.assertEqual(rendition.pdf_hash, hashlib.sha256(pdf_bytes).hexdigest())
+        self.assertIn(f"{report.report_number}-ar.pdf", response["Content-Disposition"])
+
+        verification = self.client.get(
+            f"/api/v1/evaluations/reports/verify/{report.report_number}", HTTP_ACCEPT_LANGUAGE="ar",
+        ).json()
+        hashes = {item["language"]: item["sha256_hash"] for item in verification["language_versions"]}
+        self.assertEqual(hashes, {"en": report.pdf_hash, "ar": rendition.pdf_hash})
+        self.assertEqual(verification["verification_status"], "Authentic")
+        self.assertEqual(verification["public_report_status"], "نشط")
+
+    def test_english_pdf_download_is_the_original_file(self):
+        report = self._english_report()
+        response = self.client.get(
+            f"/api/v1/evaluations/reports/{report.public_id}/export-pdf", HTTP_ACCEPT_LANGUAGE="en",
+        )
+        pdf_bytes = b"".join(response.streaming_content)
+        self.assertEqual(hashlib.sha256(pdf_bytes).hexdigest(), report.pdf_hash)
+
+    def test_superseded_report_is_not_rendered_again(self):
+        report = self._english_report()
+        report.report_status = EvaluationReport.STATUS_SUPERSEDED
+        report.save()
+        self.assertIsNone(EvaluationReportService.rendition_for(report, "ar"))
+
+    def test_a_changed_result_is_never_shown_as_a_rendition(self):
+        report = self._english_report()
+        from unittest.mock import patch
+
+        with patch.object(EvaluationReportService, "_same_outcome", return_value=False):
+            self.assertIsNone(EvaluationReportService.rendition_for(report, "ar"))
+        self.assertFalse(report.renditions.exists())
+
+
+class EvaluatorReportViewerLanguageTests(ReportViewerLanguageTests):
+    """The same for an employer-led (evaluator-rated) report."""
+
+    def _english_report(self):
+        self._add_full_competency_coverage()
+        self.session.scheduled_start_at = timezone.now() - timezone.timedelta(days=1)
+        self.session.save(update_fields=["scheduled_start_at"])
+        EvaluatorRating.objects.create(
+            evaluation=self.evaluation,
+            safety_awareness=80, hygiene=75, communication=85, behavior_integrity=70, task_execution=55,
+            rated_by=self.user,
+        )
+        return super()._english_report()
+
+    _add_full_competency_coverage = EvaluationReportApiTests._add_full_competency_coverage
+
+    def test_evaluator_rendition_names_dimensions_and_risks_in_arabic(self):
+        report = self._english_report()
+        self.assertEqual(report.metadata.get("assessment_source"), "EMPLOYER_EVALUATOR")
+        payload = self._get_report("ar").data["report_payload"]
+        names = [item["competency_name"] for item in payload["competency_breakdown"]]
+        self.assertEqual(names, list(EvaluationReportService.CANONICAL_COMPETENCY_DIMENSIONS_AR))
+        self.assertEqual(payload["executive_summary"]["readiness_indicator"]["code"], report.readiness_status)
+        self.assertEqual(payload["readiness_label"], EvaluationReportService.EVALUATOR_READINESS_LABELS[report.readiness_status][1])
+        self.assertEqual(payload["executive_summary"]["secondary_score"]["label"], "درجة تقييم الذكاء الاصطناعي (مرجعية)")
+        self.assertEqual(payload["assessment_context"]["assessment_mode"], "بقيادة صاحب العمل / تقييم المقيّم")
+        # Task execution was rated 55: its improvement item is in Arabic.
+        plan = {item["competency"]: item for item in payload["improvement_plan"]}
+        self.assertIn("تنفيذ المهام العملية", plan)
+        self.assertEqual(plan["تنفيذ المهام العملية"]["recommended_action"], "تدريب مركّز")

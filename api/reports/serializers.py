@@ -49,6 +49,22 @@ class EvaluationReportSerializer(PublicIdModelSerializer):
         ]
         read_only_fields = fields
 
+    def to_representation(self, instance):
+        """Shown in the viewer's language: when the employer views in a
+        language other than the one the report was written in, the wording
+        comes from the report's rendition in their language (same scores
+        and readiness - see EvaluationReportRendition)."""
+        from api.reports.services import EvaluationReportService
+
+        data = super().to_representation(instance)
+        language = EvaluationReportService.viewer_language(self.context.get("request"))
+        localized = EvaluationReportService.localized_report_data(instance, language)
+        for key in ("report_payload", "competency_breakdown", "response_evidence_summary", "human_review_flags"):
+            data[key] = localized[key]
+        data["language"] = localized["language"]
+        data["source_language"] = localized["source_language"]
+        return data
+
     def get_generated_by_name(self, obj):
         if obj.generated_by is None:
             return ""

@@ -800,7 +800,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
             )
         except Week6ScoringError as exc:
             raise ValidationError({"detail": str(exc)}) from exc
-        return Response(SessionEvaluationSummarySerializer(summary).data)
+        return Response(SessionEvaluationSummarySerializer(summary, context={"request": request}).data)
 
     @extend_schema(request=None, responses={200: SessionEvaluationSummarySerializer})
     @action(detail=True, methods=["get"], url_path="scoring-summary")
@@ -810,7 +810,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         summary = session.evaluation_summaries.select_related("rule_set").first()
         if summary is None:
             return Response({"detail": "No scoring summary has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(SessionEvaluationSummarySerializer(summary).data)
+        return Response(SessionEvaluationSummarySerializer(summary, context={"request": request}).data)
 
     @extend_schema(request=SessionTokenSerializer, responses={200: SessionObservedTaskSerializer})
     @action(detail=True, methods=["post"], url_path="tasks/start")
@@ -906,7 +906,7 @@ class InterviewSessionViewSet(viewsets.GenericViewSet):
         report = evaluation.reports.filter(report_status="ACTIVE").select_related("generated_by").first()
         if report is None:
             return Response({"detail": "No evaluation report has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(EvaluationReportSerializer(report).data)
+        return Response(EvaluationReportSerializer(report, context={"request": request}).data)
 
     def _get_session(self):
         queryset = InterviewSession.objects.select_related(

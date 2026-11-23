@@ -556,7 +556,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             )
         except (ScoringRuleSet.DoesNotExist, Week6ScoringError) as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        serializer = SessionEvaluationSummarySerializer(summary)
+        serializer = SessionEvaluationSummarySerializer(summary, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='pending-review')
@@ -634,7 +634,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         summary = evaluation.session_summaries.select_related("rule_set").first()
         if summary is None:
             return Response({"detail": "No scoring summary has been generated yet."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(SessionEvaluationSummarySerializer(summary).data)
+        return Response(SessionEvaluationSummarySerializer(summary, context={"request": request}).data)
 
     @action(detail=True, methods=['get'], url_path='certificate')
     def certificate(self, request, id=None):
@@ -659,7 +659,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
         if held is not None:
             return held
         results = evaluation.response_results.select_related("rule_set", "question", "response").all()
-        return Response(ResponseEvaluationResultSerializer(results, many=True).data)
+        return Response(ResponseEvaluationResultSerializer(results, many=True, context={"request": request}).data)
 
     @action(detail=True, methods=['get'], url_path='competency-results')
     def competency_results(self, request, id=None):
@@ -821,6 +821,7 @@ class EvaluationViewSet(SubscriptionUsageMixin, PublicIdLookupMixin, viewsets.Mo
             'certificate_status': evaluation.certificate_status,
             'certificate_url': EvaluationSerializer(evaluation, context={'request': request}).data.get('certificate_url'),
             'reports': [{
+                'report_id': str(report.public_id),
                 'report_number': report.report_number, 'report_status': report.report_status,
                 'generated_at': report.generated_at,
                 'pdf_url': request.build_absolute_uri(report.employer_pdf.url) if report.employer_pdf and report.report_status == 'ACTIVE' else None,

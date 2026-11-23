@@ -167,7 +167,7 @@ class EvaluationSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):
         summary = obj.session_summaries.select_related("rule_set").first()
         if summary is None:
             return None
-        return SessionEvaluationSummarySerializer(summary).data
+        return SessionEvaluationSummarySerializer(summary, context=self.context).data
 
     def get_is_scored(self, obj):
         """True once Week6ScoringService has actually produced a summary.
@@ -499,7 +499,7 @@ class EvaluationListSerializer(ReviewHoldMaskMixin, PublicIdModelSerializer):
         summary = obj.session_summaries.select_related("rule_set").first()
         if summary is None:
             return None
-        return SessionEvaluationSummarySerializer(summary).data
+        return SessionEvaluationSummarySerializer(summary, context=self.context).data
 
     def get_is_scored(self, obj):
         return obj.session_summaries.exists()
@@ -668,6 +668,15 @@ class ResponseEvaluationResultSerializer(PublicIdModelSerializer):
         ]
         read_only_fields = fields
 
+    def to_representation(self, instance):
+        from api.evaluations.scoring_services import localize_scoring_explanation
+        from api.reports.services import EvaluationReportService
+
+        data = super().to_representation(instance)
+        language = EvaluationReportService.viewer_language(self.context.get("request"))
+        data["explanation"] = localize_scoring_explanation(data.get("explanation"), language)
+        return data
+
 
 class CompetencyEvaluationResultSerializer(PublicIdModelSerializer):
     rule_set_version = serializers.CharField(source="rule_set.version", read_only=True)
@@ -718,3 +727,17 @@ class SessionEvaluationSummarySerializer(PublicIdModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
+
+    def to_representation(self, instance):
+        from api.evaluations.scoring_services import localize_scoring_explanation
+        from api.reports.services import EvaluationReportService
+
+        data = super().to_representation(instance)
+        language = EvaluationReportService.viewer_language(self.context.get("request"))
+        if language == "ar":
+            data["critical_failures"] = [
+                {**item, "explanation": localize_scoring_explanation(item.get("explanation"), language)}
+                if isinstance(item, dict) else item
+                for item in data.get("critical_failures") or []
+            ]
+        return data

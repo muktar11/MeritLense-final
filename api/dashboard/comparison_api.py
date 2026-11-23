@@ -75,6 +75,10 @@ def comparison_response(request, *, owner_type, owner, role_name_for, pdf=False,
         on_entries(role_code, entries)
 
     role_name = role_name_for(role_code)
+    if language == "ar":
+        from api.evaluations.certificate_services import ROLE_NAME_AR
+
+        role_name = ROLE_NAME_AR.get(role_code, role_name)
     key_differences = compute_key_differences(entries, language=language)
     limitations = comparison_limitations(entries, language=language)
     if pdf:

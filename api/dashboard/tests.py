@@ -598,6 +598,46 @@ class CandidateComparisonFullFlowApiTests(TestCase):
         self.assertEqual(classification_by_dim["BEHAVIORAL"], "NON_CRITICAL")
         self.assertEqual(classification_by_dim["COMMUNICATION"], "NON_CRITICAL")
 
+    def test_build_full_comparison_names_competencies_in_the_viewers_language(self):
+        """Reports written in English, compared by an Arabic viewer: every
+        competency name, and the key differences that quote them, are in
+        Arabic - never the English label stored in the report."""
+        from api.reports.services import EvaluationReportService
+
+        user = User.objects.create_user(
+            email="driver-ar-viewer@example.com", password="testpass123",
+            first_name="B2C", last_name="User", role=Roles.B2C, is_verified=True,
+        )
+        rule_set = self._make_rule_set(created_by=user, company=None, role_code="driver")
+        alice, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="ar1", role_code="driver",
+            dimension_percentages={"SAFETY": 90, "PRACTICAL_TASKS": 80, "BEHAVIORAL": 70, "COMMUNICATION": 60},
+            not_applicable={"HYGIENE"}, rule_set=rule_set,
+        )
+        bob, _ = self._make_scored_candidate(
+            created_by=user, company=None, suffix="ar2", role_code="driver",
+            dimension_percentages={"SAFETY": 50, "PRACTICAL_TASKS": 60, "BEHAVIORAL": 85, "COMMUNICATION": 90},
+            not_applicable={"HYGIENE"}, rule_set=rule_set,
+        )
+
+        entries = build_full_comparison(
+            owner_type="USER", owner=user, role_code="driver",
+            candidate_ids=[str(alice.public_id), str(bob.public_id)],
+            language="ar", actor=user,
+        )
+
+        arabic = set(EvaluationReportService.CANONICAL_COMPETENCY_DIMENSIONS_AR)
+        for entry in entries:
+            self.assertTrue(entry["competencies"])
+            for row in entry["competencies"]:
+                self.assertIn(row["label"], arabic)
+        differences = compute_key_differences(entries, language="ar")
+        self.assertTrue(differences)
+        for diff in differences:
+            self.assertIn(diff["label"], arabic)
+            for english in EvaluationReportService.CANONICAL_COMPETENCY_DIMENSIONS:
+                self.assertNotIn(english, diff["text"])
+
     def test_build_full_comparison_non_driver_role_shows_required_only_no_fabricated_split(self):
         user = User.objects.create_user(
             email="domestic-b2c@example.com", password="testpass123",

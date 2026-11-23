@@ -915,3 +915,25 @@ class Week6ScoringService:
     @classmethod
     def _quantize(cls, value):
         return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+# The wording _build_explanation uses, in Arabic. The indicator phrases
+# inside each sentence come from the question bank and stay as written.
+EXPLANATION_WORDING_AR = (
+    ("No scoring evidence was available.", "لم تتوفر أدلة للتقييم."),
+    ("Human review is still required for this response.", "لا تزال هذه الإجابة تتطلب مراجعة بشرية."),
+    ("Rubric band: ", "نطاق التقييم: "),
+    ("Matched indicators: ", "المؤشرات المطابقة: "),
+    ("Missing indicators: ", "المؤشرات الناقصة: "),
+    ("Required indicators missing: ", "مؤشرات مطلوبة ناقصة: "),
+    ("Critical failure indicators detected: ", "مؤشرات إخفاق حرج مرصودة: "),
+)
+
+
+def localize_scoring_explanation(text, language):
+    """A per-answer scoring explanation in the viewer's language."""
+    if language != "ar" or not text:
+        return text
+    for english, arabic in EXPLANATION_WORDING_AR:
+        text = text.replace(english, arabic)
+    return text

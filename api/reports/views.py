@@ -103,7 +103,9 @@ class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet
             },
             request=request,
         )
-        return Response(EvaluationReportService.export_payload(report))
+        return Response(EvaluationReportService.export_payload(
+            report, language=EvaluationReportService.viewer_language(request)
+        ))
 
     @action(detail=True, methods=["get"], url_path="export-employer-payload")
     def export_employer_payload(self, request, id=None):
@@ -122,7 +124,9 @@ class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet
             },
             request=request,
         )
-        return Response(EvaluationReportService.export_employer_payload(report))
+        return Response(EvaluationReportService.export_employer_payload(
+            report, language=EvaluationReportService.viewer_language(request)
+        ))
 
     @action(detail=True, methods=["get"], url_path="export-pdf")
     def export_pdf(self, request, id=None):
@@ -145,6 +149,18 @@ class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet
             request=request,
         )
         filename = f"{report.report_number}.pdf"
+
+        # In the viewer's language: the report's rendition when they view
+        # in a language other than the one it was written in.
+        language = EvaluationReportService.viewer_language(request)
+        rendition = EvaluationReportService.rendition_for(report, language) if language else None
+        if rendition is not None:
+            return FileResponse(
+                BytesIO(EvaluationReportService.rendition_pdf(rendition)),
+                content_type="application/pdf",
+                as_attachment=True,
+                filename=f"{report.report_number}-{rendition.language}.pdf",
+            )
 
         if report.employer_pdf.name and report.employer_pdf.storage.exists(report.employer_pdf.name):
             report.employer_pdf.open("rb")
@@ -173,7 +189,9 @@ class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet
     def ai_analysis_pdf(self, request, id=None):
         report = self.get_object()
         try:
-            pdf_bytes = EvaluationReportService.render_ai_analysis_pdf(report)
+            pdf_bytes = EvaluationReportService.render_ai_analysis_pdf(
+                report, language=EvaluationReportService.viewer_language(request)
+            )
         except EvaluationReportError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
 
@@ -204,7 +222,9 @@ class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet
     def documents_bundle(self, request, id=None):
         report = self.get_object()
         try:
-            zip_bytes = EvaluationReportService.build_documents_zip(report)
+            zip_bytes = EvaluationReportService.build_documents_zip(
+                report, language=EvaluationReportService.viewer_language(request)
+            )
         except EvaluationReportError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
 
@@ -233,7 +253,9 @@ class EvaluationReportViewSet(PublicIdLookupMixin, viewsets.ReadOnlyModelViewSet
 
 def verify_report(request, report_number):
     report = get_object_or_404(EvaluationReport.objects.select_related("evaluation"), report_number=report_number)
-    payload = EvaluationReportService.build_public_verification_payload(report)
+    payload = EvaluationReportService.build_public_verification_payload(
+        report, language=EvaluationReportService.viewer_language(request)
+    )
     return JsonResponse(payload)
 
 

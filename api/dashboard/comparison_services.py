@@ -230,7 +230,20 @@ def _readiness_display(readiness_status, language):
 DIMENSION_KEYS_IN_ORDER = ("SAFETY", "HYGIENE", "COMMUNICATION", "PRACTICAL_TASKS", "BEHAVIORAL")
 
 
-def _competency_rows(report, role_code):
+def _dimension_label(index, language):
+    """The approved name of a report dimension, in the viewer's language -
+    never the label stored in the report, which is in the language the
+    candidate was assessed in."""
+    from api.reports.services import EvaluationReportService
+
+    names = (
+        EvaluationReportService.CANONICAL_COMPETENCY_DIMENSIONS_AR
+        if language == "ar" else EvaluationReportService.CANONICAL_COMPETENCY_DIMENSIONS
+    )
+    return names[index]
+
+
+def _competency_rows(report, role_code, language="en"):
     """Role-scoped competency rows for the comparison table/radar chart -
     reads ONLY report.report_payload (already computed, stored, immutable
     once ACTIVE), never recalculates a score or re-decides a classification.
@@ -253,7 +266,7 @@ def _competency_rows(report, role_code):
     items = ((report.report_payload or {}).get("critical_competency_status")) or []
 
     rows = []
-    for dim_key, item in zip(DIMENSION_KEYS_IN_ORDER, items):
+    for index, (dim_key, item) in enumerate(zip(DIMENSION_KEYS_IN_ORDER, items)):
         if item.get("not_applicable"):
             continue
         if role_config is None and dim_key not in required:
@@ -261,7 +274,7 @@ def _competency_rows(report, role_code):
         classification = role_config.get(dim_key) if role_config is not None else "REQUIRED"
         rows.append({
             "dimension_key": dim_key,
-            "label": item.get("label"),
+            "label": _dimension_label(index, language),
             "classification": classification,
             "percentage": float(item.get("percentage") or 0),
             "status_label": item.get("status_label"),
@@ -295,6 +308,19 @@ def _ensure_active_report(evaluation, actor):
         return EvaluationReportService.generate_for_evaluation(evaluation=evaluation, actor=actor)
     except EvaluationReportError:
         return None
+
+
+def _failure_topic(failure, language):
+    """A critical failure's question topic as recorded (question-bank
+    content); without one, its competency named in the viewer's language."""
+    from api.reports.services import EvaluationReportService
+
+    if failure.get("topic"):
+        return failure["topic"]
+    code = failure.get("competency_code")
+    if code:
+        return EvaluationReportService._friendly_competency_name(code, failure.get("competency_name"), language=language)
+    return ""
 
 
 class ComparisonError(ValueError):
@@ -476,7 +502,7 @@ def build_full_comparison(*, owner_type, owner, role_code, language, actor, cand
         critical_failures = payload.get("critical_failures") or []
         failed_topics = []
         for failure in critical_failures:
-            topic = failure.get("topic") or failure.get("competency_code") or ""
+            topic = _failure_topic(failure, language)
             if topic and topic not in failed_topics:
                 failed_topics.append(topic)
         tier = _summary_tier(summary)
@@ -499,7 +525,7 @@ def build_full_comparison(*, owner_type, owner, role_code, language, actor, cand
                 "failed_topics": failed_topics,
                 "override_triggered": bool(executive.get("override_triggered")),
             },
-            "competencies": _competency_rows(report, role_code),
+            "competencies": _competency_rows(report, role_code, language),
         })
     return entries
 
